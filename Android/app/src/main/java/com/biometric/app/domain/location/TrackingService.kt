@@ -396,8 +396,14 @@ class TrackingService : Service() {
                         val response = mobileApi.me("Bearer $token")
                         if (response.isSuccessful) {
                             Log.d("TrackingService", "Heartbeat success 💓")
-                        } else if (response.code() == 401) {
-                            Log.w("TrackingService", "Heartbeat 401: Authoritative session lost ⚠️")
+                        } else if (response.code() == 401 || response.code() == 403) {
+                            val state = response.headers()["X-Mobile-Session-State"] ?: ""
+                            if (state.equals("SESSION_REVOKED", true) ||
+                                state.equals("REAUTH_REQUIRED", true)) {
+                                Log.w("TrackingService", "Heartbeat: server explicitly rejected this mobile session (${state}).")
+                            } else {
+                                Log.w("TrackingService", "Heartbeat HTTP ${response.code()} without explicit revocation. Tracking/session state retained.")
+                            }
                         }
                     }
                 } catch (e: Exception) {

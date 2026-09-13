@@ -966,14 +966,25 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                 if (sessionStore.isLoggedIn()) {
                                     loadDashboard()
                                 }
+                            } else if (recoverResponse.code() == 401 || recoverResponse.code() == 403) {
+                                // A server-authenticated 401/403 is different from
+                                // a network failure. Preserve the current session
+                                // unless the server explicitly reports that this
+                                // mobile session was revoked/replaced.
+                                val state = recoverResponse.headers()["X-Mobile-Session-State"] ?: ""
+                                if (state.equals("SESSION_REVOKED", true) ||
+                                    state.equals("REAUTH_REQUIRED", true)) {
+                                    Log.e("EmployeeHome", "Mobile session was explicitly rejected by the server (${state}). Returning to login.")
+                                    goToLogin()
+                                } else {
+                                    Log.w("EmployeeHome", "Temporary authentication challenge without revocation state. Keeping persisted session and retrying.")
+                                    scheduleDashboardRetry(10_000L)
+                                }
                             } else {
-                                // Only an authoritative authentication rejection
-                                // reaches the login path. Timeouts, DNS failures,
-                                // airplane mode and other network failures are
-                                // handled by the exception/retry path and never
-                                // clear the persisted session.
-                                Log.e("EmployeeHome", "Authoritative mobile session rejected with HTTP ${recoverResponse.code()}. Redirecting to login.")
-                                goToLogin()
+                                // 5xx and other server responses are availability
+                                // failures, not logout decisions.
+                                Log.w("EmployeeHome", "Dashboard returned HTTP ${recoverResponse.code()}. Keeping session and retrying.")
+                                scheduleDashboardRetry(10_000L)
                             }
                         } finally {
                             dashboardAuthRecoveryInProgress = false
