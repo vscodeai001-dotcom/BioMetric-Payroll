@@ -21,6 +21,7 @@ import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.ThemePreferenceSync
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.MotionManager
 import com.google.android.gms.common.api.ApiException
@@ -40,6 +41,7 @@ class LoginActivity : MotionBaseActivity() {
 
     @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var mobileSessionStore: MobileSessionStore
+    @Inject lateinit var themePreferenceSync: ThemePreferenceSync
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
@@ -188,7 +190,9 @@ class LoginActivity : MotionBaseActivity() {
                             else -> UserRole.STAFF.name
                         }
                         
-                        mobileSessionStore.saveLogin(token, result.employeeId, result.name)
+                        mobileSessionStore.saveLogin(token, result.employeeId, result.name, result.email)
+                        // Server preference is authoritative across devices. Refresh it before entering the app.
+                        themePreferenceSync.refreshFromServer()
                         adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
                         applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)

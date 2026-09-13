@@ -36,6 +36,7 @@ class BiometricApplication : Application(), Configuration.Provider {
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var sessionStore: com.biometric.app.data.MobileSessionStore
+    @Inject lateinit var themePreferenceSync: com.biometric.app.sync.ThemePreferenceSync
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -86,7 +87,13 @@ class BiometricApplication : Application(), Configuration.Provider {
         }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization async start failed", it) }
 
         runCatching {
-            ThemeManager.applyTheme(this)
+            ThemeManager.applyTheme(this, sessionStore.userThemeKey())
+            if (sessionStore.isLoggedIn()) {
+                CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                    runCatching { themePreferenceSync.refreshFromServer() }
+                        .onFailure { Log.w("BiometricApplication", "Persisted user theme refresh skipped", it) }
+                }
+            }
         }.onFailure { Log.w("BiometricApplication", "Theme initialization skipped", it) }
 
         // Background jobs are useful, but they are not required to render/login.

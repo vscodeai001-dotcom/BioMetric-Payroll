@@ -18,9 +18,15 @@ import androidx.appcompat.widget.Toolbar
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.biometric.app.R
 import com.biometric.app.util.MotionManager
 import com.biometric.app.util.ThemeManager
+import com.biometric.app.sync.ThemePreferenceSync
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.EntryPoint
+import dagger.hilt.components.SingletonComponent
 import com.google.android.material.appbar.AppBarLayout
 
 import androidx.core.view.WindowInsetsControllerCompat
@@ -146,11 +152,35 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
             // Stagger the theme change to allow the click feedback and ripple to complete,
             // which helps prevent main-thread hangs during Activity recreation.
             it.postDelayed({
-                ThemeManager.toggleTheme(this)
+                val theme = ThemeManager.toggleTheme(
+                    this,
+                    getSharedPreferences("mobile_session", MODE_PRIVATE)
+                        .getString("email", "")
+                        .orEmpty()
+                        .ifBlank {
+                            getSharedPreferences("user_prefs", MODE_PRIVATE)
+                                .getString("user_uid", "default")
+                                .orEmpty()
+                        }
+                )
+                lifecycleScope.launch {
+                    runCatching {
+                        EntryPointAccessors.fromApplication(
+                            applicationContext,
+                            ThemeEntryPoint::class.java
+                        ).themePreferenceSync.persist(theme)
+                    }
+                }
             }, 200)
         }
         
         return HeaderRefs(tvLine1, tvLine2, tvStatus, tvLine3, btnTheme, btnShop)
+    }
+
+    @EntryPoint
+    @dagger.hilt.InstallIn(SingletonComponent::class)
+    interface ThemeEntryPoint {
+        val themePreferenceSync: ThemePreferenceSync
     }
 
     data class HeaderRefs(

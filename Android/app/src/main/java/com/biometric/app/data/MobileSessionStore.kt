@@ -13,11 +13,12 @@ class MobileSessionStore @Inject constructor(
 ) {
     private val prefs get() = context.getSharedPreferences("mobile_session", Context.MODE_PRIVATE)
 
-    fun saveLogin(token: String, employeeId: Int, name: String) {
+    fun saveLogin(token: String, employeeId: Int, name: String, email: String = "") {
         prefs.edit {
             putString(KEY_TOKEN, token)
             putInt(KEY_EMPLOYEE_ID, employeeId)
             putString(KEY_NAME, name)
+            putString(KEY_EMAIL, email)
             putBoolean(KEY_ACTIVE, true)
         }
     }
@@ -25,6 +26,8 @@ class MobileSessionStore @Inject constructor(
     fun token(): String? = prefs.getString(KEY_TOKEN, null)
     fun employeeId(): Int = prefs.getInt(KEY_EMPLOYEE_ID, 0)
     fun employeeName(): String = prefs.getString(KEY_NAME, "") ?: ""
+    fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
+    fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_ACTIVE, false) && !token().isNullOrBlank()
 
     fun isReliabilitySetupDone(): Boolean = prefs.getBoolean(KEY_RELIABILITY_DONE, false)
@@ -56,6 +59,7 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_TOKEN = "token"
         private const val KEY_EMPLOYEE_ID = "employee_id"
         private const val KEY_NAME = "name"
+        private const val KEY_EMAIL = "email"
         private const val KEY_ACTIVE = "active"
         private const val KEY_GPS_SESSION = "gps_session_id"
         private const val KEY_RELIABILITY_DONE = "reliability_setup_done"

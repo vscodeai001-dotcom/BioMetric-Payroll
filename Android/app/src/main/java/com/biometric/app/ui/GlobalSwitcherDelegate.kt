@@ -1,6 +1,7 @@
 package com.biometric.app.ui
 
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.ThemePreferenceSync
 import android.content.Context
 import android.content.Intent
 import android.util.TypedValue
@@ -77,7 +78,18 @@ object GlobalSwitcherDelegate {
                 // Stagger the theme change to allow the menu to close and animations to finish
                 val view = activity.findViewById<View>(R.id.action_theme) ?: activity.window.decorView
                 view.postDelayed({
-                    ThemeManager.toggleTheme(activity)
+                    val localTheme = ThemeManager.toggleTheme(
+                        activity,
+                        resolveThemeUserKey(activity)
+                    )
+                    activity.lifecycleScope.launch {
+                        runCatching {
+                            themeSync(activity).persist(localTheme)
+                        }.onFailure {
+                            // Local cache remains active; next authenticated login/start
+                            // will reconcile with the server preference.
+                        }
+                    }
                 }, 200)
                 return true
             }
@@ -108,6 +120,24 @@ object GlobalSwitcherDelegate {
         return false
     }
 
+
+    private fun resolveThemeUserKey(activity: AppCompatActivity): String =
+        activity.getSharedPreferences("mobile_session", Context.MODE_PRIVATE)
+            .getString("email", "")
+            .orEmpty()
+            .ifBlank {
+                activity.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                    .getString("user_uid", "default")
+                    .orEmpty()
+            }
+
+    private fun themeSync(activity: AppCompatActivity): ThemePreferenceSync {
+        val entryPoint = EntryPointAccessors.fromApplication(
+            activity.applicationContext,
+            ThemeEntryPoint::class.java
+        )
+        return entryPoint.themePreferenceSync
+    }
 
     fun shareApp(activity: AppCompatActivity) {
         try {
@@ -196,6 +226,12 @@ object GlobalSwitcherDelegate {
                 activity.finish()
             }
         }
+    }
+
+    @EntryPoint
+    @dagger.hilt.InstallIn(SingletonComponent::class)
+    interface ThemeEntryPoint {
+        val themePreferenceSync: ThemePreferenceSync
     }
 
     @EntryPoint

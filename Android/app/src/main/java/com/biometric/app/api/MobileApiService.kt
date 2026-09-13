@@ -108,6 +108,15 @@ interface MobileApiService {
         @Body request: GpsSessionRequest
     ): Response<Unit>
 
+    @GET("api/mobile/employee/theme")
+    suspend fun getTheme(@Header("Authorization") authorization: String): Response<ThemePreferenceDto>
+
+    @PUT("api/mobile/employee/theme")
+    suspend fun saveTheme(
+        @Header("Authorization") authorization: String,
+        @Body request: ThemePreferenceRequest
+    ): Response<ThemePreferenceDto>
+
     @POST("api/mobile/realtime/changed")
     suspend fun notifyRealtimeChanged(
         @Header("Authorization") authorization: String,
@@ -515,4 +524,13 @@ data class RealtimeChangedRequest(
 data class RealtimeChangedItem(
     val entity: String,
     val action: String = "MODIFIED"
+)
+
+
+data class ThemePreferenceDto(
+    @SerializedName("theme") val theme: String = "light"
+)
+
+data class ThemePreferenceRequest(
+    @SerializedName("theme") val theme: String
 )
