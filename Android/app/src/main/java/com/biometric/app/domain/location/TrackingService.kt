@@ -400,7 +400,12 @@ class TrackingService : Service() {
                             val state = response.headers()["X-Mobile-Session-State"] ?: ""
                             if (state.equals("SESSION_REVOKED", true) ||
                                 state.equals("REAUTH_REQUIRED", true)) {
-                                Log.w("TrackingService", "Heartbeat: server explicitly rejected this mobile session (${state}).")
+                                // Do not clear the persisted login here. The
+                                // foreground service must remain alive long
+                                // enough for the UI/session owner to process an
+                                // authoritative revocation. Network failures
+                                // never enter this branch.
+                                Log.w("TrackingService", "Heartbeat: server explicitly rejected this mobile session (${state}); preserving local session until authoritative UI handling.")
                             } else {
                                 Log.w("TrackingService", "Heartbeat HTTP ${response.code()} without explicit revocation. Tracking/session state retained.")
                             }
