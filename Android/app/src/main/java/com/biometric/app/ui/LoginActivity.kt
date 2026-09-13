@@ -248,9 +248,8 @@ class LoginActivity : MotionBaseActivity() {
 
     private fun proceedToMain() {
         // Break the loop: Mark process as verified and clear lock state
-        markAsVerified()
+        markAsVerified(this)
         getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
-            putBoolean("is_locked", false)
             putLong("last_active_time", System.currentTimeMillis())
         }
 

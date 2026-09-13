@@ -16,19 +16,26 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
 
     companion object {
         @Volatile
-        private var isProcessVerified = false
+        private var isProcessAuthorized = false
+
+        @Volatile
+        private var isLockingInProgress = false
         
-        fun markAsVerified() {
+        fun markAsVerified(context: Context) {
             Log.i("SecurityBase", "markAsVerified called. Process is now authorized.")
-            isProcessVerified = true
+            isProcessAuthorized = true
+            isLockingInProgress = false
+            
+            // Clear persistent lock state
+            context.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+                putBoolean("is_locked", false)
+            }
         }
 
-        fun isProcessVerified() = isProcessVerified
+        fun isProcessVerified() = isProcessAuthorized
     }
 
     protected open fun isSecurityBypass(): Boolean = false
-
-    private var isLockingInProgress = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,9 +63,9 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
         val sharedPrefs = getSharedPreferences("auth_prefs", MODE_PRIVATE)
         val isLocked = sharedPrefs.getBoolean("is_locked", false)
         
-        Log.d("SecurityBase", "checkSession: Activity=${this.javaClass.simpleName}, verified=$isProcessVerified, locked=$isLocked")
+        Log.d("SecurityBase", "checkSession: Activity=${this.javaClass.simpleName}, authorized=$isProcessAuthorized, locked=$isLocked")
 
-        if (!isProcessVerified || isLocked) {
+        if (!isProcessAuthorized || isLocked) {
             lockApp()
             return true
         }

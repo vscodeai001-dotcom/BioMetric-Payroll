@@ -33,7 +33,7 @@ class LauncherActivity : AppCompatActivity() {
         if (isLoggedIn && !needsProcessVerification) {
             if (sessionStore.isReliabilitySetupDone()) {
                 // Already logged in, verified, and setup: Jump to Dashboard
-                SecurityBaseActivity.markAsVerified()
+                SecurityBaseActivity.markAsVerified(this)
                 sharedViewModel.warmUpDashboard()
                 startActivity(Intent(this, destination))
             } else {
