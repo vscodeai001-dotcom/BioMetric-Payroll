@@ -153,12 +153,8 @@ class MainViewModel @Inject constructor(
     private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {
         workforceRecalcJob?.cancel()
         
-        // Ensure we don't show loading forever if there are no shops yet
-        if (shops.isEmpty()) {
-            _isLoading.value = false
-            return
-        }
-        
+        // The Web dashboard is company-wide. Shops are a legacy Android cache
+        // dimension and must never prevent employee/attendance KPIs from loading.
         _isLoading.value = true
 
         workforceRecalcJob = viewModelScope.launch(Dispatchers.Default) {

@@ -257,6 +257,7 @@ class SignalRManager @Inject constructor(
         @SerializedName("allowedRadiusMeters") val allowedRadiusMeters: Int = 100,
         @SerializedName("isWithinAllowedRadius") val isWithinAllowedRadius: Boolean,
         @SerializedName("timestamp") val timestamp: String? = null,
-        @SerializedName("speedMps") val speedMps: Double = 0.0
+        @SerializedName("speedMps") val speedMps: Double = 0.0,
+        @SerializedName("movementState") val movementState: String = "Stopped"
     )
 }

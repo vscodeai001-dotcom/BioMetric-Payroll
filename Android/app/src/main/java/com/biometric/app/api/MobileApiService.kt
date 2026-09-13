@@ -108,6 +108,11 @@ interface MobileApiService {
         @Body request: GpsSessionRequest
     ): Response<Unit>
 
+    @GET("api/mobile/admin/live-locations")
+    suspend fun getAdminLiveLocations(
+        @Header("Authorization") authorization: String
+    ): Response<List<AdminLiveLocationDto>>
+
     @GET("api/mobile/admin/feature-settings")
     suspend fun getAdminFeatureSettings(@Header("Authorization") authorization: String): Response<AdminFeatureSettingsDto>
 
@@ -309,6 +314,21 @@ data class GpsUpdateResponse(
     val allowedRadiusMeters: Int = 0,
     val isWithinAllowedRadius: Boolean = false,
     val timestamp: String? = null
+)
+
+data class AdminLiveLocationDto(
+    @SerializedName("employeeId") val employeeId: Int = 0,
+    @SerializedName("latitude") val latitude: Double = 0.0,
+    @SerializedName("longitude") val longitude: Double = 0.0,
+    @SerializedName("accuracyMeters") val accuracyMeters: Double = 0.0,
+    @SerializedName("distanceMeters") val distanceMeters: Double = 0.0,
+    @SerializedName("allowedRadiusMeters") val allowedRadiusMeters: Int = 0,
+    @SerializedName("isWithinAllowedRadius") val isWithinAllowedRadius: Boolean = false,
+    @SerializedName("lastUpdatedUtc") val lastUpdatedUtc: String? = null,
+    @SerializedName("sessionStartedUtc") val sessionStartedUtc: String? = null,
+    @SerializedName("sessionId") val sessionId: String? = null,
+    @SerializedName("speedMps") val speedMps: Double = 0.0,
+    @SerializedName("movementState") val movementState: String = "Stopped"
 )
 
 data class AdminFeatureSettingsDto(

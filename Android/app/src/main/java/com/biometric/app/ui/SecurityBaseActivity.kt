@@ -33,6 +33,16 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
         }
 
         fun isProcessVerified() = isProcessAuthorized
+
+        fun clearProcessAuthorization(context: Context) {
+            isProcessAuthorized = false
+            isLockingInProgress = false
+            context.applicationContext
+                .getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                .edit(commit = true) {
+                    putBoolean("is_locked", false)
+                }
+        }
     }
 
     protected open fun isSecurityBypass(): Boolean = false

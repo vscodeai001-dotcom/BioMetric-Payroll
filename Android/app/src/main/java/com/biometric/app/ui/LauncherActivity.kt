@@ -1,7 +1,5 @@
 package com.biometric.app.ui
 
-import android.app.Activity
-import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -21,32 +19,34 @@ class LauncherActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val isLoggedIn = sessionStore.isLoggedIn()
         val authPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
-        
-        // Sessions are indefinite. We only force an unlock check if the process just started.
-        val needsProcessVerification = !SecurityBaseActivity.isProcessVerified()
+        val isLoggedIn = sessionStore.isLoggedIn()
 
-        val role = authPrefs.getString("user_role", UserRole.STAFF.name)
-        val destination = if (role == UserRole.STAFF.name) EmployeeHomeActivity::class.java else MainActivity::class.java
+        if (isLoggedIn) {
+            // A persisted mobile bearer session is the authoritative login state.
+            // Do not send a cold process back through LoginActivity. That was the
+            // source of the repeated security/unlock screen after closing the app.
+            SecurityBaseActivity.markAsVerified(applicationContext)
 
-        if (isLoggedIn && !needsProcessVerification) {
-            // Already logged in and process is verified (e.g. Activity recreation or simple rotation)
-            if (sessionStore.isReliabilitySetupDone()) {
-                sharedViewModel.warmUpDashboard()
-                startActivity(Intent(this, destination))
+            val role = authPrefs.getString("user_role", UserRole.STAFF.name)
+            val destination = if (
+                role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name
+            ) {
+                MainActivity::class.java
             } else {
-                startActivity(Intent(this, ReliabilitySetupActivity::class.java))
+                EmployeeHomeActivity::class.java
             }
-        } else if (isLoggedIn) {
-            // Logged in but needs security unlock (cold start)
-            startActivity(Intent(this, LoginActivity::class.java))
+
+            if (role == UserRole.STAFF.name) {
+                sharedViewModel.warmUpDashboard()
+            }
+            startActivity(Intent(this, destination))
         } else {
-            // Never logged in
             startActivity(Intent(this, LoginActivity::class.java))
         }
+
         finish()
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
         } else {

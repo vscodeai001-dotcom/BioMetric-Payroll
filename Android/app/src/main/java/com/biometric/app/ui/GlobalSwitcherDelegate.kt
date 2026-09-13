@@ -17,6 +17,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
+import androidx.lifecycle.lifecycleScope
+import com.biometric.app.api.MobileApiService
+import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.entity.UserRole
+import dagger.hilt.EntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.launch
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.biometric.app.R
 import com.biometric.app.ui.viewmodel.SharedViewModel
@@ -83,8 +91,14 @@ object GlobalSwitcherDelegate {
                     ?: toolbar
                     ?: activity.window.decorView
 
-                val role = sharedViewModel.userProfile.value?.role
-                val isAdmin = role?.contains("Admin", true) == true
+                val profileRole = sharedViewModel.userProfile.value?.role.orEmpty()
+                val storedRole = activity.applicationContext
+                    .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    .getString("user_role", "")
+                    .orEmpty()
+                val isAdmin = profileRole.contains("Admin", true) ||
+                    storedRole == UserRole.ADMIN.name ||
+                    storedRole == UserRole.SUPER_ADMIN.name
                 
                 showQuickActionPopup(activity, actionView, extraActions, isAdmin)
                 return true
@@ -148,6 +162,46 @@ object GlobalSwitcherDelegate {
         }
     }
 
+    private fun performLogout(activity: AppCompatActivity) {
+        val entryPoint = EntryPointAccessors.fromApplication(
+            activity.applicationContext,
+            LogoutEntryPoint::class.java
+        )
+        val session = entryPoint.sessionStore
+        val api = entryPoint.mobileApi
+        val token = session.token()
+
+        activity.lifecycleScope.launch {
+            try {
+                if (!token.isNullOrBlank()) {
+                    runCatching { api.logout("Bearer $token") }
+                }
+            } finally {
+                try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) {}
+                session.clearLogin()
+                activity.applicationContext
+                    .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    .edit().clear().apply()
+                activity.applicationContext
+                    .getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                    .edit().clear().apply()
+                SecurityBaseActivity.clearProcessAuthorization(activity.applicationContext)
+
+                activity.startActivity(Intent(activity, LoginActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                })
+                activity.finish()
+            }
+        }
+    }
+
+    @EntryPoint
+    @dagger.hilt.InstallIn(SingletonComponent::class)
+    interface LogoutEntryPoint {
+        val mobileApi: MobileApiService
+        val sessionStore: MobileSessionStore
+    }
+
     private fun showQuickActionPopup(
         activity: AppCompatActivity,
         anchor: View,
@@ -177,17 +231,7 @@ object GlobalSwitcherDelegate {
                      .setTitle("Logout 🚪")
                      .setMessage("Are you sure you want to sign out?")
                      .setPositiveButton("Logout") { _, _ ->
-                         try {
-                             FirebaseAuth.getInstance().signOut()
-                         } catch (_: Exception) {}
-                         
-                         activity.applicationContext.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE).edit().clear().apply()
-                         activity.applicationContext.getSharedPreferences("mobile_session", Context.MODE_PRIVATE).edit().clear().apply()
-                         
-                         activity.startActivity(Intent(activity, LoginActivity::class.java).apply {
-                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                         })
-                         activity.finish()
+                         performLogout(activity)
                      }
                      .setNegativeButton("Cancel", null)
                      .show()
