@@ -295,7 +295,11 @@ data class GpsUpdateRequest(
     val accuracy: Double,
     val speed: Double,
     val timestamp: Long,
-    val batteryLevel: Int
+    val batteryLevel: Int,
+    /** Client-generated id used for enterprise idempotency on the server. */
+    val clientEventId: String? = null,
+    /** Monotonic GPS sequence within the mobile tracking session. */
+    val sequence: Long? = null
 )
 
 data class GpsUpdateResponse(

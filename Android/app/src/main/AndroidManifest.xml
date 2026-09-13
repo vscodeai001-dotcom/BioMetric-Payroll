@@ -341,6 +341,12 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.OfflineTrackingActivity"
+            android:exported="false"
+            android:label="Offline GPS Command Center"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ui.RouteReplayActivity"
             android:exported="false"
             android:label="Route Replay"

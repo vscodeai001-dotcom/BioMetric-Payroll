@@ -124,9 +124,9 @@
                                 android:layout_height="match_parent"
                                 android:padding="16dp"
                                 android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TOTAL WORKFORCE" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiWorkforce" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="👥 2 Active" android:textSize="10sp" android:layout_marginTop="4dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_total_workforce" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiWorkforce" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/star_staff" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#4F46E5" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
 
@@ -141,9 +141,9 @@
                                 android:layout_height="match_parent"
                                 android:padding="16dp"
                                 android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PRESENT TODAY" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiPresent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2 / 2" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:id="@+id/tvKpiAbsent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⏳ 0 Absent" android:textSize="10sp" android:layout_marginTop="4dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_present_today" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiPresent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0 / 0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:id="@+id/tvKpiAbsent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⏳ 0 Absent" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#047857" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
 
@@ -158,9 +158,9 @@
                                 android:layout_height="match_parent"
                                 android:padding="16dp"
                                 android:orientation="vertical">
-                                <TextView android:id="@+id/tvPayrollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PAYROLL (SEPT)" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvPayrollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_payroll_cycle" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
                                 <TextView android:id="@+id/tvKpiPayroll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Done" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:id="@+id/tvPayrollVariance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 0.0% vs Last Month" android:textSize="10sp" android:layout_marginTop="4dp" />
+                                <TextView android:id="@+id/tvPayrollVariance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 0.0% vs Last Month" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#D97706" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
 
@@ -175,9 +175,9 @@
                                 android:layout_height="match_parent"
                                 android:padding="16dp"
                                 android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="UNPAID ADVANCES" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiAdvances" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹1,000" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📮 Needs Recovery" android:textSize="10sp" android:layout_marginTop="4dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_unpaid_advances" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiAdvances" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📮 Action Required" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#EF4444" />
                             </LinearLayout>
                         </com.google.android.material.card.MaterialCardView>
 

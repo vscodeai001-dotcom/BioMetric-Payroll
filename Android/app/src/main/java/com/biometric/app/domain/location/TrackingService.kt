@@ -27,6 +27,7 @@ import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.LocalLocation
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MobileSessionStore
+import java.util.UUID
 import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -42,6 +43,7 @@ class TrackingService : Service() {
     @Inject lateinit var syncManager: LocationSyncManager
     @Inject lateinit var locationDao: LocationDao
     @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var offlineMonitor: OfflineTrackingMonitor
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -53,13 +55,14 @@ class TrackingService : Service() {
     private var serverSessionStarted = false
     // Keep only the newest GPS fix for server upload. This prevents callback bursts
     // from building an unbounded queue of network coroutines and starving the app.
-    private val latestLocationChannel = Channel<Location>(Channel.CONFLATED)
+    private val latestLocationChannel = Channel<LocalLocation>(Channel.CONFLATED)
     private var gpsUploadJob: Job? = null
     private var heartbeatJob: Job? = null
     private var locationHandlerThread: HandlerThread? = null
     private var isForeground = false
     private var locationUpdatesStarted = false
     private var signalRStarted = false
+    private val sequenceLock = Any()
 
     companion object {
         private const val CHANNEL_ID = "tracking_channel"
@@ -76,12 +79,16 @@ class TrackingService : Service() {
         private const val KEY_LAST_LAT = "last_lat"
         private const val KEY_LAST_LON = "last_lon"
         private const val KEY_LAST_STATUS = "last_status"
+        private const val KEY_SEQUENCE = "gps_sequence"
+        private const val KEY_SEQUENCE_SESSION = "gps_sequence_session"
     }
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
+        offlineMonitor.start()
+        offlineMonitor.record(OfflineTrackingMonitor.SERVICE_RECOVERED, OfflineTrackingMonitor.INFO, "Tracking service initialized/recovered")
         
         // Start foreground immediately in onCreate to satisfy the system 5s rule
         startForegroundSafe()
@@ -283,8 +290,19 @@ class TrackingService : Service() {
     }
 
     private fun handleLocationUpdate(location: Location) {
-        if (qualityManager.isMockLocation(location)) return
-        
+        if (qualityManager.isMockLocation(location)) {
+            offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Mock location rejected by existing quality policy")
+            return
+        }
+        if (!location.latitude.isFinite() || !location.longitude.isFinite() ||
+            location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) {
+            offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.ERROR, "Invalid GPS coordinate rejected")
+            return
+        }
+        if (qualityManager.isSuspiciousMovement(lastLocation, location)) {
+            offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Suspicious movement detected; preserving GPS fix for audit")
+        }
+
         lastLocation = location
         getSharedPreferences(PREFS, MODE_PRIVATE).edit {
             putLong(KEY_LAST_LOCATION_AT, System.currentTimeMillis())
@@ -297,34 +315,63 @@ class TrackingService : Service() {
         saveLocationToLocalQueue(location)
     }
 
+    private fun nextGpsSequence(sessionId: String): Long {
+        synchronized(sequenceLock) {
+            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+            val previousSession = prefs.getString(KEY_SEQUENCE_SESSION, null)
+            val current = if (previousSession == sessionId) prefs.getLong(KEY_SEQUENCE, 0L) else 0L
+            val next = current + 1L
+            prefs.edit {
+                putString(KEY_SEQUENCE_SESSION, sessionId)
+                putLong(KEY_SEQUENCE, next)
+            }
+            return next
+        }
+    }
+
     private fun saveLocationToLocalQueue(location: Location) {
         val battery = (getSystemService(BATTERY_SERVICE) as BatteryManager)
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val sessionId = sessionStore.gpsSessionId()
+        val clientEventId = UUID.randomUUID().toString()
 
-        // The location callback must return immediately. Room/network work stays
-        // entirely off the callback/main thread, and server uploads are coalesced
-        // to one worker so slow network calls cannot pile up.
         serviceScope.launch {
             runCatching {
-                locationDao.insert(
-                    LocalLocation(
-                        sessionId = sessionStore.gpsSessionId(),
+                val nextSequence = nextGpsSequence(sessionId)
+                val local = LocalLocation(
+                    clientEventId = clientEventId,
+                    sessionId = sessionId,
+                    sequence = nextSequence,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    accuracy = location.accuracy,
+                    speed = location.speed,
+                    batteryLevel = battery,
+                    // Preserve the GPS event time, not the upload time.
+                    timestamp = location.time,
+                    capturedElapsedRealtime = android.os.SystemClock.elapsedRealtime(),
+                    isOfflineCapture = !offlineMonitor.isOnline()
+                )
+                val insertedId = locationDao.insert(local)
+                if (insertedId > 0L) {
+                    offlineMonitor.record(
+                        OfflineTrackingMonitor.QUEUE_ENQUEUED,
+                        if (local.isOfflineCapture) OfflineTrackingMonitor.WARNING else OfflineTrackingMonitor.INFO,
+                        if (local.isOfflineCapture) "GPS fix captured offline and durably queued" else "GPS fix durably queued for authoritative upload",
+                        sessionId = sessionId,
                         latitude = location.latitude,
                         longitude = location.longitude,
                         accuracy = location.accuracy,
-                        speed = location.speed,
-                        batteryLevel = battery
+                        correlationId = clientEventId
                     )
-                )
+                    latestLocationChannel.trySend(local)
+                    startGpsUploadWorker()
+                }
             }.onFailure { ex ->
                 Log.d("TrackingService", "Local GPS save deferred: ${ex.message}")
+                offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.ERROR, "Unable to persist GPS fix locally: ${ex.message}")
             }
         }
-
-        // Non-blocking. If several fixes arrive while the network is busy, only
-        // the newest fix is retained for the server upload.
-        latestLocationChannel.trySend(location)
-        startGpsUploadWorker()
     }
 
     private fun startGpsUploadWorker() {
@@ -362,15 +409,14 @@ class TrackingService : Service() {
         }
     }
 
-    private suspend fun uploadLocationToServer(location: Location) {
+    private suspend fun uploadLocationToServer(location: LocalLocation) {
         if (!ensureServerSession()) return
 
         val token = sessionStore.token() ?: return
-        var sessionId = sessionStore.gpsSessionId()
-        val battery = (getSystemService(BATTERY_SERVICE) as BatteryManager)
-            .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        var sessionId = location.sessionId
 
         try {
+            locationDao.markAttempt(location.id, LocalLocation.SYNC_IN_FLIGHT, location.attemptCount + 1, System.currentTimeMillis(), null)
             var response = mobileApi.updateGps(
                 "Bearer $token",
                 GpsUpdateRequest(
@@ -379,8 +425,10 @@ class TrackingService : Service() {
                     longitude = location.longitude,
                     accuracy = location.accuracy.toDouble(),
                     speed = location.speed.toDouble(),
-                    timestamp = System.currentTimeMillis(),
-                    batteryLevel = battery
+                    timestamp = location.timestamp,
+                    batteryLevel = location.batteryLevel,
+                    clientEventId = location.clientEventId,
+                    sequence = location.sequence
                 )
             )
 
@@ -395,6 +443,7 @@ class TrackingService : Service() {
                 serverSessionStarted = false
                 sessionStore.clearGpsSession()
                 sessionId = sessionStore.gpsSessionId()
+                locationDao.rebindSession(location.id, sessionId)
 
                 if (!ensureServerSession()) return
 
@@ -406,21 +455,52 @@ class TrackingService : Service() {
                         longitude = location.longitude,
                         accuracy = location.accuracy.toDouble(),
                         speed = location.speed.toDouble(),
-                        timestamp = System.currentTimeMillis(),
-                        batteryLevel = battery
+                        timestamp = location.timestamp,
+                        batteryLevel = location.batteryLevel,
+                        clientEventId = location.clientEventId,
+                        sequence = location.sequence
                     )
                 )
             }
 
             if (response.isSuccessful) {
+                locationDao.markSynced(location.id, System.currentTimeMillis())
+                offlineMonitor.record(
+                    OfflineTrackingMonitor.UPLOAD_SUCCESS,
+                    OfflineTrackingMonitor.INFO,
+                    "GPS fix ${location.sequence} acknowledged by server",
+                    sessionId = sessionId,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    accuracy = location.accuracy,
+                    correlationId = location.clientEventId
+                )
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                     putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
                     putString(KEY_LAST_STATUS, "Active")
                 }
+                OfflineSyncWorker.schedule(this@TrackingService)
+            } else {
+                locationDao.markAttempt(location.id, LocalLocation.SYNC_FAILED, location.attemptCount + 1, System.currentTimeMillis(), "HTTP_${response.code()}")
+                offlineMonitor.record(
+                    OfflineTrackingMonitor.UPLOAD_FAILED,
+                    OfflineTrackingMonitor.WARNING,
+                    "GPS upload deferred with HTTP ${response.code()}; local evidence retained",
+                    sessionId = sessionId,
+                    correlationId = location.clientEventId
+                )
             }
         } catch (ce: CancellationException) {
             throw ce
         } catch (ex: Exception) {
+            locationDao.markAttempt(location.id, LocalLocation.SYNC_FAILED, location.attemptCount + 1, System.currentTimeMillis(), ex.message?.take(500))
+            offlineMonitor.record(
+                OfflineTrackingMonitor.UPLOAD_FAILED,
+                OfflineTrackingMonitor.WARNING,
+                "GPS upload deferred: ${ex.message ?: "network unavailable"}",
+                sessionId = location.sessionId,
+                correlationId = location.clientEventId
+            )
             Log.d("TrackingService", "GPS upload deferred: ${ex.message}")
         }
     }
@@ -476,6 +556,8 @@ class TrackingService : Service() {
         locationHandlerThread?.quitSafely()
         locationHandlerThread = null
         latestLocationChannel.close()
+        offlineMonitor.record(OfflineTrackingMonitor.TRACKING_STOPPED, OfflineTrackingMonitor.INFO, "Tracking service destroyed")
+        offlineMonitor.stop()
         serviceScope.cancel()
         super.onDestroy()
     }

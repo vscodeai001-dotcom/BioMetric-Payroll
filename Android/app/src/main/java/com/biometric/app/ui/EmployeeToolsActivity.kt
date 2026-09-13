@@ -54,6 +54,7 @@ class EmployeeToolsActivity : MotionBaseActivity() {
             Tool("FBP Declaration", "Flexible benefits", "✦") { startActivity(Intent(this, FbpDeclarationActivity::class.java)) },
             Tool("Profile", "My details", "●") { startActivity(Intent(this, MyReportsActivity::class.java).putExtra("FRAGMENT_TYPE", "profile")) },
             Tool("My Reports", "Personal reports", "▥") { startActivity(Intent(this, MyReportsActivity::class.java)) },
+            Tool("Offline GPS", "Map, queue & event log", "🛰") { startActivity(Intent(this, OfflineTrackingActivity::class.java)) },
             Tool("Leave History", "Requests & balances", "☷") { startActivity(Intent(this, MyLeavesActivity::class.java)) }
         )
 

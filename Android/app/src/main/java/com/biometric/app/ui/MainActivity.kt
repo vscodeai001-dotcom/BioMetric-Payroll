@@ -834,6 +834,17 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     } 
                 }
                 launch { 
+                    viewModel.isLoading.collectLatest { isLoading ->
+                        _binding?.let { b ->
+                            if (isLoading) {
+                                PremiumLoader.show(b.loadingLayout, PremiumLoader.ScreenType.GENERIC, lifecycleScope)
+                            } else {
+                                PremiumLoader.hide(b.loadingLayout)
+                            }
+                        }
+                    }
+                }
+                launch { 
                     sharedViewModel.isWarmingUp.collect { isWarming ->
                         _binding?.let { b ->
                             b.swipeRefresh.isRefreshing = isWarming 

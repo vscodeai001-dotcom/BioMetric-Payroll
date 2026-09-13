@@ -31,17 +31,18 @@ class LauncherActivity : AppCompatActivity() {
         val destination = if (role == UserRole.STAFF.name) EmployeeHomeActivity::class.java else MainActivity::class.java
 
         if (isLoggedIn && !needsProcessVerification) {
+            // Already logged in and process is verified (e.g. Activity recreation or simple rotation)
             if (sessionStore.isReliabilitySetupDone()) {
-                // Already logged in, verified, and setup: Jump to Dashboard
-                SecurityBaseActivity.markAsVerified(applicationContext)
                 sharedViewModel.warmUpDashboard()
                 startActivity(Intent(this, destination))
             } else {
-                // Logged in but setup missing: Force reliability wizard
                 startActivity(Intent(this, ReliabilitySetupActivity::class.java))
             }
+        } else if (isLoggedIn) {
+            // Logged in but needs security unlock (cold start)
+            startActivity(Intent(this, LoginActivity::class.java))
         } else {
-            // Either never logged in, or needs security unlock (cold start)
+            // Never logged in
             startActivity(Intent(this, LoginActivity::class.java))
         }
         finish()

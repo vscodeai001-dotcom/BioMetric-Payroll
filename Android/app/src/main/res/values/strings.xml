@@ -7,14 +7,20 @@
     <string name="share">Share</string>
 
     <!-- Dashboard Strings -->
-    <string name="icon_star">🛡️</string>
-    <string name="star_staff">Top Employee</string>
-    <string name="icon_closed">🗓️</string>
-    <string name="closed">Closed</string>
-    <string name="loading">⏳ Loading...</string>
-    <string name="staff">Staff Members 👤</string>
-    <string name="reports">Insights &amp; Reports 📈</string>
-    <string name="quick_actions">Quick Actions ⚡</string>
+    <string name="icon_star">🛡️ ✨</string>
+    <string name="star_staff">Elite Employee 🏆</string>
+    <string name="icon_closed">🗓️ 🔒</string>
+    <string name="closed">OFF DUTY</string>
+    <string name="loading">⏳ Brewing Insights...</string>
+    <string name="staff">Workforce Intelligence 👥 🛡️</string>
+    <string name="reports">Business Intelligence 📈 💎</string>
+    <string name="quick_actions">Command Center ⚡ 🕹️</string>
+
+    <!-- KPI Labels matching Web -->
+    <string name="label_total_workforce">TOTAL WORKFORCE 👥</string>
+    <string name="label_present_today">PRESENT TODAY 🟢</string>
+    <string name="label_payroll_cycle">PAYROLL CYCLE 💰</string>
+    <string name="label_unpaid_advances">UNPAID ADVANCES 💸</string>
 
     <!-- Common Activity Strings -->
     <string name="switch_shop">Switch Organization 🏪</string>

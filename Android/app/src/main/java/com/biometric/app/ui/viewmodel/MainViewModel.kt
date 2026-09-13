@@ -152,6 +152,8 @@ class MainViewModel @Inject constructor(
 
     private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {
         workforceRecalcJob?.cancel()
+        
+        // Ensure we don't show loading forever if there are no shops yet
         if (shops.isEmpty()) {
             _isLoading.value = false
             return
@@ -184,41 +186,45 @@ class MainViewModel @Inject constructor(
                     val payrolls = bundle.payrolls
 
                     val activeStaff = employees.filter { it.isActive }
+                    val activeIds = activeStaff.map { it.employeeId }.toSet()
                     val today = System.currentTimeMillis()
                     val startOfToday = DateRangeUtil.getStartOfDay(today)
                     val dateTodayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(today))
                     
                     val presentCount = attendance.filter { 
-                        it.checkInTime >= startOfToday 
+                        it.checkInTime >= startOfToday && activeIds.contains(it.employeeId)
                     }.distinctBy { it.employeeId }.size
 
                     val unpaidAdvAmount = advances.filter { !it.isRecovered }.sumOf { it.amount }
                     val recentAdvancesList = advances.filter { !it.isRecovered }.sortedByDescending { it.date }.take(4)
 
-                    // Ported from DashboardAnalyticsService.cs
-                    val cal = Calendar.getInstance()
-                    cal.add(Calendar.MONTH, -1)
-                    val lastMonth = cal.get(Calendar.MONTH) + 1
-                    val lastYear = cal.get(Calendar.YEAR)
-                    
-                    cal.add(Calendar.MONTH, -1)
-                    val prevMonth = cal.get(Calendar.MONTH) + 1
-                    val prevYear = cal.get(Calendar.YEAR)
+                    // Ported from DashboardAnalyticsService.cs & Home.razor
+                    // Blazor uses DateTime.Now.AddMonths(-1) for the "current" cycle in dashboard.
+                    val monthCal = Calendar.getInstance()
+                    monthCal.add(Calendar.MONTH, -1)
+                    val targetMonth = monthCal.get(Calendar.MONTH) + 1
+                    val targetYear = monthCal.get(Calendar.YEAR)
 
-                    val currentPayrollCost = payrolls.filter { it.payMonth == lastMonth && it.payYear == lastYear }.sumOf { it.netSalary }
+                    val currentPayrollCost = payrolls.filter { it.payMonth == targetMonth && it.payYear == targetYear }.sumOf { it.netSalary }
+                    
+                    monthCal.add(Calendar.MONTH, -1)
+                    val prevMonth = monthCal.get(Calendar.MONTH) + 1
+                    val prevYear = monthCal.get(Calendar.YEAR)
                     val previousPayrollCost = payrolls.filter { it.payMonth == prevMonth && it.payYear == prevYear }.sumOf { it.netSalary }
-                    val variance = if (previousPayrollCost == 0.0) 100.0 else ((currentPayrollCost - previousPayrollCost) / previousPayrollCost) * 100.0
+                    
+                    val variance = if (previousPayrollCost == 0.0) 0.0 else ((currentPayrollCost - previousPayrollCost) / previousPayrollCost) * 100.0
 
                     val shiftsToday = schedules.filter { it.shiftDate == dateTodayStr }.size
                     
-                    // Ported 1:1 from Web's LoadAdminDashboard()
                     val summariesThisMonth = summaries.filter { 
                         val sDate = it.shiftDate.split("-")
-                        sDate.size == 3 && sDate[0].toInt() == Calendar.getInstance().get(Calendar.YEAR) && sDate[1].toInt() == Calendar.getInstance().get(Calendar.MONTH) + 1
+                        if (sDate.size == 3) {
+                            sDate[0].toInt() == Calendar.getInstance().get(Calendar.YEAR) && sDate[1].toInt() == Calendar.getInstance().get(Calendar.MONTH) + 1
+                        } else false
                     }
                     val totalScheduledMs = summariesThisMonth.sumOf { it.scheduledShiftDurationMs }
 
-                    val hasLastMonthPayroll = payrolls.any { it.payMonth == lastMonth && it.payYear == lastYear }
+                    val hasLastMonthPayroll = payrolls.any { it.payMonth == targetMonth && it.payYear == targetYear }
                     val pendingPayrollsCount = if (hasLastMonthPayroll) 0 else 1
 
                     // Update Global Stats
@@ -236,13 +242,15 @@ class MainViewModel @Inject constructor(
                         totalMonthScheduledMs = totalScheduledMs,
                         recentAdvances = recentAdvancesList
                     )
+                    
+                    // Critical: Update states and hide loader immediately upon first successful calculation
                     _globalStats.value = stats
                     saveStatsCache(stats)
 
                     shops.map { shop ->
                         val shopEmployees = employees.filter { it.shopId == shop.shopId && it.isActive }
                         val shopPresent = attendance.filter { 
-                            it.shopId == shop.shopId && it.checkInTime >= startOfToday 
+                            it.shopId == shop.shopId && it.checkInTime >= startOfToday && activeIds.contains(it.employeeId)
                         }.distinctBy { it.employeeId }.size
                         
                         val pendingRegs = regularizations.filter { 

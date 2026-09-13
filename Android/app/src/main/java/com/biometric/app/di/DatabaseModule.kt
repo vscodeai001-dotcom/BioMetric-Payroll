@@ -10,6 +10,7 @@ import com.biometric.app.data.dao.*
 import com.biometric.app.sync.NeonSyncManager
 import com.biometric.app.data.AppLocalDatabase
 import com.biometric.app.data.LocationDao
+import com.biometric.app.data.dao.OfflineTrackingEventDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -30,6 +31,11 @@ object DatabaseModule {
     @Provides
     fun provideLocationDao(database: AppLocalDatabase): LocationDao {
         return database.locationDao()
+    }
+
+    @Provides
+    fun provideOfflineTrackingEventDao(database: AppLocalDatabase): OfflineTrackingEventDao {
+        return database.offlineTrackingEventDao()
     }
 
     @Provides

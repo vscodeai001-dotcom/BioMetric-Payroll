@@ -57,26 +57,28 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
     }
 
     private fun checkSession(): Boolean {
-        // Break the loop: If we are already in LoginActivity, don't try to lock again
+        // Break the loop: If we are already in LoginActivity, don't try to lock again.
+        // LauncherActivity doesn't inherit from SecurityBaseActivity, but we keep this robust.
         if (this is LoginActivity) return false
 
-        // Always use applicationContext for shared preferences in the base class to ensure 
-        // we are reading the most up-to-date state across all activities.
+        // Always use applicationContext for shared preferences in the base class
         val sharedPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
         val isLocked = sharedPrefs.getBoolean("is_locked", false)
         
+        // If the process is already authorized in memory, we are good.
+        if (isProcessAuthorized && !isLocked) {
+            return false
+        }
+
         Log.d("SecurityBase", "checkSession: Activity=${this.javaClass.simpleName}, authorized=$isProcessAuthorized, locked=$isLocked")
 
-        if (!isProcessAuthorized || isLocked) {
-            // Only lock if we have a valid session to protect. 
-            // If there's no login session, the app should naturally be at LoginActivity anyway.
-            val sessionPrefs = applicationContext.getSharedPreferences("mobile_session", MODE_PRIVATE)
-            val hasToken = !sessionPrefs.getString("token", null).isNullOrBlank()
-            
-            if (hasToken) {
-                lockApp()
-                return true
-            }
+        // Only lock if we have a valid session to protect. 
+        val sessionPrefs = applicationContext.getSharedPreferences("mobile_session", MODE_PRIVATE)
+        val hasToken = !sessionPrefs.getString("token", null).isNullOrBlank()
+        
+        if (hasToken && (!isProcessAuthorized || isLocked)) {
+            lockApp()
+            return true
         }
 
         return false

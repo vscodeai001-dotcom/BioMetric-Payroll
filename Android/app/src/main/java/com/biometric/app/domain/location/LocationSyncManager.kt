@@ -1,75 +1,40 @@
 package com.biometric.app.domain.location
 
 import android.content.Context
-import android.util.Log
-import androidx.hilt.work.HiltWorker
-import androidx.work.BackoffPolicy
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
-import androidx.work.ListenableWorker.Result
-import com.biometric.app.api.GpsSessionRequest
-import com.biometric.app.api.GpsUpdateRequest
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
-import dagger.assisted.Assisted
-import dagger.assisted.AssistedInject
-import dagger.hilt.android.qualifiers.ApplicationContext
+import androidx.work.*
 import java.util.concurrent.TimeUnit
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Single scheduling facade for GPS synchronization.
+ * The durable OfflineSyncWorker owns the actual ordered sync transaction.
+ */
 @Singleton
 class LocationSyncManager @Inject constructor(
-    @param:ApplicationContext private val context: Context,
-    private val mobileApi: MobileApiService,
-    private val sessionStore: MobileSessionStore
+    @param:ApplicationContext private val context: Context
 ) {
     fun scheduleImmediateSync() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val request = OneTimeWorkRequestBuilder<LocationSyncWorker>()
-            .setConstraints(constraints)
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
-            .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "BioMetricLocationSyncImmediate",
-            androidx.work.ExistingWorkPolicy.KEEP,
-            request
-        )
+        OfflineSyncWorker.schedule(context)
     }
 
     fun schedulePeriodicSync() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val request = PeriodicWorkRequestBuilder<LocationSyncWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(constraints)
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+        val request = PeriodicWorkRequestBuilder<OfflineSyncWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .addTag("offline_location_sync_periodic")
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            "BioMetricLocationSync",
+            "offline_location_sync_periodic",
             ExistingPeriodicWorkPolicy.KEEP,
             request
         )
     }
 
-    suspend fun syncNow(): Result {
-        return Result.success()
+    suspend fun syncNow(): androidx.work.ListenableWorker.Result {
+        // WorkManager owns retry/backoff and network constraints. Callers should
+        // enqueue the worker rather than performing a second competing sync loop.
+        scheduleImmediateSync()
+        return androidx.work.ListenableWorker.Result.success()
     }
-}
-
-@HiltWorker
-class LocationSyncWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted params: WorkerParameters,
-    private val locationSyncManager: LocationSyncManager
-) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result = locationSyncManager.syncNow()
 }
