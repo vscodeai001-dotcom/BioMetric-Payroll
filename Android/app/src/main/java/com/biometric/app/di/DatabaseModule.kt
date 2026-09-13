@@ -40,12 +40,15 @@ object DatabaseModule {
 
     @Provides
     @Singleton
+    @Suppress("DEPRECATION")
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             "biometric_payroll.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .fallbackToDestructiveMigration()
+            .build()
     }
 
     @Provides

@@ -118,6 +118,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private val iconCache = mutableMapOf<String, Drawable>()
     private var officeMarker: Marker? = null
     private var geofenceCircle: Polygon? = null
+    private var currentGeofenceRadiusMeters: Int = 0
     private var statusFilter = "All"
     private val approvalFilter = MutableStateFlow("All")
     private val workforceSearchQuery = MutableStateFlow("")
@@ -327,6 +328,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun updateOfficeOnMap(lat: Double, lon: Double, radius: Int) {
+        currentGeofenceRadiusMeters = radius
         _binding?.let { b ->
             val maps = listOf(b.adminMapView, b.commandCenterMapView)
             if (lat == 0.0) return
@@ -409,10 +411,19 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     return@forEach
                 }
 
-                // PORTED: Update Global Geofence Circle if any employee reports a different radius
-                // This ensures the Admin Map circle updates to 20m instantly when changed in Settings.
-                if (loc.allowedRadiusMeters > 0 && loc.allowedRadiusMeters != geofenceCircle?.points?.let { radiusFromPoints(it, officeMarker?.position) }) {
-                    officeMarker?.position?.let { updateOfficeOnMap(it.latitude, it.longitude, loc.allowedRadiusMeters) }
+                // Keep the configured radius as the source of truth.
+                // Avoid reading the deprecated Polygon.points property.
+                if (
+                    loc.allowedRadiusMeters > 0 &&
+                    loc.allowedRadiusMeters != currentGeofenceRadiusMeters
+                ) {
+                    officeMarker?.position?.let {
+                        updateOfficeOnMap(
+                            it.latitude,
+                            it.longitude,
+                            loc.allowedRadiusMeters
+                        )
+                    }
                 }
 
                 val point = GeoPoint(loc.latitude, loc.longitude)
@@ -1095,10 +1106,4 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
     }
 
-    private fun radiusFromPoints(points: List<GeoPoint>, center: GeoPoint?): Int {
-        if (center == null || points.isEmpty()) return 100
-        val results = FloatArray(1)
-        Location.distanceBetween(center.latitude, center.longitude, points[0].latitude, points[0].longitude, results)
-        return results[0].toInt()
-    }
 }
