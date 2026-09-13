@@ -88,6 +88,18 @@ object DatabaseModule {
     fun provideLocalPayrollHistoryDao(database: AppDatabase) = database.localPayrollHistoryDao()
 
     @Provides
+    fun provideLocalBonusRecordDao(database: AppDatabase) = database.localBonusRecordDao()
+
+    @Provides
+    fun provideLocalTaxDeclarationDao(database: AppDatabase) = database.localTaxDeclarationDao()
+
+    @Provides
+    fun provideLocalFbpDeclarationDao(database: AppDatabase) = database.localFbpDeclarationDao()
+
+    @Provides
+    fun provideLocalFbpComponentDao(database: AppDatabase) = database.localFbpComponentDao()
+
+    @Provides
     @Singleton
     fun provideMainRepository(
         @ApplicationContext context: Context,

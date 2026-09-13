@@ -3,6 +3,7 @@ package com.biometric.app.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.biometric.app.api.AdminFeatureSettingsDto
 import com.biometric.app.api.CompanySettingsResponse
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MainRepository
@@ -89,11 +90,15 @@ class MainViewModel @Inject constructor(
     private val _companySettings = MutableStateFlow<CompanySettingsResponse?>(null)
     val companySettings = _companySettings.asStateFlow()
 
+    private val _featureSettings = MutableStateFlow<AdminFeatureSettingsDto?>(null)
+    val featureSettings = _featureSettings.asStateFlow()
+
     init {
         restoreStatsCache()
         checkSubscription()
         ensureUserProfileExists()
         loadCompanySettings()
+        loadFeatureSettings()
         
         viewModelScope.launch {
             sharedViewModel.refreshRequested.collect {
@@ -111,6 +116,7 @@ class MainViewModel @Inject constructor(
 
     fun triggerRefresh() {
         loadCompanySettings()
+        loadFeatureSettings()
         viewModelScope.launch {
             recalculateWorkforce(allShops.value, _currentPeriod.value, _currentDate.value, _customEndDate.value)
         }
@@ -126,6 +132,20 @@ class MainViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Failed to load company settings", e)
+            }
+        }
+    }
+
+    private fun loadFeatureSettings() {
+        val token = sessionStore.token() ?: return
+        viewModelScope.launch {
+            try {
+                val response = mobileApi.getAdminFeatureSettings("Bearer $token")
+                if (response.isSuccessful) {
+                    _featureSettings.value = response.body()
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to load feature settings", e)
             }
         }
     }

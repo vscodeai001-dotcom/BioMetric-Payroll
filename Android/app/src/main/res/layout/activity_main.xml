@@ -391,9 +391,19 @@
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
                                         android:layout_marginEnd="8dp"
-                                        android:text="⚡ Approve Regs"
+                                        android:text="⚡ Regularizations"
                                         android:textSize="11sp"
                                         app:icon="@drawable/ic_check_circle"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnRunPayroll"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="💰 Run Payroll"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_logs"
                                         app:iconSize="16dp" />
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnReportCenter"
@@ -401,18 +411,49 @@
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
                                         android:layout_marginEnd="8dp"
-                                        android:text="📋 Report Center"
+                                        android:text="📊 Report Center"
                                         android:textSize="11sp"
                                         app:icon="@drawable/ic_logs"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnLeaveManagement"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="🌴 Leaves"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_add"
                                         app:iconSize="16dp" />
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAddEmployee"
                                         style="@style/Widget.Material3.Button.TonalButton"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
                                         android:text="➕ Add Staff"
                                         android:textSize="11sp"
                                         app:icon="@drawable/ic_add"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAuditTrail"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="📜 Audit Logs"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_search"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnRecycleBin"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="♻️ Recycle Bin"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_search"
                                         app:iconSize="16dp" />
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnUserManagement"

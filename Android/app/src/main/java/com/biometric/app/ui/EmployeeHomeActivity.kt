@@ -54,6 +54,7 @@ import com.biometric.app.sync.SignalRManager
 import com.biometric.app.ui.selfservice.*
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.BatteryOptimizationHelper
+import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
 import dagger.hilt.android.AndroidEntryPoint
@@ -149,13 +150,13 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             return
         }
 
-        binding.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋"
-        binding.tvMapUserLabel.text = sessionStore.employeeName().ifBlank { "Live Tracker 🛰️" }
+        binding.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋 ✨"
+        binding.tvMapUserLabel.text = sessionStore.employeeName().ifBlank { "Live Tracker 🛰️ 📍" }
 
         // Setup Toolbar
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = null
-        setupDualHeader(binding.toolbar, "Staff Portal 🏢", sessionStore.employeeName().ifBlank { "Employee Dashboard 👤" })
+        setupDualHeader(binding.toolbar, "Staff Portal 🏢 ✨", sessionStore.employeeName().ifBlank { "Employee Dashboard 👤 💎" })
 
         setupToolbar()
         setupClickListeners()
@@ -239,6 +240,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                     updateRangeStatus()
                                 }
                             }
+                            is SignalRManager.SyncEvent.BonusChanged,
+                            is SignalRManager.SyncEvent.TaxDeclarationChanged,
                             is SignalRManager.SyncEvent.LocationChanged -> {
                                 val currentEmpId = sessionStore.employeeId()
                                 signalR.liveLocations.value[currentEmpId]?.let { loc ->
@@ -248,9 +251,12 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                         updateMapMarkers()
                                     }
                                 }
+                                sharedViewModel.warmUpDashboard()
+                                loadDashboard()
                             }
                             else -> {
                                 Log.d("EmployeeHome", "Real-time refresh for dashboard: $event 🔄")
+                                sharedViewModel.warmUpDashboard()
                                 loadDashboard()
                             }
                         }
@@ -335,24 +341,69 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun setupClickListeners() {
-        binding.btnPunch.setOnClickListener { attemptPunch() }
-        binding.btnViewAttendanceLogs.setOnClickListener { openSelfService("attendance") }
-        binding.btnViewPayslips.setOnClickListener { openSelfService("payslips") }
+        binding.btnPunch.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            attemptPunch() 
+        }
+        binding.btnViewAttendanceLogs.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("attendance") 
+        }
+        binding.btnViewPayslips.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("payslips") 
+        }
 
-        binding.btnAttendance.setOnClickListener { openSelfService("attendance") }
-        binding.btnLeaves.setOnClickListener { openSelfService("leaves") }
-        binding.btnPayslips.setOnClickListener { openSelfService("payslips") }
-        binding.btnAdvances.setOnClickListener { openSelfService("advances") }
-        binding.btnBonuses.setOnClickListener { openSelfService("bonuses") }
-        binding.btnCorrection.setOnClickListener { openSelfService("correction") }
-        binding.btnResignation.setOnClickListener { openSelfService("resignation") }
-        binding.btnShifts.setOnClickListener { openSelfService("shifts") }
-        binding.btnTax.setOnClickListener { openSelfService("tax") }
-        binding.btnFbp.setOnClickListener { openSelfService("fbp") }
+        binding.btnAttendance.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("attendance") 
+        }
+        binding.btnLeaves.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("leaves") 
+        }
+        binding.btnPayslips.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("payslips") 
+        }
+        binding.btnAdvances.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("advances") 
+        }
+        binding.btnBonuses.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("bonuses") 
+        }
+        binding.btnCorrection.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("correction") 
+        }
+        binding.btnResignation.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("resignation") 
+        }
+        binding.btnShifts.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("shifts") 
+        }
+        binding.btnTax.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("tax") 
+        }
+        binding.btnFbp.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("fbp") 
+        }
 
-        binding.btnSettings.setOnClickListener { openSelfService("profile") }
+        binding.btnSettings.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            openSelfService("profile") 
+        }
 
-        binding.btnLogout.setOnClickListener { confirmLogout() }
+        binding.btnLogout.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            confirmLogout() 
+        }
     }
 
     private fun openSelfService(key: String) {

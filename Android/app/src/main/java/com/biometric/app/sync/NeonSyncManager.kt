@@ -29,7 +29,11 @@ class NeonSyncManager @Inject constructor(
     private val payrollHistoryDao: LocalPayrollHistoryDao,
     private val apiService: ApiService,
     private val resignationDao: LocalResignationRequestDao,
-    private val leaveDao: LocalLeaveRequestDao
+    private val leaveDao: LocalLeaveRequestDao,
+    private val bonusDao: LocalBonusRecordDao,
+    private val taxDao: LocalTaxDeclarationDao,
+    private val fbpComponentDao: LocalFbpComponentDao,
+    private val fbpDeclarationDao: LocalFbpDeclarationDao
 ) {
     private val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -57,6 +61,10 @@ class NeonSyncManager @Inject constructor(
             syncDailySummaries(conn)
             syncShiftSchedules(conn)
             syncPayrollHistories(conn)
+            syncBonuses(conn)
+            syncTaxDeclarations(conn)
+            syncFbpComponents(conn)
+            syncFbpDeclarations(conn)
             
             // Push local changes to PostgreSQL
             pushLocalChanges(conn)
@@ -295,6 +303,91 @@ class NeonSyncManager @Inject constructor(
                         ptDeduction = rs.getDouble("pt_deduction"),
                         tdsDeduction = rs.getDouble("tds_deduction"),
                         totalShiftAllowance = rs.getDouble("TotalShiftAllowance"),
+                        syncState = 1
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun syncBonuses(conn: Connection) {
+        Log.d(TAG, "Syncing Bonuses...")
+        conn.prepareStatement("SELECT * FROM bonus_records").use { stmt ->
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    bonusDao.upsert(LocalBonusRecord(
+                        bonusId = rs.getInt("bonusid"),
+                        employeeId = rs.getInt("employeeid"),
+                        bonusDate = rs.getDate("bonus_date")?.time ?: 0L,
+                        amount = rs.getDouble("amount"),
+                        description = rs.getString("description"),
+                        payrollIdPaid = rs.getObject("payrollid_paid") as? Int,
+                        syncState = 1
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun syncTaxDeclarations(conn: Connection) {
+        Log.d(TAG, "Syncing Tax Declarations...")
+        conn.prepareStatement("SELECT * FROM tax_declarations").use { stmt ->
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    taxDao.upsert(LocalTaxDeclaration(
+                        declarationId = rs.getInt("declaration_id"),
+                        employeeId = rs.getInt("employee_id"),
+                        financialYear = rs.getInt("financial_year"),
+                        regime = rs.getString("regime") ?: "New",
+                        section80C = rs.getDouble("section_80c"),
+                        section80D = rs.getDouble("section_80d"),
+                        hraRentPaid = rs.getDouble("hra_rent_paid"),
+                        otherExemptions = rs.getDouble("other_exemptions"),
+                        status = rs.getString("status") ?: "Pending",
+                        adminRemarks = rs.getString("admin_remarks"),
+                        submissionDate = rs.getTimestamp("submission_date")?.time ?: 0L,
+                        approvalDate = rs.getTimestamp("approval_date")?.time,
+                        syncState = 1
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun syncFbpComponents(conn: Connection) {
+        Log.d(TAG, "Syncing FBP Components...")
+        conn.prepareStatement("SELECT * FROM fbp_components").use { stmt ->
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    fbpComponentDao.upsert(LocalFbpComponent(
+                        componentId = rs.getInt("component_id"),
+                        name = rs.getString("name") ?: "",
+                        maxAnnualLimit = rs.getDouble("max_annual_limit"),
+                        isActive = rs.getBoolean("is_active"),
+                        isTaxExempt = rs.getBoolean("is_tax_exempt"),
+                        syncState = 1
+                    ))
+                }
+            }
+        }
+    }
+
+    private fun syncFbpDeclarations(conn: Connection) {
+        Log.d(TAG, "Syncing FBP Declarations...")
+        conn.prepareStatement("SELECT * FROM flexible_benefit_declarations").use { stmt ->
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    fbpDeclarationDao.upsert(LocalFbpDeclaration(
+                        declarationId = rs.getInt("declaration_id"),
+                        employeeId = rs.getInt("employee_id"),
+                        financialYear = rs.getInt("financial_year"),
+                        componentName = rs.getString("component_name") ?: "",
+                        annualAllocatedAmount = rs.getDouble("annual_allocated_amount"),
+                        monthlyAllocatedAmount = rs.getDouble("monthly_allocated_amount"),
+                        status = rs.getString("status") ?: "Draft",
+                        submissionDate = rs.getTimestamp("submission_date")?.time ?: 0L,
+                        isActive = rs.getBoolean("is_active"),
+                        adminRemarks = rs.getString("admin_remarks"),
                         syncState = 1
                     ))
                 }

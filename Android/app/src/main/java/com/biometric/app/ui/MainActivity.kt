@@ -76,17 +76,21 @@ import android.text.TextWatcher
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.core.graphics.toColorInt
+import com.biometric.app.api.AdminFeatureSettingsDto
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.AdvancePayment
+import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import java.text.NumberFormat
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @AndroidEntryPoint
 class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
@@ -143,7 +147,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = null
-        val headers = setupDualHeader(binding.toolbar, "Workforce Hub 🏢", "Organization Dashboard")
+        val headers = setupDualHeader(binding.toolbar, "Workforce Hub 🏢 ✨", "Organization Dashboard 🛡️")
         headers.btnShop?.visibility = View.GONE
         tvLastSynced = headers.status
         tvLastSynced?.visibility = View.VISIBLE
@@ -217,12 +221,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         activeHub?.let { animateContentEntry(it) }
         setupDualHeader(binding.toolbar, when (hub) {
-            "DASHBOARD" -> "Workforce Hub 🏢"
-            "WORKFORCE" -> "Staff Management 👥"
-            "APPROVALS" -> "Admin Approvals ✅"
-            "TRACKING" -> "Live Operations 🛰️"
-            "REPORTS" -> "Business Intelligence 📈"
-            else -> "Organization Dashboard 🛡️"
+            "DASHBOARD" -> "Workforce Hub 🏢 ✨"
+            "WORKFORCE" -> "Staff Management 👥 🛡️"
+            "APPROVALS" -> "Admin Approvals ✅ ⚡"
+            "TRACKING" -> "Live Operations 🛰️ 📍"
+            "REPORTS" -> "Business Intelligence 📈 💎"
+            else -> "Organization Dashboard 🛡️ ✨"
         }, "Organization Dashboard 🛡️")
         return true
     }
@@ -514,6 +518,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             is SignalRManager.SyncEvent.RegularizationChanged,
                             is SignalRManager.SyncEvent.LeaveChanged,
                             is SignalRManager.SyncEvent.AdvanceChanged,
+                            is SignalRManager.SyncEvent.BonusChanged,
+                            is SignalRManager.SyncEvent.TaxDeclarationChanged,
                             is SignalRManager.SyncEvent.EmployeeChanged,
                             is SignalRManager.SyncEvent.ExitChanged,
                             is SignalRManager.SyncEvent.AttendanceChanged,
@@ -742,19 +748,58 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupListeners() {
-        binding.btnAddShop.setOnClickListener { showAddShopDialog() }
-        binding.cvLiveMapCard.setOnClickListener { showHub("TRACKING"); binding.bottomNavigation.selectedItemId = R.id.nav_tracking }
+        binding.btnAddShop.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            showAddShopDialog() 
+        }
+        binding.cvLiveMapCard.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            showHub("TRACKING"); binding.bottomNavigation.selectedItemId = R.id.nav_tracking 
+        }
         binding.cvManualPunchCorrection.setOnClickListener {
+            HapticUtil.vibrateClick(it)
             startActivity(Intent(this, AdminManualPunchCorrectionActivity::class.java))
         }
-        binding.btnApproveRegs.setOnClickListener { startActivity(Intent(this, RegularizationActivity::class.java)) }
+        binding.btnApproveRegs.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, RegularizationActivity::class.java)) 
+        }
+        binding.btnRunPayroll.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminPayrollActivity::class.java)) 
+        }
+        binding.btnLeaveManagement.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, LeaveManagementActivity::class.java)) 
+        }
+        binding.btnAuditTrail.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AuditTrailActivity::class.java)) 
+        }
+        binding.btnRecycleBin.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, RecycleBinActivity::class.java)) 
+        }
         binding.btnReportCenter.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
             startActivity(Intent(this, ReportCenterActivity::class.java)) 
         }
-        binding.btnAddEmployee.setOnClickListener { startActivity(Intent(this, StaffActivity::class.java)) }
-        binding.btnViewAllAdvances.setOnClickListener { showHub("REPORTS"); binding.bottomNavigation.selectedItemId = R.id.nav_reports }
-        binding.btnUserManagement.setOnClickListener { startActivity(Intent(this, UserManagementActivity::class.java)) }
-        binding.btnOpenFullReportCenter.setOnClickListener { startActivity(Intent(this, ReportCenterActivity::class.java)) }
+        binding.btnAddEmployee.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, StaffActivity::class.java)) 
+        }
+        binding.btnViewAllAdvances.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            showHub("REPORTS"); binding.bottomNavigation.selectedItemId = R.id.nav_reports 
+        }
+        binding.btnUserManagement.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, UserManagementActivity::class.java)) 
+        }
+        binding.btnOpenFullReportCenter.setOnClickListener { 
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ReportCenterActivity::class.java)) 
+        }
     }
 
     private fun observeViewModel() {
@@ -934,8 +979,28 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun applyRolePermissions() {
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", UserRole.STAFF.name)
-        binding.cvLiveMapCard.isVisible = (role == UserRole.SUPER_ADMIN.name)
-        binding.btnUserManagement.isVisible = (role == UserRole.SUPER_ADMIN.name)
+        val isSuperAdmin = role == UserRole.SUPER_ADMIN.name
+
+        lifecycleScope.launch {
+            viewModel.featureSettings.collectLatest { settings ->
+                _binding?.let { b ->
+                    val s = settings ?: AdminFeatureSettingsDto()
+
+                    // Admin Hub Quick Actions
+                    b.btnRunPayroll.isVisible = isSuperAdmin || (s.enablePayroll && s.adminCanRunPayroll)
+                    b.btnApproveRegs.isVisible = isSuperAdmin || s.enableRegularizationRequest
+                    b.btnLeaveManagement.isVisible = isSuperAdmin || s.enableLeaveManagement
+                    b.btnReportCenter.isVisible = isSuperAdmin || (s.enableCompanyReports && s.adminCanViewReports)
+                    b.btnAddEmployee.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
+                    b.btnUserManagement.isVisible = isSuperAdmin
+                    b.btnRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
+                    b.btnAuditTrail.isVisible = isSuperAdmin || s.enableAuditLog
+
+                    // Map Visibility
+                    b.cvLiveMapCard.isVisible = isSuperAdmin || (s.enableGeoFencing && s.adminCanViewAttendance)
+                }
+            }
+        }
     }
 
     private fun checkBatteryOptimizations() {

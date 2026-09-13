@@ -36,19 +36,24 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         private readonly ILogger<LogoutModel>
             _logger;
 
+        private readonly AttendanceEventMonitorService
+            _attendanceMonitor;
+
 
         public LogoutModel(
             SignInManager<IdentityUser> signInManager,
             UserManager<IdentityUser> userManager,
             IDbContextFactory<AppDbContext> dbFactory,
             GeoLocationService geoLocationService,
-            ILogger<LogoutModel> logger)
+            ILogger<LogoutModel> logger,
+            AttendanceEventMonitorService attendanceMonitor)
         {
             _signInManager = signInManager;
             _userManager = userManager;
             _dbFactory = dbFactory;
             _geoLocationService = geoLocationService;
             _logger = logger;
+            _attendanceMonitor = attendanceMonitor;
         }
 
 
@@ -77,6 +82,15 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             var user =
                 await _userManager.GetUserAsync(User);
 
+
+            string? deviceId = null;
+            if (user != null)
+            {
+                deviceId = User.FindFirstValue(DeviceClaimType);
+                if (string.IsNullOrWhiteSpace(deviceId)) Request.Cookies.TryGetValue(DeviceCookieName, out deviceId);
+                await _attendanceMonitor.RecordAsync(
+                    "LOGOUT_REQUESTED", user.Id, user.Email, deviceId, "Web", "REQUESTED", "MANUAL_LOGOUT");
+            }
 
             try
             {
@@ -112,6 +126,9 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
             DeleteDeviceCookie();
 
+            if (user != null)
+                await _attendanceMonitor.RecordAsync(
+                    "LOGOUT_COMPLETED", user.Id, user.Email, deviceId, "Web", "SUCCESS", "MANUAL_LOGOUT_COMPLETED");
 
             _logger.LogInformation(
                 "LOGOUT COMPLETED. UserId={UserId}",

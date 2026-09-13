@@ -117,6 +117,16 @@ class SignalRManager @Inject constructor(
             managerScope.launch { _dataChangeEvents.emit(SyncEvent.AdvanceChanged) }
         }, Any::class.java)
 
+        hub.on("BonusChanged", { _ ->
+            Log.d("SignalR", "BonusChanged received")
+            managerScope.launch { _dataChangeEvents.emit(SyncEvent.BonusChanged) }
+        }, Any::class.java)
+
+        hub.on("TaxDeclarationChanged", { _ ->
+            Log.d("SignalR", "TaxDeclarationChanged received")
+            managerScope.launch { _dataChangeEvents.emit(SyncEvent.TaxDeclarationChanged) }
+        }, Any::class.java)
+
         hub.on("EmployeeChanged", { _ ->
             Log.d("SignalR", "EmployeeChanged received")
             managerScope.launch { _dataChangeEvents.emit(SyncEvent.EmployeeChanged) }
@@ -216,6 +226,8 @@ class SignalRManager @Inject constructor(
         data class GeoSettingsChanged(val settings: GeoSettingsChangedEvent) : SyncEvent()
         object LeaveChanged : SyncEvent()
         object AdvanceChanged : SyncEvent()
+        object BonusChanged : SyncEvent()
+        object TaxDeclarationChanged : SyncEvent()
         object EmployeeChanged : SyncEvent()
         object GlobalRefresh : SyncEvent()
         object ApplicationDataChanged : SyncEvent()
