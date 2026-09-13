@@ -15,6 +15,8 @@ import com.biometric.app.domain.location.LocationSyncManager
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.TrackingRecoveryWorker
 import com.biometric.app.sync.DashboardWarmingWorker
+import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.sync.NeonSyncWorker
 import com.biometric.app.util.ThemeManager
 import dagger.hilt.android.HiltAndroidApp
@@ -30,6 +32,8 @@ class BiometricApplication : Application(), Configuration.Provider {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var locationSyncManager: LocationSyncManager
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var mobileSessionStore: MobileSessionStore
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -54,6 +58,16 @@ class BiometricApplication : Application(), Configuration.Provider {
                     "BioMetricPayroll_Android_" + packageName
             }
         }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization async start failed", it) }
+
+        // Keep the cross-device realtime bus alive for the lifetime of the
+        // authenticated app process. Individual screens continue to own their
+        // existing UI/layout logic; this only keeps their authoritative cache
+        // current in the background.
+        runCatching {
+            if (mobileSessionStore.isLoggedIn()) {
+                realtimeCoordinator.start()
+            }
+        }.onFailure { Log.w("BiometricApplication", "Realtime coordinator startup skipped", it) }
 
         runCatching {
             ThemeManager.applyTheme(this)

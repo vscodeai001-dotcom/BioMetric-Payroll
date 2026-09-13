@@ -20,6 +20,7 @@ import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
 import com.biometric.app.ui.viewmodel.SharedViewModel
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.util.MotionManager
 import com.google.android.gms.common.api.ApiException
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -40,6 +41,7 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var mobileSessionStore: MobileSessionStore
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -92,6 +94,7 @@ class LoginActivity : MotionBaseActivity() {
         binding.btnReset.setOnClickListener {
             // Allow user to logout and switch accounts if they want
             // This button is an explicit account switch/sign-out action.
+            realtimeCoordinator.stop()
             mobileSessionStore.clearLogin()
             SecurityBaseActivity.clearProcessAuthorization(applicationContext)
             applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
@@ -185,6 +188,9 @@ class LoginActivity : MotionBaseActivity() {
                         }
                         
                         mobileSessionStore.saveLogin(token, result.employeeId, result.name)
+                        // Start the central realtime bus immediately after the
+                        // authenticated session is persisted.
+                        realtimeCoordinator.start()
                         applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)
                             putString("user_role", role)

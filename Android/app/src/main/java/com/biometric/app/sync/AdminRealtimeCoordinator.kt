@@ -7,6 +7,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import com.biometric.app.sync.SignalRManager.SyncEvent
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -36,10 +37,19 @@ class AdminRealtimeCoordinator @Inject constructor(
 
         signalR.start()
         collectJob = scope.launch {
-            signalR.dataChangeEvents.collectLatest {
+            // Hydrate the local cache once when the realtime channel starts.
+            // This removes the "only current after manual refresh" gap without
+            // changing any screen flow or business logic.
+            syncFromAuthoritativeStore()
+
+            signalR.dataChangeEvents.collectLatest { event ->
+                // GPS telemetry already has its own low-latency live-location
+                // channel. Never run the full Neon CRUD sync for every GPS fix.
+                if (event is SyncEvent.LocationChanged) return@collectLatest
+
                 pendingRefresh?.cancel()
                 pendingRefresh = launch {
-                    delay(180)
+                    delay(120)
                     onLocalRefresh()
                     syncFromAuthoritativeStore()
                 }
@@ -67,5 +77,6 @@ class AdminRealtimeCoordinator @Inject constructor(
         collectJob?.cancel()
         pendingRefresh = null
         collectJob = null
+        signalR.stop()
     }
 }

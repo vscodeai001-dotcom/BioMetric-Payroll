@@ -23,6 +23,7 @@ class SignalRManager @Inject constructor(
     private var hubConnection: HubConnection? = null
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var connectInProgress = false
+    @Volatile private var buildInProgress = false
     
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 10)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
@@ -43,6 +44,7 @@ class SignalRManager @Inject constructor(
              return
         }
 
+        buildInProgress = true
         managerScope.launch {
             try {
                 hubConnection = HubConnectionBuilder.create(hubUrl)
@@ -53,6 +55,8 @@ class SignalRManager @Inject constructor(
                 connect()
             } catch (e: Exception) {
                 Log.e("SignalR", "Failed to build HubConnection", e)
+            } finally {
+                buildInProgress = false
             }
         }
     }
@@ -187,6 +191,15 @@ class SignalRManager @Inject constructor(
             }
         }, Any::class.java)
 
+        hub.onReconnected { connectionId ->
+            Log.i("SignalR", "Realtime channel reconnected: $connectionId")
+            // Reconnection is a cache-consistency boundary. Ask the central
+            // coordinator to hydrate the authoritative store once.
+            managerScope.launch {
+                _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
+            }
+        }
+
         hub.onClosed { exception ->
             Log.w("SignalR", "Connection closed. Retrying in 5s...", exception)
             managerScope.launch {
@@ -221,6 +234,8 @@ class SignalRManager @Inject constructor(
     }
 
     fun stop() {
+        buildInProgress = false
+        connectInProgress = false
         hubConnection?.stop()
         hubConnection = null
     }

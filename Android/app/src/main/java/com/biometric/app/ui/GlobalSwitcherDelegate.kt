@@ -29,6 +29,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.biometric.app.R
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.ThemeManager
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.google.firebase.auth.FirebaseAuth
 import java.io.File
 
@@ -169,6 +170,7 @@ object GlobalSwitcherDelegate {
         )
         val session = entryPoint.sessionStore
         val api = entryPoint.mobileApi
+        val realtime = entryPoint.realtimeCoordinator
         val token = session.token()
 
         activity.lifecycleScope.launch {
@@ -178,6 +180,7 @@ object GlobalSwitcherDelegate {
                 }
             } finally {
                 try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) {}
+                realtime.stop()
                 session.clearLogin()
                 activity.applicationContext
                     .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
@@ -200,6 +203,7 @@ object GlobalSwitcherDelegate {
     interface LogoutEntryPoint {
         val mobileApi: MobileApiService
         val sessionStore: MobileSessionStore
+        val realtimeCoordinator: AdminRealtimeCoordinator
     }
 
     private fun showQuickActionPopup(
