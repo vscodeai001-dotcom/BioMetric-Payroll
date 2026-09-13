@@ -39,6 +39,7 @@ import com.biometric.app.util.PremiumLoader
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.ImageUtils
 import com.biometric.app.utils.PremiumUI
+import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch

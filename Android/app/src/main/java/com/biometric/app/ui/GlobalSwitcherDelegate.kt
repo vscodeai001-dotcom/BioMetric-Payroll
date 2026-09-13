@@ -1,6 +1,8 @@
 package com.biometric.app.ui
 
+import android.content.Context
 import android.content.Intent
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.Menu
 import android.view.MenuInflater
@@ -19,6 +21,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.biometric.app.R
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.ThemeManager
+import com.google.firebase.auth.FirebaseAuth
 import java.io.File
 
 object GlobalSwitcherDelegate {
@@ -80,7 +83,10 @@ object GlobalSwitcherDelegate {
                     ?: toolbar
                     ?: activity.window.decorView
 
-                showQuickActionPopup(activity, actionView, extraActions)
+                val role = sharedViewModel.userProfile.value?.role
+                val isAdmin = role?.contains("Admin", true) == true
+                
+                showQuickActionPopup(activity, actionView, extraActions, isAdmin)
                 return true
             }
         }
@@ -145,7 +151,8 @@ object GlobalSwitcherDelegate {
     private fun showQuickActionPopup(
         activity: AppCompatActivity,
         anchor: View,
-        extraActions: List<ActionItem>
+        extraActions: List<ActionItem>,
+        showLogoutAsDefault: Boolean = false
     ) {
         dismissPopup() // Dismiss any previous popup to avoid leaks
         
@@ -157,10 +164,38 @@ object GlobalSwitcherDelegate {
         val container = popupView.findViewById<ViewGroup>(R.id.llActionContainer)
         
         val density = activity.resources.displayMetrics.density
-        val iconSizePx = (42 * density).toInt() // Reduced from 48dp to fit more icons
-        val totalPaddingPx = (8 * density).toInt() // 4dp padding on each side
-        val requiredWidth = (extraActions.size * iconSizePx) + totalPaddingPx
-        val maxWidth = (activity.resources.displayMetrics.widthPixels * 0.98).toInt() // Increased from 90% to 98%
+        val iconSizePx = (42 * density).toInt() 
+        val totalPaddingPx = (8 * density).toInt() 
+
+        val finalActions = extraActions.toMutableList()
+        val hasLogout = finalActions.any { it.emoji == "🚪" }
+        
+        // Add Logout automatically for Admin/SuperAdmin roles if not already present
+        if (!hasLogout && showLogoutAsDefault) {
+             finalActions.add(ActionItem("🚪", "Logout") {
+                 MaterialAlertDialogBuilder(activity)
+                     .setTitle("Logout 🚪")
+                     .setMessage("Are you sure you want to sign out?")
+                     .setPositiveButton("Logout") { _, _ ->
+                         try {
+                             FirebaseAuth.getInstance().signOut()
+                         } catch (_: Exception) {}
+                         
+                         activity.applicationContext.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                         activity.applicationContext.getSharedPreferences("mobile_session", Context.MODE_PRIVATE).edit().clear().apply()
+                         
+                         activity.startActivity(Intent(activity, LoginActivity::class.java).apply {
+                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                         })
+                         activity.finish()
+                     }
+                     .setNegativeButton("Cancel", null)
+                     .show()
+             })
+        }
+        
+        val requiredWidth = (finalActions.size * iconSizePx) + totalPaddingPx
+        val maxWidth = (activity.resources.displayMetrics.widthPixels * 0.98).toInt() 
         
         val popupWindow = PopupWindow(
             popupView,
@@ -168,7 +203,6 @@ object GlobalSwitcherDelegate {
             ViewGroup.LayoutParams.WRAP_CONTENT,
             true
         ).apply {
-            // Responsive width: WRAP_CONTENT if it fits, else limit to screen width
             if (requiredWidth > maxWidth) {
                 width = maxWidth
             } else {
@@ -186,14 +220,11 @@ object GlobalSwitcherDelegate {
         val btnSync = popupView.findViewById<View>(R.id.btnSync)
         val btnLogout = popupView.findViewById<View>(R.id.btnLogout)
         
-        // btnSync is now managed via extraActions in MainActivity to avoid duplication.
         btnSync.visibility = View.GONE
         btnLogout.visibility = View.GONE
 
-        val allActions = extraActions
-
-        // Add Extra Actions dynamically
-        allActions.forEach { action ->
+        // Add Final Actions dynamically
+        finalActions.forEach { action ->
             val textView = TextView(activity).apply {
                 val size = (42 * activity.resources.displayMetrics.density).toInt() // Matched with container logic
                 layoutParams = LinearLayout.LayoutParams(size, size)
@@ -201,7 +232,7 @@ object GlobalSwitcherDelegate {
                 textSize = 24f
                 text = action.emoji
                 
-                val outValue = android.util.TypedValue()
+                val outValue = TypedValue()
                 activity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true)
                 background = ContextCompat.getDrawable(activity, outValue.resourceId)
 

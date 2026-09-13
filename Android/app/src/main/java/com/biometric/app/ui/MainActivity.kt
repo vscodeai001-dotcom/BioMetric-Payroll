@@ -1041,7 +1041,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return if (GlobalSwitcherDelegate.handleOptionsItemSelected(this, item, sharedViewModel)) true else super.onOptionsItemSelected(item)
+        val extraActions = listOf(
+            GlobalSwitcherDelegate.ActionItem("🔄", "Sync Data") {
+                triggerExclusiveRefresh()
+                Toast.makeText(this, "Real-time sync triggered... 🛰️", Toast.LENGTH_SHORT).show()
+            }
+        )
+        return if (GlobalSwitcherDelegate.handleOptionsItemSelected(this, item, sharedViewModel, extraActions)) true else super.onOptionsItemSelected(item)
     }
 
     override fun onPaymentSuccess(p0: String?) { Toast.makeText(this, "Subscription Successful! 💎 ✅", Toast.LENGTH_LONG).show() }
@@ -1083,12 +1089,5 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val results = FloatArray(1)
         Location.distanceBetween(center.latitude, center.longitude, points[0].latitude, points[0].longitude, results)
         return results[0].toInt()
-    }
-
-    private fun logout() {
-        FirebaseAuth.getInstance().signOut()
-        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { clear() }
-        startActivity(Intent(this, LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
-        finish()
     }
 }
