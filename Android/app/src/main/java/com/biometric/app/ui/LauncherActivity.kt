@@ -20,6 +20,7 @@ class LauncherActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val authPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
+        val userPrefs = applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE)
         val isLoggedIn = sessionStore.isLoggedIn()
 
         if (isLoggedIn) {
@@ -28,7 +29,10 @@ class LauncherActivity : AppCompatActivity() {
             // source of the repeated security/unlock screen after closing the app.
             SecurityBaseActivity.markAsVerified(applicationContext)
 
-            val role = authPrefs.getString("user_role", UserRole.STAFF.name)
+            val role =
+                authPrefs.getString("user_role", null)
+                    ?: userPrefs.getString("user_role", UserRole.STAFF.name)
+                    ?: UserRole.STAFF.name
             val destination = if (
                 role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name
             ) {

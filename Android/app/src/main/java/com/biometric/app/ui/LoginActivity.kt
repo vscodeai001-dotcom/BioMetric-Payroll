@@ -248,7 +248,10 @@ class LoginActivity : MotionBaseActivity() {
 
     private fun proceedToMain() {
         // Break the loop: Mark process as verified and clear lock state
-        markAsVerified(applicationContext)
+        // The successful credential/biometric flow is the explicit authorization
+        // event for this process. Do this before launching the protected destination.
+        SecurityBaseActivity.markAsVerified(applicationContext)
+
         applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
             putLong("last_active_time", System.currentTimeMillis())
         }

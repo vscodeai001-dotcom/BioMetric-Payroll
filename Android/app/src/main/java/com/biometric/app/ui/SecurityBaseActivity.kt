@@ -8,9 +8,14 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.edit
 
 /**
- * Base activity providing session protection.
- * Sessions in BioMetric are indefinite; we only lock on cold starts (process restart)
- * or when explicitly signalled by the server.
+ * Central session guard for protected Android screens.
+ *
+ * IMPORTANT:
+ * - A valid persisted mobile session is sufficient to keep the user logged in.
+ * - Closing the app, removing it from Recents, or a process restart must NOT
+ *   manufacture a new security-login loop.
+ * - An explicit logout clears the persisted session and returns to LoginActivity.
+ * - This class does not change attendance, GPS, payroll, or business rules.
  */
 abstract class SecurityBaseActivity : AppCompatActivity() {
 
@@ -20,92 +25,134 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
 
         @Volatile
         private var isLockingInProgress = false
-        
+
+        private const val AUTH_PREFS = "auth_prefs"
+        private const val SESSION_PREFS = "mobile_session"
+
         fun markAsVerified(context: Context) {
-            Log.i("SecurityBase", "markAsVerified called. Process is now authorized.")
+            val app = context.applicationContext
+
             isProcessAuthorized = true
             isLockingInProgress = false
-            
-            // Clear persistent lock state using application context for cross-activity consistency
-            context.applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
-                putBoolean("is_locked", false)
-            }
+
+            app.getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
+                .edit(commit = true) {
+                    putBoolean("is_locked", false)
+                    putLong("last_active_time", System.currentTimeMillis())
+                }
+
+            Log.i(
+                "SecurityBase",
+                "Session authorized for current process"
+            )
         }
 
-        fun isProcessVerified() = isProcessAuthorized
+        fun isProcessVerified(): Boolean = isProcessAuthorized
 
         fun clearProcessAuthorization(context: Context) {
             isProcessAuthorized = false
             isLockingInProgress = false
+
             context.applicationContext
-                .getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                .getSharedPreferences(AUTH_PREFS, Context.MODE_PRIVATE)
                 .edit(commit = true) {
                     putBoolean("is_locked", false)
                 }
+
+            Log.i(
+                "SecurityBase",
+                "Process authorization cleared because the user explicitly logged out"
+            )
         }
     }
 
+    /**
+     * LoginActivity and ReliabilitySetupActivity intentionally bypass the
+     * protected-session redirect because they are entry/setup screens.
+     */
     protected open fun isSecurityBypass(): Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
-        if (isSecurityBypass()) {
-            return
-        }
 
-        checkSession()
+        if (!isSecurityBypass()) {
+            checkSession()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (isSecurityBypass()) {
-            return
+
+        if (!isSecurityBypass()) {
+            checkSession()
         }
-        
-        checkSession()
     }
 
+    /**
+     * Do NOT use an in-memory "cold start" flag as the reason to redirect.
+     *
+     * Android can recreate an Activity/process at any time. The persisted
+     * MobileSessionStore token is the authoritative login state.
+     */
     private fun checkSession(): Boolean {
-        // Break the loop: If we are already in LoginActivity, don't try to lock again.
-        // LauncherActivity doesn't inherit from SecurityBaseActivity, but we keep this robust.
-        if (this is LoginActivity) return false
-
-        // Always use applicationContext for shared preferences in the base class
-        val sharedPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
-        val isLocked = sharedPrefs.getBoolean("is_locked", false)
-        
-        // If the process is already authorized in memory, we are good.
-        if (isProcessAuthorized && !isLocked) {
+        if (this is LoginActivity) {
             return false
         }
 
-        Log.d("SecurityBase", "checkSession: Activity=${this.javaClass.simpleName}, authorized=$isProcessAuthorized, locked=$isLocked")
+        val sessionPrefs =
+            applicationContext.getSharedPreferences(
+                SESSION_PREFS,
+                Context.MODE_PRIVATE
+            )
 
-        // Only lock if we have a valid session to protect. 
-        val sessionPrefs = applicationContext.getSharedPreferences("mobile_session", MODE_PRIVATE)
-        val hasToken = !sessionPrefs.getString("token", null).isNullOrBlank()
-        
-        if (hasToken && (!isProcessAuthorized || isLocked)) {
-            lockApp()
-            return true
+        val token =
+            sessionPrefs.getString("token", null)
+
+        val hasToken = !token.isNullOrBlank()
+
+        if (hasToken) {
+            // A persisted authenticated mobile session survives:
+            // - process recreation
+            // - closing from Recents
+            // - returning from another Activity
+            //
+            // Never redirect to LoginActivity merely because the static
+            // process flag was reset.
+            if (!isProcessAuthorized) {
+                Log.i(
+                    "SecurityBase",
+                    "Restoring authorized state from persisted mobile session: ${javaClass.simpleName}"
+                )
+                markAsVerified(applicationContext)
+            }
+
+            return false
         }
 
-        return false
+        // No persisted session means there is no authenticated user.
+        // Only then return to the real login screen.
+        Log.w(
+            "SecurityBase",
+            "No persisted mobile session for ${javaClass.simpleName}; returning to LoginActivity"
+        )
+
+        redirectToLogin()
+        return true
     }
 
-    private fun lockApp() {
-        if (isLockingInProgress || isFinishing || isDestroyed) return
+    private fun redirectToLogin() {
+        if (isLockingInProgress || isFinishing || isDestroyed) {
+            return
+        }
+
         isLockingInProgress = true
 
-        val sharedPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
-        sharedPrefs.edit(commit = true) {
-            putBoolean("is_locked", true)
+        val intent = Intent(this, LoginActivity::class.java).apply {
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
-        
-        Log.w("SecurityBase", "lockApp: Redirecting to LoginActivity due to unauthorized process or explicit lock.")
-        val intent = Intent(this, LoginActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+
         startActivity(intent)
         finish()
     }
