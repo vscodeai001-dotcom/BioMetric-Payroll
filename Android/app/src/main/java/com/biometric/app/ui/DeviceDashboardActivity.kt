@@ -8,12 +8,16 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.databinding.ActivityDeviceDashboardBinding
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.ui.adapter.DeviceAdapter
 import com.google.firebase.database.*
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class DeviceDashboardActivity : AppCompatActivity() {
+
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var binding: ActivityDeviceDashboardBinding
     private val dbRef = FirebaseDatabase.getInstance().getReference("owners")
@@ -83,6 +87,7 @@ class DeviceDashboardActivity : AppCompatActivity() {
                     .child("deviceId")
                     .removeValue()
                     .addOnSuccessListener {
+                        firebaseSync.notifyRealtimeChanged("UserProfile", "MODIFIED")
                         Toast.makeText(this, "Device revoked successfully", Toast.LENGTH_SHORT).show()
                     }
             }

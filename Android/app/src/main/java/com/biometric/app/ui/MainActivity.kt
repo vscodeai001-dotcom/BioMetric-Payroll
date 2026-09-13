@@ -653,21 +653,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                 Log.d("MainActivity", "New session detected: ${event.employeeId}. Pulling fresh data. 🛰️")
                                 triggerExclusiveRefresh()
                             }
-                            is SignalRManager.SyncEvent.ApplicationDataChanged,
-                            is SignalRManager.SyncEvent.RegularizationChanged,
-                            is SignalRManager.SyncEvent.LeaveChanged,
-                            is SignalRManager.SyncEvent.AdvanceChanged,
-                            is SignalRManager.SyncEvent.BonusChanged,
-                            is SignalRManager.SyncEvent.TaxDeclarationChanged,
-                            is SignalRManager.SyncEvent.EmployeeChanged,
-                            is SignalRManager.SyncEvent.ExitChanged,
-                            is SignalRManager.SyncEvent.AttendanceChanged,
-                            is SignalRManager.SyncEvent.PunchChanged,
-                            is SignalRManager.SyncEvent.DataChanged -> {
-                                Log.d("MainActivity", "Real-time refresh triggered by: $event 🔄")
-                                triggerExclusiveRefresh()
-                            }
-                            else -> triggerExclusiveRefresh()
+                            // Generic CRUD/application events are owned by the
+                            // application-scoped AdminRealtimeCoordinator. This
+                            // Activity keeps only its special low-latency GPS and
+                            // session handling here, avoiding duplicate Neon pulls.
+                            else -> Unit
                         }
                     }
                 }
@@ -681,6 +671,21 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 viewModel.triggerRefresh()
                 sharedViewModel.warmUpDashboard()
                 viewModel.startNeonSync()
+            }
+        }
+    }
+
+    /**
+     * Called by the application-wide realtime dispatcher after the central
+     * authoritative sync completes. This is UI invalidation only; it deliberately
+     * does not start another Neon pull.
+     */
+    private fun refreshFromCentralRealtime() {
+        if (isFinishing || isDestroyed) return
+        lifecycleScope.launch {
+            _binding?.let {
+                viewModel.triggerRefresh()
+                sharedViewModel.warmUpDashboard()
             }
         }
     }

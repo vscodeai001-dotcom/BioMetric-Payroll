@@ -320,8 +320,7 @@ class MainRepository(
     }
 
     suspend fun pushProfileByUid(profile: UserProfile) {
-        firebaseSync.getGlobalRef().child("user_profiles").child(profile.uid).setValue(profile).await()
-        firebaseSync.notifyRealtimeAfterWrite("UserProfile", "MODIFIED")
+        firebaseSync.pushProfile(profile)
     }
     
     // ---------------- SHOP ----------------

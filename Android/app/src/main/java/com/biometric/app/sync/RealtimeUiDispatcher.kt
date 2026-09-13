@@ -24,6 +24,7 @@ class RealtimeUiDispatcher @Inject constructor() {
     private val resumedFragments = LinkedHashSet<Fragment>()
 
     private val activityMethods = mapOf(
+        "MainActivity" to listOf("refreshFromCentralRealtime"),
         "AdminAttendanceActivity" to listOf("load"),
         "AdminManualPunchCorrectionActivity" to listOf("loadIssues"),
         "AdminPayrollActivity" to listOf("loadPreview", "loadHistory"),
@@ -59,6 +60,12 @@ class RealtimeUiDispatcher @Inject constructor() {
         resumedActivity = activity
         if (activity is FragmentActivity) {
             activity.supportFragmentManager.registerFragmentLifecycleCallbacks(fragmentCallbacks, false)
+            // The Activity lifecycle callback may register after its current
+            // fragments are already RESUMED. Seed the registry so the first
+            // central realtime event reaches the visible fragment too.
+            synchronized(this) {
+                collectResumedFragments(activity.supportFragmentManager)
+            }
         }
     }
 
@@ -77,6 +84,17 @@ class RealtimeUiDispatcher @Inject constructor() {
         activity?.let { refreshActivity(it) }
         synchronized(this) {
             resumedFragments.toList().forEach { refreshFragment(it) }
+        }
+    }
+
+    private fun collectResumedFragments(manager: FragmentManager) {
+        manager.fragments.forEach { fragment ->
+            if (fragment.lifecycle.currentState == Lifecycle.State.RESUMED) {
+                resumedFragments.add(fragment)
+            }
+            if (fragment.childFragmentManager.fragments.isNotEmpty()) {
+                collectResumedFragments(fragment.childFragmentManager)
+            }
         }
     }
 

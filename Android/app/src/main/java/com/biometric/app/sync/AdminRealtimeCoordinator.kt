@@ -37,7 +37,14 @@ class AdminRealtimeCoordinator @Inject constructor(
 
         signalR.start()
         collectJob = scope.launch {
-            signalR.dataChangeEvents.collectLatest {
+            signalR.dataChangeEvents.collectLatest { event ->
+                // Only database/application invalidation events enter the
+                // authoritative Neon pull pipeline. High-frequency GPS and
+                // session/geofence events have their own realtime consumers.
+                if (!requiresAuthoritativeSync(event)) {
+                    return@collectLatest
+                }
+
                 pendingRefresh?.cancel()
                 pendingRefresh = launch {
                     delay(180)
@@ -57,6 +64,32 @@ class AdminRealtimeCoordinator @Inject constructor(
         }
     }
 
+    private fun requiresAuthoritativeSync(event: SignalRManager.SyncEvent): Boolean =
+        when (event) {
+            is SignalRManager.SyncEvent.DataChanged,
+            is SignalRManager.SyncEvent.AttendanceChanged,
+            is SignalRManager.SyncEvent.PunchChanged,
+            is SignalRManager.SyncEvent.LeaveChanged,
+            is SignalRManager.SyncEvent.AdvanceChanged,
+            is SignalRManager.SyncEvent.BonusChanged,
+            is SignalRManager.SyncEvent.TaxDeclarationChanged,
+            is SignalRManager.SyncEvent.EmployeeChanged,
+            is SignalRManager.SyncEvent.GlobalRefresh,
+            is SignalRManager.SyncEvent.RegularizationChanged,
+            is SignalRManager.SyncEvent.ExitChanged,
+            is SignalRManager.SyncEvent.SessionStarted -> true
+
+            // These are low-latency/session-state channels and must never
+            // trigger a complete Neon synchronization.
+            is SignalRManager.SyncEvent.LocationChanged,
+            is SignalRManager.SyncEvent.GeoSettingsChanged,
+            is SignalRManager.SyncEvent.SessionEnded -> false
+
+            // Keep future event types conservative: they should opt in
+            // explicitly rather than accidentally creating a sync storm.
+            else -> false
+        }
+
     private suspend fun syncFromAuthoritativeStore() {
         syncMutex.withLock {
             runCatching { repository.startNeonSync() }
@@ -68,5 +101,6 @@ class AdminRealtimeCoordinator @Inject constructor(
         collectJob?.cancel()
         pendingRefresh = null
         collectJob = null
+        signalR.stop()
     }
 }

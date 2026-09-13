@@ -194,8 +194,14 @@ class FirebaseSyncManager @Inject constructor(
     
     fun pushSalaryPayment(p: SalaryPayment) {
         val ref = getOwnerRef() ?: return
-        ref.child("salary_payments").child(p.paymentId).setValue(p)
-        notifyRealtimeChanged("SalaryPayment", "MODIFIED")
+        syncScope.launch {
+            runCatching {
+                ref.child("salary_payments").child(p.paymentId).setValue(p).await()
+                notifyRealtimeChanged("SalaryPayment", "MODIFIED")
+            }.onFailure {
+                Log.w("FirebaseSyncManager", "Salary payment write failed", it)
+            }
+        }
     }
 
     suspend fun pushHistory(hist: EmployeeHistory) { getOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await(); notifyRealtimeChanged("EmployeeHistory", "MODIFIED") }
@@ -213,7 +219,17 @@ class FirebaseSyncManager @Inject constructor(
                 ref.child(hist.historyId).setValue(hist)
                 return Transaction.success(currentData)
             }
-            override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {}
+
+            override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {
+                if (error != null || !committed) {
+                    Log.w("FirebaseSyncManager", "Atomic history write did not commit: ${error?.message ?: "not committed"}")
+                    return
+                }
+                // The realtime invalidation is emitted only after Firebase
+                // confirms the atomic transaction. This prevents another
+                // platform from reloading before the history write exists.
+                notifyRealtimeChanged("EmployeeHistory", "MODIFIED")
+            }
         })
     }
     suspend fun pushClosedDay(day: ShopClosedDay) { getOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await(); notifyRealtimeChanged("ShopClosedDay", "MODIFIED") }
@@ -256,12 +272,15 @@ class FirebaseSyncManager @Inject constructor(
             val chunkMap = chunk.associateBy({ it.key }) { it.value }
             ref.updateChildren(chunkMap).await()
         }
+        notifyRealtimeChanged("RecycleBinItem", "MODIFIED")
     }
 
     suspend fun clearSnapshotsAndSummaries() {
         val ref = getOwnerRef() ?: return
         ref.child("monthly_snapshots").removeValue().await()
         ref.child("summaries").removeValue().await()
+        notifyRealtimeChanged("SalarySnapshot", "DELETED")
+        notifyRealtimeChanged("DailySummary", "DELETED")
     }
 
     suspend fun clearTable(table: String) {
