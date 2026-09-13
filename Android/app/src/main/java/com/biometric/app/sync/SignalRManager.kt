@@ -22,6 +22,7 @@ class SignalRManager @Inject constructor(
 ) {
     private var hubConnection: HubConnection? = null
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    @Volatile private var connectInProgress = false
     
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 10)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
@@ -190,20 +191,31 @@ class SignalRManager @Inject constructor(
             Log.w("SignalR", "Connection closed. Retrying in 5s...", exception)
             managerScope.launch {
                 delay(5000)
-                connect()
+                if (sessionStore.isLoggedIn()) connect()
             }
         }
     }
 
     private fun connect() {
+        if (connectInProgress) return
+        connectInProgress = true
         managerScope.launch {
             try {
-                hubConnection?.start()?.blockingAwait()
+                val hub = hubConnection ?: return@launch
+                if (hub.connectionState == HubConnectionState.CONNECTED ||
+                    hub.connectionState == HubConnectionState.CONNECTING) {
+                    return@launch
+                }
+                hub.start()?.blockingAwait()
                 Log.i("SignalR", "Successfully connected to Real-Time Hub ✅")
             } catch (e: Exception) {
                 Log.e("SignalR", "Failed to connect to Hub: ${e.message}")
-                delay(10000)
-                connect()
+                managerScope.launch {
+                    delay(10000)
+                    if (sessionStore.isLoggedIn()) connect()
+                }
+            } finally {
+                connectInProgress = false
             }
         }
     }

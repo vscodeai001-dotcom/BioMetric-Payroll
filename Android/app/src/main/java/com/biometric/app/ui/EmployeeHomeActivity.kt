@@ -1243,6 +1243,16 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun goToLogin() {
+        // Only callers that explicitly decide the session is invalid reach this
+        // method. Clear the stale mobile session here so Launcher/Login cannot
+        // bounce between an invalid token and the protected screen.
+        sessionStore.clearLogin()
+        SecurityBaseActivity.clearProcessAuthorization(applicationContext)
+        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
+            .edit(commit = true) { clear() }
+        applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE)
+            .edit(commit = true) { clear() }
+
         startActivity(Intent(this, LoginActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         })

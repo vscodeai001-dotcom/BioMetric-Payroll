@@ -57,6 +57,10 @@ import org.osmdroid.config.Configuration as OsmConfig
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.infowindow.InfoWindow
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.widget.LinearLayout
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.util.BoundingBox
 import android.graphics.ColorMatrixColorFilter
@@ -123,6 +127,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var geofenceCircle: Polygon? = null
     private var currentGeofenceRadiusMeters: Int = 0
     private var statusFilter = "All"
+    private var adminMapAutoCentered = false
+    private var adminInfoWindow: InfoWindow? = null
     private val approvalFilter = MutableStateFlow("All")
     private val workforceSearchQuery = MutableStateFlow("")
 
@@ -477,8 +483,26 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
 
                 val point = GeoPoint(loc.latitude, loc.longitude)
-                val m1 = markers.getOrPut(loc.employeeId) { Marker(dashboardMap).apply { setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM); dashboardMap.overlays.add(this) } }
-                val m2 = markers2.getOrPut(loc.employeeId) { Marker(commandMap).apply { setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM); commandMap.overlays.add(this) } }
+                val m1 = markers.getOrPut(loc.employeeId) {
+                    Marker(dashboardMap).apply {
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setOnMarkerClickListener { marker, _ ->
+                            marker.showInfoWindow()
+                            true
+                        }
+                        dashboardMap.overlays.add(this)
+                    }
+                }
+                val m2 = markers2.getOrPut(loc.employeeId) {
+                    Marker(commandMap).apply {
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setOnMarkerClickListener { marker, _ ->
+                            marker.showInfoWindow()
+                            true
+                        }
+                        commandMap.overlays.add(this)
+                    }
+                }
                 
                 m1.alpha = 1f; m2.alpha = 1f; m1.title = emp?.name; m2.title = emp?.name
                 
@@ -500,9 +524,30 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 m1.icon = icon; m2.icon = icon
                 val snippet = "Status: $status | Speed: ${formatSpeed(loc.speedMps)}\nDist: ${formatDistance(loc.distanceMeters)}"
                 m1.snippet = snippet; m2.snippet = snippet
+                val info1 = createAdminMarkerInfoWindow(dashboardMap, loc, emp?.name ?: "Employee", status)
+                val info2 = createAdminMarkerInfoWindow(commandMap, loc, emp?.name ?: "Employee", status)
+                m1.setInfoWindow(info1)
+                m2.setInfoWindow(info2)
                 updateAdminRoadRoute(loc.employeeId, point)
                 geoPoints.add(point)
             }
+            // Initial camera fit only. Never recenter on every GPS fix, otherwise
+            // the admin cannot pan/inspect the map while an employee is moving.
+            if (!adminMapAutoCentered && geoPoints.isNotEmpty()) {
+                if (geoPoints.size == 1) {
+                    dashboardMap.controller.setCenter(geoPoints.first())
+                    commandMap.controller.setCenter(geoPoints.first())
+                    dashboardMap.controller.setZoom(16.0)
+                    commandMap.controller.setZoom(16.0)
+                } else {
+                    createBoundingBox(geoPoints)?.let { box ->
+                        dashboardMap.zoomToBoundingBox(box, true, 100)
+                        commandMap.zoomToBoundingBox(box, true, 100)
+                    }
+                }
+                adminMapAutoCentered = true
+            }
+
             b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, locations.count { getLocStatus(it) == "Live" })
             b.btnRefreshMap.setOnClickListener {
                 createBoundingBox(geoPoints)?.let { box ->
@@ -510,6 +555,31 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
             }
             dashboardMap.invalidate(); commandMap.invalidate()
+        }
+    }
+
+    private fun createAdminMarkerInfoWindow(
+        mapView: org.osmdroid.views.MapView,
+        loc: SignalRManager.LiveLocation,
+        employeeName: String,
+        status: String
+    ): InfoWindow {
+        return object : InfoWindow(android.R.layout.simple_list_item_2, mapView) {
+            override fun onOpen(item: Any?) {
+                val root = mView as? android.widget.TextView ?: return
+                root.text = "$employeeName\n$status  •  ${formatSpeed(loc.speedMps)}\n" +
+                    "Distance: ${formatDistance(loc.distanceMeters)}  •  Accuracy: ±${loc.accuracyMeters.toInt()} m\n" +
+                    "Radius: ${loc.allowedRadiusMeters} m  •  ${if (loc.isWithinAllowedRadius) "Within range" else "Outside range"}"
+                root.setPadding(24, 16, 24, 16)
+                root.setTextSize(12f)
+                root.setTextColor(Color.DKGRAY)
+                root.background = GradientDrawable().apply {
+                    cornerRadius = 28f
+                    setColor(Color.WHITE)
+                    setStroke(2, 0x33000000)
+                }
+            }
+            override fun onClose() {}
         }
     }
 
@@ -570,7 +640,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                     // logout() // Requirement: App will never logged out automatically
                                 }
                             }
-                            is SignalRManager.SyncEvent.LocationChanged -> { }
+                            is SignalRManager.SyncEvent.LocationChanged -> {
+                                // LocationChanged is the low-latency trigger. The
+                                // SignalR payload is intentionally lightweight, so
+                                // immediately hydrate the authoritative snapshot to
+                                // obtain the complete location/speed/state details.
+                                lifecycleScope.launch {
+                                    hydrateLiveLocationsOnce()
+                                }
+                            }
                             is SignalRManager.SyncEvent.SessionStarted -> {
                                 Log.d("MainActivity", "New session detected: ${event.employeeId}. Pulling fresh data. 🛰️")
                                 triggerExclusiveRefresh()

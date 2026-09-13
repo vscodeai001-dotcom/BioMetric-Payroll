@@ -91,7 +91,13 @@ class LoginActivity : MotionBaseActivity() {
         }
         binding.btnReset.setOnClickListener {
             // Allow user to logout and switch accounts if they want
+            // This button is an explicit account switch/sign-out action.
             mobileSessionStore.clearLogin()
+            SecurityBaseActivity.clearProcessAuthorization(applicationContext)
+            applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                .edit(commit = true) { clear() }
+            applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE)
+                .edit(commit = true) { clear() }
             setupUI()
         }
     }

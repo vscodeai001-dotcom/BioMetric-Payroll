@@ -129,15 +129,21 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
             return false
         }
 
-        // No persisted session means there is no authenticated user.
-        // Only then return to the real login screen.
+        // Do not manufacture a Login/Security screen from the base activity.
+        //
+        // A protected Activity can be recreated while Android is restoring the
+        // task, and an auth check here can race the session store during that
+        // restoration. That race was the source of the repeated security-login
+        // loop. LauncherActivity and each entry screen are responsible for
+        // deciding where an unauthenticated user should go.
+        //
+        // IMPORTANT: this does not clear the session and does not log the user
+        // out. Explicit logout remains the only normal path that clears it.
         Log.w(
             "SecurityBase",
-            "No persisted mobile session for ${javaClass.simpleName}; returning to LoginActivity"
+            "No persisted mobile session for ${javaClass.simpleName}; leaving navigation to the entry screen"
         )
-
-        redirectToLogin()
-        return true
+        return false
     }
 
     private fun redirectToLogin() {
