@@ -1,0 +1,130 @@
+﻿using Microsoft.EntityFrameworkCore;
+using Npgsql;
+
+namespace Payroll.Web.Services
+{
+    public class ThemeService
+    {
+        private const string ThemePreferenceTableName = "public.user_theme_preferences";
+
+        private readonly IDbContextFactory<AppDbContext> _dbFactory;
+
+        public ThemeService(
+            IDbContextFactory<AppDbContext> dbFactory)
+        {
+            _dbFactory = dbFactory;
+        }
+
+        // Default to light theme
+        public string CurrentTheme { get; private set; } = "light";
+
+        public event Action? OnThemeChanged;
+
+        public void SetTheme(string theme)
+        {
+            theme = theme == "dark" ? "dark" : "light";
+
+            if (theme != CurrentTheme)
+            {
+                CurrentTheme = theme;
+                OnThemeChanged?.Invoke();
+            }
+        }
+
+        public async Task<string?> GetThemeAsync(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return null;
+
+            await using var db = await _dbFactory.CreateDbContextAsync();
+
+            try
+            {
+                return await db.UserThemePreferences
+                    .AsNoTracking()
+                    .Where(x => x.UserId == userId)
+                    .Select(x => x.Theme)
+                    .FirstOrDefaultAsync();
+            }
+            catch (PostgresException ex) when (ex.SqlState == "42P01")
+            {
+                await EnsureThemePreferencesTableAsync(db);
+
+                return await db.UserThemePreferences
+                    .AsNoTracking()
+                    .Where(x => x.UserId == userId)
+                    .Select(x => x.Theme)
+                    .FirstOrDefaultAsync();
+            }
+        }
+
+        public async Task SaveThemeAsync(string userId, string theme)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+                return;
+
+            theme = theme == "dark" ? "dark" : "light";
+
+            await using var db = await _dbFactory.CreateDbContextAsync();
+
+            try
+            {
+                var preference = await db.UserThemePreferences
+                    .FirstOrDefaultAsync(x => x.UserId == userId);
+
+                if (preference == null)
+                {
+                    db.UserThemePreferences.Add(new Payroll.Shared.Data.UserThemePreference
+                    {
+                        UserId = userId,
+                        Theme = theme,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    preference.Theme = theme;
+                    preference.UpdatedAtUtc = DateTime.UtcNow;
+                }
+
+                await db.SaveChangesAsync();
+            }
+            catch (PostgresException ex) when (ex.SqlState == "42P01")
+            {
+                await EnsureThemePreferencesTableAsync(db);
+
+                var preference = await db.UserThemePreferences
+                    .FirstOrDefaultAsync(x => x.UserId == userId);
+
+                if (preference == null)
+                {
+                    db.UserThemePreferences.Add(new Payroll.Shared.Data.UserThemePreference
+                    {
+                        UserId = userId,
+                        Theme = theme,
+                        UpdatedAtUtc = DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    preference.Theme = theme;
+                    preference.UpdatedAtUtc = DateTime.UtcNow;
+                }
+
+                await db.SaveChangesAsync();
+            }
+        }
+
+        private async Task EnsureThemePreferencesTableAsync(AppDbContext db)
+        {
+            await db.Database.ExecuteSqlRawAsync($"""
+                CREATE TABLE IF NOT EXISTS {ThemePreferenceTableName} (
+                    user_id character varying(450) NOT NULL,
+                    theme character varying(20) NOT NULL DEFAULT 'light',
+                    updated_at_utc timestamp without time zone NOT NULL DEFAULT NOW(),
+                    CONSTRAINT PK_user_theme_preferences PRIMARY KEY (user_id)
+                );
+                """);
+        }
+    }
+}

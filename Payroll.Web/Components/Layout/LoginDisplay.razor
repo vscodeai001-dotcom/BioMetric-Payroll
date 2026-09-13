@@ -1,0 +1,126 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
+
+@inject IJSRuntime JSRuntime
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject IHttpContextAccessor HttpContextAccessor
+
+<AuthorizeView>
+
+    <Authorized>
+
+        <div class="login-display-wrapper">
+
+            <!-- =====================================================
+                 LOGGED-IN USER
+                 ===================================================== -->
+
+            <a class="nav-link login-user-link"
+               href="/Identity/Account/Manage"
+               title="@context.User.Identity?.Name">
+
+                <span class="hello-text">
+                    Hello,
+                </span>
+
+                <span class="user-name">
+                    @context.User.Identity?.Name
+                </span>
+
+            </a>
+
+
+            <!-- =====================================================
+                 LOGOUT
+                 ===================================================== -->
+
+            <form id="employee-logout-form"
+                  class="logout-form"
+                  method="post"
+                  action="/Identity/Account/Logout">
+
+                <input type="hidden"
+                       name="__RequestVerificationToken"
+                       value="@Antiforgery.GetAndStoreTokens(
+                                                  HttpContextAccessor.HttpContext!).RequestToken" />
+
+                <button type="submit"
+                        class="logout-button"
+                        title="Logout"
+                        aria-label="Logout"
+                        @onclick="PrepareLogout">
+
+                    <i class="bi bi-box-arrow-right logout-icon"
+                       aria-hidden="true">
+                    </i>
+
+                    <span class="logout-text">
+                        Logout
+                    </span>
+
+                </button>
+
+            </form>
+
+        </div>
+
+    </Authorized>
+
+
+    <NotAuthorized>
+
+        <a class="nav-link text-light me-2"
+           href="/Identity/Account/Register">
+            Register
+        </a>
+
+        <a class="nav-link text-light"
+           href="/Identity/Account/Login">
+            Login
+        </a>
+
+    </NotAuthorized>
+
+</AuthorizeView>
+
+
+@code
+{
+    private async Task PrepareLogout()
+    {
+        /*
+         * ============================================================
+         * STOP EMPLOYEE GPS BEFORE REAL LOGOUT
+         * ============================================================
+         *
+         * This does NOT perform the logout.
+         *
+         * The browser will continue with the normal HTML
+         * form POST to:
+         *
+         * /Identity/Account/Logout
+         *
+         * This avoids the previous JavaScript form-submission
+         * problem.
+         */
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "stopPersistentEmployeeGps");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Unable to stop employee GPS during logout: {ex}");
+        }
+
+        /*
+         * Give the GPS watcher a short moment to stop.
+         *
+         * The form submission itself remains the normal browser
+         * POST handled by ASP.NET Core Identity.
+         */
+        await Task.Delay(150);
+    }
+}

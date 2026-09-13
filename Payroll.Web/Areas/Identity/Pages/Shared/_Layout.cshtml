@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Payroll System</title>
+
+    <!-- Bootswatch Theme + Icons (same as main layout) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/cosmo/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+    <!-- MAIN APP STYLES -->
+    <link rel="stylesheet" href="~/app.css" />
+    <link rel="stylesheet" href="~/dark-theme.css" />
+    <link rel="stylesheet" href="~/Payroll.Web.styles.css" />
+</head>
+
+<body>
+    <script>
+        // Apply the same persisted application theme immediately on Identity pages.
+        // This prevents a light-mode flash when the user previously selected dark mode.
+        (function () {
+            try {
+                var theme = localStorage.getItem('payroll_theme') === 'dark' ? 'dark' : 'light';
+                if (theme === 'dark') document.body.classList.add('dark');
+            } catch (e) { }
+        })();
+    </script>
+
+    <header class="identity-header">
+        <a class="identity-brand" asp-area="" asp-page="/Index">Payroll.Web</a>
+        <div class="identity-actions">
+            <button type="button"
+                    id="identityThemeToggle"
+                    class="identity-theme-toggle"
+                    aria-label="Switch theme"
+                    title="Switch theme"
+                    aria-pressed="false"
+                    onclick="window.identityTheme.toggle()">
+                <span id="identityThemeIcon" aria-hidden="true"></span>
+            </button>
+            <a asp-area="Identity" asp-page="/Account/Register">Register</a>
+            <a asp-area="Identity" asp-page="/Account/Login">Login</a>
+        </div>
+    </header>
+
+    <div class="container mt-4">
+        <main role="main" class="pb-3">
+            @RenderBody()
+        </main>
+    </div>
+
+    <!-- Identity page scripts -->
+    @await RenderSectionAsync("Scripts", required: false)
+
+    <script src="~/js/themeInterop.js?v=20260907-identity-theme"></script>
+    <!-- APPLY DARK/LIGHT THEME WHEN PAGE LOADS -->
+    <script>
+        (function () {
+            try {
+                window.identityTheme = {
+                    apply: function (theme) {
+                        var value = theme === 'dark' ? 'dark' : 'light';
+                        window.themeInterop.setThemeOnBody(value);
+                        window.themeInterop.saveTheme(value);
+                        var icon = document.getElementById('identityThemeIcon');
+                        if (icon) {
+                            icon.className = value === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-fill';
+                        }
+                        var toggle = document.getElementById('identityThemeToggle');
+                        if (toggle) {
+                            toggle.setAttribute('aria-pressed', value === 'dark' ? 'true' : 'false');
+                            toggle.setAttribute('aria-label', value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+                            toggle.setAttribute('title', value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+                        }
+                    },
+                    toggle: function () {
+                        var next = document.body.classList.contains('dark') ? 'light' : 'dark';
+                        this.apply(next);
+                    }
+                };
+
+                window.identityTheme.apply(window.themeInterop.loadTheme());
+            } catch (e) {
+                console.warn('Theme init failed', e);
+            }
+        })();
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,4621 @@
+@using global::Payroll.Web.Services
+@using global::Payroll.Shared.Data
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using System.Text.Json
+@implements IAsyncDisposable
+
+@inject IJSRuntime JSRuntime
+@inject LocationHistoryService LocationHistoryService
+@inject IDbContextFactory<AppDbContext> DbFactory
+
+<div class="live-staff-card card border-0 shadow-sm mb-4 @(isPlaybackFullscreen ? "replay-fullscreen" : "")">
+
+    <!-- ============================================================
+         LIVE STAFF HEADER
+         ============================================================ -->
+
+    <div class="live-staff-header d-flex justify-content-between align-items-center">
+
+        <div>
+            <h5 class="fw-bold mb-1">
+                <i class="bi bi-geo-alt-fill text-primary me-2"></i>
+                Live Staff Locations
+            </h5>
+
+            <small class="text-muted">
+                Current employee location from active GPS sessions
+            </small>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+
+            <span class="live-count">
+                <span class="live-count-dot"></span>
+                @liveCount Live / @employees.Count
+            </span>
+
+            <button type="button"
+                    class="btn btn-outline-primary btn-sm"
+                    @onclick="RefreshLocations"
+                    disabled="@isRefreshing">
+
+                <i class="bi bi-arrow-clockwise @(isRefreshing ? "spin" : "")"></i>
+
+                <span class="d-none d-md-inline ms-1">
+                    Refresh
+                </span>
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- ============================================================
+         LIVE MAP + STAFF LIST
+         ============================================================ -->
+
+    <div class="live-staff-body @(selectedEmployeeId > 0 ? "has-selection" : "")">
+
+        <div class="admin-map-wrapper">
+
+            <div id="@mapId"
+                 class="admin-live-map">
+            </div>
+
+            @if (isPlaybackFullscreen)
+            {
+                <button type="button"
+                        class="replay-exit-button"
+                        @onclick="ExitPlayback"
+                        aria-label="Exit journey replay">
+                    <i class="bi bi-x-lg me-1"></i>
+                    Exit Replay
+                </button>
+            }
+
+            @if (liveCount == 0)
+            {
+                <div class="map-empty-overlay">
+                    <i class="bi bi-broadcast-pin display-6 text-muted"></i>
+                    <span>No live staff locations</span>
+                    <small>Live employee locations will appear automatically.</small>
+                </div>
+            }
+
+            <div class="map-live-legend">
+                <span><i class="legend-dot within"></i> Within range</span>
+                <span><i class="legend-dot outside"></i> Outside range</span>
+            </div>
+
+        </div>
+
+        @if (selectedEmployeeId > 0)
+        {
+            var selectedEmployee = employees.FirstOrDefault(e => e.EmployeeID == selectedEmployeeId);
+            var selectedLocation = GetLocation(selectedEmployeeId);
+
+            if (selectedEmployee != null)
+            {
+                <aside class="selected-live-card">
+                    <div class="selected-live-card-header">
+                        <div class="selected-identity">
+                            <div class="premium-avatar @GetAvatarClass(selectedLocation != null ? GetLocationStatus(selectedLocation) : LocationStatus.Offline)">
+                                @GetInitials(selectedEmployee.Name)
+                                <span class="avatar-status-dot"></span>
+                            </div>
+                            <div class="selected-identity-text">
+                                <strong>@selectedEmployee.Name</strong>
+                                <span>Live location tracking</span>
+                            </div>
+                        </div>
+                        <button type="button" class="selected-close" @onclick="() => SelectEmployee(selectedEmployeeId)" aria-label="Close employee details">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+
+                    @if (selectedLocation != null)
+                    {
+                        var selectedStatus = GetLocationStatus(selectedLocation);
+                        <div class="selected-status-row">
+                            <span class="selected-status @GetStatusClass(selectedStatus)">
+                                <i class="bi bi-record-fill"></i> @GetStatusText(selectedStatus)
+                            </span>
+                            <span class="selected-updated">
+                                Updated @ToLocalTime(selectedLocation.LastUpdatedUtc).ToString("HH:mm:ss")
+                            </span>
+                        </div>
+
+                        <div class="selected-metrics">
+                            <div class="selected-metric primary">
+                                <span><i class="bi bi-signpost-2-fill"></i> Route distance</span>
+                                <strong data-selected-route-distance="@selectedEmployee.EmployeeID">@FormatDistance(selectedLocation.DistanceMeters)</strong>
+                            </div>
+                            <div class="selected-metric">
+                                <span><i class="bi bi-bullseye"></i> Geofence</span>
+                                <strong class="@(selectedLocation.IsWithinAllowedRadius ? "text-success" : "text-danger")">
+                                    @(selectedLocation.IsWithinAllowedRadius ? "Within range" : "Outside range")
+                                </strong>
+                            </div>
+                            <div class="selected-metric">
+                                <span><i class="bi bi-crosshair"></i> GPS accuracy</span>
+                                <strong>@FormatAccuracy(selectedLocation.AccuracyMeters)</strong>
+                            </div>
+                            <div class="selected-metric">
+                                <span><i class="bi bi-hourglass-split"></i> Tracking</span>
+                                <strong>@FormatDuration(GetSessionDuration(selectedLocation))</strong>
+                            </div>
+                            <div class="selected-metric">
+                                <span><i class="bi bi-broadcast-pin"></i> Last update</span>
+                                <strong>@ToLocalTime(selectedLocation.LastUpdatedUtc).ToString("HH:mm:ss")</strong>
+                            </div>
+                            <div class="selected-metric">
+                                <span><i class="bi bi-rulers"></i> Allowed radius</span>
+                                <strong>@selectedLocation.AllowedRadiusMeters m</strong>
+                            </div>
+                        </div>
+
+                        <div class="selected-coordinates">
+                            <div><span>Latitude</span><strong>@selectedLocation.Latitude.ToString("F6")</strong></div>
+                            <div><span>Longitude</span><strong>@selectedLocation.Longitude.ToString("F6")</strong></div>
+                        </div>
+
+                        <button type="button" class="selected-action" @onclick="() => SelectEmployee(selectedEmployeeId)">
+                            <i class="bi bi-chevron-up"></i> Collapse details
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="selected-offline">
+                            <i class="bi bi-broadcast"></i>
+                            <strong>GPS session unavailable</strong>
+                            <span>The employee is not currently sending a live location.</span>
+                        </div>
+                    }
+                </aside>
+            }
+        }
+
+    </div>
+
+    <!-- ============================================================
+         FOOTER
+         ============================================================ -->
+
+    <div class="live-staff-footer">
+
+        <span>
+            <i class="bi bi-clock me-1"></i>
+            @GetFooterText()
+        </span>
+
+        <span>
+            @liveCount live · @staleCount stale · @offlineCount offline
+        </span>
+
+    </div>
+
+</div>
+
+
+<!-- ================================================================
+     SELECTED EMPLOYEE DETAILS
+     ================================================================ -->
+@if (selectedEmployeeId > 0)
+{
+    var selectedEmployee =
+        employees.FirstOrDefault(e => e.EmployeeID == selectedEmployeeId);
+
+    var selectedLocation =
+        GetLocation(selectedEmployeeId);
+
+    if (selectedEmployee != null)
+    {
+        <div class="live-staff-details card border-0 shadow-sm mb-4">
+
+            <div class="live-details-header d-flex justify-content-between align-items-center">
+
+                <div>
+
+                    <h6 class="fw-bold mb-1">
+
+                        <i class="bi bi-person-badge text-primary me-2"></i>
+
+                        @selectedEmployee.Name
+
+                    </h6>
+
+                    <small class="text-muted">
+
+                        @(selectedLocation != null
+                                        ? "Live tracking details"
+                                        : "Employee location details")
+
+            </small>
+
+                </div>
+
+        @if (selectedLocation != null)
+                {
+                    var selectedStatus =
+                    GetLocationStatus(selectedLocation);
+
+                    <span class="staff-live-state @GetStatusClass(selectedStatus)">
+                        @GetStatusText(selectedStatus)
+                    </span>
+                }
+                else
+                {
+                    <span class="staff-live-state offline">
+                        Offline
+                    </span>
+                }
+
+            </div>
+
+
+            @if (selectedLocation != null)
+            {
+                <div class="live-details-grid">
+
+                    <div class="live-detail-box">
+                        <span>Tracking started</span>
+                        <strong>
+                            @(ToLocalTime(selectedLocation.SessionStartedUtc)
+                                            .ToString("dd MMM yyyy HH:mm:ss"))
+                                                                          </strong>
+                                                                      </div>
+
+                    <div class="live-detail-box">
+                        <span>Tracking duration</span>
+                        <strong>
+                            @FormatDuration(GetSessionDuration(selectedLocation))
+                        </strong>
+                    </div>
+
+                    <div class="live-detail-box">
+                        <span>Last GPS update</span>
+                        <strong>
+                            @(ToLocalTime(selectedLocation.LastUpdatedUtc)
+                                            .ToString("HH:mm:ss"))
+            </strong>
+        </div>
+
+                    <div class="live-detail-box">
+                        <span>Distance from office</span>
+                        <strong>
+                            @FormatDistance(selectedLocation.DistanceMeters)
+                        </strong>
+                    </div>
+                    <div class="live-detail-box">
+                        <span>GPS accuracy</span>
+                        <strong>
+                            @FormatAccuracy(selectedLocation.AccuracyMeters)
+                        </strong>
+                    </div>
+                    <div class="live-detail-box">
+                        <span>Allowed radius</span>
+                        <strong>
+                            @selectedLocation.AllowedRadiusMeters m
+                        </strong>
+                    </div>
+
+                    <div class="live-detail-box">
+                        <span>Geofence status</span>
+
+                        <strong class="@(selectedLocation.IsWithinAllowedRadius
+                                                                                                                                                                                            ? "text-success"
+                                                                                                                                                                                            : "text-danger")">
+
+                            @(selectedLocation.IsWithinAllowedRadius
+                                            ? "Within allowed range"
+                                            : "Outside allowed range")
+
+            </strong>
+        </div>
+
+                    <div class="live-detail-box">
+                        <span>Latitude</span>
+
+                        <strong>
+                            @selectedLocation.Latitude.ToString("F6")
+                        </strong>
+                    </div>
+
+                    <div class="live-detail-box">
+                        <span>Longitude</span>
+
+                        <strong>
+                            @selectedLocation.Longitude.ToString("F6")
+                        </strong>
+                    </div>
+
+                </div>
+        }
+            else
+            {
+                <div class="offline-details-message">
+
+                    <i class="bi bi-geo-alt"></i>
+
+                    <span>
+                        This employee does not currently have an active GPS session.
+                    </span>
+
+                </div>
+            }
+
+        </div>
+
+
+        <!-- ============================================================
+             GEO PUNCH AUDIT
+             ============================================================ -->
+        <div class="geo-punch-audit-card card border-0 shadow-sm mb-4">
+            <div class="geo-punch-audit-header d-flex justify-content-between align-items-center clickable" @onclick="() => isPunchAuditExpanded = !isPunchAuditExpanded">
+                <div>
+                    <h5 class="fw-bold mb-1">
+                        <i class="bi bi-shield-check text-primary me-2"></i>
+                        @selectedEmployee.Name Punch Audit
+                    </h5>
+                    <small class="text-muted">GPS validation and attendance punch audit</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    @if (isPunchAuditExpanded)
+                    {
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                                title="Previous day" aria-label="Previous day"
+                                @onclick="() => ChangeAuditDateByDays(-1)" @onclick:stopPropagation="true"
+                                disabled="@punchAuditLoading">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+                        <input type="date" class="form-control form-control-sm history-date-input"
+                               value="@punchAuditDate.ToString("yyyy-MM-dd")"
+                               @onchange="ChangePunchAuditDate" @onclick:stopPropagation="true" />
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                                title="Next day" aria-label="Next day"
+                                @onclick="() => ChangeAuditDateByDays(1)" @onclick:stopPropagation="true"
+                                disabled="@punchAuditLoading">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-primary btn-sm"
+                                @onclick="LoadSelectedEmployeePunchAudits" @onclick:stopPropagation="true"
+                                disabled="@punchAuditLoading">
+                            <i class="bi bi-arrow-clockwise @(punchAuditLoading ? "spin" : "")"></i>
+                            <span class="d-none d-md-inline ms-1">Refresh</span>
+                        </button>
+                    }
+                    <i class="bi @(isPunchAuditExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                </div>
+            </div>
+            @if (isPunchAuditExpanded)
+            {
+                @if (punchAuditLoading)
+                {
+                    <div class="history-loading">
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        Loading punch audit...
+                    </div>
+                }
+                else if (selectedPunchAudits.Count == 0)
+                {
+                    <div class="history-empty">
+                        <i class="bi bi-shield-x"></i>
+                        <strong>No GPS punch audit records</strong>
+                        <span>No punch audit records were found for @punchAuditDate.ToString("dd MMM yyyy").</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="geo-punch-audit-summary">
+                        <div><small>TOTAL</small><strong>@selectedPunchAudits.Count</strong></div>
+                        <div><small>SUCCESS</small><strong class="text-success">@selectedPunchAudits.Count(x => x.Success)</strong></div>
+                        <div><small>FAILED</small><strong class="text-danger">@selectedPunchAudits.Count(x => !x.Success)</strong></div>
+                        <div><small>OUTSIDE RANGE</small><strong class="text-danger">@selectedPunchAudits.Count(x => !x.IsWithinAllowedRadius)</strong></div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover geo-punch-audit-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Result</th>
+                                    <th>Accuracy</th>
+                                    <th>Distance</th>
+                                    <th>Allowed</th>
+                                    <th>Geofence</th>
+                                    <th>Message</th>
+                                    <th>Session</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var audit in selectedPunchAudits)
+                                {
+                                    <tr class="geo-punch-audit-row" @onclick="() => OpenPunchAudit(audit)" title="Click to view punch details">
+                                        <td class="fw-semibold">@ToLocalTime(audit.PunchTimeUtc).ToString("HH:mm:ss")</td>
+                                        <td>
+                                            @if (audit.Success)
+                                            {
+                                                <span class="geo-audit-success"><i class="bi bi-check-circle-fill me-1"></i>Success</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="geo-audit-failed"><i class="bi bi-x-circle-fill me-1"></i>Failed</span>
+                                            }
+                                        </td>
+                                        <td><span class="gps-accuracy-badge @GetAccuracyClass(audit.AccuracyMeters)">@GetAccuracyLabel(audit.AccuracyMeters) <small>@FormatAccuracy(audit.AccuracyMeters)</small></span></td>
+                                        <td>@FormatDistance(audit.DistanceFromOfficeMeters)</td>
+                                        <td>@audit.AllowedRadiusMeters m</td>
+                                        <td>
+                                            @if (audit.IsWithinAllowedRadius)
+                                            {
+                                                <span class="geo-audit-within"><i class="bi bi-geo-alt-fill me-1"></i>Within</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="geo-audit-outside"><i class="bi bi-geo-alt-fill me-1"></i>Outside</span>
+                                            }
+                                        </td>
+                                        <td class="geo-audit-message" title="@audit.ResultMessage">@audit.ResultMessage</td>
+                                        <td>
+                                            @if (audit.SessionId.HasValue)
+                                            {
+                                                <span title="@audit.SessionId.Value">@audit.SessionId.Value.ToString("N").Substring(0, 8)</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        </div>
+
+        @if (selectedPunchAudit != null)
+        {
+            <div class="geo-audit-modal-backdrop" @onclick="ClosePunchAudit">
+                <div class="geo-audit-modal card border-0 shadow-lg" @onclick:stopPropagation="true">
+                    <div class="geo-audit-modal-header d-flex justify-content-between align-items-center">
+                        <div><h5 class="fw-bold mb-1"><i class="bi bi-shield-check text-primary me-2"></i>Punch Audit Details</h5><small class="text-muted">@selectedEmployee.Name · @ToLocalTime(selectedPunchAudit.PunchTimeUtc).ToString("dd MMM yyyy HH:mm:ss")</small></div>
+                        <button type="button" class="btn btn-sm btn-light" @onclick="ClosePunchAudit"><i class="bi bi-x-lg"></i></button>
+                    </div>
+                    <div class="geo-audit-modal-body">
+                        <div class="geo-audit-result-banner @(selectedPunchAudit.Success ? "success" : "failed")"><i class="bi @(selectedPunchAudit.Success ? "bi-check-circle-fill" : "bi-x-circle-fill")"></i><div><strong>@(selectedPunchAudit.Success ? "Punch Accepted" : "Punch Rejected")</strong><span>@selectedPunchAudit.ResultMessage</span></div></div>
+                        <div class="geo-audit-detail-grid">
+                            <div><small>GPS ACCURACY</small><strong class="@GetAccuracyClass(selectedPunchAudit.AccuracyMeters)">@GetAccuracyLabel(selectedPunchAudit.AccuracyMeters)</strong><span>@FormatAccuracy(selectedPunchAudit.AccuracyMeters)</span></div>
+                            <div><small>DISTANCE FROM OFFICE</small><strong>@FormatDistance(selectedPunchAudit.DistanceFromOfficeMeters)</strong><span>Allowed @selectedPunchAudit.AllowedRadiusMeters m</span></div>
+                            <div><small>GEOFENCE</small><strong class="@(selectedPunchAudit.IsWithinAllowedRadius ? "text-success" : "text-danger")">@(selectedPunchAudit.IsWithinAllowedRadius ? "Within range" : "Outside range")</strong><span>@FormatDistance(selectedPunchAudit.DistanceFromOfficeMeters) / @selectedPunchAudit.AllowedRadiusMeters m</span></div>
+                            <div><small>SOURCE</small><strong>@selectedPunchAudit.Source</strong><span>Attendance ID: @(selectedPunchAudit.AttendanceLogId?.ToString() ?? "-")</span></div>
+                            <div><small>LATITUDE</small><strong>@selectedPunchAudit.Latitude.ToString("F6")</strong><span>GPS coordinate</span></div>
+                            <div><small>LONGITUDE</small><strong>@selectedPunchAudit.Longitude.ToString("F6")</strong><span>GPS coordinate</span></div>
+                            <div class="geo-audit-detail-wide"><small>SESSION ID</small><strong>@(selectedPunchAudit.SessionId?.ToString() ?? "-")</strong></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- ============================================================
+             LOCATION HISTORY
+             ============================================================ -->
+
+        <div class="location-history-card card border-0 shadow-sm mb-4">
+
+            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick="() => isSessionTimelineExpanded = !isSessionTimelineExpanded">
+
+                <div>
+
+                    <h5 class="fw-bold mb-1">
+
+                        <i class="bi bi-clock-history text-primary me-2"></i>
+
+                        @selectedEmployee.Name Location History
+
+                    </h5>
+
+                    <small class="text-muted">
+                        GPS location history recorded for the selected date
+                    </small>
+
+                </div>
+
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    @if (isSessionTimelineExpanded)
+                    {
+                        <button type="button"
+                                class="btn btn-outline-primary btn-sm"
+                                title="Previous day" aria-label="Previous day"
+                                @onclick="() => ChangeHistoryDateByDays(-1)" @onclick:stopPropagation="true"
+                                disabled="@historyLoading">
+                            <i class="bi bi-chevron-left"></i>
+                        </button>
+
+                        <input type="date"
+                               class="form-control form-control-sm history-date-input"
+                               value="@historyDate.ToString("yyyy-MM-dd")"
+                               @onchange="ChangeHistoryDate" @onclick:stopPropagation="true" />
+
+                        <button type="button"
+                                class="btn btn-outline-primary btn-sm"
+                                title="Next day" aria-label="Next day"
+                                @onclick="() => ChangeHistoryDateByDays(1)" @onclick:stopPropagation="true"
+                                disabled="@historyLoading">
+                            <i class="bi bi-chevron-right"></i>
+                        </button>
+
+                        <button type="button"
+                                class="btn btn-outline-primary btn-sm"
+                                @onclick="LoadSelectedEmployeeHistory" @onclick:stopPropagation="true"
+                                disabled="@historyLoading">
+
+                            <i class="bi bi-arrow-clockwise @(historyLoading ? "spin" : "")"></i>
+
+                            <span class="d-none d-md-inline ms-1">
+                                Refresh
+                            </span>
+
+                        </button>
+                    }
+                    <i class="bi @(isSessionTimelineExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                </div>
+
+            </div>
+
+
+            @if (isSessionTimelineExpanded)
+            {
+                @if (historyLoading)
+                {
+                    <div class="history-loading">
+
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+
+                        Loading location history...
+
+                    </div>
+                }
+                else if (selectedHistory.Count == 0)
+                {
+                    <div class="history-empty">
+
+                        <i class="bi bi-geo-alt"></i>
+
+                        <strong>
+                            No GPS history recorded
+                        </strong>
+
+                        <span>
+                            No location records were found for
+                            @historyDate.ToString("dd MMM yyyy").
+                        </span>
+
+                    </div>
+                }
+                else
+                {
+                    <!-- ====================================================
+                         HISTORY SUMMARY
+                         ==================================================== -->
+
+                    <div class="location-history-summary">
+
+                        <div>
+                            <small>STARTED</small>
+                            <strong>@HistoryStartText</strong>
+                        </div>
+
+                        <div>
+                            <small>LAST UPDATE</small>
+                            <strong>@HistoryEndText</strong>
+                        </div>
+
+                        <div>
+                            <small>GPS POINTS</small>
+                            <strong>@selectedHistory.Count</strong>
+                        </div>
+
+                        <div>
+                            <small>MAX DISTANCE</small>
+                            <strong>@FormatDistance(HistoryMaxDistance)</strong>
+                        </div>
+
+                        <div>
+                            <small>TRAVEL</small>
+                            <strong>@FormatDistance(HistoryTravelDistance)</strong>
+                        </div>
+
+                    </div>
+
+
+
+                    <!-- ====================================================
+                         GPS QUALITY + SESSION SUMMARY
+                         ==================================================== -->
+
+                    <div class="gps-session-summary">
+                        <div class="gps-quality-grid">
+                            <div><small>AVG ACCURACY</small><strong class="@GetAccuracyClass(HistoryAverageAccuracy)">@GetAccuracyLabel(HistoryAverageAccuracy)</strong><span>@FormatAccuracy(HistoryAverageAccuracy)</span></div>
+                            <div><small>WORST ACCURACY</small><strong class="@GetAccuracyClass(HistoryWorstAccuracy)">@GetAccuracyLabel(HistoryWorstAccuracy)</strong><span>@FormatAccuracy(HistoryWorstAccuracy)</span></div>
+                            <div><small>POOR GPS POINTS</small><strong>@HistoryPoorAccuracyCount</strong><span>Accuracy &gt; 100 m</span></div>
+                            <div><small>OUTSIDE RANGE</small><strong class="@(HistoryOutsideRangeCount > 0 ? "text-danger" : "text-success")">@HistoryOutsideRangeCount</strong><span>GPS points</span></div>
+                            <div><small>SESSIONS</small><strong>@HistorySessionCount</strong><span>Tracking sessions</span></div>
+                        </div>
+
+                        @if (HistorySessions.Count > 0)
+                        {
+                            <div class="gps-session-timeline">
+                                <div class="gps-session-title"><i class="bi bi-diagram-3 me-1"></i>GPS Session Timeline</div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0 gps-session-table">
+                                        <thead><tr><th>Session</th><th>Started</th><th>Last Update</th><th>Duration</th><th>Points</th><th>Travel</th><th>Avg Accuracy</th><th>Status</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var session in HistorySessions)
+                                            {
+                                                <tr class="@(selectedPlaybackSessionId == session.SessionId ? "gps-session-row-selected" : "")"
+                                                    @onclick="() => SelectPlaybackSession(session.SessionId)"
+                                                    title="Play this session route only">
+                                                    <td><code>@ShortSessionId(session.SessionId)</code></td>
+                                                    <td>@ToLocalTime(session.StartUtc).ToString("HH:mm:ss")</td>
+                                                    <td>@ToLocalTime(session.EndUtc).ToString("HH:mm:ss")</td>
+                                                    <td>@FormatDuration(session.EndUtc - session.StartUtc)</td>
+                                                    <td>@session.PointCount</td>
+                                                    <td>@FormatDistance(session.TravelMeters)</td>
+                                                    <td><span class="gps-accuracy-badge @GetAccuracyClass(session.AverageAccuracy)">@GetAccuracyLabel(session.AverageAccuracy) <small>@FormatAccuracy(session.AverageAccuracy)</small></span></td>
+                                                    <td>
+                                                        @{
+                                                            var sessionStatus =
+                                                            GetHistorySessionStatus(session.SessionId);
+                                                        }
+
+                                                        @if (sessionStatus == "Active")
+                                                        {
+                                                            <span class="badge bg-success-subtle text-success">
+                                                                <i class="bi bi-broadcast me-1"></i>
+                                                                Active
+                                                            </span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-secondary-subtle text-secondary">
+                                                                <i class="bi bi-check-circle me-1"></i>
+                                                                Ended
+                                                            </span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </div>
+
+
+        <!-- ====================================================
+             ROUTE PLAYBACK
+             ==================================================== -->
+        <div class="location-history-card card border-0 shadow-sm mb-4">
+            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick="() => isRoutePlaybackExpanded = !isRoutePlaybackExpanded">
+                <div class="history-playback-title">
+                    <i class="bi bi-play-circle-fill text-primary me-1"></i>
+                    Route Playback
+                    @if (isRoutePlaybackExpanded)
+                    {
+                        @if (selectedPlaybackSessionId.HasValue)
+                        {
+                            <span class="badge bg-primary-subtle text-primary ms-2">
+                                Session @ShortSessionId(selectedPlaybackSessionId.Value)
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary-subtle text-secondary ms-2">
+                                Full Day
+                            </span>
+                        }
+                    }
+                </div>
+                <div class="d-flex align-items-center">
+                    <i class="bi @(isRoutePlaybackExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                </div>
+            </div>
+
+            @if (isRoutePlaybackExpanded)
+            {
+                @if (selectedHistory.Count == 0)
+                {
+                    <div class="history-empty py-4">
+                        <span class="text-muted small">Select a date with GPS history to use playback.</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="history-playback-toolbar">
+                        <div class="history-playback-actions">
+                            <button type="button"
+                                    class="btn btn-sm @(selectedPlaybackSessionId.HasValue ? "btn-outline-secondary" : "btn-secondary")"
+                                    @onclick="SelectFullDayPlayback"
+                                    disabled="@(!selectedPlaybackSessionId.HasValue)">
+                                <i class="bi bi-calendar3 me-1"></i>
+                                Full Day
+                            </button>
+
+                            <button type="button"
+                                    class="btn btn-sm btn-primary"
+                                    @onclick="PlayHistory"
+                                    disabled="@(!CanPlayback)">
+                                <i class="bi bi-play-fill me-1"></i>
+                                Play
+                            </button>
+
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @onclick="PauseHistory"
+                                    disabled="@(!CanPlayback)">
+                                <i class="bi bi-pause-fill me-1"></i>
+                                Pause
+                            </button>
+
+                            <button type="button"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    @onclick="ResetHistory"
+                                    disabled="@(!CanPlayback)">
+                                <i class="bi bi-arrow-counterclockwise me-1"></i>
+                                Reset
+                            </button>
+
+                            <select class="form-select form-select-sm history-speed"
+                                    value="@playbackSpeed"
+                                    @onchange="ChangePlaybackSpeed">
+                                <option value="0.25">0.25×</option>
+                                <option value="0.5">0.5×</option>
+                                <option value="1">1×</option>
+                                <option value="2">2×</option>
+                                <option value="4">4×</option>
+                                <option value="8">8×</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="history-playback-progress">
+                        <div class="playback-progress-top">
+                            <span><i class="bi bi-clock me-1"></i>@playbackStatus</span>
+                            <strong>GPS @PlaybackDisplayIndex / @PlaybackPoints.Count</strong>
+                        </div>
+                        <input type="range"
+                               class="form-range playback-range"
+                               min="0"
+                               max="@(Math.Max(0, PlaybackPoints.Count - 1))"
+                               value="@PlaybackIndex"
+                               @oninput="SeekHistoryFromSlider" />
+                        <div class="playback-progress-bottom">
+                            <span>@PlaybackTimeText</span>
+                            <span>@PlaybackDistanceText</span>
+                        </div>
+                    </div>
+
+                    <div class="history-playback-status">
+                        <span><i class="bi bi-broadcast me-1"></i>Playback: <strong>@playbackStatus</strong></span>
+                        <span><i class="bi bi-geo-alt me-1"></i>@PlaybackPoints.Count GPS points</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover location-history-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Time</th>
+                                    <th>Accuracy</th>
+                                    <th>Distance</th>
+                                    <th>Allowed</th>
+                                    <th>Status</th>
+                                    <th>Latitude</th>
+                                    <th>Longitude</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < selectedHistory.Count; i++)
+                                {
+                                    var point = selectedHistory[i];
+                                    <tr class="@(PlaybackIndex == i ? "history-row-active" : "")" @onclick="() => SelectHistoryPoint(i)">
+                                        <td><span class="history-point-number">@(i + 1)</span></td>
+                                        <td class="fw-semibold">@(ToLocalTime(point.RecordedAtUtc).ToString("HH:mm:ss"))</td>
+                                        <td>@FormatAccuracy(point.AccuracyMeters)</td>
+                                        <td>@FormatDistance(point.DistanceFromOfficeMeters)</td>
+                                        <td>@point.AllowedRadiusMeters m</td>
+                                        <td>
+                                            @if (point.IsWithinAllowedRadius)
+                                            {
+                                                <span class="history-status within"><i class="bi bi-check-circle me-1"></i>Within range</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="history-status outside"><i class="bi bi-exclamation-circle me-1"></i>Outside range</span>
+                                            }
+                                        </td>
+                                        <td>@point.Latitude.ToString("F6")</td>
+                                        <td>@point.Longitude.ToString("F6")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        </div>
+    }
+}
+
+
+
+<style>
+    .gps-session-summary {
+        border-top: 1px solid #e9ecef;
+        background: #fbfcfe
+    }
+
+    .gps-quality-grid {
+        display: grid;
+        grid-template-columns: repeat(5,minmax(120px,1fr));
+        gap: 0;
+        border-bottom: 1px solid #e9ecef
+    }
+
+        .gps-quality-grid > div {
+            padding: 14px 16px;
+            border-right: 1px solid #e9ecef
+        }
+
+            .gps-quality-grid > div:last-child {
+                border-right: 0
+            }
+
+        .gps-quality-grid small {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            color: #6c757d;
+            margin-bottom: 5px
+        }
+
+        .gps-quality-grid strong {
+            display: block;
+            font-size: 16px
+        }
+
+        .gps-quality-grid span {
+            display: block;
+            font-size: 11px;
+            color: #6c757d;
+            margin-top: 3px
+        }
+
+    .gps-session-timeline {
+        padding: 14px 16px
+    }
+
+    .gps-session-title {
+        font-weight: 700;
+        margin-bottom: 10px;
+        color: #495057
+    }
+
+    .gps-session-table {
+        font-size: 12px
+    }
+
+        .gps-session-table th {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: #6c757d;
+            white-space: nowrap
+        }
+
+        .gps-session-table td {
+            vertical-align: middle;
+            white-space: nowrap
+        }
+
+        .gps-session-table tbody tr {
+            cursor: pointer;
+            transition: background .12s;
+        }
+
+            .gps-session-table tbody tr:hover {
+                background: rgba(13,110,253,.06);
+            }
+
+    .gps-session-row-selected {
+        background: rgba(13,110,253,.14) !important;
+        box-shadow: inset 3px 0 0 #0d6efd;
+    }
+
+    .gps-session-table code {
+        font-size: 11px
+    }
+
+    .gps-accuracy-badge {
+        font-weight: 600
+    }
+
+        .gps-accuracy-badge small {
+            font-weight: 400;
+            margin-left: 3px
+        }
+
+        .gps-accuracy-badge.excellent, .gps-accuracy-badge.good {
+            color: #198754
+        }
+
+        .gps-accuracy-badge.fair {
+            color: #b58105
+        }
+
+        .gps-accuracy-badge.poor {
+            color: #fd7e14
+        }
+
+        .gps-accuracy-badge.very-poor {
+            color: #dc3545
+        }
+
+        .gps-accuracy-badge.unknown {
+            color: #6c757d
+        }
+
+    @@media(max-width:900px) {
+        .gps-quality-grid {
+            grid-template-columns: repeat(2,1fr)
+        }
+
+            .gps-quality-grid > div:nth-child(2n) {
+                border-right: 0
+            }
+    }
+
+    /* ============================================================
+       GPS / HISTORY SURFACE THEME HARDENING
+       ============================================================ */
+    body.dark .location-history-card,
+    body.dark .location-history-card.card,
+    body.dark .location-history-card .card-body,
+    body.dark .location-history-card .table-responsive,
+    body.dark .gps-session-summary,
+    body.dark .gps-session-timeline,
+    body.dark .gps-session-table,
+    body.dark .location-history-table {
+        background-color: #161f2d !important;
+        color: #e7edf6 !important;
+        border-color: rgba(255,255,255,.09) !important;
+    }
+
+    body.dark .gps-session-table > :not(caption) > * > *,
+    body.dark .location-history-table > :not(caption) > * > * {
+        background-color: #161f2d !important;
+        color: #e7edf6 !important;
+        border-color: rgba(255,255,255,.09) !important;
+    }
+
+    body.dark .gps-session-table thead th,
+    body.dark .location-history-table thead th {
+        background-color: #1b2635 !important;
+        color: #aebbd0 !important;
+    }
+
+    body.dark .gps-session-table tbody tr:hover > *,
+    body.dark .location-history-table tbody tr:hover > * {
+        background-color: rgba(13,110,253,.10) !important;
+        color: #f4f8ff !important;
+    }
+
+    body.dark .history-playback-toolbar,
+    body.dark .history-playback-progress,
+    body.dark .history-playback-status,
+    body.dark .gps-session-title {
+        background-color: #1b2635 !important;
+        color: #e7edf6 !important;
+        border-color: rgba(255,255,255,.09) !important;
+    }
+
+    body.dark .history-playback-toolbar .form-control,
+    body.dark .history-playback-toolbar .form-select,
+    body.dark .history-playback-progress input,
+    body.dark .location-history-card input,
+    body.dark .location-history-card select {
+        background-color: #111a27 !important;
+        color: #e7edf6 !important;
+        border-color: rgba(255,255,255,.16) !important;
+    }
+
+    body.dark .history-playback-toolbar .form-control::placeholder,
+    body.dark .location-history-card input::placeholder {
+        color: #8492a6 !important;
+    }
+
+    body.dark .location-history-card .text-muted,
+    body.dark .gps-session-summary .text-muted {
+        color: #91a0b4 !important;
+    }
+
+
+    /* ============================================================
+       PREMIUM ADMIN LIVE MAP VISUALS
+       Presentation-only: no GPS, attendance, database, or layout flow changes.
+       ============================================================ */
+
+    .admin-map-wrapper {
+        background: #eef2f7;
+        border-radius: 0 0 16px 16px;
+        overflow: hidden;
+    }
+
+    .admin-live-map {
+        height: 430px;
+        background: #eef2f7;
+        isolation: isolate;
+    }
+
+    .admin-live-map .leaflet-container {
+        font-family: inherit;
+        background: #eef2f7;
+    }
+
+    .admin-live-map .leaflet-tile-pane {
+        transition: filter .25s ease;
+    }
+
+    .admin-live-map .leaflet-control-zoom {
+        margin: 14px !important;
+        border: 1px solid rgba(15,23,42,.12) !important;
+        border-radius: 12px !important;
+        overflow: hidden;
+        box-shadow: 0 8px 24px rgba(15,23,42,.14) !important;
+    }
+
+    .admin-live-map .leaflet-control-zoom a {
+        width: 34px !important;
+        height: 34px !important;
+        line-height: 34px !important;
+        font-size: 17px !important;
+        color: #334155 !important;
+        background: rgba(255,255,255,.94) !important;
+        border: 0 !important;
+    }
+
+    .admin-live-map .leaflet-control-zoom a + a {
+        border-top: 1px solid rgba(15,23,42,.10) !important;
+    }
+
+    .admin-live-map .leaflet-control-attribution {
+        padding: 4px 7px !important;
+        border-radius: 8px 0 0 0;
+        background: rgba(255,255,255,.76) !important;
+        backdrop-filter: blur(8px);
+        color: #64748b !important;
+        font-size: 9px !important;
+    }
+
+    .admin-live-map .leaflet-control-attribution a {
+        color: #475569 !important;
+    }
+
+    .payroll-map-user {
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 850;
+        letter-spacing: .5px;
+        border: 2px solid rgba(255,255,255,.96);
+        box-shadow:
+            0 10px 24px rgba(15,23,42,.30),
+            0 0 0 5px rgba(37,99,235,.10),
+            inset 0 1px 0 rgba(255,255,255,.42);
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+
+    .payroll-map-user::before {
+        content: "";
+        position: absolute;
+        inset: -7px;
+        border-radius: 19px;
+        border: 1px solid rgba(37,99,235,.18);
+        pointer-events: none;
+        animation: payrollMapMarkerPulse 2.6s ease-out infinite;
+    }
+
+    .payroll-map-user-within {
+        background: linear-gradient(145deg,#1478ff 0%,#5b55e8 100%);
+    }
+
+    .payroll-map-user-outside {
+        background: linear-gradient(145deg,#ef596b 0%,#c92f52 100%);
+        box-shadow:
+            0 10px 24px rgba(220,38,72,.30),
+            0 0 0 5px rgba(239,68,68,.10),
+            inset 0 1px 0 rgba(255,255,255,.42);
+    }
+
+    .payroll-map-user-outside::before {
+        border-color: rgba(239,68,68,.25);
+    }
+
+    .payroll-map-user:hover {
+        transform: translateY(-3px) scale(1.06);
+        box-shadow:
+            0 14px 30px rgba(15,23,42,.34),
+            0 0 0 7px rgba(37,99,235,.12),
+            inset 0 1px 0 rgba(255,255,255,.48);
+    }
+
+    .payroll-map-user-status {
+        width: 11px;
+        height: 11px;
+        right: -3px;
+        bottom: -3px;
+        border: 2px solid #fff;
+        box-shadow: 0 2px 8px rgba(0,0,0,.28);
+    }
+
+    .payroll-map-office {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        color: #fff;
+        background: linear-gradient(145deg,#0d6efd,#594fe7);
+        border: 2px solid rgba(255,255,255,.98);
+        box-shadow:
+            0 10px 24px rgba(37,99,235,.34),
+            0 0 0 6px rgba(37,99,235,.12),
+            inset 0 1px 0 rgba(255,255,255,.40);
+        font-size: 18px;
+        position: relative;
+    }
+
+    .payroll-map-office::after {
+        inset: -9px;
+        border: 1px solid rgba(37,99,235,.30);
+        animation: payrollMapOfficePulse 2.8s ease-out infinite;
+    }
+
+    .admin-live-hover-tooltip,
+    .admin-office-tooltip {
+        border-radius: 14px !important;
+        border: 1px solid rgba(255,255,255,.15) !important;
+        background: rgba(10,18,32,.94) !important;
+        box-shadow: 0 16px 38px rgba(2,8,23,.32) !important;
+        backdrop-filter: blur(16px);
+    }
+
+    .admin-live-hover-card {
+        min-width: 245px;
+        padding: 3px;
+    }
+
+    .map-live-legend {
+        left: 14px;
+        bottom: 14px;
+        padding: 8px 11px;
+        border-radius: 12px;
+        border: 1px solid rgba(255,255,255,.20);
+        background: rgba(8,15,28,.82);
+        backdrop-filter: blur(14px) saturate(1.15);
+        box-shadow: 0 12px 30px rgba(2,8,23,.24);
+        font-size: .63rem;
+    }
+
+    /* Raw GPS samples are intentionally not rendered as straight-line trails.
+       The visible route is the road-routed geometry returned by the existing
+       presentation routing layer. */
+    .admin-live-map .payroll-raw-gps-trail {
+        display: none !important;
+    }
+
+    @@keyframes payrollMapMarkerPulse {
+        0% { transform: scale(.72); opacity: .60; }
+        65% { transform: scale(1.18); opacity: 0; }
+        100% { transform: scale(1.18); opacity: 0; }
+    }
+
+    @@keyframes payrollMapOfficePulse {
+        0% { transform: scale(.76); opacity: .60; }
+        70% { transform: scale(1.16); opacity: 0; }
+        100% { transform: scale(1.16); opacity: 0; }
+    }
+
+    body.dark .admin-map-wrapper,
+    body.dark .admin-live-map,
+    body.dark .admin-live-map .leaflet-container {
+        background: #08111f;
+    }
+
+    body.dark .admin-live-map .leaflet-control-zoom {
+        border-color: rgba(255,255,255,.10) !important;
+        box-shadow: 0 10px 28px rgba(0,0,0,.35) !important;
+    }
+
+    body.dark .admin-live-map .leaflet-control-zoom a {
+        color: #dbe7f5 !important;
+        background: rgba(17,27,43,.94) !important;
+    }
+
+    body.dark .admin-live-map .leaflet-control-zoom a + a {
+        border-top-color: rgba(255,255,255,.09) !important;
+    }
+
+    body.dark .admin-live-map .leaflet-control-attribution {
+        background: rgba(7,15,27,.78) !important;
+        color: #94a3b8 !important;
+    }
+
+    body.dark .admin-live-map .leaflet-control-attribution a {
+        color: #cbd5e1 !important;
+    }
+
+    body.dark .payroll-map-office {
+        box-shadow:
+            0 12px 28px rgba(37,99,235,.40),
+            0 0 0 6px rgba(59,130,246,.16),
+            inset 0 1px 0 rgba(255,255,255,.34);
+    }
+
+    body.dark .map-live-legend {
+        background: rgba(7,15,27,.86);
+        border-color: rgba(255,255,255,.13);
+    }
+
+    /* Route hierarchy: a soft shadow/casing plus a crisp road line. */
+    .payroll-admin-road-casing {
+        pointer-events: none;
+        filter: drop-shadow(0 2px 5px rgba(2,8,23,.22));
+    }
+
+    .payroll-admin-road-line {
+        pointer-events: none;
+    }
+
+    @@media (max-width: 768px) {
+        .admin-live-map {
+            height: 390px;
+        }
+
+        .map-live-legend {
+            left: 10px;
+            bottom: 10px;
+            font-size: .58rem;
+        }
+    }
+
+</style>
+
+<style>
+
+    .live-staff-card,
+    .live-staff-details,
+    .location-history-card {
+        overflow: hidden;
+    }
+
+    .live-staff-details {
+        display: none !important;
+    }
+
+    .live-staff-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        min-height: 430px;
+        background: rgba(8, 15, 28, .02);
+    }
+
+    .live-staff-body.has-selection {
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+    }
+
+    .selected-live-card {
+        min-width: 0;
+        padding: 18px;
+        border-left: 1px solid rgba(0,0,0,.08);
+        background: rgba(255,255,255,.96);
+        backdrop-filter: blur(16px);
+        box-shadow: -12px 0 30px rgba(18, 31, 53, .06);
+    }
+
+    .selected-live-card-header, .selected-identity, .selected-status-row {
+        display: flex;
+        align-items: center;
+    }
+
+    .selected-live-card-header { justify-content: space-between; gap: 12px; }
+    .selected-identity { gap: 11px; min-width: 0; }
+    .selected-identity-text { min-width: 0; display:flex; flex-direction:column; gap:2px; }
+    .selected-identity-text strong { font-size: .98rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .selected-identity-text span, .selected-updated { font-size:.68rem; color:#7c899b; }
+
+    .premium-avatar {
+        position:relative; width:46px; height:46px; flex:0 0 46px; border-radius:15px;
+        display:flex; align-items:center; justify-content:center;
+        color:#fff; font-size:.78rem; font-weight:800; letter-spacing:.4px;
+        background:linear-gradient(145deg,#2388ff,#5b5fe8);
+        box-shadow:0 9px 20px rgba(35,136,255,.25), inset 0 1px 0 rgba(255,255,255,.3);
+    }
+    .premium-avatar.stale { background:linear-gradient(145deg,#d99a16,#f1bf43); }
+    .premium-avatar.offline { background:linear-gradient(145deg,#697586,#3e4857); }
+    .avatar-status-dot { position:absolute; right:-2px; bottom:-2px; width:12px; height:12px; border-radius:50%; background:#22c55e; border:3px solid #fff; }
+    .premium-avatar.stale .avatar-status-dot { background:#f59e0b; }
+    .premium-avatar.offline .avatar-status-dot { background:#94a3b8; }
+
+    .selected-close { width:30px; height:30px; border:0; border-radius:9px; background:rgba(100,116,139,.08); color:#718096; }
+    .selected-close:hover { background:rgba(13,110,253,.10); color:#0d6efd; }
+    .selected-status-row { justify-content:space-between; gap:8px; margin:16px 0 12px; padding:9px 11px; border:1px solid rgba(100,116,139,.12); border-radius:11px; background:rgba(248,250,252,.78); }
+    .selected-status { font-size:.68rem; font-weight:800; }
+    .selected-status.online { color:#16a34a; } .selected-status.stale { color:#d97706; } .selected-status.offline { color:#64748b; }
+    .selected-status i { font-size:.48rem; vertical-align:middle; }
+
+    .selected-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .selected-metric { padding:11px; border:1px solid rgba(100,116,139,.11); border-radius:11px; background:rgba(248,250,252,.72); min-width:0; }
+    .selected-metric.primary { grid-column:1/-1; background:linear-gradient(145deg,rgba(13,110,253,.09),rgba(99,102,241,.055)); border-color:rgba(13,110,253,.16); }
+    .selected-metric span { display:block; font-size:.62rem; color:#7b8797; margin-bottom:4px; }
+    .selected-metric span i { margin-right:4px; }
+    .selected-metric strong { display:block; font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .selected-metric.primary strong { font-size:1.08rem; }
+    .selected-coordinates { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; padding:10px 11px; border-radius:11px; background:rgba(15,23,42,.035); }
+    .selected-coordinates span { display:block; font-size:.59rem; color:#8792a2; }
+    .selected-coordinates strong { display:block; font-size:.68rem; margin-top:2px; }
+    .selected-action { width:100%; margin-top:10px; border:0; background:transparent; color:#0d6efd; font-size:.68rem; font-weight:700; padding:6px; }
+    .selected-offline { min-height:220px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:6px; color:#7b8797; }
+    .selected-offline i { font-size:2rem; opacity:.55; }
+    .selected-offline strong { color:inherit; font-size:.82rem; }
+    .selected-offline span { font-size:.68rem; max-width:220px; }
+
+    .map-live-legend { position:absolute; left:14px; bottom:14px; z-index:500; display:flex; gap:8px; padding:7px 9px; border:1px solid rgba(255,255,255,.18); border-radius:10px; background:rgba(15,23,42,.78); backdrop-filter:blur(10px); color:#e8eef7; font-size:.62rem; box-shadow:0 8px 24px rgba(0,0,0,.18); }
+    .map-live-legend span { display:flex; align-items:center; gap:5px; }
+    .legend-dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+    .legend-dot.within { background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,.14); }
+    .legend-dot.outside { background:#ef4444; box-shadow:0 0 0 3px rgba(239,68,68,.14); }
+
+    .live-staff-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .admin-map-wrapper {
+        position: relative;
+        min-width: 0;
+    }
+
+    .admin-live-map {
+        width: 100%;
+        height: 430px;
+        background: #e9ecef;
+    }
+
+    .clickable { cursor: pointer; }
+    .clickable:hover { background-color: rgba(0,0,0,.02); }
+    body.dark .clickable:hover { background-color: rgba(255,255,255,.02); }
+    }
+
+    .payroll-user-marker { background: transparent !important; border: 0 !important; }
+    .payroll-map-user {
+        position: relative; width: 44px; height: 44px; border-radius: 15px;
+        display:flex; align-items:center; justify-content:center;
+        color:#fff; font-size:11px; font-weight:850; letter-spacing:.5px;
+        border:2px solid rgba(255,255,255,.92);
+        box-shadow:0 8px 18px rgba(15,23,42,.28), inset 0 1px 0 rgba(255,255,255,.35);
+        transition:transform .18s ease, box-shadow .18s ease;
+    }
+    .payroll-map-user:hover { transform:translateY(-2px) scale(1.05); box-shadow:0 11px 24px rgba(15,23,42,.34), inset 0 1px 0 rgba(255,255,255,.42); }
+    .payroll-map-user-within { background:linear-gradient(145deg,#1688ff,#635bdb); }
+    .payroll-map-user-outside { background:linear-gradient(145deg,#ef5b68,#c92f52); }
+    .payroll-map-user-status {
+        position:absolute; right:-3px; bottom:-3px; width:11px; height:11px; border-radius:50%;
+        background:#22c55e; border:2px solid #fff; box-shadow:0 2px 7px rgba(0,0,0,.25);
+    }
+    .payroll-map-user-outside .payroll-map-user-status { background:#ef4444; }
+    .payroll-map-user-initials { line-height:1; user-select:none; }
+
+    .admin-office-tooltip, .admin-live-hover-tooltip {
+        background:rgba(12,18,30,.94) !important; color:#eef5ff !important;
+        border:1px solid rgba(255,255,255,.13) !important; border-radius:12px !important;
+        box-shadow:0 12px 30px rgba(0,0,0,.30) !important; backdrop-filter:blur(12px);
+    }
+    .admin-office-tooltip::before, .admin-live-hover-tooltip::before { border-top-color:rgba(12,18,30,.94) !important; }
+    .admin-live-hover-card { min-width:235px; padding:2px; }
+    .admin-live-hover-title { display:flex; align-items:center; gap:7px; margin-bottom:9px; }
+    .admin-live-hover-title strong { font-size:12px; max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hover-avatar { width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; background:linear-gradient(145deg,#2388ff,#5b5fe8); color:#fff; font-size:9px; font-weight:800; }
+    .hover-state { margin-left:auto; font-size:8px; font-weight:800; padding:4px 6px; border-radius:999px; white-space:nowrap; }
+    .hover-state.within { color:#5ee39b; background:rgba(34,197,94,.12); }
+    .hover-state.outside { color:#ff7d8c; background:rgba(239,68,68,.12); }
+    .admin-live-hover-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+    .admin-live-hover-grid span { display:flex; flex-direction:column; gap:2px; padding:6px 7px; border-radius:8px; background:rgba(255,255,255,.055); border:1px solid rgba(255,255,255,.06); }
+    .admin-live-hover-grid small { color:#91a0b4; font-size:7px; text-transform:uppercase; letter-spacing:.45px; }
+    .admin-live-hover-grid b { color:#f3f7fc; font-size:10px; }
+
+
+    .map-empty-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        background: rgba(248,249,250,.72);
+        pointer-events: none;
+    }
+
+        .map-empty-overlay span {
+            font-weight: 600;
+            color: #6c757d;
+        }
+
+        .map-empty-overlay small {
+            font-size: .7rem;
+            color: #6c757d;
+        }
+
+    .live-staff-list {
+        padding: 10px;
+        max-height: 360px;
+        overflow-y: auto;
+        border-left: 1px solid rgba(0,0,0,.08);
+    }
+
+    .staff-location-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        text-align: left;
+        border: 1px solid transparent;
+        background: transparent;
+        border-radius: 9px;
+        padding: 10px;
+        margin-bottom: 6px;
+        color: inherit;
+        transition: .15s;
+    }
+
+        .staff-location-item:hover,
+        .staff-location-item.selected {
+            background: rgba(13,110,253,.07);
+            border-color: rgba(13,110,253,.2);
+        }
+
+    .staff-avatar {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 10px;
+        background: rgba(108,117,125,.1);
+        color: #6c757d;
+    }
+
+        .staff-avatar.live {
+            background: rgba(25,135,84,.1);
+            color: #198754;
+        }
+
+        .staff-avatar.stale {
+            background: rgba(255,193,7,.12);
+            color: #997404;
+        }
+
+        .staff-avatar.offline {
+            background: rgba(108,117,125,.1);
+            color: #6c757d;
+        }
+
+    .staff-location-info {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .staff-name-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+        .staff-name-row strong {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+    .staff-live-state {
+        font-size: .64rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 20px;
+        white-space: nowrap;
+    }
+
+        .staff-live-state.online {
+            color: #198754;
+            background: rgba(25,135,84,.1);
+        }
+
+        .staff-live-state.stale {
+            color: #997404;
+            background: rgba(255,193,7,.15);
+        }
+
+        .staff-live-state.offline {
+            color: #6c757d;
+            background: rgba(108,117,125,.1);
+        }
+
+    .staff-location-details {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: .75rem;
+        margin-top: 3px;
+    }
+
+    .staff-session-details {
+        display: flex;
+        justify-content: space-between;
+        gap: 5px;
+        font-size: .63rem;
+        color: #6c757d;
+        margin-top: 4px;
+    }
+
+        .staff-session-details span {
+            white-space: nowrap;
+        }
+
+    .staff-location-info small {
+        font-size: .65rem;
+    }
+
+    .staff-arrow {
+        color: #adb5bd;
+        margin-left: 6px;
+        transition: transform .15s ease;
+    }
+
+    .staff-location-item.selected .staff-arrow {
+        color: #0d6efd;
+    }
+
+    .live-count {
+        font-size: .75rem;
+        font-weight: 700;
+        color: #198754;
+        white-space: nowrap;
+    }
+
+    .live-count-dot {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #198754;
+        margin-right: 4px;
+        animation: livePulse 1.5s infinite;
+    }
+
+    .live-staff-footer {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 20px;
+        border-top: 1px solid rgba(0,0,0,.08);
+        font-size: .7rem;
+        color: #6c757d;
+    }
+
+    .spin {
+        animation: liveStaffSpin .8s linear infinite;
+    }
+
+    .live-details-header,
+    .location-history-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .live-details-grid {
+        display: grid;
+        grid-template-columns: repeat(4,1fr);
+        gap: 1px;
+        background: rgba(0,0,0,.06);
+    }
+
+    .live-detail-box {
+        background: #fff;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+        .live-detail-box span {
+            font-size: .67rem;
+            color: #6c757d;
+        }
+
+        .live-detail-box strong {
+            font-size: .8rem;
+        }
+
+    .offline-details-message {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 16px 18px;
+        color: #6c757d;
+        font-size: .8rem;
+    }
+
+    .geo-punch-audit-card {
+        overflow: hidden;
+    }
+
+    .geo-punch-audit-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .geo-punch-audit-summary {
+        display: grid;
+        grid-template-columns: repeat(4,1fr);
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+        .geo-punch-audit-summary > div {
+            padding: 12px 16px;
+            border-right: 1px solid rgba(0,0,0,.08);
+        }
+
+            .geo-punch-audit-summary > div:last-child {
+                border-right: 0;
+            }
+
+        .geo-punch-audit-summary small {
+            display: block;
+            color: #6c757d;
+            font-size: .62rem;
+            font-weight: 700;
+        }
+
+        .geo-punch-audit-summary strong {
+            display: block;
+            font-size: 1rem;
+            margin-top: 2px;
+        }
+
+    .geo-punch-audit-table {
+        font-size: .74rem;
+    }
+
+        .geo-punch-audit-table th {
+            font-size: .63rem;
+            text-transform: uppercase;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .geo-punch-audit-table td,
+        .geo-punch-audit-table th {
+            padding: 9px 10px;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+
+    .geo-audit-success,
+    .geo-audit-within {
+        color: #198754;
+        font-weight: 600;
+    }
+
+    .geo-audit-failed,
+    .geo-audit-outside {
+        color: #dc3545;
+        font-weight: 600;
+    }
+
+    .geo-audit-message {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .geo-punch-audit-row {
+        cursor: pointer;
+    }
+
+        .geo-punch-audit-row:hover {
+            background: rgba(13,110,253,.06) !important;
+        }
+
+    .gps-accuracy-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 700;
+    }
+
+        .gps-accuracy-badge small {
+            font-weight: 500;
+            color: #6c757d;
+        }
+
+        .gps-accuracy-badge.excellent, .geo-audit-detail-grid strong.excellent {
+            color: #198754;
+        }
+
+        .gps-accuracy-badge.good, .geo-audit-detail-grid strong.good {
+            color: #20a060;
+        }
+
+        .gps-accuracy-badge.fair, .geo-audit-detail-grid strong.fair {
+            color: #997404;
+        }
+
+        .gps-accuracy-badge.poor, .geo-audit-detail-grid strong.poor {
+            color: #fd7e14;
+        }
+
+        .gps-accuracy-badge.very-poor, .geo-audit-detail-grid strong.very-poor {
+            color: #dc3545;
+        }
+
+        .gps-accuracy-badge.unknown {
+            color: #6c757d;
+        }
+
+    .geo-audit-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        background: rgba(0,0,0,.48);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    .geo-audit-modal {
+        width: min(760px,100%);
+        max-height: 90vh;
+        overflow: auto;
+        border-radius: 12px;
+    }
+
+    .geo-audit-modal-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+    .geo-audit-modal-body {
+        padding: 18px 20px 20px;
+    }
+
+    .geo-audit-result-banner {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 13px 15px;
+        border-radius: 9px;
+        margin-bottom: 18px;
+    }
+
+        .geo-audit-result-banner.success {
+            color: #146c43;
+            background: rgba(25,135,84,.10);
+        }
+
+        .geo-audit-result-banner.failed {
+            color: #b02a37;
+            background: rgba(220,53,69,.10);
+        }
+
+        .geo-audit-result-banner i {
+            font-size: 1.35rem;
+        }
+
+        .geo-audit-result-banner strong, .geo-audit-result-banner span {
+            display: block;
+        }
+
+        .geo-audit-result-banner span {
+            font-size: .78rem;
+            margin-top: 2px;
+        }
+
+    .geo-audit-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2,1fr);
+        gap: 1px;
+        background: rgba(0,0,0,.08);
+        border: 1px solid rgba(0,0,0,.08);
+    }
+
+        .geo-audit-detail-grid > div {
+            background: #fff;
+            padding: 13px 15px;
+            min-width: 0;
+        }
+
+        .geo-audit-detail-grid small, .geo-audit-detail-grid strong, .geo-audit-detail-grid span {
+            display: block;
+        }
+
+        .geo-audit-detail-grid small {
+            font-size: .62rem;
+            font-weight: 700;
+            color: #6c757d;
+            margin-bottom: 4px;
+        }
+
+        .geo-audit-detail-grid strong {
+            font-size: .86rem;
+            word-break: break-word;
+        }
+
+        .geo-audit-detail-grid span {
+            font-size: .7rem;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+
+    .geo-audit-detail-wide {
+        grid-column: 1/-1;
+    }
+
+    body.dark .geo-audit-modal {
+        background: #212529;
+        color: #f8f9fa;
+    }
+
+    body.dark .geo-audit-modal-header {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .geo-audit-detail-grid {
+        background: rgba(255,255,255,.1);
+        border-color: rgba(255,255,255,.1);
+    }
+
+        body.dark .geo-audit-detail-grid > div {
+            background: #212529;
+        }
+
+    body.dark .gps-accuracy-badge small {
+        color: #adb5bd;
+    }
+
+    .history-date-input {
+        width: 150px;
+    }
+
+    .history-loading {
+        padding: 35px;
+        text-align: center;
+        color: #6c757d;
+        font-size: .85rem;
+    }
+
+    .history-empty {
+        padding: 40px 20px;
+        text-align: center;
+        color: #6c757d;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 5px;
+    }
+
+        .history-empty i {
+            font-size: 2rem;
+            color: #adb5bd;
+            margin-bottom: 5px;
+        }
+
+        .history-empty strong {
+            color: #495057;
+            font-size: .9rem;
+        }
+
+        .history-empty span {
+            font-size: .75rem;
+        }
+
+    .location-history-summary {
+        display: grid;
+        grid-template-columns: repeat(5,1fr);
+        border-bottom: 1px solid rgba(0,0,0,.08);
+    }
+
+        .location-history-summary > div {
+            padding: 12px 16px;
+            border-right: 1px solid rgba(0,0,0,.08);
+        }
+
+            .location-history-summary > div:last-child {
+                border-right: 0;
+            }
+
+        .location-history-summary small {
+            display: block;
+            color: #6c757d;
+            font-size: .62rem;
+            font-weight: 700;
+        }
+
+        .location-history-summary strong {
+            display: block;
+            font-size: 1rem;
+            margin-top: 2px;
+        }
+
+    .history-playback-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid rgba(0,0,0,.08);
+        gap: 10px;
+    }
+
+    .history-playback-title {
+        font-size: .8rem;
+        font-weight: 700;
+    }
+
+    .history-playback-actions {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .history-speed {
+        width: 75px;
+    }
+
+    .history-playback-progress {
+        padding: 12px 16px;
+        background: rgba(13,110,253,.025);
+        border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+
+    .playback-progress-top,
+    .playback-progress-bottom {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: .7rem;
+        color: #6c757d;
+    }
+
+        .playback-progress-top strong {
+            color: #0d6efd;
+        }
+
+    .playback-progress-bottom {
+        font-size: .65rem;
+    }
+
+    .playback-range {
+        margin: 7px 0 2px;
+        cursor: pointer;
+    }
+
+    .history-playback-status {
+        display: flex;
+        justify-content: space-between;
+        padding: 7px 16px;
+        background: rgba(13,110,253,.04);
+        border-bottom: 1px solid rgba(0,0,0,.06);
+        font-size: .7rem;
+        color: #6c757d;
+    }
+
+    .location-history-table {
+        font-size: .76rem;
+    }
+
+        .location-history-table th {
+            font-size: .65rem;
+            text-transform: uppercase;
+            color: #6c757d;
+            white-space: nowrap;
+        }
+
+        .location-history-table td,
+        .location-history-table th {
+            padding: 9px 12px;
+            vertical-align: middle;
+        }
+
+        .location-history-table tbody tr {
+            cursor: pointer;
+            transition: background .12s;
+        }
+
+            .location-history-table tbody tr:hover {
+                background: rgba(13,110,253,.06);
+            }
+
+    .history-row-active {
+        background: rgba(13,110,253,.14) !important;
+        box-shadow: inset 3px 0 0 #0d6efd;
+    }
+
+    .history-point-number {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 23px;
+        height: 23px;
+        border-radius: 50%;
+        background: #eef4ff;
+        color: #0d6efd;
+        font-size: .65rem;
+        font-weight: 700;
+    }
+
+    .history-row-active .history-point-number {
+        background: #0d6efd;
+        color: #fff;
+    }
+
+    .history-status {
+        font-size: .68rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+        .history-status.within {
+            color: #198754;
+        }
+
+        .history-status.outside {
+            color: #dc3545;
+        }
+
+    @@keyframes liveStaffSpin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    @@keyframes livePulse {
+        0%, 100% {
+            opacity: 1;
+        }
+
+        50% {
+            opacity: .35;
+        }
+    }
+
+    body.dark .geo-punch-audit-header {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .geo-punch-audit-summary > div {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .live-staff-header,
+    body.dark .live-staff-footer,
+    body.dark .live-details-header,
+    body.dark .location-history-header {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .live-staff-list {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .staff-location-item:hover,
+    body.dark .staff-location-item.selected {
+        background: rgba(13,110,253,.15);
+    }
+
+    body.dark .selected-live-card { background:rgba(16,24,38,.96); border-color:rgba(255,255,255,.10); box-shadow:-12px 0 30px rgba(0,0,0,.20); }
+    body.dark .selected-status-row, body.dark .selected-metric { background:rgba(255,255,255,.035); border-color:rgba(255,255,255,.09); }
+    body.dark .selected-coordinates { background:rgba(255,255,255,.035); }
+    body.dark .selected-close { background:rgba(255,255,255,.07); color:#a9b5c5; }
+    body.dark .avatar-status-dot { border-color:#101826; }
+
+    body.dark .admin-live-map .leaflet-tile-pane {
+        filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(1.1) saturate(0.6) sepia(0.1) hue-rotate(200deg);
+    }
+
+    body.dark .admin-live-map {
+        background: #0b1425;
+    }
+
+    body.dark .map-empty-overlay {
+        background: rgba(33,37,41,.72);
+    }
+
+        body.dark .map-empty-overlay span,
+        body.dark .map-empty-overlay small {
+            color: #adb5bd;
+        }
+
+    body.dark .live-detail-box {
+        background: #212529;
+    }
+
+    body.dark .live-details-grid {
+        background: rgba(255,255,255,.08);
+    }
+
+    body.dark .history-empty strong {
+        color: #dee2e6;
+    }
+
+    body.dark .location-history-summary > div {
+        border-color: rgba(255,255,255,.1);
+    }
+
+    body.dark .history-playback-status,
+    body.dark .history-playback-progress {
+        background: rgba(13,110,253,.12);
+        border-color: rgba(255,255,255,.08);
+    }
+
+    body.dark .history-point-number {
+        background: rgba(13,110,253,.2);
+    }
+
+    /* GPS/history cards follow the application theme in dark mode. */
+    body.dark .live-staff-card,
+    body.dark .location-history-card,
+    body.dark .gps-session-summary,
+    body.dark .gps-session-timeline,
+    body.dark .gps-session-table,
+    body.dark .location-history-table {
+        background: #161f2d;
+        color: #e7edf6;
+    }
+
+    body.dark .live-staff-header,
+    body.dark .location-history-header,
+    body.dark .history-playback-toolbar,
+    body.dark .history-playback-progress,
+    body.dark .history-playback-status,
+    body.dark .gps-session-title {
+        background: #1b2635;
+        color: #e7edf6;
+    }
+
+    body.dark .gps-quality-grid > div,
+    body.dark .location-history-summary > div {
+        background: #161f2d;
+        border-color: rgba(255,255,255,.09);
+    }
+
+    body.dark .gps-session-table,
+    body.dark .location-history-table {
+        --bs-table-bg: #161f2d;
+        --bs-table-color: #e7edf6;
+        --bs-table-border-color: rgba(255,255,255,.09);
+        --bs-table-hover-bg: rgba(13,110,253,.10);
+        --bs-table-hover-color: #f4f8ff;
+    }
+
+    body.dark .gps-session-table th,
+    body.dark .location-history-table th,
+    body.dark .gps-quality-grid small,
+    body.dark .location-history-summary small,
+    body.dark .playback-progress-top,
+    body.dark .playback-progress-bottom,
+    body.dark .history-playback-status {
+        color: #91a0b4;
+    }
+
+    body.dark .gps-session-table td,
+    body.dark .location-history-table td,
+    body.dark .gps-session-title,
+    body.dark .location-history-summary strong,
+    body.dark .gps-quality-grid strong {
+        color: #e7edf6;
+    }
+
+    body.dark .gps-session-table tbody tr:hover,
+    body.dark .location-history-table tbody tr:hover {
+        background: rgba(13,110,253,.10) !important;
+    }
+
+    body.dark .history-playback-progress {
+        background: #121b29;
+    }
+
+    body.dark .history-playback-status {
+        border-color: rgba(255,255,255,.09);
+    }
+
+    /* Office marker is deliberately visible in both map modes. */
+    .payroll-office-marker {
+        background: transparent !important;
+        border: 0 !important;
+    }
+
+    .payroll-map-office {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: linear-gradient(145deg,#0d6efd,#5b5fe8);
+        border: 2px solid rgba(255,255,255,.95);
+        box-shadow: 0 0 0 5px rgba(13,110,253,.14), 0 8px 22px rgba(13,110,253,.35);
+        font-size: 17px;
+    }
+
+    .payroll-map-office::after {
+        content: "";
+        position: absolute;
+        inset: -7px;
+        border-radius: 50%;
+        border: 1px solid rgba(13,110,253,.35);
+        pointer-events: none;
+    }
+
+    /* Replay presentation. The existing map becomes the only primary surface. */
+    .live-staff-card.replay-fullscreen {
+        position: fixed !important;
+        inset: 0 !important;
+        z-index: 5000 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-width: none !important;
+        margin: 0 !important;
+        border-radius: 0 !important;
+        overflow: hidden !important;
+        display: block !important;
+    }
+
+    .replay-fullscreen .live-staff-header,
+    .replay-fullscreen .selected-live-card,
+    .replay-fullscreen .live-staff-list,
+    .replay-fullscreen .map-empty-overlay,
+    .replay-fullscreen .location-history-header,
+    .replay-fullscreen .location-history-summary,
+    .replay-fullscreen .gps-session-summary,
+    .replay-fullscreen .location-history-card > .table-responsive {
+        display: none !important;
+    }
+
+    .replay-fullscreen .live-staff-body {
+        display: block !important;
+        min-height: 100vh !important;
+        height: 100vh !important;
+        background: #0b1220 !important;
+    }
+
+    .replay-fullscreen .admin-map-wrapper {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .replay-fullscreen .admin-live-map {
+        position: absolute !important;
+        inset: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    .replay-fullscreen .map-live-legend {
+        bottom: 150px;
+    }
+
+    .replay-fullscreen .location-history-card {
+        position: absolute !important;
+        left: 16px !important;
+        right: 16px !important;
+        bottom: 14px !important;
+        z-index: 5100 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+        background: transparent !important;
+        box-shadow: none !important;
+        pointer-events: none;
+    }
+
+    .replay-fullscreen .history-playback-toolbar,
+    .replay-fullscreen .history-playback-progress,
+    .replay-fullscreen .history-playback-status {
+        pointer-events: auto;
+        backdrop-filter: blur(16px);
+        box-shadow: 0 10px 35px rgba(0,0,0,.28);
+    }
+
+    .replay-fullscreen .history-playback-toolbar {
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 14px 14px 0 0;
+    }
+
+    .replay-fullscreen .history-playback-progress {
+        border-left: 1px solid rgba(255,255,255,.14);
+        border-right: 1px solid rgba(255,255,255,.14);
+    }
+
+    .replay-fullscreen .history-playback-status {
+        border: 1px solid rgba(255,255,255,.14);
+        border-radius: 0 0 14px 14px;
+    }
+
+    .replay-fullscreen .history-playback-toolbar,
+    .replay-fullscreen .history-playback-progress,
+    .replay-fullscreen .history-playback-status {
+        background: rgba(18,28,43,.92);
+        color: #e7edf6;
+    }
+
+    body:not(.dark) .replay-fullscreen .history-playback-toolbar,
+    body:not(.dark) .replay-fullscreen .history-playback-progress,
+    body:not(.dark) .replay-fullscreen .history-playback-status {
+        background: rgba(255,255,255,.94);
+        color: #1f2937;
+        border-color: rgba(15,23,42,.12);
+    }
+
+    .replay-exit-button {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        z-index: 5200;
+        border: 1px solid rgba(255,255,255,.18);
+        border-radius: 11px;
+        padding: 9px 13px;
+        color: #fff;
+        background: rgba(15,23,42,.82);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 8px 24px rgba(0,0,0,.24);
+        font-size: .75rem;
+        font-weight: 700;
+    }
+
+    .replay-exit-button:hover {
+        background: rgba(13,110,253,.92);
+        color: #fff;
+    }
+
+    body:not(.dark) .replay-exit-button {
+        color: #1f2937;
+        background: rgba(255,255,255,.94);
+        border-color: rgba(15,23,42,.12);
+    }
+
+    @@media(max-width:991px) {
+
+        .live-staff-body,
+        .live-staff-body.has-selection {
+            grid-template-columns: 1fr;
+        }
+
+        .selected-live-card {
+            border-left: 0;
+            border-top: 1px solid rgba(0,0,0,.08);
+        }
+
+        .admin-live-map {
+            height: 360px;
+        }
+
+        .live-staff-list {
+            border-left: 0;
+            border-top: 1px solid rgba(0,0,0,.08);
+            max-height: 300px;
+        }
+
+        .live-details-grid {
+            grid-template-columns: repeat(2,1fr);
+        }
+
+        .location-history-summary {
+            grid-template-columns: repeat(2,1fr);
+        }
+
+        .geo-punch-audit-summary {
+            grid-template-columns: repeat(2,1fr);
+        }
+
+            .geo-punch-audit-summary > div:nth-child(2) {
+                border-right: 0;
+            }
+
+        .location-history-summary > div:nth-child(2) {
+            border-right: 0;
+        }
+    }
+
+    @@media(max-width:575px) {
+        .geo-audit-modal-backdrop {
+            padding: 8px;
+        }
+
+        .geo-audit-detail-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .geo-audit-detail-wide {
+            grid-column: auto;
+        }
+
+        .staff-session-details {
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .live-details-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .location-history-summary {
+            grid-template-columns: 1fr;
+        }
+
+        .geo-punch-audit-summary {
+            grid-template-columns: 1fr;
+        }
+
+            .geo-punch-audit-summary > div {
+                border-right: 0;
+                border-bottom: 1px solid rgba(0,0,0,.08);
+            }
+
+                .geo-punch-audit-summary > div:last-child {
+                    border-bottom: 0;
+                }
+
+        .location-history-summary > div {
+            border-right: 0;
+            border-bottom: 1px solid rgba(0,0,0,.08);
+        }
+
+            .location-history-summary > div:last-child {
+                border-bottom: 0;
+            }
+
+        .location-history-header {
+            align-items: flex-start !important;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .history-date-input {
+            width: 140px;
+        }
+
+        .history-playback-toolbar {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .history-playback-actions {
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .history-playback-status {
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .playback-progress-top,
+        .playback-progress-bottom {
+            gap: 8px;
+        }
+    }
+
+</style>
+
+
+@code {
+
+    private readonly string mapId =
+        $"admin-live-map-{Guid.NewGuid():N}";
+
+    private readonly List<Employee> employees = new();
+
+    private readonly List<LiveEmployeeLocation> locations = new();
+
+    private CancellationTokenSource? refreshCts;
+    private DotNetObjectReference<LiveStaffLocationPanel>? liveLocationSignalRReference;
+
+    private bool disposed;
+
+    private bool isRefreshing;
+    private bool refreshQueued;
+
+    private bool mapNeedsUpdate;
+
+    private int selectedEmployeeId;
+    private int currentOfficeRadius = 100;
+
+    private List<EmployeeLocationHistory> selectedHistory = new();
+    private List<GeoPunchAudit> selectedPunchAudits = new();
+    private GeoPunchAudit? selectedPunchAudit;
+    private Dictionary<Guid, EmployeeGpsSession> gpsSessionLookup = new();
+    private bool historyLoading;
+    private bool punchAuditLoading;
+    private DateTime punchAuditDate = DateTime.Today;
+
+    private DateTime historyDate = DateTime.Today;
+
+    private DateTime? lastRefresh;
+
+    private double playbackSpeed = 1;
+
+    // Null = full-day playback. A value = playback for one GPS session only.
+    private Guid? selectedPlaybackSessionId;
+
+    private string playbackStatus = "Ready";
+
+    private int playbackIndex;
+
+    private CancellationTokenSource? playbackStateCts;
+
+    // Presentation-only state. It does not change GPS, attendance, session,
+    // database, or business logic. It temporarily presents the existing map
+    // as a focused journey-replay workspace.
+    private bool isPlaybackFullscreen;
+
+    // Collapse States (Web Dashboard)
+    private bool isPunchAuditExpanded = false;
+    private bool isSessionTimelineExpanded = false;
+    private bool isRoutePlaybackExpanded = false;
+
+
+    private int liveCount =>
+        locations.Count(
+            x => GetLocationStatus(x) == LocationStatus.Live);
+
+    private int staleCount =>
+        locations.Count(
+            x => GetLocationStatus(x) == LocationStatus.Stale);
+
+    private int offlineCount =>
+        Math.Max(
+            0,
+            employees.Count - liveCount - staleCount);
+
+    private IReadOnlyList<EmployeeLocationHistory> PlaybackPoints =>
+        selectedPlaybackSessionId.HasValue
+            ? selectedHistory
+                .Where(x => x.SessionId == selectedPlaybackSessionId.Value)
+                .OrderBy(x => x.RecordedAtUtc)
+                .ToList()
+            : selectedHistory;
+
+    private bool CanPlayback =>
+        PlaybackPoints.Count > 0;
+
+    private int PlaybackIndex =>
+     Math.Max(
+         0,
+         Math.Min(
+             playbackIndex,
+             Math.Max(0, PlaybackPoints.Count - 1)));
+
+    private int PlaybackDisplayIndex =>
+        PlaybackPoints.Count == 0
+            ? 0
+            : PlaybackIndex + 1;
+
+    private string PlaybackTimeText
+    {
+        get
+        {
+            if (PlaybackPoints.Count == 0)
+                return "-";
+
+            var point =
+                PlaybackPoints[PlaybackIndex];
+
+            return ToLocalTime(
+                point.RecordedAtUtc)
+                .ToString("HH:mm:ss");
+        }
+    }
+
+    [JSInvokable]
+    public async Task LocationChanged(object? data)
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            /*
+             * Fast path:
+             * the browser-side SignalR listener updates the existing Leaflet
+             * marker immediately. Keep the Blazor state in sync without
+             * forcing a database round-trip for every GPS fix.
+             *
+             * If the payload is not a normal coordinate update, or it belongs
+             * to a new session/employee, fall back to the authoritative DB
+             * snapshot. This preserves the existing lifecycle safety rules.
+             */
+            if (!TryApplyLocationPayload(data, out var needsAuthoritativeRefresh))
+            {
+                needsAuthoritativeRefresh = true;
+            }
+
+            if (needsAuthoritativeRefresh)
+            {
+                await RefreshLocations();
+            }
+            else
+            {
+                mapNeedsUpdate = true;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            // Refresh selected history only when the selected employee's
+            // current session actually changed. Normal GPS fixes do not need
+            // to reload the entire history table.
+            if (selectedEmployeeId > 0 &&
+                TryGetPayloadEmployeeId(data, out var changedEmployeeId) &&
+                changedEmployeeId == selectedEmployeeId)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin SignalR location update failed: {ex}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task SessionStarted(object? data = null)
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            // A new employee can start tracking after this admin page has
+            // already rendered. Refresh the authoritative membership once.
+            await RefreshLocations();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin GPS session-start refresh failed: {ex}");
+        }
+    }
+
+    private static bool TryGetPayloadEmployeeId(
+        object? data,
+        out int employeeId)
+    {
+        employeeId = 0;
+
+        if (data is not JsonElement json ||
+            json.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!json.TryGetProperty("EmployeeId", out var idProperty) &&
+            !json.TryGetProperty("employeeId", out idProperty))
+        {
+            return false;
+        }
+
+        return idProperty.TryGetInt32(out employeeId) && employeeId > 0;
+    }
+
+    private bool TryApplyLocationPayload(
+        object? data,
+        out bool needsAuthoritativeRefresh)
+    {
+        needsAuthoritativeRefresh = false;
+
+        if (data is not JsonElement json ||
+            json.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!TryGetPayloadEmployeeId(data, out var employeeId))
+        {
+            return false;
+        }
+
+        if (TryGetJsonInt(json, "AllowedRadiusMeters", out var newRadius) &&
+            newRadius > 0 && newRadius != currentOfficeRadius)
+        {
+            currentOfficeRadius = newRadius;
+        }
+
+        if (!TryGetJsonDouble(json, "Latitude", out var latitude) ||
+            !TryGetJsonDouble(json, "Longitude", out var longitude) ||
+            !double.IsFinite(latitude) ||
+            !double.IsFinite(longitude))
+        {
+            return false;
+        }
+
+        var sessionId = Guid.Empty;
+
+        if (TryGetJsonString(json, "SessionId", out var sessionText))
+        {
+            Guid.TryParse(sessionText, out sessionId);
+        }
+
+        var existingIndex = locations.FindIndex(
+            x => x.EmployeeId == employeeId);
+
+        if (existingIndex < 0)
+        {
+            // If the employee is not in the list (e.g. session just started),
+            // add them immediately using the data in this packet.
+            // This avoids waiting for a database refresh and fixes the lag.
+            var newLocation = new LiveEmployeeLocation
+            {
+                EmployeeId = employeeId,
+                Latitude = latitude,
+                Longitude = longitude,
+                AccuracyMeters = TryGetJsonDouble(json, "AccuracyMeters", out var accVal) ? accVal : 0,
+                DistanceMeters = TryGetJsonDouble(json, "DistanceMeters", out var distVal) ? distVal : 0,
+                AllowedRadiusMeters = TryGetJsonInt(json, "AllowedRadiusMeters", out var radVal) ? radVal : 0,
+                IsWithinAllowedRadius = TryGetJsonBool(json, "IsWithinAllowedRadius", out var withinVal) ? withinVal : true,
+                LastUpdatedUtc = TryGetJsonDateTime(json, "LastUpdatedUtc", out var updVal) ? updVal : DateTime.UtcNow,
+                SessionStartedUtc = TryGetJsonDateTime(json, "SessionStartedUtc", out var startVal) ? startVal : DateTime.UtcNow,
+                SessionId = sessionId
+            };
+
+            locations.Add(newLocation);
+
+            // Still set needsAuthoritativeRefresh to true to ensure
+            // the full Employee object is loaded if it's missing.
+            needsAuthoritativeRefresh = !employees.Any(e => e.EmployeeID == employeeId);
+            return true;
+        }
+
+        var existing = locations[existingIndex];
+
+        // A delayed packet from an older GPS session must never overwrite
+        // the current session's coordinates.
+        if (sessionId != Guid.Empty &&
+            existing.SessionId != Guid.Empty &&
+            existing.SessionId != sessionId)
+        {
+            needsAuthoritativeRefresh = true;
+            return true;
+        }
+
+        // LiveEmployeeLocation intentionally exposes init-only properties.
+        // Replace the immutable snapshot item instead of mutating it.
+        var updatedLocation = new LiveEmployeeLocation
+        {
+            EmployeeId = existing.EmployeeId,
+            Latitude = latitude,
+            Longitude = longitude,
+            AccuracyMeters = TryGetJsonDouble(json, "AccuracyMeters", out var accuracyVal)
+                ? accuracyVal
+                : existing.AccuracyMeters,
+            DistanceMeters = TryGetJsonDouble(json, "DistanceMeters", out var distanceVal)
+                ? distanceVal
+                : existing.DistanceMeters,
+            AllowedRadiusMeters = TryGetJsonInt(json, "AllowedRadiusMeters", out var radiusVal)
+                ? radiusVal
+                : existing.AllowedRadiusMeters,
+            IsWithinAllowedRadius = TryGetJsonBool(json, "IsWithinAllowedRadius", out var updatedWithinVal)
+                ? updatedWithinVal
+                : existing.IsWithinAllowedRadius,
+            LastUpdatedUtc = TryGetJsonDateTime(json, "LastUpdatedUtc", out var updatedTimeVal)
+                ? updatedTimeVal
+                : DateTime.UtcNow,
+            SessionStartedUtc = existing.SessionStartedUtc,
+            SessionId = sessionId != Guid.Empty
+                ? sessionId
+                : existing.SessionId
+        };
+
+        locations[existingIndex] = updatedLocation;
+        return true;
+    }
+
+    private static bool TryGetJsonDouble(
+        JsonElement json,
+        string name,
+        out double value)
+    {
+        value = 0;
+
+        if (!json.TryGetProperty(name, out var property) &&
+            !json.TryGetProperty(
+                char.ToLowerInvariant(name[0]) + name[1..],
+                out property))
+        {
+            return false;
+        }
+
+        return property.ValueKind == JsonValueKind.Number &&
+               property.TryGetDouble(out value);
+    }
+
+    private static bool TryGetJsonBool(
+        JsonElement json,
+        string name,
+        out bool value)
+    {
+        value = false;
+
+        if (!json.TryGetProperty(name, out var property) &&
+            !json.TryGetProperty(
+                char.ToLowerInvariant(name[0]) + name[1..],
+                out property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind != JsonValueKind.True &&
+            property.ValueKind != JsonValueKind.False)
+        {
+            return false;
+        }
+
+        value = property.GetBoolean();
+        return true;
+    }
+
+    private static bool TryGetJsonInt(
+        JsonElement json,
+        string name,
+        out int value)
+    {
+        value = 0;
+
+        if (!json.TryGetProperty(name, out var property) &&
+            !json.TryGetProperty(
+                char.ToLowerInvariant(name[0]) + name[1..],
+                out property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind != JsonValueKind.Number ||
+            !property.TryGetInt32(out value))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryGetJsonString(
+        JsonElement json,
+        string name,
+        out string value)
+    {
+        value = string.Empty;
+
+        if (!json.TryGetProperty(name, out var property) &&
+            !json.TryGetProperty(
+                char.ToLowerInvariant(name[0]) + name[1..],
+                out property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+            return false;
+
+        value = property.GetString() ?? string.Empty;
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static bool TryGetJsonDateTime(
+        JsonElement json,
+        string name,
+        out DateTime value)
+    {
+        value = default;
+
+        if (!TryGetJsonString(json, name, out var text))
+            return false;
+
+        return DateTime.TryParse(
+            text,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out value);
+    }
+
+    // The shared attendance SignalR hub broadcasts NotificationChanged to all
+    // registered listeners. This component is registered as a general listener
+    // but does not own notification UI. Keep a no-op invokable endpoint so a
+    // notification broadcast cannot produce a Blazor JS interop exception.
+    // This is presentation/realtime plumbing only and does not alter business logic.
+    [JSInvokable]
+    public Task NotificationChanged(object? data = null)
+    {
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task AttendanceChanged(object? data = null)
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            await RefreshLocations();
+            await RefreshSelectedEmployeePunchAuditsSilently();
+            await LoadSelectedEmployeeHistory();
+
+            await Task.Delay(300);
+            await RefreshSelectedEmployeePunchAuditsSilently();
+            await LoadSelectedEmployeeHistory();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin attendance update failed: {ex}");
+        }
+    }
+
+    private string PlaybackDistanceText
+    {
+        get
+        {
+            if (PlaybackPoints.Count == 0)
+                return "-";
+
+            return FormatDistance(
+                PlaybackPoints[PlaybackIndex]
+                    .DistanceFromOfficeMeters);
+        }
+    }
+
+    private string GetHistorySessionStatus(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+            return "Ended";
+
+        if (!gpsSessionLookup.TryGetValue(
+                sessionId,
+                out var session))
+        {
+            return "Ended";
+        }
+
+        /*
+         * EndedAtUtc == null means the GPS session
+         * has not been explicitly closed yet.
+         */
+        return session.EndedAtUtc.HasValue
+            ? "Ended"
+            : "Active";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEmployees();
+
+        /*
+         * Initial snapshot only.
+         *
+         * After this, GPS updates arrive through SignalR.
+         */
+        await RefreshLocations();
+
+        /*
+         * Keep the existing timer only for:
+         *
+         * 1. Playback state
+         * 2. LIVE → STALE → OFFLINE UI aging
+         *
+         * It MUST NOT call RefreshLocations().
+         */
+        refreshCts =
+            new CancellationTokenSource();
+
+        _ =
+            AutoRefresh(
+                refreshCts.Token);
+    }
+
+
+    private async Task LoadEmployees()
+    {
+        try
+        {
+            await using var db =
+                await DbFactory.CreateDbContextAsync();
+
+            var data =
+                await db.Employees
+                    .AsNoTracking()
+                    .Where(e =>
+                        !e.TerminationDate.HasValue)
+                    .OrderBy(e => e.Name)
+                    .ToListAsync();
+
+            employees.Clear();
+
+            employees.AddRange(data);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Live staff employee load failed: {ex}");
+        }
+    }
+
+
+    private async Task RefreshLocations()
+    {
+        if (isRefreshing)
+        {
+            refreshQueued = true;
+            return;
+        }
+
+        isRefreshing = true;
+
+        try
+        {
+            do
+            {
+                refreshQueued = false;
+
+                await using var db =
+                    await DbFactory.CreateDbContextAsync();
+
+                // EmployeeGpsSessions is the authoritative lifecycle source.
+                // Only EndedAtUtc == null sessions are allowed into the live
+                // collection, and only the newest active session per employee
+                // can appear. This prevents stale SignalR packets from creating
+                // phantom Live entries such as 3 Live / 2 employees.
+                var employeeIds = employees
+                    .Select(e => e.EmployeeID)
+                    .ToList();
+
+                // A GPS session is live only when it belongs to a current
+                // employee and the session itself is still active in the
+                // authoritative database. Device locks are intentionally NOT
+                // required here: web-browser employees have a valid GPS
+                // session even when their device-lock lifecycle is different
+                // from the mobile bearer lifecycle. Abandoned mobile sessions
+                // are closed by the dedicated mobile lease cleanup service.
+                var activeSessions = await (
+                    from session in db.EmployeeGpsSessions.AsNoTracking()
+                    join employee in db.Employees.AsNoTracking()
+                        on session.EmployeeId equals employee.EmployeeID
+                    where employeeIds.Contains(session.EmployeeId)
+                          && !employee.IsDeleted
+                          && !session.EndedAtUtc.HasValue
+                          && session.LastLatitude.HasValue
+                          && session.LastLongitude.HasValue
+                    orderby session.EmployeeId, session.StartedAtUtc descending
+                    select session)
+                    .ToListAsync();
+
+                var snapshot = new List<LiveEmployeeLocation>();
+                var seenEmployees = new HashSet<int>();
+
+                foreach (var session in activeSessions)
+                {
+                    if (!seenEmployees.Add(session.EmployeeId))
+                        continue;
+
+                    snapshot.Add(new LiveEmployeeLocation
+                    {
+                        EmployeeId = session.EmployeeId,
+                        Latitude = session.LastLatitude!.Value,
+                        Longitude = session.LastLongitude!.Value,
+                        AccuracyMeters = session.LastAccuracyMeters ?? 0,
+                        DistanceMeters = session.LastDistanceFromOfficeMeters ?? 0,
+                        AllowedRadiusMeters = session.LastAllowedRadiusMeters ?? 0,
+                        IsWithinAllowedRadius = session.LastIsWithinAllowedRadius ?? false,
+                        LastUpdatedUtc = session.LastUpdateAtUtc,
+                        SessionStartedUtc = session.StartedAtUtc,
+                        SessionId = session.SessionId
+                    });
+                }
+
+                locations.Clear();
+                locations.AddRange(snapshot);
+
+                // Initialize currentOfficeRadius from DB on first load/refresh
+                var office = await GetOfficeLocation();
+                currentOfficeRadius = office.Radius;
+
+                lastRefresh = DateTime.Now;
+                mapNeedsUpdate = true;
+
+                await InvokeAsync(StateHasChanged);
+            }
+            while (refreshQueued && !disposed);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Live location refresh failed: {ex}");
+        }
+        finally
+        {
+            isRefreshing = false;
+        }
+    }
+
+    // ============================================================
+    // GPS SESSION ENDED
+    // ============================================================
+    //
+    // Logout/session-end is a lifecycle event, not a location update.
+    // Remove the employee from the active list immediately and then
+    // reload the authoritative DB snapshot so an old in-memory entry
+    // can never remain visible.
+    // ============================================================
+
+    [JSInvokable]
+    public async Task SessionEnded(object? data = null)
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            // Fast path: remove the employee from the local collection immediately
+            // to stop tracking on the UI while the authoritative DB refresh runs.
+            if (TryGetPayloadEmployeeId(data, out var employeeId))
+            {
+                locations.RemoveAll(x => x.EmployeeId == employeeId);
+            }
+
+            await RefreshLocations();
+
+            mapNeedsUpdate = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin GPS session-end refresh failed: {ex}");
+        }
+    }
+
+
+    private async Task AutoRefresh(
+    CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(5),
+                    token);
+
+                if (token.IsCancellationRequested)
+                    break;
+
+                // Live location membership and coordinates are pushed through
+                // SignalR. Do not poll the database every few seconds because
+                // that creates unnecessary redraws and makes the map feel noisy.
+                // This timer only ages the UI status and advances playback.
+                await InvokeAsync(StateHasChanged);
+
+                await PollPlaybackState();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Live staff UI timer failed: {ex}");
+        }
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && liveLocationSignalRReference == null && !disposed)
+        {
+            liveLocationSignalRReference =
+                DotNetObjectReference.Create(this);
+
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "attendanceRefresh.register",
+                    liveLocationSignalRReference);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Unable to register admin live location SignalR listener: {ex}");
+            }
+
+            // Register to receive periodic location health updates (lightweight)
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "attendanceRefresh.registerLocationHealth",
+                    liveLocationSignalRReference);
+            }
+            catch { }
+
+            // Register a browser-side fast path for GPS coordinates. This
+            // animates the existing Leaflet marker immediately when a
+            // LocationChanged SignalR event arrives, while Blazor continues
+            // to own authoritative state and lifecycle decisions.
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "registerAdminLiveLocationRealtime",
+                    mapId);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Unable to register admin live location realtime bridge: {ex}");
+            }
+
+            // The first snapshot can race an employee login. One additional
+            // authoritative snapshot after the component is interactive makes
+            // initial markers appear without requiring the Refresh button.
+            try
+            {
+                await RefreshLocations();
+            }
+            catch { }
+        }
+
+        if (!mapNeedsUpdate)
+            return;
+
+        mapNeedsUpdate = false;
+
+        try
+        {
+            var office = await GetOfficeLocation();
+
+            var staff = locations
+                .Select(x => new AdminMapLocation
+                {
+                    EmployeeId = x.EmployeeId,
+                    Name = employees
+                        .FirstOrDefault(e => e.EmployeeID == x.EmployeeId)
+                        ?.Name ?? "Employee",
+                    Latitude = x.Latitude,
+                    Longitude = x.Longitude,
+                    DistanceMeters = x.DistanceMeters,
+                    AllowedRadiusMeters = x.AllowedRadiusMeters,
+                    IsWithinAllowedRadius = x.IsWithinAllowedRadius,
+                    AccuracyMeters = x.AccuracyMeters,
+                    LastUpdatedUtc = x.LastUpdatedUtc,
+                    SessionStartedUtc = x.SessionStartedUtc,
+                    Status = GetLocationStatus(x).ToString()
+                })
+                .ToList();
+
+            await JSRuntime.InvokeVoidAsync(
+                "updateAdminLiveStaffMap",
+                mapId,
+                office.Latitude,
+                office.Longitude,
+                currentOfficeRadius,
+                staff,
+                selectedEmployeeId,
+                isPlaybackFullscreen,
+                liveLocationSignalRReference);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin live map update failed: {ex}");
+        }
+    }
+
+
+    private async Task<(double Latitude, double Longitude, int Radius)>
+        GetOfficeLocation()
+    {
+        await using var db =
+            await DbFactory.CreateDbContextAsync();
+
+        var company =
+            await db.CompanySettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    s => s.SettingID == 1);
+
+        return (
+            company?.OfficeLatitude ?? 0,
+            company?.OfficeLongitude ?? 0,
+            company?.GeoRadiusMeters ?? 100);
+    }
+
+
+    [JSInvokable]
+    public async Task SelectEmployeeFromMap(int employeeId)
+    {
+        await SelectEmployee(employeeId);
+    }
+
+
+    private async Task SelectEmployee(int employeeId)
+    {
+        if (employeeId <= 0)
+            return;
+
+        /*
+         * ============================================================
+         * TOGGLE BEHAVIOUR
+         *
+         * Clicking the currently selected employee again collapses
+         * ALL employee details.
+         *
+         * Clicking another employee switches the expanded details
+         * to that employee.
+         * ============================================================
+         */
+        if (selectedEmployeeId == employeeId)
+        {
+            await StopPlayback();
+
+            selectedEmployeeId = 0;
+
+            selectedHistory.Clear();
+            selectedPunchAudits.Clear();
+
+            selectedPunchAudit = null;
+
+            gpsSessionLookup.Clear();
+
+            selectedPlaybackSessionId = null;
+
+            playbackIndex = 0;
+            playbackStatus = "Ready";
+
+            mapNeedsUpdate = true;
+
+            await InvokeAsync(StateHasChanged);
+
+            return;
+        }
+
+        /*
+         * ============================================================
+         * SELECT NEW EMPLOYEE
+         * ============================================================
+         */
+
+        await StopPlayback();
+
+        selectedEmployeeId = employeeId;
+
+        historyDate = DateTime.Today;
+        punchAuditDate = historyDate;
+
+        selectedPunchAudit = null;
+
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+
+        await LoadSelectedEmployeeHistory();
+
+        punchAuditDate = historyDate;
+
+        await LoadSelectedEmployeePunchAudits();
+
+        mapNeedsUpdate = true;
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+
+    private async Task LoadSelectedEmployeeHistory()
+    {
+        if (selectedEmployeeId <= 0)
+        {
+            selectedHistory.Clear();
+
+            selectedPlaybackSessionId = null;
+
+            gpsSessionLookup.Clear();
+
+            playbackIndex = 0;
+
+            return;
+        }
+
+        historyLoading = true;
+
+        try
+        {
+            await StopPlayback();
+
+            selectedHistory =
+    await LocationHistoryService
+        .GetDateAsync(
+            selectedEmployeeId,
+            historyDate);
+
+            /*
+             * Load the real GPS session records corresponding
+             * to the history points.
+             *
+             * This allows the session timeline to distinguish
+             * an active session from an ended session instead
+             * of showing every session as "Recorded".
+             */
+            var sessionIds =
+                selectedHistory
+                    .Where(x => x.SessionId != Guid.Empty)
+                    .Select(x => x.SessionId)
+                    .Distinct()
+                    .ToList();
+
+            gpsSessionLookup =
+                await LocationHistoryService
+                    .GetGpsSessionsByIdsAsync(
+                        selectedEmployeeId,
+                        sessionIds);
+
+            playbackIndex = 0;
+            selectedPlaybackSessionId = null;
+
+            playbackStatus =
+                "Ready";
+
+            mapNeedsUpdate = true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Location history load failed: {ex}");
+
+            selectedHistory.Clear();
+
+            gpsSessionLookup.Clear();
+            selectedPlaybackSessionId = null;
+
+            playbackIndex = 0;
+
+            playbackStatus =
+                "Ready";
+        }
+        finally
+        {
+            historyLoading = false;
+
+            await InvokeAsync(
+                StateHasChanged);
+        }
+    }
+
+
+    private async Task LoadSelectedEmployeePunchAudits()
+    {
+        if (selectedEmployeeId <= 0)
+        {
+            selectedPunchAudits.Clear();
+            return;
+        }
+
+        punchAuditLoading = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            TimeZoneInfo indiaTimeZone;
+
+            try
+            {
+                indiaTimeZone =
+                    TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                indiaTimeZone =
+                    TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            }
+
+            var indiaStart =
+                DateTime.SpecifyKind(
+                    punchAuditDate.Date,
+                    DateTimeKind.Unspecified);
+
+            var indiaEnd =
+                DateTime.SpecifyKind(
+                    punchAuditDate.Date.AddDays(1),
+                    DateTimeKind.Unspecified);
+
+            var startUtc =
+                TimeZoneInfo.ConvertTimeToUtc(
+                    indiaStart,
+                    indiaTimeZone);
+
+            var endUtc =
+                TimeZoneInfo.ConvertTimeToUtc(
+                    indiaEnd,
+                    indiaTimeZone);
+
+            selectedPunchAudits = await db.GeoPunchAudits
+                .AsNoTracking()
+                .Where(x => x.EmployeeId == selectedEmployeeId &&
+                            x.PunchTimeUtc >= startUtc &&
+                            x.PunchTimeUtc < endUtc)
+                .OrderByDescending(x => x.PunchTimeUtc)
+                .ToListAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Geo punch audit load failed: {ex}");
+            selectedPunchAudits.Clear();
+        }
+        finally
+        {
+            punchAuditLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RefreshSelectedEmployeePunchAuditsSilently()
+    {
+        /*
+         * No employee selected = nothing to refresh.
+         */
+        if (selectedEmployeeId <= 0)
+            return;
+
+        /*
+         * Do not compete with a manual/date-change audit load.
+         */
+        if (punchAuditLoading)
+            return;
+
+        try
+        {
+            await using var db =
+                await DbFactory.CreateDbContextAsync();
+
+            var employeeId = selectedEmployeeId;
+            
+
+            var indiaTimeZone =
+     TimeZoneInfo.FindSystemTimeZoneById(
+         "Asia/Kolkata");
+
+            var indiaStart =
+                DateTime.SpecifyKind(
+                    punchAuditDate.Date,
+                    DateTimeKind.Unspecified);
+
+            var indiaEnd =
+                DateTime.SpecifyKind(
+                    punchAuditDate.Date.AddDays(1),
+                    DateTimeKind.Unspecified);
+
+            var startUtc =
+                TimeZoneInfo.ConvertTimeToUtc(
+                    indiaStart,
+                    indiaTimeZone);
+
+            var endUtc =
+                TimeZoneInfo.ConvertTimeToUtc(
+                    indiaEnd,
+                    indiaTimeZone);
+
+            var latestAudits =
+                await db.GeoPunchAudits
+                    .AsNoTracking()
+                    .Where(x =>
+                        x.EmployeeId == employeeId &&
+                        x.PunchTimeUtc >= startUtc &&
+                        x.PunchTimeUtc < endUtc)
+                    .OrderByDescending(x => x.PunchTimeUtc)
+                    .ToListAsync();
+
+            /*
+             * Replace the displayed snapshot atomically.
+             * This makes a newly inserted mobile punch appear in
+             * the existing audit card without leaving the page.
+             */
+            selectedPunchAudits = latestAudits;
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            /*
+             * Background refresh must never break the page/circuit.
+             */
+            Console.Error.WriteLine(
+                $"Real-time geo punch audit refresh failed: {ex}");
+        }
+    }
+
+
+    private async Task ChangePunchAuditDate(ChangeEventArgs e)
+    {
+        if (!DateTime.TryParse(e.Value?.ToString(), out var date)) return;
+        await StopPlayback();
+        historyDate = date.Date;
+        punchAuditDate = date.Date;
+        selectedPlaybackSessionId = null;
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+        selectedPunchAudit = null;
+        await LoadSelectedEmployeeHistory();
+        await LoadSelectedEmployeePunchAudits();
+        mapNeedsUpdate = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ChangeAuditDateByDays(int days)
+    {
+        await ChangePunchAuditDate(
+            new ChangeEventArgs
+            {
+                Value = punchAuditDate.Date.AddDays(days).ToString("yyyy-MM-dd")
+            });
+    }
+
+    private async Task ChangeHistoryDate(ChangeEventArgs e)
+    {
+        if (!DateTime.TryParse(e.Value?.ToString(), out var date)) return;
+        await StopPlayback();
+        historyDate = date.Date;
+        punchAuditDate = date.Date;
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+        selectedPunchAudit = null;
+        await LoadSelectedEmployeeHistory();
+        await LoadSelectedEmployeePunchAudits();
+        mapNeedsUpdate = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ChangeHistoryDateByDays(int days)
+    {
+        await ChangeHistoryDate(
+            new ChangeEventArgs
+            {
+                Value = historyDate.Date.AddDays(days).ToString("yyyy-MM-dd")
+            });
+    }
+
+    private void OpenPunchAudit(GeoPunchAudit audit) => selectedPunchAudit = audit;
+    private void ClosePunchAudit() => selectedPunchAudit = null;
+
+    private static string GetAccuracyLabel(double meters)
+    {
+        if (meters <= 0) return "Unknown";
+        if (meters <= 20) return "Excellent";
+        if (meters <= 50) return "Good";
+        if (meters <= 100) return "Fair";
+        if (meters <= 200) return "Poor";
+        return "Very Poor";
+    }
+
+    private static string GetAccuracyClass(double meters)
+    {
+        if (meters <= 0) return "unknown";
+        if (meters <= 20) return "excellent";
+        if (meters <= 50) return "good";
+        if (meters <= 100) return "fair";
+        if (meters <= 200) return "poor";
+        return "very-poor";
+    }
+
+
+
+    private double HistoryAverageAccuracy =>
+        selectedHistory.Count == 0
+            ? 0
+            : selectedHistory.Where(x => x.AccuracyMeters > 0).Select(x => x.AccuracyMeters).DefaultIfEmpty().Average();
+
+    private double HistoryWorstAccuracy =>
+        selectedHistory.Count == 0
+            ? 0
+            : selectedHistory.Max(x => x.AccuracyMeters);
+
+    private int HistoryPoorAccuracyCount =>
+        selectedHistory.Count(x => x.AccuracyMeters > 100);
+
+    private int HistoryOutsideRangeCount =>
+        selectedHistory.Count(x => !x.IsWithinAllowedRadius);
+
+    private int HistorySessionCount =>
+        HistorySessions.Count;
+
+    private List<SessionSummary> HistorySessions =>
+        selectedHistory
+            .GroupBy(x => x.SessionId)
+            .Select(g =>
+            {
+                var points = g.OrderBy(x => x.RecordedAtUtc).ToList();
+                double travel = 0;
+                for (int i = 1; i < points.Count; i++)
+                    travel += CalculateDistance(points[i - 1].Latitude, points[i - 1].Longitude, points[i].Latitude, points[i].Longitude);
+                var accuracies = points.Where(x => x.AccuracyMeters > 0).Select(x => x.AccuracyMeters).ToList();
+                return new SessionSummary
+                {
+                    SessionId = g.Key,
+                    StartUtc = points.First().RecordedAtUtc,
+                    EndUtc = points.Last().RecordedAtUtc,
+                    PointCount = points.Count,
+                    TravelMeters = travel,
+                    AverageAccuracy = accuracies.Count == 0 ? 0 : accuracies.Average()
+                };
+            })
+            .OrderByDescending(x => x.StartUtc)
+            .ToList();
+
+    private static string ShortSessionId(Guid sessionId)
+    {
+        var value = sessionId.ToString("N");
+        return value.Length <= 8 ? value : value[..8];
+    }
+
+    private async Task SelectPlaybackSession(Guid sessionId)
+    {
+        if (sessionId == Guid.Empty)
+            return;
+
+        if (!selectedHistory.Any(x => x.SessionId == sessionId))
+            return;
+
+        await StopPlayback();
+
+        selectedPlaybackSessionId = sessionId;
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+
+        // Load the selected session route on the map without starting playback.
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "startAdminHistoryPlayback",
+                mapId,
+                PlaybackPoints,
+                SelectedEmployeeName,
+                playbackSpeed,
+                0);
+
+            await JSRuntime.InvokeVoidAsync(
+                "pauseAdminHistoryPlayback",
+                mapId);
+        }
+        catch { }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SelectFullDayPlayback()
+    {
+        if (!selectedPlaybackSessionId.HasValue)
+            return;
+
+        await StopPlayback();
+
+        selectedPlaybackSessionId = null;
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+
+        // Restore the complete day's route on the map without playing it.
+        if (PlaybackPoints.Count > 0)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "startAdminHistoryPlayback",
+                    mapId,
+                    PlaybackPoints,
+                    SelectedEmployeeName,
+                    playbackSpeed,
+                    0);
+
+                await JSRuntime.InvokeVoidAsync(
+                    "pauseAdminHistoryPlayback",
+                    mapId);
+            }
+            catch { }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PlayHistory()
+    {
+        if (!CanPlayback || selectedEmployeeId <= 0)
+            return;
+
+        if (PlaybackIndex >= PlaybackPoints.Count - 1)
+            playbackIndex = 0;
+
+        playbackStatus = "Playing";
+        isPlaybackFullscreen = true;
+
+        await InvokeAsync(StateHasChanged);
+
+        await JSRuntime.InvokeVoidAsync(
+            "startAdminHistoryPlayback",
+            mapId,
+            PlaybackPoints,
+            SelectedEmployeeName,
+            playbackSpeed,
+            playbackIndex);
+
+        StartPlaybackPolling();
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+
+    private async Task ExitPlayback()
+    {
+        isPlaybackFullscreen = false;
+
+        await StopPlayback();
+
+        mapNeedsUpdate = true;
+
+        await InvokeAsync(StateHasChanged);
+
+        // Restore the normal map dimensions after the fullscreen presentation
+        // has been removed. The map data itself remains untouched.
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "restoreAdminHistoryPlaybackLayout",
+                mapId);
+        }
+        catch
+        {
+        }
+    }
+
+
+    private async Task PauseHistory()
+    {
+        if (!CanPlayback)
+            return;
+
+        playbackStatus =
+            "Paused";
+
+        await JSRuntime.InvokeVoidAsync(
+            "pauseAdminHistoryPlayback",
+            mapId);
+
+        await InvokeAsync(
+            StateHasChanged);
+    }
+
+
+    private async Task ResetHistory()
+    {
+        if (!CanPlayback)
+            return;
+
+        await JSRuntime.InvokeVoidAsync(
+            "resetAdminHistoryPlayback",
+            mapId);
+
+        playbackIndex = 0;
+
+        playbackStatus =
+            "Ready";
+
+        await InvokeAsync(
+            StateHasChanged);
+    }
+
+
+    private bool IsHistoryPointActive(int historyIndex)
+    {
+        if (historyIndex < 0 || historyIndex >= selectedHistory.Count || !CanPlayback)
+            return false;
+
+        var point = selectedHistory[historyIndex];
+
+        if (selectedPlaybackSessionId.HasValue &&
+            point.SessionId != selectedPlaybackSessionId.Value)
+            return false;
+
+        var playbackPoint = PlaybackPoints[PlaybackIndex];
+        return playbackPoint.Id == point.Id;
+    }
+
+    private async Task SelectHistoryPoint(int index)
+    {
+        if (index < 0 || index >= selectedHistory.Count)
+            return;
+
+        var point = selectedHistory[index];
+
+        // If a session is selected, clicking a point from another session
+        // automatically switches playback to that session.
+        if (selectedPlaybackSessionId.HasValue &&
+            point.SessionId != selectedPlaybackSessionId.Value)
+        {
+            await SelectPlaybackSession(point.SessionId);
+            return;
+        }
+
+        var playbackIndexForPoint = selectedPlaybackSessionId.HasValue
+            ? PlaybackPoints
+                .Select((x, i) => new { x, i })
+                .FirstOrDefault(x => x.x.Id == point.Id)?.i ?? -1
+            : index;
+
+        if (playbackIndexForPoint < 0)
+            return;
+
+        playbackIndex = playbackIndexForPoint;
+        playbackStatus = "Paused";
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("pauseAdminHistoryPlayback", mapId);
+            await JSRuntime.InvokeVoidAsync("seekAdminHistoryPlayback", mapId, playbackIndex);
+        }
+        catch { }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+
+    private async Task SeekHistoryFromSlider(ChangeEventArgs e)
+    {
+        if (!CanPlayback)
+            return;
+
+        if (!int.TryParse(e.Value?.ToString(), out var index))
+            return;
+
+        index = Math.Max(0, Math.Min(PlaybackPoints.Count - 1, index));
+        playbackIndex = index;
+
+        await JSRuntime.InvokeVoidAsync(
+            "seekAdminHistoryPlayback",
+            mapId,
+            index);
+
+        playbackStatus =
+            "Paused";
+
+        await InvokeAsync(
+            StateHasChanged);
+    }
+
+
+    private async Task ChangePlaybackSpeed(
+        ChangeEventArgs e)
+    {
+        if (!double.TryParse(
+            e.Value?.ToString(),
+            out var speed))
+            return;
+
+        playbackSpeed =
+            Math.Max(.25, speed);
+
+        if (CanPlayback)
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "setAdminHistoryPlaybackSpeed",
+                mapId,
+                playbackSpeed);
+        }
+    }
+
+
+    private void StartPlaybackPolling()
+    {
+        if (playbackStateCts != null)
+            return;
+
+        playbackStateCts =
+            new CancellationTokenSource();
+
+        _ =
+            PollPlaybackLoop(
+                playbackStateCts.Token);
+    }
+
+
+    private async Task PollPlaybackLoop(
+        CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(
+                    400,
+                    token);
+
+                if (token.IsCancellationRequested)
+                    break;
+
+                await PollPlaybackState();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Playback polling failed: {ex}");
+        }
+    }
+
+
+    private async Task PollPlaybackState()
+    {
+        if (!CanPlayback)
+            return;
+
+        try
+        {
+            var state =
+                await JSRuntime.InvokeAsync<PlaybackState?>(
+                    "getAdminHistoryPlaybackState",
+                    mapId);
+
+            if (state == null)
+                return;
+
+            var newIndex =
+                Math.Max(
+                    0,
+                    Math.Min(
+                        PlaybackPoints.Count - 1,
+                        state.Index));
+
+            var changed =
+                playbackIndex != newIndex;
+
+            playbackIndex =
+                newIndex;
+
+            if (state.Completed)
+            {
+                playbackStatus =
+                    "Completed";
+
+                StopPlaybackPolling();
+            }
+            else if (state.Playing)
+            {
+                playbackStatus =
+                    "Playing";
+            }
+
+            if (changed)
+            {
+                await InvokeAsync(
+                    StateHasChanged);
+            }
+        }
+        catch
+        {
+            // Browser circuit may be closing.
+        }
+    }
+
+
+    private void StopPlaybackPolling()
+    {
+        try
+        {
+            playbackStateCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        playbackStateCts?.Dispose();
+
+        playbackStateCts = null;
+    }
+
+
+    private async Task StopPlayback()
+    {
+        StopPlaybackPolling();
+        isPlaybackFullscreen = false;
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "stopAdminHistoryPlayback",
+                mapId);
+        }
+        catch
+        {
+        }
+
+        playbackIndex = 0;
+
+        playbackStatus =
+            "Ready";
+    }
+
+
+    private string SelectedEmployeeName =>
+        employees.FirstOrDefault(
+            x => x.EmployeeID ==
+                 selectedEmployeeId)
+        ?.Name
+        ?? "Employee";
+
+
+    private string HistoryStartText =>
+        selectedHistory.Count == 0
+            ? "-"
+            : ToLocalTime(
+                selectedHistory.First()
+                    .RecordedAtUtc)
+                .ToString("HH:mm:ss");
+
+
+    private string HistoryEndText =>
+        selectedHistory.Count == 0
+            ? "-"
+            : ToLocalTime(
+                selectedHistory.Last()
+                    .RecordedAtUtc)
+                .ToString("HH:mm:ss");
+
+
+    private double HistoryMaxDistance =>
+        selectedHistory.Count == 0
+            ? 0
+            : selectedHistory.Max(
+                x => x.DistanceFromOfficeMeters);
+
+
+    private double HistoryTravelDistance
+    {
+        get
+        {
+            if (selectedHistory.Count < 2)
+                return 0;
+
+            double total = 0;
+
+            for (int i = 1;
+                 i < selectedHistory.Count;
+                 i++)
+            {
+                total += CalculateDistance(
+                    selectedHistory[i - 1].Latitude,
+                    selectedHistory[i - 1].Longitude,
+                    selectedHistory[i].Latitude,
+                    selectedHistory[i].Longitude);
+            }
+
+            return total;
+        }
+    }
+
+
+    private static double CalculateDistance(
+        double lat1,
+        double lon1,
+        double lat2,
+        double lon2)
+    {
+        const double earthRadius =
+            6371000;
+
+        var r1 =
+            lat1 * Math.PI / 180;
+
+        var r2 =
+            lat2 * Math.PI / 180;
+
+        var dLat =
+            (lat2 - lat1) *
+            Math.PI / 180;
+
+        var dLon =
+            (lon2 - lon1) *
+            Math.PI / 180;
+
+        var a =
+            Math.Sin(dLat / 2) *
+            Math.Sin(dLat / 2) +
+            Math.Cos(r1) *
+            Math.Cos(r2) *
+            Math.Sin(dLon / 2) *
+            Math.Sin(dLon / 2);
+
+        var c =
+            2 *
+            Math.Atan2(
+                Math.Sqrt(a),
+                Math.Sqrt(1 - a));
+
+        return earthRadius * c;
+    }
+
+
+    private static string GetInitials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return "•";
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1)
+            return parts[0][0].ToString().ToUpperInvariant();
+
+        return $"{parts[0][0]}{parts[^1][0]}".ToUpperInvariant();
+    }
+
+
+    private LiveEmployeeLocation? GetLocation(
+        int employeeId) =>
+        locations.FirstOrDefault(
+            x => x.EmployeeId == employeeId);
+
+
+    private LocationStatus GetLocationStatus(
+        LiveEmployeeLocation? location)
+    {
+        if (location == null)
+            return LocationStatus.Offline;
+
+        var age =
+            DateTime.UtcNow -
+            location.LastUpdatedUtc;
+
+        // The LiveLocationStore is the source of truth for the active
+        // employee GPS session. Its thresholds are intentionally long so
+        // a browser background/sleep throttle does not turn a still-logged-in
+        // employee into Offline merely because a fresh GPS point was delayed.
+        // The actual LastUpdated time is still displayed separately.
+        if (age <= TimeSpan.FromSeconds(LiveLocationStore.LiveTimeoutSeconds))
+            return LocationStatus.Live;
+
+        if (age <= TimeSpan.FromSeconds(LiveLocationStore.StaleTimeoutSeconds))
+            return LocationStatus.Stale;
+
+        return LocationStatus.Offline;
+    }
+
+
+    private static string GetStatusText(
+        LocationStatus status) =>
+        status switch
+        {
+            LocationStatus.Live =>
+                "Live",
+
+            LocationStatus.Stale =>
+                "Stale",
+
+            _ =>
+                "Offline"
+        };
+
+
+    private static string GetStatusClass(
+        LocationStatus status) =>
+        status switch
+        {
+            LocationStatus.Live =>
+                "online",
+
+            LocationStatus.Stale =>
+                "stale",
+
+            _ =>
+                "offline"
+        };
+
+
+    private static string GetAvatarClass(
+        LocationStatus status) =>
+        status switch
+        {
+            LocationStatus.Live =>
+                "live",
+
+            LocationStatus.Stale =>
+                "stale",
+
+            _ =>
+                "offline"
+        };
+
+
+    private static TimeSpan GetSessionDuration(
+        LiveEmployeeLocation location)
+    {
+        var duration =
+            DateTime.UtcNow -
+            location.SessionStartedUtc;
+
+        return duration < TimeSpan.Zero
+            ? TimeSpan.Zero
+            : duration;
+    }
+
+
+    private static string FormatDuration(
+        TimeSpan duration)
+    {
+        if (duration.TotalDays >= 1)
+        {
+            return
+                $"{(int)duration.TotalDays}d " +
+                $"{duration.Hours:00}h " +
+                $"{duration.Minutes:00}m";
+        }
+
+        if (duration.TotalHours >= 1)
+        {
+            return
+                $"{(int)duration.TotalHours}h " +
+                $"{duration.Minutes:00}m";
+        }
+
+        return
+            $"{duration.Minutes:00}m " +
+            $"{duration.Seconds:00}s";
+    }
+
+
+    private string GetFooterText() =>
+        lastRefresh.HasValue
+            ? $"Last updated {lastRefresh.Value:HH:mm:ss}"
+            : "Waiting for location updates";
+
+
+    private static string FormatDistance(
+        double meters) =>
+        meters < 1000
+            ? $"{meters:F0} m"
+            : $"{meters / 1000:F2} km";
+
+    private static string FormatAccuracy(double meters)
+    {
+        if (meters <= 0)
+            return "Unknown";
+
+        return meters < 1000
+            ? $"±{meters:F0} m"
+            : $"±{meters / 1000:F2} km";
+    }
+
+    private static DateTime ToLocalTime(DateTime utc)
+    {
+        var utcValue = DateTime.SpecifyKind(
+            utc,
+            DateTimeKind.Utc);
+
+        TimeZoneInfo indiaTimeZone;
+
+        try
+        {
+            indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            indiaTimeZone =
+                TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        }
+
+        return TimeZoneInfo.ConvertTimeFromUtc(
+            utcValue,
+            indiaTimeZone);
+    }
+
+
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+            return;
+
+        disposed = true;
+
+        /*
+         * Stop UI timer.
+         */
+        try
+        {
+            refreshCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            refreshCts?.Dispose();
+        }
+        catch
+        {
+        }
+
+        refreshCts = null;
+
+        /*
+         * Stop playback polling.
+         */
+        try
+        {
+            playbackStateCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            playbackStateCts?.Dispose();
+        }
+        catch
+        {
+        }
+
+        playbackStateCts = null;
+
+        /*
+         * Unregister this component from SignalR.
+         */
+        if (liveLocationSignalRReference != null)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "attendanceRefresh.unregister",
+                    liveLocationSignalRReference);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "attendanceRefresh.unregisterLocationHealth",
+                    liveLocationSignalRReference);
+            }
+            catch { }
+
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "unregisterAdminLiveLocationRealtime",
+                    mapId);
+            }
+            catch { }
+
+            liveLocationSignalRReference.Dispose();
+
+            liveLocationSignalRReference = null;
+        }
+
+        /*
+         * Stop historical playback.
+         */
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "stopAdminHistoryPlayback",
+                mapId);
+        }
+        catch
+        {
+        }
+
+        /*
+         * Destroy only this admin map.
+         */
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "destroyAdminLiveStaffMap",
+                mapId);
+        }
+        catch
+        {
+        }
+    }
+
+
+    private enum LocationStatus
+    {
+        Live,
+        Stale,
+        Offline
+    }
+
+
+    private sealed class AdminMapLocation
+    {
+        public int EmployeeId { get; set; }
+
+        public string Name { get; set; } = "";
+
+        public double Latitude { get; set; }
+
+        public double Longitude { get; set; }
+
+        public double DistanceMeters { get; set; }
+
+        public int AllowedRadiusMeters { get; set; }
+
+        public bool IsWithinAllowedRadius { get; set; }
+
+        public double AccuracyMeters { get; set; }
+
+        public DateTime LastUpdatedUtc { get; set; }
+
+        public DateTime SessionStartedUtc { get; set; }
+
+        public string Status { get; set; } = "";
+    }
+
+
+
+    private sealed class SessionSummary
+    {
+        public Guid SessionId { get; set; }
+        public DateTime StartUtc { get; set; }
+        public DateTime EndUtc { get; set; }
+        public int PointCount { get; set; }
+        public double TravelMeters { get; set; }
+        public double AverageAccuracy { get; set; }
+    }
+
+    private sealed class PlaybackState
+    {
+        public int Index { get; set; }
+
+        public int Total { get; set; }
+
+        public bool Playing { get; set; }
+
+        public bool Completed { get; set; }
+
+        public double Speed { get; set; }
+    }
+
+}
