@@ -42,6 +42,7 @@ import com.biometric.app.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -281,7 +282,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun startLiveSnapshotHydration() {
         liveSnapshotJob?.cancel()
         liveSnapshotJob = lifecycleScope.launch {
-            while (isActive) {
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 hydrateLiveLocationsOnce()
                 delay(3000L)
             }
