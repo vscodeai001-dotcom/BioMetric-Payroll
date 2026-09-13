@@ -1236,7 +1236,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply { action = TrackingService.ACTION_STOP })
                 sessionStore.clearLogin()
                 getSharedPreferences("user_prefs", MODE_PRIVATE).edit { putBoolean("is_logged_in", false) }
-                getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { putBoolean("is_locked", false) }
+                applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { putBoolean("is_locked", false) }
                 goToLogin()
             }
         }

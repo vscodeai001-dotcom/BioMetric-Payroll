@@ -1087,7 +1087,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun logout() {
         FirebaseAuth.getInstance().signOut()
-        getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { clear() }
+        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { clear() }
         startActivity(Intent(this, LoginActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK })
         finish()
     }

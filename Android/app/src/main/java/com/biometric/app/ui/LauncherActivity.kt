@@ -22,7 +22,7 @@ class LauncherActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val isLoggedIn = sessionStore.isLoggedIn()
-        val authPrefs = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+        val authPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
         
         // Sessions are indefinite. We only force an unlock check if the process just started.
         val needsProcessVerification = !SecurityBaseActivity.isProcessVerified()
@@ -33,7 +33,7 @@ class LauncherActivity : AppCompatActivity() {
         if (isLoggedIn && !needsProcessVerification) {
             if (sessionStore.isReliabilitySetupDone()) {
                 // Already logged in, verified, and setup: Jump to Dashboard
-                SecurityBaseActivity.markAsVerified(this)
+                SecurityBaseActivity.markAsVerified(applicationContext)
                 sharedViewModel.warmUpDashboard()
                 startActivity(Intent(this, destination))
             } else {

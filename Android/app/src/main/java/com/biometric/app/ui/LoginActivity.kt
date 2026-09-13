@@ -179,13 +179,13 @@ class LoginActivity : MotionBaseActivity() {
                         }
                         
                         mobileSessionStore.saveLogin(token, result.employeeId, result.name)
-                        getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
+                        applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)
                             putString("user_role", role)
                             putInt("employee_id", result.employeeId)
                             putString("employee_name", result.name)
                         }
-                        getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+                        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("has_logged_in_before", true)
                             putBoolean("is_locked", false)
                             putString("user_role", role)
@@ -248,15 +248,15 @@ class LoginActivity : MotionBaseActivity() {
 
     private fun proceedToMain() {
         // Break the loop: Mark process as verified and clear lock state
-        markAsVerified(this)
-        getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+        markAsVerified(applicationContext)
+        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
             putLong("last_active_time", System.currentTimeMillis())
         }
 
-        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+        val role = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
             .getString("user_role", UserRole.STAFF.name)
         
-        val employeeId = getSharedPreferences("auth_prefs", MODE_PRIVATE).getInt("employee_id", 0)
+        val employeeId = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).getInt("employee_id", 0)
         
         // If they are an Admin or SuperAdmin, always go to MainActivity (Admin Dashboard)
         // If they are STAFF, go to EmployeeHomeActivity

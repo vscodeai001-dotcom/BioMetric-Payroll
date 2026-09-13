@@ -26,8 +26,8 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
             isProcessAuthorized = true
             isLockingInProgress = false
             
-            // Clear persistent lock state
-            context.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+            // Clear persistent lock state using application context for cross-activity consistency
+            context.applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
                 putBoolean("is_locked", false)
             }
         }
@@ -60,14 +60,23 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
         // Break the loop: If we are already in LoginActivity, don't try to lock again
         if (this is LoginActivity) return false
 
-        val sharedPrefs = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+        // Always use applicationContext for shared preferences in the base class to ensure 
+        // we are reading the most up-to-date state across all activities.
+        val sharedPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
         val isLocked = sharedPrefs.getBoolean("is_locked", false)
         
         Log.d("SecurityBase", "checkSession: Activity=${this.javaClass.simpleName}, authorized=$isProcessAuthorized, locked=$isLocked")
 
         if (!isProcessAuthorized || isLocked) {
-            lockApp()
-            return true
+            // Only lock if we have a valid session to protect. 
+            // If there's no login session, the app should naturally be at LoginActivity anyway.
+            val sessionPrefs = applicationContext.getSharedPreferences("mobile_session", MODE_PRIVATE)
+            val hasToken = !sessionPrefs.getString("token", null).isNullOrBlank()
+            
+            if (hasToken) {
+                lockApp()
+                return true
+            }
         }
 
         return false
@@ -77,11 +86,12 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
         if (isLockingInProgress || isFinishing || isDestroyed) return
         isLockingInProgress = true
 
-        val sharedPrefs = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+        val sharedPrefs = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
         sharedPrefs.edit(commit = true) {
             putBoolean("is_locked", true)
         }
         
+        Log.w("SecurityBase", "lockApp: Redirecting to LoginActivity due to unauthorized process or explicit lock.")
         val intent = Intent(this, LoginActivity::class.java)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
