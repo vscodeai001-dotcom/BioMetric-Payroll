@@ -628,8 +628,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         lifecycleScope.launch {
             signalR.dataChangeEvents
                 .collectLatest { event ->
-                    // Stable Flow API: coalesce a burst of realtime events without preview debounce API.
-                    delay(500L)
+                    // Central coordinator already coalesces realtime bursts.
+                    // Do not add another visible delay here.
                     _binding?.let {
                         when (event) {
                             is SignalRManager.SyncEvent.SessionEnded -> {

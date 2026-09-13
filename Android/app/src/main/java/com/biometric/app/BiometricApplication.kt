@@ -1,5 +1,6 @@
 package com.biometric.app
 
+import android.app.Activity
 import android.app.Application
 import android.util.Log
 import androidx.work.Configuration
@@ -15,9 +16,9 @@ import com.biometric.app.domain.location.LocationSyncManager
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.TrackingRecoveryWorker
 import com.biometric.app.sync.DashboardWarmingWorker
-import com.biometric.app.sync.AdminRealtimeCoordinator
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.sync.NeonSyncWorker
+import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.ThemeManager
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -32,8 +33,9 @@ class BiometricApplication : Application(), Configuration.Provider {
 
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var locationSyncManager: LocationSyncManager
-    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
-    @Inject lateinit var mobileSessionStore: MobileSessionStore
+    @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
+    @Inject lateinit var sessionStore: com.biometric.app.data.MobileSessionStore
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -42,6 +44,30 @@ class BiometricApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Keep one application-scoped realtime coordinator. Activities and fragments
+        // only register their visible state; no screen creates its own SignalR bus.
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) {
+                realtimeUiDispatcher.onActivityResumed(activity)
+            }
+
+            override fun onActivityPaused(activity: Activity) {
+                realtimeUiDispatcher.onActivityPaused(activity)
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) = Unit
+            override fun onActivityStarted(activity: Activity) = Unit
+            override fun onActivityStopped(activity: Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(activity: Activity) = Unit
+        })
+
+        // Start only when a persisted authenticated session exists. Login/logout
+        // continue to own authentication state; this is realtime infrastructure only.
+        if (sessionStore.isLoggedIn()) {
+            adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+        }
 
         // Keep application startup resilient. A failure in an optional background
         // subsystem must never crash the app before the first screen is shown.
@@ -58,16 +84,6 @@ class BiometricApplication : Application(), Configuration.Provider {
                     "BioMetricPayroll_Android_" + packageName
             }
         }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization async start failed", it) }
-
-        // Keep the cross-device realtime bus alive for the lifetime of the
-        // authenticated app process. Individual screens continue to own their
-        // existing UI/layout logic; this only keeps their authoritative cache
-        // current in the background.
-        runCatching {
-            if (mobileSessionStore.isLoggedIn()) {
-                realtimeCoordinator.start()
-            }
-        }.onFailure { Log.w("BiometricApplication", "Realtime coordinator startup skipped", it) }
 
         runCatching {
             ThemeManager.applyTheme(this)

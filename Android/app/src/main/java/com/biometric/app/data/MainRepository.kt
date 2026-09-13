@@ -321,6 +321,7 @@ class MainRepository(
 
     suspend fun pushProfileByUid(profile: UserProfile) {
         firebaseSync.getGlobalRef().child("user_profiles").child(profile.uid).setValue(profile).await()
+        firebaseSync.notifyRealtimeAfterWrite("UserProfile", "MODIFIED")
     }
     
     // ---------------- SHOP ----------------
@@ -821,6 +822,13 @@ class MainRepository(
             ?.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     snapshot.children.forEach { it.ref.removeValue() }
+                    repositoryScope.launch {
+                        runCatching {
+                            firebaseSync.notifyRealtimeAfterWrite("SalarySnapshot", "DELETED")
+                        }.onFailure { e ->
+                            Log.e("MainRepository", "Failed to publish SalarySnapshot realtime change", e)
+                        }
+                    }
                 }
                 override fun onCancelled(error: DatabaseError) {}
             })

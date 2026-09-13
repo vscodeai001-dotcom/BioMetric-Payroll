@@ -22,10 +22,17 @@ import com.google.android.gms.maps.model.MarkerOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
 import dagger.hilt.android.AndroidEntryPoint
+import com.biometric.app.sync.FirebaseSyncManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.*
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
+
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var binding: ActivityGeofenceManagerBinding
     private var googleMap: GoogleMap? = null
@@ -135,7 +142,7 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
                 if (name.isNotEmpty()) {
                     val id = UUID.randomUUID().toString()
                     val newGeofence = GeofenceLocation(id, name, lat, lon, radius)
-                    dbRef.child(id).setValue(newGeofence)
+                    CoroutineScope(Dispatchers.IO).launch { runCatching { firebaseSync.pushGeofenceRaw(id, newGeofence) } }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -147,7 +154,7 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
             .setTitle("Delete Geofence?")
             .setMessage("Are you sure you want to remove ${g.name}?")
             .setPositiveButton("Delete") { _, _ ->
-                dbRef.child(g.id).removeValue()
+                CoroutineScope(Dispatchers.IO).launch { runCatching { firebaseSync.deleteGeofenceRaw(g.id) } }
             }
             .setNegativeButton("Cancel", null)
             .show()

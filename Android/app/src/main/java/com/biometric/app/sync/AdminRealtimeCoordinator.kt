@@ -7,8 +7,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import com.biometric.app.sync.SignalRManager.SyncEvent
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -37,21 +37,12 @@ class AdminRealtimeCoordinator @Inject constructor(
 
         signalR.start()
         collectJob = scope.launch {
-            // Hydrate the local cache once when the realtime channel starts.
-            // This removes the "only current after manual refresh" gap without
-            // changing any screen flow or business logic.
-            syncFromAuthoritativeStore()
-
-            signalR.dataChangeEvents.collectLatest { event ->
-                // GPS telemetry already has its own low-latency live-location
-                // channel. Never run the full Neon CRUD sync for every GPS fix.
-                if (event is SyncEvent.LocationChanged) return@collectLatest
-
+            signalR.dataChangeEvents.collectLatest {
                 pendingRefresh?.cancel()
                 pendingRefresh = launch {
-                    delay(120)
-                    onLocalRefresh()
+                    delay(180)
                     syncFromAuthoritativeStore()
+                    withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
                 }
             }
         }
@@ -61,8 +52,8 @@ class AdminRealtimeCoordinator @Inject constructor(
         pendingRefresh?.cancel()
         pendingRefresh = scope.launch {
             delay(80)
-            onLocalRefresh()
             syncFromAuthoritativeStore()
+            withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
         }
     }
 
@@ -77,6 +68,5 @@ class AdminRealtimeCoordinator @Inject constructor(
         collectJob?.cancel()
         pendingRefresh = null
         collectJob = null
-        signalR.stop()
     }
 }

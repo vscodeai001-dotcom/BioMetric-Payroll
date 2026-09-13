@@ -16,6 +16,10 @@ import com.biometric.app.data.entity.ShopClosedDay
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
+import com.biometric.app.api.MobileApiService
+import com.biometric.app.api.RealtimeChangedItem
+import com.biometric.app.api.RealtimeChangedRequest
+import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
@@ -28,7 +32,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class FirebaseSyncManager @Inject constructor() {
+class FirebaseSyncManager @Inject constructor(
+    private val mobileApi: MobileApiService,
+    private val sessionStore: MobileSessionStore
+) {
 
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -154,24 +161,44 @@ class FirebaseSyncManager @Inject constructor() {
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    suspend fun pushShop(shop: Shop) = getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await()
-    suspend fun pushEmployee(emp: Employee) = getOwnerRef()?.child("employees")?.child(emp.employeeId)?.setValue(emp)?.await()
+    fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED") {
+        val token = sessionStore.token() ?: return
+        syncScope.launch {
+            runCatching {
+                mobileApi.notifyRealtimeChanged(
+                    "Bearer $token",
+                    RealtimeChangedRequest(listOf(RealtimeChangedItem(entity, action)))
+                )
+            }.onFailure {
+                // Notification is best-effort. The existing Firebase write is
+                // authoritative for this legacy path and must never fail because
+                // SignalR is temporarily unavailable.
+                Log.w("FirebaseSyncManager", "Realtime notification failed for $entity", it)
+            }
+        }
+    }
+
+    suspend fun pushShop(shop: Shop) { getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await(); notifyRealtimeChanged("Shop", "MODIFIED") }
+    suspend fun pushEmployee(emp: Employee) { getOwnerRef()?.child("employees")?.child(emp.employeeId)?.setValue(emp)?.await(); notifyRealtimeChanged("Employee", "MODIFIED") }
     suspend fun pushAttendance(att: Attendance) {
         val id = att.attendanceId.ifBlank { return }
         getOwnerRef()?.child("attendance")?.child(id)?.setValue(att)?.await()
+        notifyRealtimeChanged("Attendance", "MODIFIED")
     }
     suspend fun pushAttendancePunch(punch: AttendancePunch) {
         val id = punch.punchId.ifBlank { return }
         getOwnerRef()?.child("attendance_punches")?.child(id)?.setValue(punch)?.await()
+        notifyRealtimeChanged("AttendancePunch", "MODIFIED")
     }
-    suspend fun pushAdvance(adv: AdvancePayment) = getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await()
+    suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
     
     fun pushSalaryPayment(p: SalaryPayment) {
         val ref = getOwnerRef() ?: return
         ref.child("salary_payments").child(p.paymentId).setValue(p)
+        notifyRealtimeChanged("SalaryPayment", "MODIFIED")
     }
 
-    suspend fun pushHistory(hist: EmployeeHistory) = getOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await()
+    suspend fun pushHistory(hist: EmployeeHistory) { getOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await(); notifyRealtimeChanged("EmployeeHistory", "MODIFIED") }
 
     fun pushHistoryAtomic(hist: EmployeeHistory) {
         val ref = getOwnerRef()?.child("employee_history") ?: return
@@ -189,14 +216,39 @@ class FirebaseSyncManager @Inject constructor() {
             override fun onComplete(error: DatabaseError?, committed: Boolean, snapshot: DataSnapshot?) {}
         })
     }
-    suspend fun pushClosedDay(day: ShopClosedDay) = getOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await()
-    suspend fun pushReminder(reminder: Reminder) = getOwnerRef()?.child("reminders")?.child(reminder.reminderId)?.setValue(reminder)?.await()
+    suspend fun pushClosedDay(day: ShopClosedDay) { getOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await(); notifyRealtimeChanged("ShopClosedDay", "MODIFIED") }
+    suspend fun pushReminder(reminder: Reminder) { getOwnerRef()?.child("reminders")?.child(reminder.reminderId)?.setValue(reminder)?.await(); notifyRealtimeChanged("Reminder", "MODIFIED") }
     suspend fun pushProfile(profile: UserProfile) {
         getOwnerRef()?.child("user_profiles")?.child(profile.uid)?.setValue(profile)?.await()
+        notifyRealtimeChanged("UserProfile", "MODIFIED")
         try { FirebaseFirestore.getInstance().collection("userProfiles").document(profile.uid).set(profile).await() } catch (_: Exception) {}
     }
-    suspend fun pushRecycleBin(item: RecycleBinItem) = getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await()
-    suspend fun pushAuditLog(log: AuditLog) = getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await()
+    suspend fun pushRecycleBin(item: RecycleBinItem) { getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await(); notifyRealtimeChanged("RecycleBinItem", "MODIFIED") }
+    suspend fun pushAuditLog(log: AuditLog) { getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await(); notifyRealtimeChanged("AuditLog", "ADDED") }
+
+    suspend fun notifyRealtimeAfterWrite(entity: String, action: String = "MODIFIED") {
+        notifyRealtimeChanged(entity, action)
+    }
+
+    suspend fun pushGeofenceRaw(id: String, value: Any?) {
+        getOwnerRef()?.child("geofences")?.child(id)?.setValue(value)?.await()
+        notifyRealtimeChanged("Geofence", "MODIFIED")
+    }
+
+    suspend fun deleteGeofenceRaw(id: String) {
+        getOwnerRef()?.child("geofences")?.child(id)?.removeValue()?.await()
+        notifyRealtimeChanged("Geofence", "DELETED")
+    }
+
+    suspend fun pushShiftRaw(id: String, value: Any?) {
+        getOwnerRef()?.child("shifts")?.child(id)?.setValue(value)?.await()
+        notifyRealtimeChanged("Shift", "MODIFIED")
+    }
+
+    suspend fun deleteShiftRaw(id: String) {
+        getOwnerRef()?.child("shifts")?.child(id)?.removeValue()?.await()
+        notifyRealtimeChanged("Shift", "DELETED")
+    }
 
     suspend fun bulkRestore(updates: Map<String, Any?>) {
         val ref = getOwnerRef() ?: return
@@ -214,13 +266,14 @@ class FirebaseSyncManager @Inject constructor() {
 
     suspend fun clearTable(table: String) {
         getOwnerRef()?.child(table)?.removeValue()?.await()
+        notifyRealtimeChanged(table, "DELETED")
     }
 
-    suspend fun deleteShop(shopId: String) = getOwnerRef()?.child("shops")?.child(shopId)?.removeValue()?.await()
-    suspend fun deleteAttendance(attendanceId: String) = getOwnerRef()?.child("attendance")?.child(attendanceId)?.removeValue()?.await()
-    suspend fun deletePunch(punchId: String) = getOwnerRef()?.child("attendance_punches")?.child(punchId)?.removeValue()?.await()
-    suspend fun deleteAdvance(advanceId: String) = getOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await()
-    suspend fun deleteClosedDay(dayId: String) = getOwnerRef()?.child("shop_closed_days")?.child(dayId)?.removeValue()?.await()
-    suspend fun deleteHistory(historyId: String) = getOwnerRef()?.child("employee_history")?.child(historyId)?.removeValue()?.await()
-    suspend fun deleteRecycleBinItem(id: String) = getOwnerRef()?.child("recycle_bin")?.child(id)?.removeValue()?.await()
+    suspend fun deleteShop(shopId: String) { getOwnerRef()?.child("shops")?.child(shopId)?.removeValue()?.await(); notifyRealtimeChanged("Shop", "DELETED") }
+    suspend fun deleteAttendance(attendanceId: String) { getOwnerRef()?.child("attendance")?.child(attendanceId)?.removeValue()?.await(); notifyRealtimeChanged("Attendance", "DELETED") }
+    suspend fun deletePunch(punchId: String) { getOwnerRef()?.child("attendance_punches")?.child(punchId)?.removeValue()?.await(); notifyRealtimeChanged("AttendancePunch", "DELETED") }
+    suspend fun deleteAdvance(advanceId: String) { getOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await(); notifyRealtimeChanged("AdvancePayment", "DELETED") }
+    suspend fun deleteClosedDay(dayId: String) { getOwnerRef()?.child("shop_closed_days")?.child(dayId)?.removeValue()?.await(); notifyRealtimeChanged("ShopClosedDay", "DELETED") }
+    suspend fun deleteHistory(historyId: String) { getOwnerRef()?.child("employee_history")?.child(historyId)?.removeValue()?.await(); notifyRealtimeChanged("EmployeeHistory", "DELETED") }
+    suspend fun deleteRecycleBinItem(id: String) { getOwnerRef()?.child("recycle_bin")?.child(id)?.removeValue()?.await(); notifyRealtimeChanged("RecycleBinItem", "DELETED") }
 }

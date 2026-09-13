@@ -15,10 +15,17 @@ import com.biometric.app.ui.adapter.ShiftAdapter
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
 import dagger.hilt.android.AndroidEntryPoint
+import com.biometric.app.sync.FirebaseSyncManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.*
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class ShiftManagerActivity : AppCompatActivity() {
+
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var binding: ActivityShiftManagerBinding
     private val auth = FirebaseAuth.getInstance()
@@ -96,7 +103,7 @@ class ShiftManagerActivity : AppCompatActivity() {
                 if (name.isNotEmpty()) {
                     val id = UUID.randomUUID().toString()
                     val newShift = WorkShift(id, name, start, end, grace)
-                    dbRef.child(id).setValue(newShift)
+                    CoroutineScope(Dispatchers.IO).launch { runCatching { firebaseSync.pushShiftRaw(id, newShift) } }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -108,7 +115,7 @@ class ShiftManagerActivity : AppCompatActivity() {
             .setTitle("Delete Shift?")
             .setMessage("Are you sure you want to remove ${shift.name}?")
             .setPositiveButton("Delete") { _, _ ->
-                dbRef.child(shift.id).removeValue()
+                CoroutineScope(Dispatchers.IO).launch { runCatching { firebaseSync.deleteShiftRaw(shift.id) } }
             }
             .setNegativeButton("Cancel", null)
             .show()

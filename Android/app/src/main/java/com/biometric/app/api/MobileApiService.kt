@@ -108,6 +108,12 @@ interface MobileApiService {
         @Body request: GpsSessionRequest
     ): Response<Unit>
 
+    @POST("api/mobile/realtime/changed")
+    suspend fun notifyRealtimeChanged(
+        @Header("Authorization") authorization: String,
+        @Body request: RealtimeChangedRequest
+    ): Response<Unit>
+
     @GET("api/mobile/admin/live-locations")
     suspend fun getAdminLiveLocations(
         @Header("Authorization") authorization: String
@@ -500,3 +506,13 @@ data class GenerateShiftsRequest(val startDate: String, val endDate: String)
 
 
 
+
+
+data class RealtimeChangedRequest(
+    val changes: List<RealtimeChangedItem>
+)
+
+data class RealtimeChangedItem(
+    val entity: String,
+    val action: String = "MODIFIED"
+)
