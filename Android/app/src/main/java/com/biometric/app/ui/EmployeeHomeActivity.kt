@@ -113,6 +113,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var roadRouteJob: Job? = null
     private var dashboardJob: Job? = null
     private var dashboardRetryJob: Job? = null
+    private var dashboardAuthRecoveryInProgress = false
     private var sessionStartTime: Long = 0L
     private var isPermissionDialogShowing = false
 
@@ -946,15 +947,36 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                             updateMapMarkers()
                         }
                     } else if (response.code() == 401) {
-                        Log.w("EmployeeHome", "Session potentially expired (401). Attempting authoritative recovery... 🛰️")
-                        // Silent Recovery: Try to verify if the session is still valid via 'me()'
-                        val recoverResponse = mobileApi.me("Bearer $token")
-                        if (recoverResponse.isSuccessful) {
-                            Log.i("EmployeeHome", "Authoritative Recovery Successful. Refreshing dashboard... ✅")
-                            loadDashboard() // Retry once
-                        } else {
-                            Log.e("EmployeeHome", "Authoritative session truly lost. Redirecting to login. ⚠️")
-                            goToLogin()
+                        // A 401 is an authentication/session signal, not a network
+                        // failure. Do one guarded authoritative check. Never let
+                        // concurrent realtime refreshes recurse into an auth/login
+                        // loop.
+                        if (dashboardAuthRecoveryInProgress) {
+                            Log.w("EmployeeHome", "Dashboard 401 while auth recovery is already running; keeping session state stable.")
+                            return@launch
+                        }
+
+                        dashboardAuthRecoveryInProgress = true
+                        try {
+                            Log.w("EmployeeHome", "Dashboard returned 401. Verifying the existing mobile session without clearing local login state... 🛰️")
+                            val recoverResponse = mobileApi.me("Bearer $token")
+                            if (recoverResponse.isSuccessful) {
+                                Log.i("EmployeeHome", "Authoritative mobile session is valid. Retrying dashboard after a short delay. ✅")
+                                delay(750L)
+                                if (sessionStore.isLoggedIn()) {
+                                    loadDashboard()
+                                }
+                            } else {
+                                // Only an authoritative authentication rejection
+                                // reaches the login path. Timeouts, DNS failures,
+                                // airplane mode and other network failures are
+                                // handled by the exception/retry path and never
+                                // clear the persisted session.
+                                Log.e("EmployeeHome", "Authoritative mobile session rejected with HTTP ${recoverResponse.code()}. Redirecting to login.")
+                                goToLogin()
+                            }
+                        } finally {
+                            dashboardAuthRecoveryInProgress = false
                         }
                     } else {
                         Log.e("EmployeeHome", "Dashboard error: ${response.code()} ❌")
