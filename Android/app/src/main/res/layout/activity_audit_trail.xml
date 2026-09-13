@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="Financial Audit Trail 🛡️"
+            app:titleCentered="false"
+            app:titleTextAppearance="@style/PremiumToolbarTitle" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <LinearLayout
+        android:id="@+id/contentLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="visible"
+        android:alpha="0"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Fixed Header (Controls & Summary) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="?attr/colorSurface"
+            android:elevation="4dp">
+
+            <!-- Uniform Filter Section -->
+            <include
+                android:id="@+id/layoutFilterIcons"
+                layout="@layout/layout_filter_icons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp" />
+
+            <!-- Search Section -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/tilSearch"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:hint="Search user, module or action..."
+                app:startIconDrawable="@android:drawable/ic_menu_search"
+                app:endIconMode="clear_text">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etSearch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text|textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Summary Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="12dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnOpenRecycleBin"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Open Recycle Bin 🗑️"
+                    android:textSize="12sp"
+                    app:icon="@drawable/ic_delete"
+                    app:iconSize="18dp"
+                    app:cornerRadius="12dp" />
+
+                <GridLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:columnCount="4"
+                    android:layout_marginTop="8dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+                        <TextView android:id="@+id/tvSummaryUpdates" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="14sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Updates" android:textSize="10sp" android:textColor="?attr/colorSecondary" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+                        <TextView android:id="@+id/tvSummaryDeletions" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/red" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Deleted" android:textSize="10sp" android:textColor="?attr/colorSecondary" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+                        <TextView android:id="@+id/tvSummaryRestorations" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="14sp" android:textColor="@color/green" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Restored" android:textSize="10sp" android:textColor="?attr/colorSecondary" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_columnWeight="1"
+                        android:gravity="center"
+                        android:orientation="vertical">
+                        <TextView android:id="@+id/tvSummaryNew" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textStyle="bold" android:textSize="14sp" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="New" android:textSize="10sp" android:textColor="?attr/colorSecondary" />
+                    </LinearLayout>
+                </GridLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvAuditLogs"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:padding="8dp"
+                tools:listitem="@layout/item_audit_log" />
+
+            <LinearLayout
+                android:id="@+id/llEmptyState"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:padding="48dp"
+                android:visibility="gone">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🕵️" android:textSize="48sp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="No activity logs found" android:layout_marginTop="16dp" android:textColor="?attr/colorSecondary" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/animFeedback"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center"
+        android:elevation="20dp"
+        android:visibility="gone" />
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/window_background">
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="4dp"
+        app:strokeWidth="0dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/colorPrimaryContainer"
+            android:orientation="vertical"
+            android:padding="20dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Upcoming Shifts"
+                android:textColor="?attr/colorPrimary"
+                android:textStyle="bold"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+            <TextView
+                android:id="@+id/tvShiftSummary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="You have 22 shifts scheduled for this month."
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:textSize="13sp"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvShifts"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:paddingHorizontal="8dp"
+        android:clipToPadding="false"
+        tools:listitem="@layout/item_shift_row" />
+
+    <TextView
+        android:id="@+id/tvEmpty"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="No shifts found 🕒"
+        android:visibility="gone" />
+
+</LinearLayout>

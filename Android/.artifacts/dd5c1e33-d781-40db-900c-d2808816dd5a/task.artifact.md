@@ -1,0 +1,5 @@
+- [x] Create `SuperAdminManagementActivity` for feature toggling and branding.
+- [x] Add SuperAdmin credentials logic for access control.
+- [x] Implement feature toggles (16 screens) in `FeatureManager` and `UserProfile`.
+- [x] Implement branding updates (Name/Logo) in `BrandingManager` and `Shop`.
+- [/] Update Navigation logic to respect user-level feature toggles.

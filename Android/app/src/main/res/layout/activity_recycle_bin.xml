@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/android:colorBackground"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:title="Recycle Bin 🗑️"
+            app:navigationIcon="@drawable/ic_back"
+            app:titleTextAppearance="@style/PremiumToolbarTitle" />
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:paddingBottom="8dp">
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/chipGroupFilters"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="16dp"
+                app:singleSelection="true">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipAll"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="All"
+                    android:checked="true" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipStaff"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Staff" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipAttendance"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Attendance" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/chipShop"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Workplaces" />
+
+            </com.google.android.material.chip.ChipGroup>
+        </HorizontalScrollView>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <FrameLayout
+        android:id="@+id/contentLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvRecycleBin"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingBottom="100dp"
+            tools:listitem="@layout/item_recycle_bin_row" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLoadMore"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="16dp"
+            android:text="Load More Items"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <LinearLayout
+            android:id="@+id/emptyState"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <com.airbnb.lottie.LottieAnimationView
+                android:id="@+id/animEmptyTrash"
+                android:layout_width="160dp"
+                android:layout_height="160dp"
+                app:lottie_rawRes="@raw/anim_empty_trash"
+                app:lottie_autoPlay="true"
+                app:lottie_loop="true" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Recycle Bin is Empty"
+                android:textAppearance="@style/TextAppearance.Material3.TitleLarge" />
+
+        </LinearLayout>
+    </FrameLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/animFeedback"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center"
+        android:elevation="20dp"
+        android:visibility="gone" />
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Table Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp"
+            android:background="#20FFFFFF">
+            <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="Pay Period" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7"/>
+            <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="Net Payable" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7"/>
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Hourly Rate" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7"/>
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Total Hours" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7"/>
+            <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="OT Pay" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Actions" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" android:minWidth="60dp"/>
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvPayslips"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvEmpty"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="No payslips available yet 📭"
+        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+        android:visibility="gone" />
+
+</FrameLayout>

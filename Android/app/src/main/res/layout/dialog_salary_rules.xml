@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24.dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Systematic Calculation Rules"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16.dp"
+            android:textColor="?attr/colorOnSurface"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="New Joinee Cutoff Day">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etNewJoineeCutoff"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="Max Absences for Paid Leave">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etMaxAbsencesPaidLeave"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="Max Absences for Bonus">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etMaxAbsencesBonus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="Max Shortfall Minutes for Bonus">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etMaxShortfallBonus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="Monthly Paid Leave Pool (Days)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etPaidLeavePool"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?android:attr/listDivider"
+            android:layout_marginTop="24.dp"
+            android:layout_marginBottom="16.dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Staff Defaults"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16.dp"
+            android:textColor="?attr/colorOnSurface"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Shift Start">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etDefaultShiftStart"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="time" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8.dp"
+                android:hint="Shift End">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etDefaultShiftEnd"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="time" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="Break Hours">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etDefaultBreakHours"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:hint="OT Rate Multiplier">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etDefaultOtMultiplier"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <CheckBox
+            android:id="@+id/cbDefaultBonusEligible"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16.dp"
+            android:text="Bonus Eligible by Default" />
+
+        <CheckBox
+            android:id="@+id/cbDefaultPaidLeaveEligible"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Paid Leave Eligible by Default" />
+
+        <CheckBox
+            android:id="@+id/cbDefaultPaidLeaveWeekdays"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Paid Leave on Weekdays" />
+
+        <CheckBox
+            android:id="@+id/cbDefaultPaidLeaveWeekends"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Paid Leave on Weekends" />
+
+    </LinearLayout>
+</ScrollView>

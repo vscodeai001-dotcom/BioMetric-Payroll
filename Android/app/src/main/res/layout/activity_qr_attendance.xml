@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/tvShopName"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Shop Name"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Scan this QR to mark attendance"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="8dp">
+
+            <ImageView
+                android:id="@+id/ivQrCode"
+                android:layout_width="300dp"
+                android:layout_height="300dp"
+                android:padding="16dp"
+                android:src="@drawable/ic_logs" />
+
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            android:id="@+id/tvTimestamp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:text="Valid until: --:--"
+            android:textAppearance="@style/TextAppearance.Material3.LabelLarge" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnClose"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="48dp"
+            android:text="Close" />
+
+    </LinearLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/animFeedback"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center"
+        android:elevation="20dp"
+        android:visibility="gone" />
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+</FrameLayout>

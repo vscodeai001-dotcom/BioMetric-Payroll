@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_theme"
+        android:icon="@drawable/ic_theme_switch"
+        android:title="Theme"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_add"
+        android:icon="@drawable/ic_add"
+        android:title="Add"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_shop"
+        android:icon="@drawable/ic_shop_switch"
+        android:title="Switch Shop"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_kitchen"
+        android:icon="@drawable/ic_history"
+        android:title="Activity Patterns"
+        android:visible="false"
+        app:showAsAction="always" />
+    <item
+        android:id="@+id/action_more_global"
+        android:icon="@drawable/ic_more_horiz"
+        android:title="More Actions"
+        app:showAsAction="always" />
+</menu>

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<HorizontalScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:scrollbars="none"
+    android:background="@drawable/bg_rounded_small"
+    android:elevation="8dp">
+
+    <LinearLayout
+        android:id="@+id/llActionContainer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="4dp">
+
+        <TextView
+            android:id="@+id/btnTheme"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:textSize="24sp"
+            android:text="🌓"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnShop"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:textSize="24sp"
+            android:text="🏪"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnSync"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:textSize="24sp"
+            android:text="☁️"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <TextView
+            android:id="@+id/btnLogout"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:textSize="24sp"
+            android:text="🚪"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</HorizontalScrollView>

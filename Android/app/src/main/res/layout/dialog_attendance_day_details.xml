@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp"
+    android:background="@color/card_bg">
+
+    <TextView
+        android:id="@+id/tvDialogDate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Punches for 2026-09-08"
+        android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvNoPunches"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No raw punches found for this day."
+        android:gravity="center"
+        android:padding="24dp"
+        android:alpha="0.6"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/svPunches"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxHeight="300dp">
+        <LinearLayout
+            android:id="@+id/llPunchesContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+</LinearLayout>

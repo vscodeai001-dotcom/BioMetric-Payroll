@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_items"
+        android:title="Menu &amp; Pricing"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_toggle_controls"
+        android:title="Adjust Layout 🛠️"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_pos_report"
+        android:title="POS Reports"
+        app:showAsAction="never" />
+</menu>

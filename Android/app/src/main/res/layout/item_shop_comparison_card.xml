@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    style="@style/PremiumCardView"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <TextView
+                android:id="@+id/tvShopName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textStyle="bold"
+                tools:text="Sri Saara Foods, Moolakulam" />
+
+            <TextView
+                android:id="@+id/tvGrowthBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:background="@drawable/insight_bg"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="2dp"
+                android:textColor="@color/green"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                tools:text="📈 +12%" />
+        </RelativeLayout>
+
+        <!-- Main Financials Grid -->
+        <GridLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:columnCount="3">
+
+            <!-- Sales -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💰 Total Sales" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvSales" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹45,000" />
+            </LinearLayout>
+
+            <!-- Outflow (Other) -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📉 Outflow" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvExpenses" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/red" tools:text="₹32,000" />
+            </LinearLayout>
+
+            <!-- Net Profit -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📊 Net Profit" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvProfit" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/green" tools:text="₹10,000" />
+            </LinearLayout>
+
+            <!-- Staff Salary -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="👨‍💼 Staff Salary" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹8,000" />
+            </LinearLayout>
+
+            <!-- Fixed Expenses -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🏠 Fixed Exp." android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvFixed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹5,000" />
+            </LinearLayout>
+
+            <!-- Empty for Alignment -->
+            <View android:layout_width="0dp" android:layout_height="0dp" android:layout_columnWeight="1" />
+
+        </GridLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="12dp"
+            android:background="?attr/colorOutlineVariant" />
+
+        <!-- Performance Averages Grid (Sync with Daywise logic) -->
+        <GridLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="3">
+
+            <!-- Avg Daily Sales -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 Avg Sales" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvAvgSales" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹1,500" />
+            </LinearLayout>
+
+            <!-- Avg Daily Exp -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📉 Avg Exp" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvAvgExp" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹1,200" />
+            </LinearLayout>
+
+            <!-- Avg Daily Profit -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💰 Avg Profit" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvAvgDailyProfit" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="₹300" />
+            </LinearLayout>
+
+            <!-- Best Day -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🏆 Best Day" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvBestDay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/green" tools:text="12 Jan" />
+            </LinearLayout>
+
+            <!-- Slowest Day -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🐢 Slowest" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvSlowestDay" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" android:textColor="@color/red" tools:text="05 Jan" />
+            </LinearLayout>
+
+            <!-- Profit/Loss Days -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_columnWeight="1"
+                android:layout_marginTop="8dp"
+                android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📅 P/L Days" android:textSize="10sp" android:textColor="@color/text_secondary" />
+                <TextView android:id="@+id/tvPLDays" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textStyle="bold" tools:text="22 / 8" />
+            </LinearLayout>
+        </GridLayout>
+
+        <TextView
+            android:id="@+id/tvPerformanceLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="🏆 Top Performing"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="@color/amber"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

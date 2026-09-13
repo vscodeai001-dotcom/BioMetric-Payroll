@@ -1,0 +1,296 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background"
+    android:fitsSystemWindows="false">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:elevation="4dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:layout_scrollFlags="scroll|enterAlways"
+            app:title="Workforce Hub 👔"
+            app:titleCentered="false"
+            app:titleTextAppearance="@style/PremiumToolbarTitle">
+
+            <androidx.appcompat.widget.SearchView
+                android:id="@+id/searchView"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:layout_gravity="end"
+                app:queryHint="Search staff..."
+                app:iconifiedByDefault="true" />
+
+            <ImageButton
+                android:id="@+id/btnShowQrAttendance"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="8dp"
+                android:visibility="gone"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_logs"
+                app:tint="@color/text_primary" />
+
+        </com.google.android.material.appbar.MaterialToolbar>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/backgroundParticles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:lottie_rawRes="@raw/anim_bg_particles"
+        app:lottie_autoPlay="true"
+        app:lottie_loop="true"
+        android:alpha="0.2"
+        android:elevation="-1dp" />
+
+    <LinearLayout
+        android:id="@+id/contentLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="visible"
+        android:alpha="0"
+        android:fitsSystemWindows="false"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Combined Premium Filter Row (1 Row, 2 Columns) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="6dp">
+
+            <!-- Monthly Summary Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="5dp"
+                app:cardElevation="6dp"
+                app:cardCornerRadius="16dp"
+                app:cardBackgroundColor="@color/staff_card_bg"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/staff_card_stroke">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:id="@+id/tvTotalSalaryLabel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Monthly Breakdown 💎"
+                        android:textColor="@color/staff_nav_indigo"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
+                    <TextView
+                        android:id="@+id/tvTotalUpToDate"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Earned: ₹0"
+                        android:textColor="@color/staff_text_title"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
+                    <TextView
+                        android:id="@+id/tvSalaryBreakdown"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:alpha="0.8"
+                        android:text="Sal=0 | OT=0 | All=0 | Tot=0"
+                        android:textColor="@color/staff_text_subtitle"
+                        android:textSize="8.5sp"
+                        android:textStyle="bold"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageButton
+                            android:id="@+id/btnPrevMonth"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@drawable/ic_back"
+                            android:scaleType="centerInside"
+                            app:tint="@color/staff_nav_indigo" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedMonth"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:text="May 2026"
+                            android:textColor="@color/staff_text_label"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+
+                        <ImageButton
+                            android:id="@+id/btnNextMonth"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@drawable/ic_arrow_forward"
+                            android:scaleType="centerInside"
+                            app:tint="@color/staff_nav_indigo" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Daily Summary Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="5dp"
+                app:cardElevation="6dp"
+                app:cardCornerRadius="16dp"
+                app:cardBackgroundColor="@color/staff_card_bg"
+                app:strokeWidth="1dp"
+                app:strokeColor="@color/staff_card_stroke">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:id="@+id/tvTotalDailySalary"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Worked Today ⏱️"
+                        android:textColor="@color/staff_nav_blue"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:ellipsize="end"
+                        android:maxLines="1" />
+
+                    <TextView
+                        android:id="@+id/tvTotalDailySalaryValue"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="₹0.00"
+                        android:textColor="@color/staff_text_title"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageButton
+                            android:id="@+id/btnPrevDay"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@drawable/ic_back"
+                            android:scaleType="centerInside"
+                            app:tint="@color/staff_nav_blue" />
+
+                        <TextView
+                            android:id="@+id/tvSelectedDay"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:text="Fri 01 May"
+                            android:textColor="@color/staff_text_label"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+
+                        <ImageButton
+                            android:id="@+id/btnNextDay"
+                            android:layout_width="24dp"
+                            android:layout_height="24dp"
+                            android:background="?attr/selectableItemBackgroundBorderless"
+                            android:src="@drawable/ic_arrow_forward"
+                            android:scaleType="centerInside"
+                            app:tint="@color/staff_nav_blue" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvStaff"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:padding="12dp"
+            android:layoutAnimation="@anim/layout_animation_fall_down" />
+
+    </LinearLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/animFeedback"
+        android:layout_width="250dp"
+        android:layout_height="250dp"
+        android:layout_gravity="center"
+        android:elevation="20dp"
+        android:visibility="gone" />
+
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/fabVoiceInput"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:visibility="gone"
+        app:srcCompat="@drawable/ic_mic" />
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabAddStaff"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:layout_margin="16dp"
+        android:text="New Staff 👤+"
+        android:textColor="@color/white"
+        android:visibility="gone"
+        app:backgroundTint="@color/colorPrimary"
+        app:iconTint="@color/white" />
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="720dp"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="?attr/selectableItemBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="14dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvDate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.2"
+            android:text="07-Sept-2026"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.8"
+            android:text="Present"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/green_700" />
+
+        <TextView
+            android:id="@+id/tvScheduled"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.8"
+            android:text="09:00"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textColor="@color/text_secondary" />
+
+        <TextView
+            android:id="@+id/tvWorked"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.8"
+            android:text="08:30"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textColor="@color/text_primary"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvPenalty"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.8"
+            android:text="00:00"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textColor="@color/red_700" />
+
+        <TextView
+            android:id="@+id/tvOt"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="0.8"
+            android:text="00:00"
+            android:gravity="center"
+            android:textSize="12sp"
+            android:textColor="@color/staff_nav_indigo"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvPunches"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.5"
+            android:text="05:28 / 11:14"
+            android:gravity="end"
+            android:textSize="11sp"
+            android:textColor="@color/text_secondary"
+            android:fontFamily="monospace" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#10000000" />
+
+</LinearLayout>

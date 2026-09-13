@@ -1,0 +1,92 @@
+Biometric Payroll: Staff Salary Calculation Documentation
+This document outlines the core business logic, rules, and formulas implemented in the Staff List screen and the underlying SalaryEngine.kt.
+1. Core Definitions & Data Sources
+•
+Default Hr (Req Hr): The total target working hours for the month based on the employee's assigned shift (e.g., 9 hours/day × 30 days = 270 hours).
+•
+Work Hr: The actual hours a staff member was present, excluding breaks and gaps.
+•
+Hourly Rate:
+◦
+For MONTHLY_FIXED staff: Monthly Salary Rate / Default Hr.
+◦
+For others: The specific hourly rate assigned.
+•
+OT Hr: Extra hours worked beyond the scheduled shift duration on a given day.
+•
+Paid Leave (Used Hrs): Approved leaves that are credited as working time.
+2. Calculation Formulas
+Attendance Metrics
+•
+Net Worked Hours per Day = (Clock Out - Clock In) - Break Time - Gap Duration.
+•
+Shift Cap: Normal Work Hr is capped at the scheduled shift duration (e.g., 9h). Any time exceeding this is automatically moved to OT Hr.
+Financial Components
+1.
+Work Sal = Total Normal Worked Hours × Hourly Rate.
+2.
+OT Amt = Total OT Hours × Hourly Rate × Staff OT Multiplier.
+3.
+Paid Leave Pay = Total Paid Leave Hours × Hourly Rate.
+4.
+Allowance: Calculated daily based on presence (Present Days × Daily Allowance Rate).
+5.
+Deduct Hr (Shortfall) = Default Hr - (Work Hr + OT Hr).
+◦
+Note: This formula strictly excludes Paid Leave hours as per user requirements.
+6.
+Deduct Amt = Deduct Hr × Hourly Rate.
+Total Summaries (Staff Screen)
+•
+Net Payable = Work Sal + OT Amt + Paid Leave Pay + Bonus.
+•
+Current Pay = Net Payable - Pending Advances.
+•
+Up-to-Date Total (Screen Header) = Sum of Net Payable for all staff in the selected shop up to the current date.
+•
+Note: Daily Allowance is excluded from the staff screen total as it is paid daily via cash-out, preventing double-counting.
+3. Business Rules & Eligibility
+Paid Leave Rules
+•
+Monthly Limit: Exactly 1 day of paid leave is allowed per month.
+•
+Eligibility Threshold: Staff must have 3 or fewer total absences in the month to be eligible for the paid leave credit. If absences > 3, all missing days are unpaid.
+•
+Schedule Restriction: Paid leaves are only applied on allowed days (default: Weekdays only, unless configured differently in the staff profile).
+Bonus Rules
+•
+Amount: Exactly one full day's pay (Shift Hours × Hourly Rate).
+•
+Strict Eligibility: Staff must have Zero (0) Unpaid Absences in the month. Even taking one unpaid leave day makes the staff ineligible for the bonus.
+•
+Manual Toggle: On the staff card, the "Include Bonus" checkbox must be enabled to add this to the Up-to-Date Total.
+Shop Closed Days
+•
+If the shop is closed and the record is marked paySalary = true, staff receive full credit for their scheduled shift hours for that day.
+4. Summary Table
+UI Label
+Logic / Formula
+Notes
+Req Hr
+Days in Month × Shift Duration
+Total target
+Work Hr
+Sum of actual daily (Clocked In - Gaps)
+Capped at shift duration
+Work Sal
+Work Hr × Hourly Rate
+Actual pro-rated earnings
+OT Hr
+Total time clocked beyond shift cap
+Calculated per day
+OT Amt
+OT Hr × Hourly Rate × Multiplier
+Incentive pay
+Deduct Hr
+Req Hr - (Work Hr + OT Hr)
+Shortfall from target
+Net Payable
+Work Sal + OT Amt + Paid Leave + Bonus
+Final staff screen liability
+Date of implementation: April 2026
+System Status: Verified Build Clean

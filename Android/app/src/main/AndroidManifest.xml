@@ -1,0 +1,396 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:targetApi="31" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+    <application
+        android:name=".BiometricApplication"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:largeHeap="true"
+        android:theme="@style/Theme.Biometric">
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <activity
+            android:name=".ui.selfservice.TaxDeclarationActivity"
+            android:exported="false"
+            android:label="Tax Declaration"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.FbpDeclarationActivity"
+            android:exported="false"
+            android:label="FBP Declaration"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.PayslipListActivity"
+            android:exported="false"
+            android:label="My Payslips"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.AttendanceLogsActivity"
+            android:exported="false"
+            android:label="Attendance History"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.ApplyLeaveActivity"
+            android:exported="false"
+            android:label="Request Leave"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.MyLeavesActivity"
+            android:exported="false"
+            android:label="Leave Management"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.SalaryAdvancesActivity"
+            android:exported="false"
+            android:label="Salary Advances"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.BonusesActivity"
+            android:exported="false"
+            android:label="My Bonuses"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.MyRegularizationsActivity"
+            android:exported="false"
+            android:label="Punch Corrections"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.ShiftScheduleActivity"
+            android:exported="false"
+            android:label="Shift Roster"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.ResignationActivity"
+            android:exported="false"
+            android:label="Resignation"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.selfservice.MyReportsActivity"
+            android:exported="false"
+            android:label="My Stats"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.LauncherActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Biometric.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.EmployeePunchActivity"
+            android:exported="false"
+            android:label="Punch / Attendance"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.EmployeeToolsActivity"
+            android:exported="false"
+            android:label="Employee Tools"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.EmployeeDataActivity"
+            android:exported="false"
+            android:label="Employee"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.EmployeeHomeActivity"
+            android:exported="false"
+            android:label="Employee Portal"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false"
+            android:label="Login"
+            android:theme="@style/Theme.Biometric.Login"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.StaffActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.StaffAttendanceActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.PayrollManagementActivity"
+            android:exported="false"
+            android:label="Payroll Management"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.DeviceDashboardActivity"
+            android:exported="false"
+            android:label="Device Dashboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.LeaveManagementActivity"
+            android:exported="false"
+            android:label="Leave Management"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ShiftManagerActivity"
+            android:exported="false"
+            android:label="Shift Manager"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.RegularizationActivity"
+            android:exported="false"
+            android:label="Punch Corrections"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.AdminManualPunchCorrectionActivity"
+            android:exported="false"
+            android:label="Manual Punch Correction"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.UserManagementActivity"
+            android:exported="false"
+            android:label="User Management"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ReportCenterActivity"
+            android:exported="false"
+            android:label="Report Center"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ReliabilitySetupActivity"
+            android:exported="false"
+            android:label="Reliability Setup"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ui.ExitManagementActivity"
+            android:exported="false"
+            android:label="Exit &amp; Settlement"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.StaffPerformanceActivity"
+            android:exported="false"
+            android:label="Staff Performance"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ExpenseAnalysisActivity"
+            android:exported="false"
+            android:label="Expense Analysis"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
+            android:name=".ui.AuditTrailActivity"
+            android:exported="false"
+            android:label="Financial Audit"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
+            android:name=".ui.RecycleBinActivity"
+            android:exported="false"
+            android:label="Recycle Bin"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
+            android:name=".ui.QrAttendanceActivity"
+            android:exported="false"
+            android:label="QR Attendance Display"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.QrScannerActivity"
+            android:exported="false"
+            android:label="QR Attendance Scanner"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:label="App Settings"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ManageCategoriesActivity"
+            android:exported="false"
+            android:label="Manage Categories"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.ManageDescriptionsActivity"
+            android:exported="false"
+            android:label="Manage Descriptions"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.AiChatActivity"
+            android:exported="false"
+            android:label="AI Assistant"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <activity
+            android:name=".ui.SuperAdminManagementActivity"
+            android:exported="false"
+            android:label="SuperAdmin Management"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.StaffPermissionActivity"
+            android:exported="false"
+            android:label="Staff Permission Control"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.StaffDetailActivity"
+            android:exported="false"
+            android:label="Staff Deep Insights"
+            android:windowSoftInputMode="adjustResize" />
+
+
+
+        <activity
+            android:name=".ui.GeofenceManagerActivity"
+            android:exported="false"
+            android:label="Geofence Manager"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.TrackingMapActivity"
+            android:exported="false"
+            android:label="Live Tracking Map"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.RouteReplayActivity"
+            android:exported="false"
+            android:label="Route Replay"
+            android:windowSoftInputMode="adjustResize" />
+
+
+        <receiver
+            android:name=".domain.location.TrackingBootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".widget.DashboardWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/app_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".domain.location.TrackingNotificationReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="ACTION_NOTIFICATION_DISMISSED" />
+                <action android:name="ACTION_SERVICE_RESTART_TICK" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".domain.location.TrackingService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyDxIsBW8bq31gG7LqOm8-lwhmRFMsRu5CE" />
+
+        <activity android:name=".ui.AdminPayrollActivity" android:exported="false" />
+        <activity android:name=".ui.AdminAttendanceActivity" android:exported="false" />
+        <activity android:name=".ui.PunchCorrectionApprovalActivity" android:exported="false" />
+    </application>
+
+</manifest>

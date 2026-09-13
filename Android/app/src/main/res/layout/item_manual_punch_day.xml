@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="8dp"
+    android:layout_marginVertical="6dp"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="2dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="@color/divider">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvEmployeeName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textStyle="bold"
+                    tools:text="Shiva Prakash J" />
+
+                <TextView
+                    android:id="@+id/tvDateLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:textColor="@color/text_secondary"
+                    tools:text="Wednesday, 09 September 2026" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvOddCountBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/badge_bg_red"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="2dp"
+                android:textColor="@color/white"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                tools:text="Odd Count (15)"
+                tools:visibility="visible" />
+        </LinearLayout>
+
+        <!-- FlexboxLayout would be better, but we'll use a simple layout for now -->
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/cgPunches"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:chipSpacing="8dp" />
+
+        <LinearLayout
+            android:id="@+id/llEmptyPunches"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="8dp"
+            android:background="@drawable/search_bg"
+            android:visibility="gone">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="No punches recorded" android:textSize="12sp" android:alpha="0.7"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickAdd"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Quick Add Full Day (9-6)"
+                app:icon="@drawable/ic_correction_premium" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Add Single Punch"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:layout_marginEnd="8dp"/>
+
+            <TextView
+                android:id="@+id/tvNewPunchTime"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:background="@drawable/search_bg"
+                android:gravity="center"
+                android:text="-- : --"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAddPunch"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                app:icon="@drawable/ic_add"
+                app:iconPadding="0dp"
+                app:iconSize="20dp"
+                app:iconTint="@color/white"
+                android:backgroundTint="@color/green_700" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

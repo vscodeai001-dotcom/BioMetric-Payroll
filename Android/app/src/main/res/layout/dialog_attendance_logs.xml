@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/card_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical"
+        android:background="@color/colorSurfaceVariant">
+        
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvCurrentViewLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Attendance History 📅"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/llMonthNav"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <ImageButton
+                    android:id="@+id/btnPrevMonth"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:src="@drawable/ic_back"
+                    android:contentDescription="Previous Month"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    app:tint="@color/text_primary" />
+
+                <ImageButton
+                    android:id="@+id/btnNextMonth"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:src="@drawable/ic_forward"
+                    android:contentDescription="Next Month"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    app:tint="@color/text_primary" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnYearToggle"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2026 🗓️"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvLogs"
+        android:layout_width="match_parent"
+        android:layout_height="450dp"
+        android:padding="12dp"
+        android:clipToPadding="false" />
+</LinearLayout>

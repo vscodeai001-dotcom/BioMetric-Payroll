@@ -1,0 +1,12 @@
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_tea_cup_base">
+    <target
+        android:name="tea_fill"
+        android:animation="@animator/anim_tea_fill" />
+    <target
+        android:name="steam_group1"
+        android:animation="@animator/anim_steam" />
+    <target
+        android:name="steam_group2"
+        android:animation="@animator/anim_steam" />
+</animated-vector>

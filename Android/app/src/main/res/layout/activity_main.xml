@@ -1,0 +1,857 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:fitsSystemWindows="false">
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/backgroundParticles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:lottie_rawRes="@raw/anim_bg_particles"
+        app:lottie_autoPlay="false"
+        app:lottie_loop="true"
+        android:alpha="0.3"
+        android:visibility="gone"
+        android:elevation="-1dp" />
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorSurface"
+        app:elevation="4dp">
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            style="@style/Widget.App.Toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:layout_scrollFlags="scroll|enterAlways"
+            app:titleCentered="false">
+
+            <com.google.android.material.imageview.ShapeableImageView
+                android:id="@+id/ivAppLogo"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="12dp"
+                android:scaleType="centerCrop"
+                app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.SmallComponent"
+                android:visibility="gone" />
+
+        </com.google.android.material.appbar.MaterialToolbar>
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginBottom="64dp"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            android:fitsSystemWindows="false">
+
+            <LinearLayout
+                android:id="@+id/contentLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/spacing_medium"
+                android:paddingVertical="@dimen/spacing_small">
+
+                <!-- HUB 1: DASHBOARD (Home) -->
+                <LinearLayout
+                    android:id="@+id/hubDashboard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="16dp"
+                        app:cardCornerRadius="20dp"
+                        app:cardElevation="8dp"
+                        app:strokeWidth="0dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_gradient_primary"
+                            android:orientation="vertical"
+                            android:padding="20dp">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Workforce Hub Overview"
+                                android:textColor="@color/white"
+                                android:textSize="22sp"
+                                android:textStyle="bold" />
+                            <TextView
+                                android:id="@+id/tvLiveDate"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Real-time insights for Monday, 07 September 2026"
+                                android:textColor="#B0FFFFFF"
+                                android:textSize="14sp"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- KPI Cards Grid -->
+                    <GridLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:columnCount="2"
+                        android:alignmentMode="alignMargins"
+                        android:useDefaultMargins="true">
+
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/PremiumCardView"
+                            android:layout_width="0dp"
+                            android:layout_columnWeight="1"
+                            android:layout_height="110dp"
+                            app:cardBackgroundColor="#1A4F46E5">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:padding="16dp"
+                                android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="TOTAL WORKFORCE" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiWorkforce" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="👥 2 Active" android:textSize="10sp" android:layout_marginTop="4dp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/PremiumCardView"
+                            android:layout_width="0dp"
+                            android:layout_columnWeight="1"
+                            android:layout_height="110dp"
+                            app:cardBackgroundColor="#1A047857">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:padding="16dp"
+                                android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PRESENT TODAY" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiPresent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2 / 2" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:id="@+id/tvKpiAbsent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⏳ 0 Absent" android:textSize="10sp" android:layout_marginTop="4dp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/PremiumCardView"
+                            android:layout_width="0dp"
+                            android:layout_columnWeight="1"
+                            android:layout_height="110dp"
+                            app:cardBackgroundColor="#1AF59E0B">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:padding="16dp"
+                                android:orientation="vertical">
+                                <TextView android:id="@+id/tvPayrollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PAYROLL (SEPT)" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiPayroll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Done" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:id="@+id/tvPayrollVariance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 0.0% vs Last Month" android:textSize="10sp" android:layout_marginTop="4dp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <com.google.android.material.card.MaterialCardView
+                            style="@style/PremiumCardView"
+                            android:layout_width="0dp"
+                            android:layout_columnWeight="1"
+                            android:layout_height="110dp"
+                            app:cardBackgroundColor="#1AEF4444">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:padding="16dp"
+                                android:orientation="vertical">
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="UNPAID ADVANCES" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
+                                <TextView android:id="@+id/tvKpiAdvances" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹1,000" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
+                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📮 Needs Recovery" android:textSize="10sp" android:layout_marginTop="4dp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                    </GridLayout>
+
+                    <!-- Live Map Card -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/cvLiveMapCard"
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:padding="16dp">
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📍 Live Staff Operations"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textStyle="bold" />
+                                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnRefreshMap"
+                                    style="@style/Widget.Material3.Button.TextButton"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Zoom All"
+                                    app:icon="@drawable/ic_search" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:paddingHorizontal="16dp"
+                                android:paddingBottom="8dp">
+                                <HorizontalScrollView
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:scrollbars="none">
+                                    <com.google.android.material.chip.ChipGroup
+                                        android:id="@+id/chipGroupAdminStatus"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        app:singleSelection="true"
+                                        app:selectionRequired="true">
+                                        <com.google.android.material.chip.Chip
+                                            android:id="@+id/chipAdminAll"
+                                            style="@style/Widget.Material3.Chip.Filter"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="All"
+                                            android:checked="true" />
+                                        <com.google.android.material.chip.Chip
+                                            android:id="@+id/chipAdminLive"
+                                            style="@style/Widget.Material3.Chip.Filter"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="Live" />
+                                        <com.google.android.material.chip.Chip
+                                            android:id="@+id/chipAdminStale"
+                                            style="@style/Widget.Material3.Chip.Filter"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="Stale" />
+                                        <com.google.android.material.chip.Chip
+                                            android:id="@+id/chipAdminOffline"
+                                            style="@style/Widget.Material3.Chip.Filter"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="Offline" />
+                                    </com.google.android.material.chip.ChipGroup>
+                                </HorizontalScrollView>
+                            </LinearLayout>
+
+                            <FrameLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="320dp"
+                                android:background="#F0F0F0">
+
+                                <org.osmdroid.views.MapView
+                                    android:id="@+id/adminMapView"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent" />
+
+                                <LinearLayout
+                                    android:id="@+id/llAdminMapLoading"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:background="?attr/colorSurface"
+                                    android:gravity="center"
+                                    android:orientation="horizontal">
+                                    <com.google.android.material.progressindicator.CircularProgressIndicator
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:indeterminate="true"
+                                        app:indicatorSize="24dp"
+                                        app:trackThickness="3dp" />
+                                </LinearLayout>
+                            </FrameLayout>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- Daily Operations Section (Matching Web) -->
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="📊 Daily Operations"
+                                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                android:textStyle="bold" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:layout_marginTop="16dp"
+                                android:baselineAligned="false">
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="6dp"
+                                    android:background="@drawable/bg_pill_small"
+                                    android:backgroundTint="#F8F9FA"
+                                    android:padding="12dp"
+                                    android:gravity="center"
+                                    android:orientation="vertical">
+                                    <TextView
+                                        android:id="@+id/tvShiftsToday"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="0"
+                                        android:textSize="20sp"
+                                        android:textStyle="bold" />
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="SHIFTS TODAY"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:alpha="0.7" />
+                                </LinearLayout>
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:layout_marginStart="6dp"
+                                    android:background="@drawable/bg_pill_small"
+                                    android:backgroundTint="#F8F9FA"
+                                    android:padding="12dp"
+                                    android:gravity="center"
+                                    android:orientation="vertical">
+                                    <TextView
+                                        android:id="@+id/tvScheduledHours"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="0h"
+                                        android:textSize="20sp"
+                                        android:textStyle="bold" />
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="SCHEDULED (MONTH)"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:alpha="0.7" />
+                                </LinearLayout>
+                            </LinearLayout>
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="QUICK ACTIONS"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:alpha="0.6"
+                                android:layout_marginTop="16dp"
+                                android:layout_marginBottom="8dp"/>
+
+                            <HorizontalScrollView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:scrollbars="none">
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal">
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnApproveRegs"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="⚡ Approve Regs"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_check_circle"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnReportCenter"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
+                                        android:text="📋 Report Center"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_logs"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAddEmployee"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="➕ Add Staff"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_add"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnUserManagement"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="🔒 Users &amp; Roles"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_search"
+                                        app:iconSize="16dp" />
+                                </LinearLayout>
+                            </HorizontalScrollView>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- Recent Advances Section (Matching Web Sidebar) -->
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical">
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Recent Advances"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textStyle="bold" />
+                                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
+                                <TextView
+                                    android:id="@+id/tvRecentAdvancesCount"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0"
+                                    android:background="@drawable/bg_pill_small"
+                                    android:backgroundTint="#FEE2E2"
+                                    android:textColor="#EF4444"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp" />
+                            </LinearLayout>
+
+                            <LinearLayout
+                                android:id="@+id/llRecentAdvancesContainer"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:layout_marginTop="12dp">
+                                <!-- Dynamic entries -->
+                                <TextView
+                                    android:id="@+id/tvNoAdvances"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="No unpaid advances."
+                                    android:gravity="center"
+                                    android:padding="20dp"
+                                    android:alpha="0.5" />
+                            </LinearLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnViewAllAdvances"
+                                style="@style/Widget.Material3.Button.TextButton"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="View All Advances"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- Active Branches -->
+                    <TextView
+                        android:id="@+id/tvActiveShopsTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Workplaces 🏢"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textStyle="bold"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="8dp" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvShops"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"
+                        tools:listitem="@layout/item_shop_card" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAddShop"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="Register New Workplace"
+                        app:icon="@drawable/ic_add" />
+                </LinearLayout>
+
+                <!-- HUB 2: WORKFORCE -->
+                <LinearLayout
+                    android:id="@+id/hubWorkforce"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Staff Management 👥"
+                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                        android:textStyle="bold"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="16dp"/>
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:id="@+id/tvWorkforceSummary"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Loading workforce data..."
+                                android:alpha="0.7"/>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/tilWorkforceSearch"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        app:hintEnabled="false"
+                        app:startIconDrawable="@drawable/ic_search">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etWorkforceSearch"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="Search employees..."
+                            android:inputType="textPersonName"
+                            android:padding="12dp" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvWorkforceList"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"
+                        tools:listitem="@layout/item_history_row"/>
+                </LinearLayout>
+
+                <!-- HUB 3: APPROVALS -->
+                <LinearLayout
+                    android:id="@+id/hubApprovals"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Operational Tools"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/cvManualPunchCorrection"
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="24dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:background="@drawable/search_bg"
+                                android:gravity="center"
+                                android:text="🛠️"
+                                android:textSize="18sp" />
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="16dp"
+                                android:orientation="vertical">
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Manual Punch Correction"
+                                    android:textStyle="bold"
+                                    android:textColor="@color/text_primary" />
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Find and fix missing staff punches"
+                                    android:textSize="12sp"
+                                    android:alpha="0.7" />
+                            </LinearLayout>
+                            <ImageView
+                                android:layout_width="24dp"
+                                android:layout_height="24dp"
+                                android:src="@drawable/ic_forward"
+                                app:tint="@color/text_secondary" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Action Required"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textStyle="bold"
+                        android:layout_marginBottom="12dp" />
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupApprovals"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        app:singleSelection="true"
+                        app:selectionRequired="true">
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipApprovalAll"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="All"
+                            android:checked="true" />
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipApprovalRegs"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Regularizations" />
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipApprovalLeaves"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Leaves" />
+                    </com.google.android.material.chip.ChipGroup>
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvPendingApprovals"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"
+                        tools:listitem="@layout/item_history_row"/>
+
+                    <TextView
+                        android:id="@+id/tvNoPendingApprovals"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No pending requests found."
+                        android:gravity="center"
+                        android:padding="32dp"
+                        android:alpha="0.5"
+                        android:visibility="gone"/>
+                </LinearLayout>
+
+                <!-- HUB 4: TRACKING (Command Center) -->
+                <LinearLayout
+                    android:id="@+id/hubTracking"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Live Command Center"
+                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                        android:textStyle="bold"
+                        android:layout_marginTop="8dp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Real-time staff movement and operational monitoring"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:alpha="0.7"
+                        android:layout_marginBottom="16dp" />
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:layout_marginBottom="16dp"
+                        app:cardElevation="4dp">
+
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent">
+
+                            <org.osmdroid.views.MapView
+                                android:id="@+id/commandCenterMapView"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent" />
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupCommandStatus"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_margin="12dp"
+                                android:padding="4dp"
+                                android:background="@drawable/bg_pill_small"
+                                android:backgroundTint="#B0FFFFFF"
+                                app:singleSelection="true"
+                                app:selectionRequired="true">
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipCommandAll"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="All"
+                                    android:checked="true" />
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipCommandLive"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Live" />
+                            </com.google.android.material.chip.ChipGroup>
+                        </FrameLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <TextView
+                        android:id="@+id/tvCommandLiveCount"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="● 4 Live Operators Active"
+                        android:textColor="#22C55E"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:gravity="center"
+                        android:layout_marginBottom="8dp"/>
+
+                </LinearLayout>
+
+                <!-- HUB 5: REPORTS -->
+                <LinearLayout
+                    android:id="@+id/hubReports"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Business Intelligence 📈"
+                        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                        android:textStyle="bold"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="16dp"/>
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/PremiumCardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Current Month Projection"
+                                android:textStyle="bold"/>
+                            <TextView
+                                android:id="@+id/tvPayrollProjection"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="₹0"
+                                android:textSize="24sp"
+                                android:textStyle="bold"
+                                android:textColor="@color/colorPrimary"
+                                android:layout_marginTop="8dp"/>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnOpenFullReportCenter"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Open Advanced Report Center"
+                        app:icon="@drawable/ic_logs"/>
+                </LinearLayout>
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:layout_gravity="bottom"
+        android:background="?attr/colorSurface"
+        app:elevation="16dp"
+        app:menu="@menu/main_bottom_nav"
+        app:labelVisibilityMode="labeled" />
+
+    <!-- Biometric Secure Loading View -->
+    <include
+        android:id="@+id/loadingLayout"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/llHeaderContainer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingVertical="2dp">
+
+    <!-- Top Left: Info Labels -->
+    <LinearLayout
+        android:id="@+id/llLabels"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="start"
+        android:layout_alignParentStart="true"
+        android:layout_centerVertical="true"
+        android:layout_toStartOf="@+id/llSwitchers"
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="12dp">
+
+        <TextView
+            android:id="@+id/tvHeaderLine1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Shop Name"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:textColor="@color/red_700"
+            android:alpha="0.85"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvHeaderLine2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Screen Name"
+                android:textAppearance="@style/PremiumToolbarTitle"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorOnSurface"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/tvHeaderStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="• Syncing"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:textColor="@color/green_700"
+                android:visibility="gone"
+                android:alpha="0.9" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvHeaderLine3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Sub Label"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:textColor="@color/blue"
+            android:visibility="gone"
+            android:alpha="0.9" />
+    </LinearLayout>
+
+    <!-- Top Right: Quick Switchers -->
+    <LinearLayout
+        android:id="@+id/llSwitchers"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_alignParentEnd="true"
+        android:layout_centerVertical="true"
+        android:paddingEnd="16dp"
+        android:paddingStart="4dp">
+
+        <ImageButton
+            android:id="@+id/btnThemeToggle"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_theme_switch"
+            android:scaleType="centerInside"
+            app:tint="?attr/colorOnSurface"
+            android:contentDescription="Toggle Theme" />
+
+        <ImageButton
+            android:id="@+id/btnShopToggle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_shop_switch"
+            android:contentDescription="Switch Shop" />
+    </LinearLayout>
+
+</RelativeLayout>

@@ -1,0 +1,17 @@
+- [x] Authoritative Server Sessions
+    - [x] Modify `GpsSessionCleanupService.cs` to exempt `ANDROID:` locks
+    - [x] Update `MobileTokenAuthenticationHandler.cs` to refresh `LastSeenAtUtc`
+- [x] Android App Reliability
+    - [x] Add 5-minute Heartbeat to `TrackingService.kt`
+    - [x] Implement Authoritative Logout with Auto-Punch in `EmployeeHomeActivity.kt`
+    - [x] Implement Silent 401 Recovery in `EmployeeHomeActivity.kt`
+- [ ] Verification
+    - [ ] Manual test: Long-term background connectivity
+    - [ ] Manual test: Logout Auto-Punch
+    - [ ] Manual test: Device lock enforcement
+    - [ ] Implement Authoritative Logout with Auto-Punch in `EmployeeHomeActivity.kt` [ ]
+    - [ ] Implement Silent 401 Recovery in `EmployeeHomeActivity.kt` [ ]
+- [ ] Verification
+    - [ ] Manual test: Long-term background connectivity [ ]
+    - [ ] Manual test: Logout Auto-Punch [ ]
+    - [ ] Manual test: Device lock enforcement [ ]

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    style="@style/PremiumCardView"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginVertical="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/tvShopName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textStyle="bold"
+            tools:text="Main Branch" />
+
+        <TextView
+            android:id="@+id/tvLocation"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:alpha="0.6"
+            android:textSize="11sp"
+            android:layout_marginEnd="16dp"
+            tools:text="📍 Anna Nagar" />
+
+        <TextView
+            android:id="@+id/tvPresentToday"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="18 / 24"
+            android:textStyle="bold"
+            android:textColor="@color/green_700"
+            android:textSize="12sp"
+            android:layout_marginEnd="12dp" />
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:src="@drawable/ic_arrow_forward"
+            app:tint="@color/text_secondary"
+            android:alpha="0.4" />
+
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

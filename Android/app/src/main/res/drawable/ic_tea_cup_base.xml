@@ -1,0 +1,43 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <!-- Cup Outline -->
+    <path
+        android:pathData="M30,40 L70,40 L65,80 L35,80 Z"
+        android:strokeColor="?attr/colorPrimary"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"/>
+    <!-- Handle -->
+    <path
+        android:pathData="M70,50 C80,50 80,70 70,70"
+        android:strokeColor="?attr/colorPrimary"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"/>
+    <!-- Tea Level -->
+    <path
+        android:name="tea_fill"
+        android:pathData="M35,78 L65,78 L65,79 L35,79 Z"
+        android:fillColor="?attr/colorPrimary"/>
+
+    <group android:name="steam_group1">
+        <!-- Steam 1 -->
+        <path
+            android:name="steam1"
+            android:pathData="M40,35 Q45,25 40,20"
+            android:strokeColor="?attr/colorSecondary"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"/>
+    </group>
+
+    <group android:name="steam_group2">
+        <!-- Steam 2 -->
+        <path
+            android:name="steam2"
+            android:pathData="M55,35 Q60,25 55,20"
+            android:strokeColor="?attr/colorSecondary"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"/>
+    </group>
+</vector>

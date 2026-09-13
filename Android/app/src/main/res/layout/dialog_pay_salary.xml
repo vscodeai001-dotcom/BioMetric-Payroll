@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/tvEmployeeName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvEarnings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Monthly Earnings: ₹0.00"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvAllowance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Daily Allowance Total: ₹0.00"
+        android:textColor="@color/green"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvAdvance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Advance (Info Only): ₹0.00"
+        android:textColor="@color/red"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvBonusAmount"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Attendance Bonus: ₹0.00"
+        android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+        android:layout_marginBottom="12dp" />
+
+    <com.google.android.material.checkbox.MaterialCheckBox
+        android:id="@+id/cbIncludeBonus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Accept Bonus"
+        android:checked="false"
+        android:layout_marginBottom="16dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?android:attr/listDivider"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvTotalPayable"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Total Net Payable: ₹0.00"
+        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+        android:textColor="?attr/colorPrimary" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="* Note: Advance is shown for record only and is NOT deducted from total payable here."
+        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+        android:textColor="@color/text_secondary"
+        android:layout_marginTop="8dp" />
+
+</LinearLayout>

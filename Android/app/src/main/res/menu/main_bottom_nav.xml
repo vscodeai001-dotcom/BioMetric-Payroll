@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_dashboard"
+        android:icon="@drawable/ic_logs"
+        android:title="Dashboard" />
+    <item
+        android:id="@+id/nav_workforce"
+        android:icon="@drawable/ic_people"
+        android:title="Workforce" />
+    <item
+        android:id="@+id/nav_approvals"
+        android:icon="@drawable/ic_edit"
+        android:title="Approvals" />
+    <item
+        android:id="@+id/nav_tracking"
+        android:icon="@drawable/ic_play"
+        android:title="Tracking" />
+    <item
+        android:id="@+id/nav_reports"
+        android:icon="@drawable/ic_bar_chart"
+        android:title="Reports" />
+</menu>

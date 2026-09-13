@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Resignation Process 🚪"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="If you wish to leave, please provide your intended last working day."
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="24dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cvStatus"
+            style="@style/PremiumCardView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="#F8FAFC">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+                <TextView
+                    android:id="@+id/tvStatusHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="APPLICATION STATUS 🚩"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginBottom="8dp"/>
+                <TextView
+                    android:id="@+id/tvStatusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Pending Approval ⏳"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textStyle="bold"
+                    android:textColor="@color/amber_900"/>
+                <TextView
+                    android:id="@+id/tvAdminRemarks"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Waiting for management review."
+                    android:textSize="12sp"
+                    android:alpha="0.8"/>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/PremiumCardView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilLastDay"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Desired Last Day 🗓️"
+                    android:layout_marginBottom="16dp"
+                    app:startIconDrawable="@drawable/ic_calendar">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etLastDay"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:focusable="false"
+                        android:clickable="true" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilReason"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Reason for Resignation 📝"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etReason"
+                        android:layout_width="match_parent"
+                        android:layout_height="140dp"
+                        android:gravity="top"
+                        android:inputType="textMultiLine" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSubmit"
+            style="@style/PremiumButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Submit Resignation 📤"
+            app:cornerRadius="16dp"
+            app:backgroundTint="@color/red" />
+
+    </LinearLayout>
+</ScrollView>

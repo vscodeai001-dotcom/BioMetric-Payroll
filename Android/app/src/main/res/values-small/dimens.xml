@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Small Device Spacing -->
+    <dimen name="spacing_medium">12dp</dimen>
+    <dimen name="spacing_large">16dp</dimen>
+
+    <!-- Small Device Text Sizes -->
+    <dimen name="text_tiny">8sp</dimen>
+    <dimen name="text_small">10sp</dimen>
+    <dimen name="text_medium">12sp</dimen>
+    <dimen name="text_large">14sp</dimen>
+</resources>

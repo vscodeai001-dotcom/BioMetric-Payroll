@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tabLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:tabIndicatorFullWidth="false"
+            app:tabSelectedTextColor="?attr/colorPrimary"
+            app:tabIndicatorColor="?attr/colorPrimary">
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="History" />
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Balances" />
+        </com.google.android.material.tabs.TabLayout>
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <!-- History View -->
+            <LinearLayout
+                android:id="@+id/llHistory"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="visible">
+
+                <!-- Balances Card at Top -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="16dp"
+                    app:cardCornerRadius="20dp"
+                    app:cardElevation="4dp"
+                    app:strokeWidth="0dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:padding="16dp"
+                        android:divider="@drawable/divider_vertical"
+                        android:showDividers="middle">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PAID LEAVE 🌴" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary"/>
+                            <TextView android:id="@+id/tvPaidSummary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0.0" android:textSize="16sp" android:textStyle="bold" android:textColor="?attr/colorPrimary"/>
+                        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SICK LEAVE 🏥" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary"/>
+                            <TextView android:id="@+id/tvSickSummary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0.0" android:textSize="16sp" android:textStyle="bold" android:textColor="@color/green_700"/>
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="12dp"
+                    android:background="#15000000">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📜 RECENT APPLICATIONS" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true" android:letterSpacing="0.1"/>
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvLeaves"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    tools:listitem="@layout/item_leave_request" />
+            </LinearLayout>
+
+            <!-- Balances View -->
+            <ScrollView
+                android:id="@+id/svBalances"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Widget.App.CardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Paid Leave" android:textStyle="bold" android:textSize="16sp" android:textColor="?attr/colorPrimary"/>
+                            <TextView android:id="@+id/tvPaidLeaveVal" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0.00 / 12.00" android:layout_marginTop="4dp"/>
+                            <com.google.android.material.progressindicator.LinearProgressIndicator
+                                android:id="@+id/progressPaid"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                app:trackThickness="8dp"
+                                app:trackCornerRadius="4dp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        style="@style/Widget.App.CardView"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Sick Leave" android:textStyle="bold" android:textSize="16sp" android:textColor="@color/green_700"/>
+                            <TextView android:id="@+id/tvSickLeaveVal" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0.00 / 12.00" android:layout_marginTop="4dp"/>
+                            <com.google.android.material.progressindicator.LinearProgressIndicator
+                                android:id="@+id/progressSick"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                app:trackThickness="8dp"
+                                app:trackCornerRadius="4dp"
+                                app:indicatorColor="@color/green_700" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                </LinearLayout>
+            </ScrollView>
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+        android:id="@+id/fabApplyLeave"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:text="Apply Leave"
+        app:icon="@drawable/ic_add"
+        app:backgroundTint="?attr/colorPrimary"
+        android:textColor="@color/white"
+        app:iconTint="@color/white" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

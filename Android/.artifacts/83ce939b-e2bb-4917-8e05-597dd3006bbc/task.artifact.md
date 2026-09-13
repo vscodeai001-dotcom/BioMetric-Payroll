@@ -1,0 +1,12 @@
+- [x] Optimize `EmployeeHomeActivity.kt` startup and permission flow
+    - [x] Remove redundant `setupMap()` call in `onCreate`
+    - [x] Add `isPermissionDialogShowing` guard for dialogs
+    - [x] Stagger `loadDashboard()` and `signalR.start()` in `onResume`
+    - [x] Add persistence for the location permission "Later" choice
+- [x] Refine `TrackingService.kt` foreground service handling
+    - [x] Add permission checks before using `FOREGROUND_SERVICE_TYPE_LOCATION`
+- [x] Tune `MainActivity.kt` lifecycle
+    - [x] Ensure `observeViewModel` doesn't block main thread startup
+- [x] Verify changes
+    - [x] Build project
+    - [x] Manual test permission flows

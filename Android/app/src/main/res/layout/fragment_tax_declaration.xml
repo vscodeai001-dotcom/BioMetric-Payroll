@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tax Savings Declaration 🏦"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Financial Year 2024-25 • IT Projection"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="24dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/PremiumCardView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Section 80C (Life Ins, PF, etc.) 💰"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et80C"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Section 80D (Medical) 🏥"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/et80D"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="House Rent Allowance (HRA) 🏠"
+                    android:layout_marginBottom="16dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etHra"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Other Savings / Deductions 📝"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etOther"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSave"
+            style="@style/PremiumButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Submit Declaration 📤"
+            app:cornerRadius="16dp" />
+
+    </LinearLayout>
+</ScrollView>

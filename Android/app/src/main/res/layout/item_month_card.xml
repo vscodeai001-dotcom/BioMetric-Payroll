@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="8.dp"
+    app:cardCornerRadius="12.dp"
+    app:cardElevation="4.dp"
+    app:cardBackgroundColor="@color/white">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16.dp"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="32.dp"
+            android:layout_height="32.dp"
+            android:src="@android:drawable/ic_menu_my_calendar"
+            app:tint="?attr/colorPrimary" />
+
+        <TextView
+            android:id="@+id/tvMonthName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="16.dp"
+            android:text="January 2026"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@color/black" />
+
+        <ImageView
+            android:layout_width="24.dp"
+            android:layout_height="24.dp"
+            android:src="@android:drawable/ic_media_play"
+            app:tint="#BDBDBD" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

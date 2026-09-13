@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/llBubbleContainer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingVertical="4dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cardBubble"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp">
+
+            <TextView
+                android:id="@+id/tvMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxWidth="280dp"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="14sp"
+                tools:text="How much profit did I make last week?" />
+
+            <com.github.mikephil.charting.charts.LineChart
+                android:id="@+id/sparklineChart"
+                android:layout_width="240dp"
+                android:layout_height="80dp"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <LinearLayout
+                android:id="@+id/llTableContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAction"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="gone"
+                android:textSize="11sp"
+                app:cornerRadius="8dp"
+                tools:text="Fix Now"
+                tools:visibility="visible" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="end|center_vertical"
+                android:layout_marginTop="4dp">
+
+
+                <ImageButton
+                    android:id="@+id/btnShare"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_share"
+                    android:alpha="0.5"
+                    android:layout_marginEnd="8dp"
+                    app:tint="?attr/colorOnSurface"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/tvTimestamp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:alpha="0.6"
+                    android:textSize="10sp"
+                    tools:text="10:30 AM" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+</LinearLayout>

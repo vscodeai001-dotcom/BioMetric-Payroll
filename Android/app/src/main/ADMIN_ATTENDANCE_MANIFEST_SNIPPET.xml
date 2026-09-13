@@ -1,0 +1,6 @@
+<!-- Add inside the <application> element if AdminAttendanceActivity is not already declared. -->
+<activity
+    android:name=".ui.AdminAttendanceActivity"
+    android:exported="false"
+    android:label="Attendance Logs &amp; Reports"
+    android:screenOrientation="portrait" />

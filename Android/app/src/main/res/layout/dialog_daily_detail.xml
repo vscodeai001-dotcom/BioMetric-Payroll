@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@drawable/bottom_sheet_bg">
+
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:background="#E5E7EB" />
+
+    <TextView
+        android:id="@+id/tvDate"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Date"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:textColor="?attr/colorOnSurface" />
+
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:columnCount="2"
+        android:useDefaultMargins="true">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="💰 Sales" android:textSize="12sp" />
+            <TextView android:id="@+id/tvSales" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textSize="18sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📦 Purchases" android:textSize="12sp" />
+            <TextView android:id="@+id/tvPurchases" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textSize="18sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="👨‍💼 Salary" android:textSize="12sp" />
+            <TextView android:id="@+id/tvSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textSize="18sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_columnWeight="1"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 Net Profit" android:textSize="12sp" />
+            <TextView android:id="@+id/tvNet" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textStyle="bold" android:textSize="18sp" />
+        </LinearLayout>
+
+    </GridLayout>
+
+</LinearLayout>

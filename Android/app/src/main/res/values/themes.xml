@@ -1,0 +1,113 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.Biometric" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorPrimaryVariant">@color/colorPrimaryDark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/colorAccent</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+
+        <!-- Surface, Background, and Error Colors -->
+        <item name="android:colorBackground">@color/window_background</item>
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowDisablePreview">false</item>
+        <item name="colorSurface">@color/window_background</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/colorSurfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorError">@color/red</item>
+        <item name="colorOnError">@android:color/white</item>
+        <item name="colorOutline">@color/outline</item>
+        <item name="colorOutlineVariant">@color/outline_variant</item>
+
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">?attr/colorSurface</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
+
+        <!-- Activity Transitions -->
+        <item name="android:windowActivityTransitions">true</item>
+        <item name="android:windowEnterTransition">@android:transition/fade</item>
+        <item name="android:windowExitTransition">@android:transition/fade</item>
+
+        <!-- Custom Styles -->
+        <item name="toolbarStyle">@style/Widget.App.Toolbar</item>
+        <item name="materialCardViewStyle">@style/Widget.App.CardView</item>
+    </style>
+
+    <style name="Widget.App.Toolbar" parent="Widget.Material3.Toolbar.OnSurface">
+        <item name="titleTextAppearance">@style/TextAppearance.App.ToolbarTitle</item>
+    </style>
+
+    <style name="TextAppearance.App.ToolbarTitle" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="Widget.App.CardView" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardCornerRadius">16dp</item>
+        <item name="cardElevation">4dp</item>
+    </style>
+
+    <style name="PremiumButton" parent="Widget.Material3.Button">
+        <item name="android:textColor">@android:color/white</item>
+        <item name="backgroundTint">?attr/colorPrimary</item>
+    </style>
+
+    <style name="PremiumToolbarTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">?attr/colorOnSurface</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">marquee</item>
+        <item name="android:textSize">18sp</item>
+    </style>
+
+    <style name="PremiumCardView" parent="Widget.App.CardView">
+        <item name="cardElevation">8dp</item>
+        <item name="cardCornerRadius">24dp</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+    </style>
+
+    <style name="PremiumDashboardCard" parent="Widget.App.CardView">
+        <item name="cardElevation">16dp</item>
+        <item name="cardCornerRadius">32dp</item>
+    </style>
+
+    <style name="ShimmerStyle">
+        <item name="shimmer_base_alpha">0.6</item>
+        <item name="shimmer_highlight_alpha">1.0</item>
+        <item name="shimmer_duration">1500</item>
+        <item name="shimmer_intensity">0.3</item>
+        <item name="shimmer_repeat_mode">restart</item>
+    </style>
+
+    <style name="Theme.Biometric.Login" parent="Theme.Biometric">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="POSButtonStyle" parent="Widget.Material3.Button.UnelevatedButton">
+        <item name="android:textColor">@android:color/white</item>
+    </style>
+
+    <style name="PremiumBottomSheetDialog" parent="Theme.Material3.DayNight.BottomSheetDialog">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">false</item>
+    </style>
+
+    <style name="PremiumDialogAnimation">
+        <item name="android:windowEnterAnimation">@anim/slide_up_premium</item>
+        <item name="android:windowExitAnimation">@android:anim/fade_out</item>
+    </style>
+
+    <style name="Theme.Biometric.Splash" parent="Theme.Biometric">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+</resources>

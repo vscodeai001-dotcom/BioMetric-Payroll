@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tablet Spacing -->
+    <dimen name="spacing_medium">24dp</dimen>
+    <dimen name="spacing_large">32dp</dimen>
+    <dimen name="spacing_xlarge">48dp</dimen>
+
+    <!-- Tablet Text Sizes -->
+    <dimen name="text_tiny">12sp</dimen>
+    <dimen name="text_small">14sp</dimen>
+    <dimen name="text_medium">16sp</dimen>
+    <dimen name="text_large">18sp</dimen>
+    <dimen name="text_xlarge">22sp</dimen>
+    <dimen name="text_xxlarge">26sp</dimen>
+</resources>

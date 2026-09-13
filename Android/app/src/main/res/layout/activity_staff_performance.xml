@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="Star Staff ⭐️"
+            app:titleCentered="false"
+            app:titleTextAppearance="@style/PremiumToolbarTitle" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:id="@+id/contentLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="visible"
+            android:alpha="0">
+
+            <!-- Filter Controls -->
+            <include
+                android:id="@+id/layoutFilterIcons"
+                layout="@layout/layout_filter_icons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tvPeriodRange"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginBottom="16dp"
+                android:textSize="11sp"
+                android:textColor="?attr/colorSecondary"
+                tools:text="01 Mar 2024 - 14 Mar 2024" />
+
+            <!-- Top Performer Highlight -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardTopPerformer"
+                style="@style/PremiumCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/grad_premium_main"
+                    android:orientation="vertical"
+                    android:padding="20dp"
+                    android:gravity="center">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="🏆 STAR PERFORMER"
+                        android:gravity="center"
+                        android:textColor="#E0E7FF"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+
+                    <TextView
+                        android:id="@+id/tvTopStaffName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center"
+                        android:textColor="@android:color/white"
+                        android:textSize="28sp"
+                        android:textStyle="bold"
+                        tools:text="Ravi Shankar" />
+
+                    <TextView
+                        android:id="@+id/tvTopStaffDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center"
+                        android:textColor="#BBF7D0"
+                        android:textSize="14sp"
+                        tools:text="220 Hours Worked • ₹12,500 Total" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Employee Earnings Breakdown 🧩"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PremiumCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:baselineAligned="false"
+                    android:padding="12dp">
+
+                    <!-- Fixed Left Column -->
+                    <TableLayout
+                        android:id="@+id/tableFixedLeft"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content">
+                        <TableRow android:paddingBottom="12dp">
+                            <TextView android:text="Staff" android:textStyle="bold" android:textSize="11sp" android:textColor="?attr/colorSecondary" android:minWidth="95dp" />
+                        </TableRow>
+                        <TableRow>
+                            <View android:layout_height="1dp" android:layout_weight="1" android:background="?attr/colorOutlineVariant" android:layout_marginVertical="8dp" />
+                        </TableRow>
+                    </TableLayout>
+
+                    <!-- Scrollable Middle Columns -->
+                    <HorizontalScrollView
+                        android:id="@+id/hsvTable"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:scrollbars="none">
+                        <TableLayout
+                            android:id="@+id/tablePerformance"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content">
+                            <TableRow android:paddingBottom="12dp">
+                                <TextView android:text="Base Sal" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="?attr/colorSecondary" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Worked" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="?attr/colorSecondary" android:paddingHorizontal="8dp" />
+                                <TextView android:text="OT Amt" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#10B981" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Late" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/red" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Early" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/amber" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Gap" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/red" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Leave" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/red" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Paid Lv" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#10B981" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Bonus" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#10B981" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Allow." android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#10B981" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Adv." android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/red" android:paddingHorizontal="8dp" />
+                                <TextView android:text="T.Debit" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="@color/red" android:paddingHorizontal="8dp" />
+                                <TextView android:text="T.Credit" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#10B981" android:paddingHorizontal="8dp" />
+                                <TextView android:text="Total(Net)" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#818CF8" android:paddingHorizontal="8dp" />
+                            </TableRow>
+                            <TableRow>
+                                <View android:layout_height="1dp" android:layout_weight="1" android:background="?attr/colorOutlineVariant" android:layout_marginVertical="8dp" />
+                            </TableRow>
+                        </TableLayout>
+                    </HorizontalScrollView>
+
+                    <!-- Fixed Right Column -->
+                    <TableLayout
+                        android:id="@+id/tableFixedRight"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content">
+                        <TableRow android:paddingBottom="12dp">
+                            <TextView android:text="Due Amt" android:textStyle="bold" android:gravity="end" android:textSize="11sp" android:textColor="#34D399" android:paddingHorizontal="8dp" />
+                        </TableRow>
+                        <TableRow>
+                            <View android:layout_height="1dp" android:layout_weight="1" android:background="?attr/colorOutlineVariant" android:layout_marginVertical="8dp" />
+                        </TableRow>
+                    </TableLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Working Hours Distribution ⏱️"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PremiumCardView"
+                android:layout_width="match_parent"
+                android:layout_height="250dp"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <com.github.mikephil.charting.charts.BarChart
+                        android:id="@+id/barChartPerformance"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Earnings &amp; Productivity Insights 💡"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="12dp" />
+
+            <LinearLayout
+                android:id="@+id/llInsights"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="24dp" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

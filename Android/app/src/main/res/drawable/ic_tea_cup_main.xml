@@ -1,0 +1,67 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Cup Foot/Base -->
+    <path
+        android:pathData="M43,84 L57,84 C58.5,84 59,85 58,87 L42,87 C41,85 41.5,84 43,84 Z"
+        android:fillColor="#B2EBF2"/>
+
+    <!-- Main Porcelain Body -->
+    <path
+        android:pathData="M32,35 L68,35 L68,78 C68,81 65,84 60,84 L40,84 C35,84 32,81 32,78 Z"
+        android:fillColor="#FFFFFF"/>
+
+    <!-- Body Side Shadow -->
+    <path
+        android:pathData="M58,35 L68,35 L68,78 C68,81 65,84 60,84 L58,84 Z"
+        android:fillColor="#F5F5F5"/>
+
+    <!-- Inner Rim (Empty Cup look) -->
+    <path
+        android:pathData="M32,35 A18,6 0 1,0 68,35 A18,6 0 1,0 32,35"
+        android:fillColor="#EEEEEE"/>
+
+    <!-- Vibrant Green Tea Surface -->
+    <path
+        android:pathData="M33,36 A17,5.5 0 1,0 67,36 A17,5.5 0 1,0 33,36"
+        android:fillColor="#43A047"/>
+
+    <!-- Tea Surface Shine -->
+    <path
+        android:pathData="M38,34.5 A10,2.5 0 0,1 48,36"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="0.8"
+        android:strokeLineCap="round"
+        android:alpha="0.4"/>
+
+    <!-- Fillable Tea Path (Animated) -->
+    <!-- Note: Path data nodes must match End path for morphing -->
+    <path
+        android:name="tea_fill"
+        android:pathData="M33,78 L67,78 L67,78 C67,81 64,83 60,83 L40,83 C36,83 33,81 33,78 Z"
+        android:fillColor="#66BB6A"/>
+
+    <!-- High Quality Wispy Steam 1 -->
+    <group android:name="steam_group1">
+        <path
+            android:pathData="M44,28 C46,22 40,18 44,10"
+            android:strokeColor="#90A4AE"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:alpha="0.5"/>
+    </group>
+
+    <!-- High Quality Wispy Steam 2 -->
+    <group android:name="steam_group2">
+        <path
+            android:pathData="M54,28 C56,24 50,20 54,12"
+            android:strokeColor="#90A4AE"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:alpha="0.4"/>
+    </group>
+
+</vector>

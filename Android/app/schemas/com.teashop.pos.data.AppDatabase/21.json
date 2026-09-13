@@ -1,0 +1,1228 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 21,
+    "identityHash": "82d533f1a349769ccee18c2c0d04bb63",
+    "entities": [
+      {
+        "tableName": "shops",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`shopId` TEXT NOT NULL, `name` TEXT NOT NULL, `location` TEXT NOT NULL, `openingDate` INTEGER NOT NULL, `openingCashBalance` REAL NOT NULL, `tableCount` INTEGER NOT NULL, `isActive` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`shopId`))",
+        "fields": [
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "location",
+            "columnName": "location",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openingDate",
+            "columnName": "openingDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openingCashBalance",
+            "columnName": "openingCashBalance",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tableCount",
+            "columnName": "tableCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "shopId"
+          ]
+        }
+      },
+      {
+        "tableName": "items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemId` TEXT NOT NULL, `name` TEXT NOT NULL, `category` TEXT NOT NULL, `isActive` INTEGER NOT NULL, `hasParcelCharge` INTEGER NOT NULL, `defaultParcelCharge` REAL NOT NULL, `globalPrice` REAL NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`itemId`))",
+        "fields": [
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasParcelCharge",
+            "columnName": "hasParcelCharge",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "defaultParcelCharge",
+            "columnName": "defaultParcelCharge",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "globalPrice",
+            "columnName": "globalPrice",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemId"
+          ]
+        }
+      },
+      {
+        "tableName": "shop_item_prices",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`shopId` TEXT NOT NULL, `itemId` TEXT NOT NULL, `sellingPrice` REAL NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`shopId`, `itemId`))",
+        "fields": [
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sellingPrice",
+            "columnName": "sellingPrice",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "shopId",
+            "itemId"
+          ]
+        }
+      },
+      {
+        "tableName": "shop_tables",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`shopId` TEXT NOT NULL, `tableId` TEXT NOT NULL, `tableName` TEXT NOT NULL, `status` TEXT NOT NULL, `currentOrderId` TEXT, PRIMARY KEY(`shopId`, `tableId`))",
+        "fields": [
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tableId",
+            "columnName": "tableId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tableName",
+            "columnName": "tableName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentOrderId",
+            "columnName": "currentOrderId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "shopId",
+            "tableId"
+          ]
+        }
+      },
+      {
+        "tableName": "orders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`orderId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `tableId` TEXT, `serviceType` TEXT NOT NULL, `totalAmount` REAL NOT NULL, `discount` REAL NOT NULL, `payableAmount` REAL NOT NULL, `paymentStatus` TEXT NOT NULL, `paymentMethod` TEXT, `cashAmount` REAL NOT NULL, `onlineAmount` REAL NOT NULL, `status` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `closedAt` INTEGER, `lastModified` INTEGER NOT NULL, `isSynced` INTEGER NOT NULL, PRIMARY KEY(`orderId`))",
+        "fields": [
+          {
+            "fieldPath": "orderId",
+            "columnName": "orderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tableId",
+            "columnName": "tableId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "serviceType",
+            "columnName": "serviceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalAmount",
+            "columnName": "totalAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "discount",
+            "columnName": "discount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payableAmount",
+            "columnName": "payableAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentStatus",
+            "columnName": "paymentStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentMethod",
+            "columnName": "paymentMethod",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cashAmount",
+            "columnName": "cashAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "onlineAmount",
+            "columnName": "onlineAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "closedAt",
+            "columnName": "closedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSynced",
+            "columnName": "isSynced",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "orderId"
+          ]
+        }
+      },
+      {
+        "tableName": "order_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`orderItemId` TEXT NOT NULL, `orderId` TEXT NOT NULL, `itemId` TEXT NOT NULL, `itemName` TEXT NOT NULL, `quantity` REAL NOT NULL, `unitPrice` REAL NOT NULL, `parcelCharge` REAL NOT NULL, `subTotal` REAL NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`orderItemId`))",
+        "fields": [
+          {
+            "fieldPath": "orderItemId",
+            "columnName": "orderItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "orderId",
+            "columnName": "orderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemName",
+            "columnName": "itemName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unitPrice",
+            "columnName": "unitPrice",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parcelCharge",
+            "columnName": "parcelCharge",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subTotal",
+            "columnName": "subTotal",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "orderItemId"
+          ]
+        }
+      },
+      {
+        "tableName": "cashbook",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`entryId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `transactionType` TEXT NOT NULL, `category` TEXT NOT NULL, `amount` REAL NOT NULL, `description` TEXT, `referenceId` TEXT, `transactionDate` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastModified` INTEGER NOT NULL, `isSynced` INTEGER NOT NULL, PRIMARY KEY(`entryId`))",
+        "fields": [
+          {
+            "fieldPath": "entryId",
+            "columnName": "entryId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transactionType",
+            "columnName": "transactionType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amount",
+            "columnName": "amount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "referenceId",
+            "columnName": "referenceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "transactionDate",
+            "columnName": "transactionDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSynced",
+            "columnName": "isSynced",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "entryId"
+          ]
+        }
+      },
+      {
+        "tableName": "stock_movements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`movementId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `itemId` TEXT NOT NULL, `quantity` REAL NOT NULL, `movementType` TEXT NOT NULL, `referenceId` TEXT, `reason` TEXT, `timestamp` INTEGER NOT NULL, PRIMARY KEY(`movementId`))",
+        "fields": [
+          {
+            "fieldPath": "movementId",
+            "columnName": "movementId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quantity",
+            "columnName": "quantity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "movementType",
+            "columnName": "movementType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "referenceId",
+            "columnName": "referenceId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "movementId"
+          ]
+        }
+      },
+      {
+        "tableName": "employees",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`employeeId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `name` TEXT NOT NULL, `phone` TEXT NOT NULL, `salaryType` TEXT NOT NULL, `salaryRate` REAL NOT NULL, `shiftStart` TEXT NOT NULL, `shiftEnd` TEXT NOT NULL, `breakHours` REAL NOT NULL, `graceMinutes` INTEGER NOT NULL, `otRateMultiplier` REAL NOT NULL, `isActive` INTEGER NOT NULL, `hireDate` INTEGER NOT NULL, `terminateDate` INTEGER, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`employeeId`))",
+        "fields": [
+          {
+            "fieldPath": "employeeId",
+            "columnName": "employeeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryType",
+            "columnName": "salaryType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryRate",
+            "columnName": "salaryRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftStart",
+            "columnName": "shiftStart",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftEnd",
+            "columnName": "shiftEnd",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "breakHours",
+            "columnName": "breakHours",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "graceMinutes",
+            "columnName": "graceMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "otRateMultiplier",
+            "columnName": "otRateMultiplier",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hireDate",
+            "columnName": "hireDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "terminateDate",
+            "columnName": "terminateDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "employeeId"
+          ]
+        }
+      },
+      {
+        "tableName": "attendance",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`attendanceId` TEXT NOT NULL, `employeeId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `checkInTime` INTEGER NOT NULL, `checkOutTime` INTEGER, `type` TEXT NOT NULL, `hoursWorked` REAL NOT NULL, `lateDeduction` REAL NOT NULL, `otHours` REAL NOT NULL, `isSynced` INTEGER NOT NULL, `shiftStart` TEXT NOT NULL, `shiftEnd` TEXT NOT NULL, `breakHours` REAL NOT NULL, `salaryType` TEXT NOT NULL, `salaryRate` REAL NOT NULL, PRIMARY KEY(`attendanceId`))",
+        "fields": [
+          {
+            "fieldPath": "attendanceId",
+            "columnName": "attendanceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employeeId",
+            "columnName": "employeeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkInTime",
+            "columnName": "checkInTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkOutTime",
+            "columnName": "checkOutTime",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hoursWorked",
+            "columnName": "hoursWorked",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lateDeduction",
+            "columnName": "lateDeduction",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "otHours",
+            "columnName": "otHours",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSynced",
+            "columnName": "isSynced",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftStart",
+            "columnName": "shiftStart",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftEnd",
+            "columnName": "shiftEnd",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "breakHours",
+            "columnName": "breakHours",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryType",
+            "columnName": "salaryType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryRate",
+            "columnName": "salaryRate",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "attendanceId"
+          ]
+        }
+      },
+      {
+        "tableName": "salary_payments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`paymentId` TEXT NOT NULL, `employeeId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `amount` REAL NOT NULL, `lateDeduction` REAL NOT NULL, `netPaid` REAL NOT NULL, `periodStart` INTEGER NOT NULL, `periodEnd` INTEGER NOT NULL, `paymentDate` INTEGER NOT NULL, PRIMARY KEY(`paymentId`))",
+        "fields": [
+          {
+            "fieldPath": "paymentId",
+            "columnName": "paymentId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employeeId",
+            "columnName": "employeeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amount",
+            "columnName": "amount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lateDeduction",
+            "columnName": "lateDeduction",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "netPaid",
+            "columnName": "netPaid",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodStart",
+            "columnName": "periodStart",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "periodEnd",
+            "columnName": "periodEnd",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paymentDate",
+            "columnName": "paymentDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "paymentId"
+          ]
+        }
+      },
+      {
+        "tableName": "advance_payments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`advanceId` TEXT NOT NULL, `employeeId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `amount` REAL NOT NULL, `date` INTEGER NOT NULL, `isRecovered` INTEGER NOT NULL, `recoveryPaymentId` TEXT, PRIMARY KEY(`advanceId`))",
+        "fields": [
+          {
+            "fieldPath": "advanceId",
+            "columnName": "advanceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employeeId",
+            "columnName": "employeeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amount",
+            "columnName": "amount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isRecovered",
+            "columnName": "isRecovered",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveryPaymentId",
+            "columnName": "recoveryPaymentId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "advanceId"
+          ]
+        }
+      },
+      {
+        "tableName": "suppliers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`supplierId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `name` TEXT NOT NULL, `contact` TEXT NOT NULL, `description` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`supplierId`))",
+        "fields": [
+          {
+            "fieldPath": "supplierId",
+            "columnName": "supplierId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contact",
+            "columnName": "contact",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "supplierId"
+          ]
+        }
+      },
+      {
+        "tableName": "purchases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`purchaseId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `supplierId` TEXT NOT NULL, `supplierName` TEXT NOT NULL, `totalAmount` REAL NOT NULL, `paidAmount` REAL NOT NULL, `balanceAmount` REAL NOT NULL, `purchaseDate` INTEGER NOT NULL, `description` TEXT, `isSettled` INTEGER NOT NULL, PRIMARY KEY(`purchaseId`))",
+        "fields": [
+          {
+            "fieldPath": "purchaseId",
+            "columnName": "purchaseId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "supplierId",
+            "columnName": "supplierId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "supplierName",
+            "columnName": "supplierName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalAmount",
+            "columnName": "totalAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paidAmount",
+            "columnName": "paidAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "balanceAmount",
+            "columnName": "balanceAmount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "purchaseDate",
+            "columnName": "purchaseDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isSettled",
+            "columnName": "isSettled",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "purchaseId"
+          ]
+        }
+      },
+      {
+        "tableName": "reminders",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`reminderId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `title` TEXT NOT NULL, `amount` REAL NOT NULL, `dueDay` INTEGER NOT NULL, `category` TEXT NOT NULL, `lastPaidMonth` INTEGER, `lastPaidYear` INTEGER, `isActive` INTEGER NOT NULL, PRIMARY KEY(`reminderId`))",
+        "fields": [
+          {
+            "fieldPath": "reminderId",
+            "columnName": "reminderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "amount",
+            "columnName": "amount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dueDay",
+            "columnName": "dueDay",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastPaidMonth",
+            "columnName": "lastPaidMonth",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastPaidYear",
+            "columnName": "lastPaidYear",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "isActive",
+            "columnName": "isActive",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "reminderId"
+          ]
+        }
+      },
+      {
+        "tableName": "stock_patterns",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemId` TEXT NOT NULL, `shopId` TEXT NOT NULL, `weekdayStandard` REAL NOT NULL, `weekendStandard` REAL NOT NULL, `supplierId` TEXT, PRIMARY KEY(`itemId`, `shopId`))",
+        "fields": [
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekdayStandard",
+            "columnName": "weekdayStandard",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "weekendStandard",
+            "columnName": "weekendStandard",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "supplierId",
+            "columnName": "supplierId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemId",
+            "shopId"
+          ]
+        }
+      },
+      {
+        "tableName": "shop_closed_days",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `shopId` TEXT NOT NULL, `date` INTEGER NOT NULL, `reason` TEXT NOT NULL, `paySalary` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shopId",
+            "columnName": "shopId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "date",
+            "columnName": "date",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "paySalary",
+            "columnName": "paySalary",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "user_profile",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `phone` TEXT NOT NULL, `joinDate` INTEGER NOT NULL, `isPremium` INTEGER NOT NULL, `subscriptionExpiry` INTEGER, `lastCheckTimestamp` INTEGER NOT NULL, PRIMARY KEY(`uid`))",
+        "fields": [
+          {
+            "fieldPath": "uid",
+            "columnName": "uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phone",
+            "columnName": "phone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "joinDate",
+            "columnName": "joinDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPremium",
+            "columnName": "isPremium",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subscriptionExpiry",
+            "columnName": "subscriptionExpiry",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastCheckTimestamp",
+            "columnName": "lastCheckTimestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "uid"
+          ]
+        }
+      },
+      {
+        "tableName": "employee_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`historyId` TEXT NOT NULL, `employeeId` TEXT NOT NULL, `version` INTEGER NOT NULL, `salaryType` TEXT NOT NULL, `salaryRate` REAL NOT NULL, `shiftStart` TEXT NOT NULL, `shiftEnd` TEXT NOT NULL, `breakHours` REAL NOT NULL, `changeDate` INTEGER NOT NULL, `changeReason` TEXT, PRIMARY KEY(`historyId`))",
+        "fields": [
+          {
+            "fieldPath": "historyId",
+            "columnName": "historyId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employeeId",
+            "columnName": "employeeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "version",
+            "columnName": "version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryType",
+            "columnName": "salaryType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "salaryRate",
+            "columnName": "salaryRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftStart",
+            "columnName": "shiftStart",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftEnd",
+            "columnName": "shiftEnd",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "breakHours",
+            "columnName": "breakHours",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changeDate",
+            "columnName": "changeDate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "changeReason",
+            "columnName": "changeReason",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "historyId"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '82d533f1a349769ccee18c2c0d04bb63')"
+    ]
+  }
+}

@@ -1,0 +1,738 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/PremiumCardView"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    app:cardBackgroundColor="@color/staff_card_bg">
+
+    <LinearLayout
+        android:id="@+id/containerContent"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:layout_width="56dp"
+                android:layout_height="56dp">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_circle_small"
+                    android:backgroundTint="#F8FAFC" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:text="@string/emoji_staff"
+                    android:textSize="28sp" />
+                <com.airbnb.lottie.LottieAnimationView
+                    android:id="@+id/animStaffPresence"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    app:lottie_rawRes="@raw/anim_ai_spark"
+                    app:lottie_autoPlay="true"
+                    app:lottie_loop="true"
+                    android:alpha="0.4" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="16dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvStaffName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleLarge"
+                    android:textStyle="bold"
+                    android:textColor="#1E293B"
+                    tools:text="👤 Shiva Prakash" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginTop="2dp">
+
+                    <TextView
+                        android:id="@+id/tvStaffRoleName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                        android:textColor="@color/text_secondary"
+                        android:textStyle="bold"
+                        tools:text="Lead Engineer 👔" />
+
+                    <TextView
+                        android:id="@+id/tvBiometricIdBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_pill_clickable"
+                        android:backgroundTint="#EFF6FF"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="2dp"
+                        android:textColor="#2563EB"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        tools:text="BIO-ID: 101" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvStaffRole"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                    android:textColor="@color/staff_text_subtitle"
+                    android:alpha="0.9"
+                    tools:text="💰 Monthly | ₹15000 | ⏱️ 12.0h" />
+
+                <TextView
+                    android:id="@+id/tvTodayStats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                    android:textStyle="bold"
+                    android:textColor="#2563EB"
+                    android:background="@drawable/bg_pill_small"
+                    android:backgroundTint="#152563EB"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="3dp"
+                    tools:text="📅 Worked: 8.5h | ₹510" />
+
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnQuickAttendance"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_punch"
+                android:textSize="11sp"
+                app:cornerRadius="12dp"
+                android:textColor="@color/colorPrimary"
+                app:backgroundTint="#102563EB" />
+        </LinearLayout>
+
+        <com.google.android.material.divider.MaterialDivider
+            android:id="@+id/dividerHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="8dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/llBodyContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <!-- Deduction / Summary Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/cbIncludeBonus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Bonus"
+                        android:textSize="11sp" />
+
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/cbIncludePaidLeave"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Paid Lv"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/tvBonusStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Bonus: No"
+                    android:textSize="10sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/tvPaidLeaveStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Paid Leave: No"
+                    android:textSize="10sp"
+                    android:textColor="@color/text_secondary" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Monthly Performance 📊"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp"/>
+
+            <GridLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="3"
+                android:alignmentMode="alignMargins"
+                android:useDefaultMargins="true">
+
+                <!-- Present Days -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="@color/green_light">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Present"
+                        android:textSize="10sp"
+                        android:textColor="@color/green" />
+                    <TextView
+                        android:id="@+id/tvDaysPresent"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/green" />
+                </LinearLayout>
+
+                <!-- Absent Days -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="@color/red_light">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Absent"
+                        android:textSize="10sp"
+                        android:textColor="@color/red" />
+                    <TextView
+                        android:id="@+id/tvDaysAbsent"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/red" />
+                </LinearLayout>
+
+                <!-- Net Worked Hrs -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="@color/blue_light">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Net Worked"
+                        android:textSize="10sp"
+                        android:textColor="@color/blue" />
+                    <TextView
+                        android:id="@+id/tvNetWorkedHrs"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0h"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/blue" />
+                </LinearLayout>
+            </GridLayout>
+
+            <!-- Deductions Summary -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="8dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Total Deductions (Shortfall) 📉"
+                    android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                    android:textStyle="bold" />
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+                <TextView
+                    android:id="@+id/tvDeductibleAmount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="₹ 0.00"
+                    android:textStyle="bold"
+                    android:textColor="@color/red" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvDeductibleHours"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0.0 hrs"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary" />
+                    <TextView
+                        android:id="@+id/tvDeductibleDays"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0.0 days"
+                        android:textSize="10sp"
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvWeekdayShortfall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Wk: 0h (₹0)"
+                        android:textSize="10sp"
+                        android:textColor="@color/text_secondary" />
+                    <TextView
+                        android:id="@+id/tvWeekendShortfall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="We: 0h (₹0)"
+                        android:textSize="10sp"
+                        android:textColor="@color/text_secondary" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Salary Details -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Earnings Breakdown 💎"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textStyle="bold"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="8dp"/>
+
+            <GridLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="4"
+                android:alignmentMode="alignMargins"
+                android:useDefaultMargins="true">
+
+                <!-- Required -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="#F3F4F6">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Required"
+                        android:textSize="9sp" />
+                    <TextView
+                        android:id="@+id/tvRequiredHours"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="0h"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Base -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="#F3F4F6">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Per Day"
+                        android:textSize="9sp" />
+                    <TextView
+                        android:id="@+id/tvDefaultPerDay"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="₹0"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Per Hour -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="#F3F4F6">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Per Hour"
+                        android:textSize="9sp" />
+                    <TextView
+                        android:id="@+id/tvDefaultPerHour"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="₹0"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Month Advance -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="8dp"
+                    android:background="@drawable/insight_bg"
+                    android:backgroundTint="#FEF2F2">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Pending Adv"
+                        android:textSize="9sp"
+                        android:textColor="@color/red" />
+                    <TextView
+                        android:id="@+id/tvPendingAdvance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="₹0"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/red" />
+                </LinearLayout>
+            </GridLayout>
+
+            <!-- Detailed Earned Stats -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Normal" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvTotalNormalHours" android:layout_width="40dp" android:layout_height="wrap_content" android:text="0h" android:textSize="11sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvTotalNormalSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/green"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="4dp">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Overtime" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvTotalOTHours" android:layout_width="40dp" android:layout_height="wrap_content" android:text="0h" android:textSize="11sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvTotalOTSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/green"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/llPLHrsContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="4dp">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Paid Leave" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvEarnedPLHrs" android:layout_width="40dp" android:layout_height="wrap_content" android:text="0h" android:textSize="11sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvEarnedPLSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/green"/>
+                    </LinearLayout>
+                    <View android:id="@+id/plPlaceholder" android:layout_width="match_parent" android:layout_height="0dp" android:layout_marginTop="0dp" android:visibility="gone"/>
+
+                    <com.google.android.material.divider.MaterialDivider
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginBottom="6dp"
+                        app:dividerColor="?attr/colorOutlineVariant" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="NET WORKED" android:textSize="11sp" android:textStyle="bold"/>
+                        <TextView android:id="@+id/tvEarnedNetWorkedHrs" android:layout_width="40dp" android:layout_height="wrap_content" android:text="0h" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/colorPrimary"/>
+                        <TextView android:id="@+id/tvEarnedNetWorkedSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/colorPrimary"/>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View android:layout_width="16dp" android:layout_height="1dp"/>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:id="@+id/cardBonus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Bonus" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvBonusRecv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/green"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/cardAllowance"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="4dp">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Allowance" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvAllowanceRecv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/green"/>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/cardAdvance"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="4dp">
+                        <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="Advance" android:textSize="11sp"/>
+                        <TextView android:id="@+id/tvAdvanceRecv" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="11sp" android:textStyle="bold" android:textColor="@color/red"/>
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Final Payable Section -->
+            <com.google.android.material.divider.MaterialDivider
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp"
+                app:dividerColor="?attr/colorOutline" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="bottom">
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Current Monthly Net" android:textSize="10sp" android:textColor="@color/text_secondary"/>
+                    <TextView android:id="@+id/tvCurrentSalary" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹ 0.00" android:textSize="18sp" android:textStyle="bold" android:textColor="@color/green"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:gravity="end">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Payable (Net - Adv)" android:textSize="10sp" android:textColor="@color/text_secondary"/>
+                    <TextView android:id="@+id/tvCurrentPayable" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹ 0.00" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/colorPrimary"/>
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Action Buttons -->
+            <GridLayout
+                android:id="@+id/llActionButtons"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:columnCount="2"
+                android:alignmentMode="alignMargins"
+                android:useDefaultMargins="true"
+                android:layout_marginTop="16dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnAttendance"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:text="ATTENDANCE"
+                    android:textSize="11sp"
+                    app:icon="@drawable/ic_logs"
+                    app:iconSize="14dp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnAdvance"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:text="ADVANCE"
+                    android:textSize="11sp"
+                    app:icon="@drawable/ic_payment"
+                    app:iconSize="14dp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPaySalary"
+                    style="@style/PremiumButton"
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:text="PAY SALARY"
+                    android:textSize="11sp"
+                    app:icon="@drawable/ic_share"
+                    app:iconSize="14dp"/>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnViewRecords"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_columnWeight="1"
+                    android:layout_height="wrap_content"
+                    android:text="RECORDS"
+                    android:textSize="11sp"
+                    app:icon="@drawable/ic_history"
+                    app:iconSize="14dp"/>
+
+            </GridLayout>
+
+            <!-- Hike / Shift Updates -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSalaryHike"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="💰 Salary Hike"
+                    android:textSize="10sp"
+                    android:padding="0dp"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnShiftUpdate"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="🕒 Shift Change"
+                    android:textSize="10sp"
+                    android:padding="0dp"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnAllowanceUpdate"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="🎁 Allow. Hike"
+                    android:textSize="10sp"
+                    android:padding="0dp"/>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnShare"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="📤 Share"
+                    android:textSize="10sp"
+                    android:padding="0dp"/>
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnToggleHistory"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="View Change History ▼"
+                android:textSize="11sp"
+                android:textColor="@color/text_secondary"
+                android:textAllCaps="false"/>
+
+            <com.google.android.material.divider.MaterialDivider android:id="@+id/dividerHistory" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"/>
+
+            <LinearLayout
+                android:id="@+id/llHistoryTimeline"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:visibility="gone"/>
+
+        </LinearLayout>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

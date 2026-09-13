@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <TextView
+                android:id="@+id/tvModule"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_tag_rounded"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp"
+                android:textColor="@color/white"
+                android:textStyle="bold"
+                android:textSize="12sp"
+                android:text="CASHBOOK"/>
+            <TextView
+                android:id="@+id/tvAction"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:text="UPDATE"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvUser"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="User: Admin"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"/>
+
+        <TextView
+            android:id="@+id/tvTimestamp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Time: 27 Apr 2026, 10:15 AM"
+            android:textColor="?attr/colorSecondary"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"/>
+
+        <LinearLayout
+            android:id="@+id/llOldValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Previous State 🔴"
+                android:textStyle="bold"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"/>
+            <TextView
+                android:id="@+id/tvOldValueFull"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/insight_bg"
+                android:padding="8dp"
+                android:fontFamily="monospace"
+                android:textSize="10sp"
+                android:text="JSON DATA HERE"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/llNewValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="New State 🟢"
+                android:textStyle="bold"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"/>
+            <TextView
+                android:id="@+id/tvNewValueFull"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:background="@drawable/insight_bg"
+                android:padding="8dp"
+                android:fontFamily="monospace"
+                android:textSize="10sp"
+                android:text="JSON DATA HERE"/>
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

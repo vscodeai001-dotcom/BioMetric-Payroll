@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_margin="4dp"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="0dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="@color/divider">
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="4dp"
+        android:paddingVertical="4dp">
+
+        <TextView
+            android:id="@+id/tvPunchTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+            android:textColor="@color/text_primary"
+            tools:text="11:34 AM" />
+
+        <ImageButton
+            android:id="@+id/btnEditPunch"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_edit"
+            app:tint="@color/blue"
+            android:padding="4dp"
+            android:layout_marginStart="4dp"
+            android:scaleType="centerInside" />
+
+        <ImageButton
+            android:id="@+id/btnDeletePunch"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/red_700"
+            android:padding="4dp"
+            android:scaleType="centerInside" />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

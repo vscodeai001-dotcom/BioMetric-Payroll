@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="ResponsivePadding">
+        <item name="android:paddingStart">@dimen/spacing_medium</item>
+        <item name="android:paddingEnd">@dimen/spacing_medium</item>
+        <item name="android:paddingTop">@dimen/spacing_small</item>
+        <item name="android:paddingBottom">@dimen/spacing_small</item>
+    </style>
+
+    <style name="ResponsiveMargin">
+        <item name="android:layout_marginStart">@dimen/spacing_medium</item>
+        <item name="android:layout_marginEnd">@dimen/spacing_medium</item>
+        <item name="android:layout_marginTop">@dimen/spacing_small</item>
+        <item name="android:layout_marginBottom">@dimen/spacing_small</item>
+    </style>
+
+    <style name="PremiumLedgerRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingVertical">12dp</item>
+        <item name="android:paddingHorizontal">16dp</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+    </style>
+</resources>

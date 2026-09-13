@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:background="@color/card_bg">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Manual Attendance 📝"
+        android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+        android:textStyle="bold"
+        android:layout_marginBottom="20dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="16dp">
+
+        <ImageButton
+            android:id="@+id/btnPrevDate"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_back"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnDate"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="Select Date 📅" />
+
+        <ImageButton
+            android:id="@+id/btnNextDate"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:src="@drawable/ic_forward"
+            android:background="?attr/selectableItemBackgroundBorderless" />
+
+    </LinearLayout>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="@color/divider"
+        app:cardBackgroundColor="@color/colorSurfaceVariant"
+        android:layout_marginBottom="20dp">
+        
+        <RadioGroup
+            android:id="@+id/rgType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp">
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                android:id="@+id/rbWork"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Work 👷"
+                android:checked="true"/>
+            <com.google.android.material.radiobutton.MaterialRadioButton
+                android:id="@+id/rbGap"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Break ☕"/>
+        </RadioGroup>
+    </com.google.android.material.card.MaterialCardView>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="20dp">
+        
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnInTime"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="IN Time 🕘"
+            android:layout_marginEnd="6dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnOutTime"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="OUT Time 🕔"
+            android:layout_marginStart="6dp" />
+    </LinearLayout>
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="@color/window_background">
+        <TextView
+            android:id="@+id/tvDuration"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="16dp"
+            android:text="Total: 0 hrs 0 mins ⏱️"
+            android:textAlignment="center"
+            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+            android:textStyle="bold"
+            android:textColor="@color/green"/>
+    </com.google.android.material.card.MaterialCardView>
+
+</LinearLayout>

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="AI Business Assistant 🤖"
+            app:titleCentered="true"
+            app:titleTextAppearance="@style/PremiumToolbarTitle" />
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <com.airbnb.lottie.LottieAnimationView
+        android:id="@+id/backgroundParticles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:lottie_rawRes="@raw/anim_bg_particles"
+        app:lottie_autoPlay="true"
+        app:lottie_loop="true"
+        android:alpha="0.2"
+        android:scaleType="centerCrop"
+        android:elevation="-1dp" />
+
+    <LinearLayout
+        android:id="@+id/contentLayout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvChat"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:padding="16dp"
+            tools:listitem="@layout/item_chat_bubble" />
+
+        <HorizontalScrollView
+            android:id="@+id/hsvSuggestions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:paddingHorizontal="12dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/cgSuggestions"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                app:singleLine="true"
+                app:chipSpacingHorizontal="8dp" />
+        </HorizontalScrollView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="16dp"
+            app:cardCornerRadius="28dp"
+            app:cardElevation="6dp"
+            app:strokeWidth="1dp"
+            app:strokeColor="?attr/colorOutlineVariant"
+            app:cardBackgroundColor="@color/card_bg">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="4dp">
+
+                <EditText
+                    android:id="@+id/etQuery"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@android:color/transparent"
+                    android:hint="Ask your beast assistant..."
+                    android:maxLines="4"
+                    android:padding="14dp"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="14sp"
+                    android:inputType="textCapSentences|textCapWords"
+                    android:autofillHints="none" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnVoice"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    app:icon="@drawable/ic_mic"
+                    app:iconSize="22dp"
+                    app:iconTint="?attr/colorPrimary"
+                    android:alpha="0.8" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSend"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    app:icon="@drawable/ic_arrow_forward"
+                    app:iconSize="24dp"
+                    app:iconTint="@color/white"
+                    app:backgroundTint="@color/colorPrimary"
+                    app:shapeAppearanceOverlay="@style/ShapeAppearance.Material3.Corner.Full" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+    </LinearLayout>
+
+    <include
+        android:id="@+id/brewingLoader"
+        layout="@layout/layout_brewing_loader"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="visible" />
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item
+        android:id="@+id/action_scan"
+        android:title="🤳 Scan"
+        android:icon="@drawable/ic_logs"
+        android:visible="false"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_backup"
+        android:title="☁️ Sync"
+        android:icon="@drawable/ic_sync"
+        app:showAsAction="never" />
+    <item
+        android:id="@+id/action_logout"
+        android:title="Logout"
+        android:icon="@android:drawable/ic_lock_power_off"
+        app:showAsAction="never" />
+</menu>

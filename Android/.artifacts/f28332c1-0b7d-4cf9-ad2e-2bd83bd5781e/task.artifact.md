@@ -1,0 +1,5 @@
+- [x] `[x]` Optimizing marker animations in MainActivity.kt
+- [x] `[x]` Fixing marker concurrency in EmployeeHomeActivity.kt
+- [x] `[x]` Hardening TrackingService.kt lifecycle
+- [x] `[x]` Adding theme application safety in ThemeManager.kt
+- [x] `[x]` Increasing map setup delays for stability

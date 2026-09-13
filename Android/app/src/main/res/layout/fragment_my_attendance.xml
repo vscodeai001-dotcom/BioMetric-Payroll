@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/window_background">
+
+    <!-- Cumulative Summary Card -->
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="8dp"
+        app:strokeWidth="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/grad_premium_main"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <TextView
+                android:id="@+id/tvSummaryTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cumulative Summary (Current Month) 📊"
+                android:textColor="@color/white"
+                android:textStyle="bold"
+                android:textSize="14sp"
+                android:alpha="0.95" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="horizontal"
+                android:divider="@drawable/divider_vertical_white"
+                android:showDividers="middle">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvTotalScheduled"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="00:00"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Scheduled 📋"
+                        android:textColor="#B0C4FF"
+                        android:textSize="10sp"
+                        android:textAllCaps="true"
+                        android:gravity="center" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvTotalWorked"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="00:00"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Worked ⏱️"
+                        android:textColor="#B0C4FF"
+                        android:textSize="10sp"
+                        android:textAllCaps="true"
+                        android:gravity="center" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvTotalPenalty"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="00:00"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Penalty 📉"
+                        android:textColor="#B0C4FF"
+                        android:textSize="10sp"
+                        android:textAllCaps="true"
+                        android:gravity="center" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/tvTotalOt"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="00:00"
+                        android:textColor="@color/white"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="OT ⚡"
+                        android:textColor="#B0C4FF"
+                        android:textSize="10sp"
+                        android:textAllCaps="true"
+                        android:gravity="center" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <!-- Table Header (Cloned from Web) -->
+            <LinearLayout
+                android:layout_width="720dp"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="12dp"
+                android:background="#15000000"
+                android:gravity="center_vertical">
+                <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="🗓️ Date" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="🚩 Status" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📋 Sch." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⏱️ Work" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📉 Pen." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⚡ OT" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                <TextView android:layout_width="0dp" android:layout_weight="1.5" android:layout_height="wrap_content" android:text="📜 Raw Punches" android:gravity="end" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+            </LinearLayout>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvAttendance"
+                android:layout_width="720dp"
+                android:layout_height="match_parent"
+                tools:listitem="@layout/item_attendance_day" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
+</LinearLayout>

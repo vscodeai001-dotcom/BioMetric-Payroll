@@ -1,0 +1,588 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp"
+        android:focusableInTouchMode="true">
+
+        <!-- Section 1: Personal Identity -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Employee Identity 👤"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilStaffName"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:errorEnabled="true">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etStaffName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Full Name"
+                android:inputType="textPersonName|textCapWords"
+                android:imeOptions="actionNext" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="8dp">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBiometricId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Biometric ID"
+                    android:inputType="text" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginBottom="8dp">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etRole"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Role / Designation"
+                    android:inputType="textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etStaffEmail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Email Address"
+                android:inputType="textEmailAddress" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_marginBottom="8dp">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etDob"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Date of Birth"
+                    android:focusable="false"
+                    android:inputType="none" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:layout_marginBottom="8dp">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etHireDate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Hire Date"
+                    android:focusable="false"
+                    android:inputType="none" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <!-- Section 2: Account Login -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Account Credentials 🔑"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilLoginId"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:errorEnabled="true">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etLoginId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="User ID (Login ID)"
+                android:inputType="text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilPassword"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:errorEnabled="true"
+            app:passwordToggleEnabled="true">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Login Password"
+                android:inputType="textPassword" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilStaffPhone"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etStaffPhone"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Mobile Number (OTP)"
+                android:inputType="phone" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Section 3: Salary & Shift -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Payroll &amp; Shift Timings 💰"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilEffectiveDate"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:visibility="gone"
+            android:hint="Effective From Date (Salary/Shift Changes)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etEffectiveDate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:focusable="false"
+                android:clickable="true" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Salary Base Type"
+            android:textAppearance="@style/TextAppearance.Material3.LabelLarge"/>
+
+        <com.google.android.material.button.MaterialButtonToggleGroup
+            android:id="@+id/toggleSalaryType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            app:singleSelection="true"
+            app:checkedButton="@+id/btnMonthly">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHourly"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Per Hour" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnMonthly"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Per Month" />
+        </com.google.android.material.button.MaterialButtonToggleGroup>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/tilSalaryRate"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:errorEnabled="true">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etSalaryRate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Salary Rate (Gross)"
+                android:inputType="numberDecimal" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:hint="Calculation Method">
+            <AutoCompleteTextView
+                android:id="@+id/etCalcMethod"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none"
+                android:text="Pro-Rata Hourly" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:hint="Daily Allow.">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etDailyAllowance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:hint="Night Allow.">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etNightAllowance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:hint="Shift Start">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etShiftStart"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:focusable="false"
+                    android:clickable="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:hint="Shift End">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etShiftEnd"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:focusable="false"
+                    android:clickable="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:hint="Break Time (minutes)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etBreakMinutes"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number"
+                android:text="60" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:hint="Comp Off Day">
+            <AutoCompleteTextView
+                android:id="@+id/etCompOff"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none"
+                android:text="None" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:hint="OT Rule">
+                <AutoCompleteTextView
+                    android:id="@+id/etOtRule"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="none"
+                    android:text="No Overtime" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:hint="Flat Rate">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etOtFlatRate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="numberDecimal" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <!-- Section 4: Bank & Statutory -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Bank &amp; Statutory Details 🏦"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etBankAccountNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Bank Account Number"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:hint="Bank IFSC">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBankIfscCode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapCharacters" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:hint="Bank Name">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etBankName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etUanNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="UAN Number (PF)"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etEsiNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="ESI Number"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbEnablePf"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Enable PF" />
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbEnableEsi"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Enable ESI" />
+        </LinearLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etTdsRate"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="TDS Rate (%)"
+                android:inputType="numberDecimal"
+                android:text="0.0" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Section 5: Shift Rotation -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Shift Rotation 🔄"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/cbEnableRotation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable Shift Rotation" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etRotationGroup"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Rotation Group (e.g. A/B/C)"
+                android:inputType="textCapCharacters" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/etRotationPattern"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Rotation Pattern (Shift Names)"
+                android:inputType="text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <!-- Section 6: Rules & Advanced -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Advanced Eligibility &amp; Rules ⚙️"
+            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+            android:textColor="?attr/colorPrimary"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"/>
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/cbBonusEligible"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Eligible for Bonus"
+            android:checked="true" />
+
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/cbPaidLeaveEligible"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Eligible for Paid Leave"
+            android:checked="true" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnIndividualRules"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Configure Fine-Grained Rules"
+            android:textAllCaps="false" />
+
+    </LinearLayout>
+</ScrollView>

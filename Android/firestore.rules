@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Profiles:
+    // Allow reading profiles for everyone (needed for identifying user by phone or ID during login)
+    match /userProfiles/{uid} {
+      allow read: if true;
+      allow write: if isSignedIn() &&
+        get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'];
+    }
+
+    // Allow collection queries on userProfiles (needed for 'whereEqualTo' searches)
+    match /userProfiles {
+      allow list: if true;
+    }
+
+    // Standard collections
+    match /{collection}/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() &&
+        get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'];
+    }
+
+    // Staff specific overrides
+    match /attendancePunches/{punchId} {
+      allow create: if isSignedIn() && request.resource.data.staffId == request.auth.uid;
+    }
+    match /location_tracking/{trackId} {
+      allow create: if isSignedIn() && request.resource.data.staffId == request.auth.uid;
+      allow read: if isSignedIn();
+    }
+  }
+}

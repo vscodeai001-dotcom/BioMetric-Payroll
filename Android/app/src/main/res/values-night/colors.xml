@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark Theme Ultra-Premium Palette -->
+    <color name="colorPrimary">#6366F1</color> <!-- Indigo 500 Glow -->
+    <color name="colorPrimaryDark">#4F46E5</color> <!-- Indigo 600 -->
+    <color name="colorAccent">#FB7185</color> <!-- Rose 300 Glow -->
+
+    <!-- Premium loader / glass colors -->
+    <color name="loader_track_color">#40FFFFFF</color>
+    <color name="loader_glass_bg">#2A1E293B</color>
+    <color name="loader_glass_stroke">#60FFFFFF</color>
+
+    <color name="window_background">#0F172A</color> <!-- Slate 900 Midnight -->
+    <color name="window_background_dark">#090D16</color> <!-- Deeper midnight -->
+    <color name="colorSurfaceDark">#1E293B</color> <!-- Slate 800 Elevated Surface -->
+    <color name="colorSurfaceVariantDark">#334155</color> <!-- Slate 700 -->
+    <color name="colorSurface">#1E293B</color> <!-- Slate 800 Card Base -->
+    <color name="colorSurfaceVariant">#334155</color> <!-- Slate 700 Border/Track Base -->
+
+    <color name="text_primary">#F8FAFC</color> <!-- Crisp white/slate 50 text -->
+    <color name="text_secondary">#94A3B8</color> <!-- Muted slate 400 text -->
+
+    <color name="card_bg">#1E293B</color>
+    <color name="divider">#334155</color>
+
+    <!-- Search Bar Colors -->
+    <color name="search_bar_bg">#334155</color>
+    <color name="search_bar_stroke">#475569</color>
+
+    <!-- Common Colors -->
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="green">#34D399</color> <!-- Emerald Glow -->
+    <color name="red">#F87171</color> <!-- Red Glow -->
+    <color name="amber">#FBBF24</color> <!-- Amber Glow -->
+    <color name="blue">#60A5FA</color> <!-- Blue Glow -->
+    <color name="orange">#FB923C</color> <!-- Orange Glow -->
+    <color name="outline">#94A3B8</color>
+    <color name="outline_variant">#475569</color>
+
+    <color name="green_700">#34D399</color>
+    <color name="red_700">#F87171</color>
+    <color name="amber_900">#F59E0B</color>
+
+    <color name="red_light">#2D1A1A</color>
+    <color name="blue_light">#1E293B</color>
+    <color name="amber_light">#332A15</color>
+    <color name="green_light">#152D20</color>
+
+    <!-- Gradient Colors -->
+    <color name="grad_start">#6366F1</color>
+    <color name="grad_end">#A855F7</color>
+
+    <!-- Staff Dashboard Premium Palette -->
+    <color name="staff_card_bg">#1E293B</color>
+    <color name="staff_card_stroke">#334155</color>
+    <color name="staff_text_title">#F8FAFC</color>
+    <color name="staff_text_subtitle">#94A3B8</color>
+    <color name="staff_nav_indigo">#818CF8</color>
+    <color name="staff_nav_blue">#38BDF8</color>
+    <color name="staff_text_label">#94A3B8</color>
+    <color name="staff_metrics_bg">#0F172A</color>
+</resources>

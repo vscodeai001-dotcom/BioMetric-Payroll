@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="New Leave Request 🌴"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Submit your absence for manager approval"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="24dp" />
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/PremiumCardView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilDateRange"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Select Dates 🗓️"
+                    android:layout_marginBottom="16dp"
+                    app:startIconDrawable="@drawable/ic_calendar">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etDateRange"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:focusable="false"
+                        android:clickable="true" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilLeaveType"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Leave Category 🏷️"
+                    android:layout_marginBottom="16dp">
+                    <AutoCompleteTextView
+                        android:id="@+id/actvLeaveType"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="none" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp"
+                    android:paddingHorizontal="4dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Request as Half-Day 🌗"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchHalfDay"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilNotes"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Reason / Remarks 📝"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etNotes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="top"
+                        android:inputType="textMultiLine"
+                        android:minLines="3" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSubmit"
+            style="@style/PremiumButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Submit Application 📤"
+            app:cornerRadius="16dp" />
+
+    </LinearLayout>
+</ScrollView>

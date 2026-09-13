@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/window_background">
+
+    <!-- Summary Card -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/cvSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="6dp"
+        app:strokeWidth="0dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/grad_premium_main"
+            android:orientation="vertical"
+            android:padding="20dp">
+            <TextView
+                android:id="@+id/tvSummaryLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TOTAL AMOUNT 💰"
+                android:textColor="#B0C4FF"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+            <TextView
+                android:id="@+id/tvTotalAmount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="₹ 0.00"
+                android:textColor="@color/white"
+                android:textSize="28sp"
+                android:textStyle="bold"
+                android:layout_marginTop="4dp" />
+            <TextView
+                android:id="@+id/tvSubLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cumulative for current financial year"
+                android:textColor="#B0C4FF"
+                android:textSize="11sp"
+                android:alpha="0.8"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Table Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp"
+        android:background="#08000000">
+        <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="Date" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+        <TextView android:layout_width="0dp" android:layout_weight="1.5" android:layout_height="wrap_content" android:text="Description" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+        <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="Amount" android:gravity="end" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvList"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:padding="8dp"
+            android:clipToPadding="false" />
+
+        <TextView
+            android:id="@+id/tvEmpty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="No records found"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:visibility="gone" />
+
+        <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+            android:id="@+id/fabAction"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="24dp"
+            android:text="New Request"
+            app:icon="@drawable/ic_add"
+            app:backgroundTint="?attr/colorPrimary"
+            android:textColor="@color/white"
+            app:iconTint="@color/white"
+            android:visibility="gone" />
+    </FrameLayout>
+
+</LinearLayout>

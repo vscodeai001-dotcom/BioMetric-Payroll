@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="1dp"
+    app:strokeWidth="0.5dp"
+    app:strokeColor="?attr/colorOutlineVariant">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/tvActionIcon"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_circle_small"
+            android:gravity="center"
+            android:textSize="18sp"
+            tools:text="✏️" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvLogUser"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.LabelLarge"
+                android:textStyle="bold"
+                tools:text="Admin" />
+
+            <TextView
+                android:id="@+id/tvLogActionText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                tools:text="Updated Expense Category" />
+
+            <LinearLayout
+                android:id="@+id/llValueChange"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvOldValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorSecondary"
+                    android:background="@drawable/bg_pill_small"
+                    android:paddingHorizontal="6dp"
+                    android:paddingVertical="2dp"
+                    tools:text="₹3000" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=" → "
+                    android:paddingHorizontal="4dp" />
+
+                <TextView
+                    android:id="@+id/tvNewValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?attr/colorPrimary"
+                    android:background="@drawable/bg_pill_small"
+                    android:paddingHorizontal="6dp"
+                    android:paddingVertical="2dp"
+                    tools:text="₹3500" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvLogModule"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/insight_bg"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="2dp"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                tools:text="EXPENSE" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvLogTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+            android:textColor="?attr/colorSecondary"
+            tools:text="10:15 AM" />
+
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>
