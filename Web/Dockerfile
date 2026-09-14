@@ -65,3 +65,8 @@ EXPOSE 10000
 # liveness-only endpoint and therefore cannot restart the service because Neon
 # is temporarily unavailable.
 #
+
+# Start the ASP.NET Core Web process. Without an explicit container entrypoint
+# the final image exits immediately after deployment, which makes Render report
+# 'Application exited early'.
+ENTRYPOINT ["dotnet", "Payroll.Web.dll"]

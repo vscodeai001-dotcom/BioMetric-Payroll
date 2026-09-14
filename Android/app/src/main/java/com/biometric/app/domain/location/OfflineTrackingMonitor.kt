@@ -1,5 +1,6 @@
 package com.biometric.app.domain.location
 
+import com.biometric.app.sync.NeonSyncWorker
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -96,8 +97,17 @@ class OfflineTrackingMonitor @Inject constructor(
                     record(
                         eventType = NETWORK_ONLINE,
                         severity = INFO,
-                        message = "Internet connectivity restored; queued GPS can synchronize"
+                        message = "Internet connectivity restored; queued GPS and pending local synchronization can resume"
                     )
+
+                    // Trigger the durable GPS queue immediately instead of
+                    // waiting for the next 15-minute periodic window.
+                    runCatching { OfflineSyncWorker.schedule(context) }
+
+                    // Neon-backed application data uses the same Room/local
+                    // cache while offline. Once connectivity returns, trigger
+                    // the existing Neon sync worker immediately as well.
+                    runCatching { NeonSyncWorker.schedule(context) }
                 }
             }
 

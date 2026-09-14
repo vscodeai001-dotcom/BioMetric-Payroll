@@ -178,6 +178,11 @@ builder.Services.AddSingleton<
 // Background service broadcasting location health for admin dashboards
 builder.Services.AddHostedService<LocationHealthService>();
 
+// Keep the Web process alive if Neon is temporarily unavailable at startup.
+// Database-backed requests recover automatically once connectivity returns.
+// This does not create a second database or alter the existing schema.
+builder.Services.AddHostedService<NeonDatabaseRecoveryService>();
+
 
 // ============================================================
 // POSTGRESQL DATETIME COMPATIBILITY
@@ -900,9 +905,8 @@ catch (Exception ex)
 
     logger.LogError(
         ex,
-        "Error during DB migration or startup schema validation.");
-
-    throw;
+        "Initial Neon database migration/schema validation was unavailable. " +
+        "Keeping the Web process alive; the background Neon recovery service will retry.");
 }
 
 
