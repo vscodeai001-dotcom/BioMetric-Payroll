@@ -30,7 +30,7 @@ class SignalRManager @Inject constructor(
     private val _liveLocations = MutableStateFlow<Map<Int, LiveLocation>>(emptyMap())
     val liveLocations = _liveLocations.asStateFlow()
 
-    private val hubUrl = "https://biometric-payroll.onrender.com/hubs/attendance-refresh"
+    private val hubUrl = "https://biometricpayroll.onrender.com/hubs/attendance-refresh"
 
     @Synchronized
     fun start() {

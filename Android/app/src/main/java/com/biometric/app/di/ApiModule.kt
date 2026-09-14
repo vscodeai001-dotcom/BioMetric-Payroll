@@ -19,7 +19,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object ApiModule {
     private const val GEMINI_API_KEY = "AIzaSyBptaB9GQdDhsWZ0u6dxnellgNJPhTK95Q"
-    private const val BIOMETRIC_BASE_URL = "https://biometric-payroll.onrender.com/"
+    private const val BIOMETRIC_BASE_URL = "https://biometricpayroll.onrender.com/"
 
     @Provides
     @Singleton
