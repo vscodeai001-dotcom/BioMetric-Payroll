@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "63802944560",
+    "firebase_url": "https://biometricpayroll-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "biometricpayroll",
+    "storage_bucket": "biometricpayroll.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:63802944560:android:dbf315497dade6da69d1f5",
+        "android_client_info": {
+          "package_name": "com.biometric.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "63802944560-5cqv3hs9rj0qqutk2j53a2oh6d9m6knu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.biometric.app",
+            "certificate_hash": "9d6b28f02da3b308b82d0ea7a78460ca921b3e48"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxIsBW8bq31gG7LqOm8-lwhmRFMsRu5CE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,243 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.13/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:clean
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:generateDebugResValues
+> Task :app:dataBindingMergeDependencyArtifactsDebug
+> Task :app:generateDebugResources
+> Task :app:processDebugGoogleServices
+
+> Task :app:mergeDebugResources
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:7:4: Multiple substitutions specified in non-positional format of string resource string/attendance_log_label. Did you mean to add the formatted="false" attribute?
+C:\Users\Shiva Prakash J\.gradle\caches\8.13\transforms\021edf850b52e2e77afd30b4b046a922\transformed\biometric-1.2.0-alpha05\res\values\values.xml:38:4: Multiple substitutions specified in non-positional format of string resource string/attendance_log_value. Did you mean to add the formatted="false" attribute?
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:3:4: Multiple substitutions specified in non-positional format of string resource string/in_time. Did you mean to add the formatted="false" attribute?
+C:\Users\Shiva Prakash J\.gradle\caches\8.13\transforms\a84f70502df7b968b6b414278eb288db\transformed\material-1.12.0\res\values\values.xml:1414:4: Multiple substitutions specified in non-positional format of string resource string/out_time. Did you mean to add the formatted="false" attribute?
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:11:4: Multiple substitutions specified in non-positional format of string resource string/total_duration. Did you mean to add the formatted="false" attribute?
+
+> Task :app:packageDebugResources
+> Task :app:processDebugNavigationResources
+> Task :app:checkDebugAarMetadata
+> Task :app:compileDebugNavigationResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:dataBindingGenBaseClassesDebug
+> Task :app:processDebugManifest
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:javaPreCompileDebug
+> Task :app:mergeDebugAssets
+> Task :app:compressDebugAssets
+> Task :app:desugarDebugFileDependencies
+> Task :app:mergeDebugJniLibFolders
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugNativeLibs NO-SOURCE
+> Task :app:stripDebugDebugSymbols NO-SOURCE
+> Task :app:mergeLibDexDebug
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseNativeLibs NO-SOURCE
+> Task :app:stripReleaseDebugSymbols NO-SOURCE
+> Task :app:extractReleaseNativeSymbolTables NO-SOURCE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:processDebugManifestForPackage
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:buildKotlinToolingMetadata
+> Task :app:dataBindingMergeDependencyArtifactsRelease
+> Task :app:generateReleaseResValues
+> Task :app:generateReleaseResources
+> Task :app:processReleaseGoogleServices
+
+> Task :app:mergeReleaseResources
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:7:4: Multiple substitutions specified in non-positional format of string resource string/attendance_log_label. Did you mean to add the formatted="false" attribute?
+C:\Users\Shiva Prakash J\.gradle\caches\8.13\transforms\021edf850b52e2e77afd30b4b046a922\transformed\biometric-1.2.0-alpha05\res\values\values.xml:38:4: Multiple substitutions specified in non-positional format of string resource string/attendance_log_value. Did you mean to add the formatted="false" attribute?
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:3:4: Multiple substitutions specified in non-positional format of string resource string/in_time. Did you mean to add the formatted="false" attribute?
+C:\Users\Shiva Prakash J\.gradle\caches\8.13\transforms\a84f70502df7b968b6b414278eb288db\transformed\material-1.12.0\res\values\values.xml:1414:4: Multiple substitutions specified in non-positional format of string resource string/out_time. Did you mean to add the formatted="false" attribute?
+E:\TeaShopPOS\app\src\main\res\values\strings.xml:11:4: Multiple substitutions specified in non-positional format of string resource string/total_duration. Did you mean to add the formatted="false" attribute?
+
+> Task :app:packageReleaseResources
+> Task :app:processReleaseNavigationResources
+> Task :app:checkReleaseAarMetadata
+> Task :app:compileReleaseNavigationResources
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:parseReleaseLocalResources
+> Task :app:dataBindingGenBaseClassesRelease
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:javaPreCompileRelease
+> Task :app:processDebugResources
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:extractProguardFiles
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:generateDebugAndroidTestResValues
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileReleaseUnitTest
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeExtDexDebug
+> Task :app:mergeExtDexRelease
+> Task :app:processReleaseResources
+> Task :app:optimizeReleaseResources
+> Task :app:kaptGenerateStubsDebugKotlin
+> Task :app:kaptGenerateStubsReleaseKotlin
+> Task :app:kaptReleaseKotlin
+> Task :app:kaptDebugKotlin
+> Task :app:compileReleaseKotlin
+> Task :app:compileDebugKotlin
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:compileDebugJavaWithJavac
+> Task :app:hiltAggregateDepsDebug
+> Task :app:hiltAggregateDepsRelease
+
+> Task :app:hiltJavaCompileDebug
+Note: E:\TeaShopPOS\app\build\generated\hilt\component_sources\debug\com\teashop\pos\Hilt_TeaShopApplication.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :app:processDebugJavaRes
+> Task :app:transformDebugClassesWithAsm
+> Task :app:mergeDebugJavaResource
+
+> Task :app:hiltJavaCompileRelease
+Note: E:\TeaShopPOS\app\build\generated\hilt\component_sources\release\com\teashop\pos\Hilt_TeaShopApplication.java uses or overrides a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
+> Task :app:dexBuilderDebug
+> Task :app:mergeProjectDexDebug
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:processReleaseJavaRes
+> Task :app:generateDebugLintReportModel
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:transformReleaseClassesWithAsm
+> Task :app:generateDebugAndroidTestLintModel
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:mergeReleaseJavaResource
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:generateDebugUnitTestLintModel
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:kaptGenerateStubsDebugUnitTestKotlin
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintAnalyzeDebug
+> Task :app:kaptGenerateStubsReleaseUnitTestKotlin
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+
+> Task :app:kaptDebugUnitTestKotlin
+warning: The following options were not recognized by any processor: '[dagger.fastInit, dagger.hilt.android.internal.disableAndroidSuperclassValidation, dagger.hilt.android.internal.projectType, dagger.hilt.internal.useAggregatingRootProcessor, kapt.kotlin.generated]'
+
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:hiltAggregateDepsDebugUnitTest
+> Task :app:hiltJavaCompileDebugUnitTest NO-SOURCE
+
+> Task :app:kaptReleaseUnitTestKotlin
+warning: The following options were not recognized by any processor: '[dagger.fastInit, dagger.hilt.android.internal.disableAndroidSuperclassValidation, dagger.hilt.android.internal.projectType, dagger.hilt.internal.useAggregatingRootProcessor, kapt.kotlin.generated]'
+
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:transformDebugUnitTestClassesWithAsm
+> Task :app:lintAnalyzeDebugAndroidTest
+> Task :app:compileReleaseUnitTestKotlin
+> Task :app:testDebugUnitTest
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:hiltAggregateDepsReleaseUnitTest
+> Task :app:hiltJavaCompileReleaseUnitTest NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:transformReleaseUnitTestClassesWithAsm
+> Task :app:lintAnalyzeDebugUnitTest
+> Task :app:testReleaseUnitTest
+> Task :app:test
+> Task :app:lintVitalReportRelease SKIPPED
+> Task :app:lintVitalRelease SKIPPED
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+> Task :app:assemble
+
+> Task :app:lintReportDebug
+Wrote HTML report to file:///E:/TeaShopPOS/app/build/reports/lint-results-debug.html
+Lint found 8 errors and 483 warnings. First failure:
+E:\TeaShopPOS\app\src\main\res\values-night\colors.xml:11: Error: The color "window_background_dark" in values-night has no declaration in the base values folder; this can lead to crashes when the resource is queried in a configuration that does not match this qualifier [MissingDefaultResource]
+    <color name="window_background_dark">#020617</color> <!-- Slate 950 -->
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+> Task :app:lintDebug FAILED
+Lint found 8 errors, 483 warnings. First failure:
+
+E:\TeaShopPOS\app\src\main\res\values-night\colors.xml:11: Error: The color "window_background_dark" in values-night has no declaration in the base values folder; this can lead to crashes when the resource is queried in a configuration that does not match this qualifier [MissingDefaultResource]
+    <color name="window_background_dark">#020617</color> <!-- Slate 950 -->
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The full lint text report is located at:
+  E:\TeaShopPOS\app\build\intermediates\lint_intermediate_text_report\debug\lintReportDebug\lint-results-debug.txt
+
+[Incubating] Problems report is available at: file:///E:/TeaShopPOS/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:lintDebug'.
+> Lint found errors in the project; aborting build.
+  
+  Fix the issues identified by lint, or create a baseline to see only new errors.
+  To create a baseline, run `gradlew updateLintBaseline` after adding the following to the module's build.gradle file:
+  ```
+  android {
+      lint {
+          baseline = file("lint-baseline.xml")
+      }
+  }
+  ```
+  For more details, see https://developer.android.com/studio/write/lint#snapshot
+  
+  Lint found 8 errors, 483 warnings. First failure:
+  
+  E:\TeaShopPOS\app\src\main\res\values-night\colors.xml:11: Error: The color "window_background_dark" in values-night has no declaration in the base values folder; this can lead to crashes when the resource is queried in a configuration that does not match this qualifier [MissingDefaultResource]
+      <color name="window_background_dark">#020617</color> <!-- Slate 950 -->
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  
+  The full lint text report is located at:
+    E:\TeaShopPOS\app\build\intermediates\lint_intermediate_text_report\debug\lintReportDebug\lint-results-debug.txt
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.13/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 6m 30s
+127 actionable tasks: 126 executed, 1 up-to-date

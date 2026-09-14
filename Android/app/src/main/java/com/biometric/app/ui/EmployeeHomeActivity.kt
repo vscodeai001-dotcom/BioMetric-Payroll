@@ -215,9 +215,16 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                 Log.i("EmployeeHome", "SessionEnded event: emp=${event.employeeId}, session=${event.sessionId}. Local: emp=$currentEmpId, session=$currentSessionId")
 
                                 if (event.employeeId > 0 && event.employeeId == currentEmpId) {
-                                    if (event.sessionId.equals(currentSessionId, true)) {
-                                        Log.w("EmployeeHome", "This specific session was terminated by server. (Automatic logout disabled) ⚠️")
-                                        // logout() // Requirement: App will never logged out automatically
+                                    val reason = event.endReason.orEmpty()
+                                    val explicitTermination = reason.equals("FORCE_LOGGED_OUT", true) ||
+                                        reason.equals("REPLACED_BY_NEW_DEVICE", true) ||
+                                        reason.equals("MANUAL_LOGOUT", true)
+
+                                    if (event.sessionId.equals(currentSessionId, true) && explicitTermination) {
+                                        Log.w("EmployeeHome", "Authoritative session termination: $reason. Returning to login because this is an explicit manual/second-device termination.")
+                                        goToLogin()
+                                    } else {
+                                        Log.i("EmployeeHome", "GPS session ended/rebased without authentication termination. reason=$reason. Keeping mobile login alive.")
                                     }
                                 }
                             }

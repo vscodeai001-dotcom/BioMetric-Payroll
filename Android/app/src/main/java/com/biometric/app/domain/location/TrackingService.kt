@@ -111,6 +111,7 @@ class TrackingService : Service() {
                     ?: getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_STAFF, null)
                     ?: sessionStore.employeeId().toString()
                 
+                serverSessionStarted = false
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                     putString(KEY_ACTIVE_STAFF, staffId)
                     putBoolean(KEY_SERVER_STARTED, false)
@@ -395,6 +396,12 @@ class TrackingService : Service() {
                         // keeping the Admin Dashboard status "Live" even if stationary.
                         val response = mobileApi.me("Bearer $token")
                         if (response.isSuccessful) {
+                            // Authentication can remain valid while the server-side
+                            // GPS session is recreated after a process restart.
+                            // Restore only the GPS session here; never log out.
+                            if (!serverSessionStarted) {
+                                ensureServerSession()
+                            }
                             Log.d("TrackingService", "Heartbeat success 💓")
                         } else if (response.code() == 401 || response.code() == 403) {
                             val state = response.headers()["X-Mobile-Session-State"] ?: ""

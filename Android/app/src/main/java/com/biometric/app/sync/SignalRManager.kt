@@ -140,7 +140,7 @@ class SignalRManager @Inject constructor(
                 val event = Gson().fromJson(json, SessionEndedEvent::class.java)
                 
                 managerScope.launch { 
-                    _dataChangeEvents.emit(SyncEvent.SessionEnded(event?.employeeId ?: 0, event?.sessionId ?: "")) 
+                    _dataChangeEvents.emit(SyncEvent.SessionEnded(event?.employeeId ?: 0, event?.sessionId ?: "", event?.endReason)) 
                 }
             } catch (e: Exception) {
                 Log.e("SignalR", "Failed to parse SessionEnded", e)
@@ -231,7 +231,8 @@ class SignalRManager @Inject constructor(
 
     data class SessionEndedEvent(
         @SerializedName("employeeId") val employeeId: Int,
-        @SerializedName("sessionId") val sessionId: String?
+        @SerializedName("sessionId") val sessionId: String?,
+        @SerializedName("endReason") val endReason: String? = null
     )
 
     sealed class SyncEvent {
@@ -250,7 +251,7 @@ class SignalRManager @Inject constructor(
         object RegularizationChanged : SyncEvent()
         object ExitChanged : SyncEvent()
         data class SessionStarted(val employeeId: Int, val sessionId: String) : SyncEvent()
-        data class SessionEnded(val employeeId: Int, val sessionId: String?) : SyncEvent()
+        data class SessionEnded(val employeeId: Int, val sessionId: String?, val endReason: String? = null) : SyncEvent()
     }
 
     data class SessionStartedEvent(
