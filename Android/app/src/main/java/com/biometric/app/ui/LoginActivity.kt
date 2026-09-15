@@ -159,8 +159,126 @@ class LoginActivity : MotionBaseActivity() {
 
     private fun handleEmployeeLogin(email: String, pass: String, forceReplace: Boolean = false) {
         lifecycleScope.launch {
+            setLoading(true)
+
+            // Firebase is the preferred Android authentication path. This makes
+            // Admin/SuperAdmin completely independent of Payroll.Web.
+            val firebaseResult = runCatching {
+                FirebaseAuth.getInstance()
+                    .signInWithEmailAndPassword(email, pass)
+                    .await()
+                    .user
+            }
+
+            val firebaseUser = firebaseResult.getOrNull()
+
+            if (firebaseUser != null) {
+                val tokenResult = runCatching {
+                    firebaseUser.getIdToken(true).await()
+                }.getOrNull()
+
+                val claims = tokenResult?.claims.orEmpty()
+                val rawRole = claims["role"]?.toString().orEmpty()
+
+                val role = when {
+                    rawRole.equals("SuperAdmin", true) ||
+                        rawRole.equals(UserRole.SUPER_ADMIN.name, true) ->
+                        UserRole.SUPER_ADMIN.name
+
+                    rawRole.equals("Admin", true) ||
+                        rawRole.equals(UserRole.ADMIN.name, true) ->
+                        UserRole.ADMIN.name
+
+                    else -> UserRole.STAFF.name
+                }
+
+                // Existing Employee single-device/login behavior remains on
+                // the established mobile endpoint. Admin/SuperAdmin do not
+                // use that endpoint or its single-device restriction.
+                if (role == UserRole.STAFF.name) {
+                    FirebaseAuth.getInstance().signOut()
+                    setLoading(false)
+                    handleEmployeeLoginViaExistingFlow(email, pass, forceReplace)
+                    return@launch
+                }
+
+                if (tokenResult?.token.isNullOrBlank()) {
+                    setLoading(false)
+                    Toast.makeText(
+                        this@LoginActivity,
+                        "Firebase login succeeded but no session token was returned.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                val ownerUid = claims["owner_uid"]?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?: firebaseUser.uid
+
+                val employeeId = when (val value = claims["employee_id"]) {
+                    is Number -> value.toInt()
+                    else -> value?.toString()?.toIntOrNull() ?: 0
+                }
+
+                val displayName = firebaseUser.displayName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: email.substringBefore("@")
+
+                mobileSessionStore.saveLogin(
+                    token = tokenResult!!.token!!,
+                    employeeId = employeeId,
+                    name = displayName,
+                    email = firebaseUser.email ?: email,
+                    firebaseOwnerUid = ownerUid
+                )
+
+                applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
+                    putBoolean("is_logged_in", true)
+                    putString("user_role", role)
+                    putInt("employee_id", employeeId)
+                    putString("employee_name", displayName)
+                    putString("user_uid", firebaseUser.uid)
+                }
+
+                applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+                    putBoolean("has_logged_in_before", true)
+                    putBoolean("is_locked", false)
+                    putString("user_role", role)
+                    putString("user_uid", firebaseUser.uid)
+                    putInt("employee_id", employeeId)
+                    putString("employee_name", displayName)
+                    putLong("last_active_time", System.currentTimeMillis())
+                }
+
+                // Realtime and GPS readiness now starts directly from Firebase.
+                // Do not call a Payroll.Web theme/API endpoint here.
+                adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+
+                setLoading(false)
+                proceedToMain()
+                return@launch
+            }
+
+            // Employee compatibility path. This is deliberately retained so
+            // existing employees are not broken while their Firebase Auth
+            // accounts are being provisioned. Admin/SuperAdmin never reach it.
+            setLoading(false)
+            handleEmployeeLoginViaExistingFlow(email, pass, forceReplace)
+        }
+    }
+
+    private fun handleEmployeeLoginViaExistingFlow(
+        email: String,
+        pass: String,
+        forceReplace: Boolean
+    ) {
+        lifecycleScope.launch {
             try {
-                Log.i("LoginActivity", "Attempting Payroll.Web login via ${BuildConfig.BIOMETRIC_API_BASE_URL}")
+                Log.i(
+                    "LoginActivity",
+                    "Employee compatibility login via ${BuildConfig.BIOMETRIC_API_BASE_URL}"
+                )
                 setLoading(true)
                 val deviceId = getAndroidDeviceId()
                 val response = mobileApi.login(
@@ -178,61 +296,66 @@ class LoginActivity : MotionBaseActivity() {
                         val token = result.token
                         if (token.isNullOrBlank()) {
                             setLoading(false)
-                            Toast.makeText(this@LoginActivity, "Login succeeded but no mobile session was issued.", Toast.LENGTH_LONG).show()
+                            Toast.makeText(
+                                this@LoginActivity,
+                                "Login succeeded but no mobile session was issued.",
+                                Toast.LENGTH_LONG
+                            ).show()
                             return@launch
                         }
 
-                        // Normalize role to our enum values
-                        val rawRole = result.role ?: ""
-                        val role = when {
-                            rawRole.contains("Super", true) -> UserRole.SUPER_ADMIN.name
-                            rawRole.contains("Admin", true) -> UserRole.ADMIN.name
-                            rawRole.contains("Employee", true) -> UserRole.STAFF.name
-                            result.name.contains("Admin", true) -> UserRole.ADMIN.name
-                            else -> UserRole.STAFF.name
-                        }
-                        
-                        mobileSessionStore.saveLogin(token, result.employeeId, result.name, result.email, result.firebaseOwnerUid)
+                        val displayName = result.name
+                        val role = UserRole.STAFF.name
 
-                        // Authenticate the existing Firebase realtime layer with
-                        // a server-issued custom token. Firebase then maintains
-                        // its own session independently of Render, so GPS and
-                        // realtime listeners do not depend on the Payroll.Web
-                        // process staying alive. If Firebase is temporarily
-                        // unavailable, the existing login flow remains intact.
+                        mobileSessionStore.saveLogin(
+                            token,
+                            result.employeeId,
+                            displayName,
+                            result.email,
+                            result.firebaseOwnerUid
+                        )
+
                         result.firebaseToken?.takeIf { it.isNotBlank() }?.let { customToken ->
-                            try {
+                            runCatching {
                                 FirebaseAuth.getInstance()
                                     .signInWithCustomToken(customToken)
                                     .await()
-                            } catch (firebaseEx: Exception) {
-                                Log.w("LoginActivity", "Firebase realtime authentication deferred: ${firebaseEx.message}")
+                            }.onFailure {
+                                Log.w(
+                                    "LoginActivity",
+                                    "Employee Firebase realtime authentication deferred: ${it.message}"
+                                )
                             }
                         }
 
-                        // Server preference is authoritative across devices. Refresh it before entering the app.
-                        themePreferenceSync.refreshFromServer()
-                        adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
                         applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)
                             putString("user_role", role)
                             putInt("employee_id", result.employeeId)
-                            putString("employee_name", result.name)
+                            putString("employee_name", displayName)
+                            putString("user_uid", result.email)
                         }
+
                         applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("has_logged_in_before", true)
                             putBoolean("is_locked", false)
                             putString("user_role", role)
-                            putString("user_uid", if (result.employeeId != 0) result.employeeId.toString() else result.email)
+                            putString("user_uid", result.email)
                             putInt("employee_id", result.employeeId)
-                            putString("employee_name", result.name)
+                            putString("employee_name", displayName)
                             putLong("last_active_time", System.currentTimeMillis())
                         }
+
+                        adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                        setLoading(false)
                         proceedToMain()
                     } else {
                         setLoading(false)
-                        val msg = result?.message ?: "Invalid ID or Password"
-                        Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@LoginActivity,
+                            result?.message ?: "Invalid ID or Password",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 } else if (response.code() == 409) {
                     setLoading(false)
@@ -253,29 +376,17 @@ class LoginActivity : MotionBaseActivity() {
                     } catch (_: Exception) {
                         "Invalid ID or Password"
                     }
-                    Log.e("Login", "Login failed: $errorBody (code: ${response.code()})")
-                    
-                    val roleFromHeader = response.headers()["X-User-Role"] ?: ""
-                    val isAdminFromHeader = roleFromHeader.contains("Admin", true)
-
-                    if (msg.contains("not registered", true) || msg.contains("not linked", true)) {
-                         // If we can't tell role from header (which we probably can't on 401), we might need another way.
-                         // But the web app just lets them in. 
-                         // Let's assume if the msg says Identity verified but no payroll, and it's an admin, we want to let them in.
-                         // However, the mobile login API I just modified should now return 200 for admins.
-                         // So this block might not even be hit for admins anymore.
-                        MaterialAlertDialogBuilder(this@LoginActivity)
-                            .setTitle("Payroll Link Missing ⚠️")
-                            .setMessage("Your account exists, but it isn't linked to an active Employee record in the payroll database.\n\nPlease ask your Admin to link $email to an Employee in the 'User Management' web portal.")
-                            .setPositiveButton("OK", null)
-                            .show()
-                    } else {
-                        Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
-                    }
+                    Log.e("Login", "Employee login failed: $errorBody (code: ${response.code()})")
+                    Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 setLoading(false)
-                Toast.makeText(this@LoginActivity, "Unable to reach BioMetric server. Check the Android API URL/network. ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Employee account is not yet Firebase-provisioned. Web compatibility login is unavailable.",
+                    Toast.LENGTH_LONG
+                ).show()
+                Log.e("LoginActivity", "Employee compatibility login failed", e)
             }
         }
     }
