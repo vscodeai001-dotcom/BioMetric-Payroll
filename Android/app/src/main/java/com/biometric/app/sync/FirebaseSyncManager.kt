@@ -16,7 +16,6 @@ import com.biometric.app.data.entity.ShopClosedDay
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
-import com.biometric.app.api.RealtimeChangedItem
 import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
@@ -164,6 +163,11 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { query.removeEventListener(listener) }
     }
 
+    data class RealtimeChangedItem(
+        val entity: String = "",
+        val action: String = "MODIFIED"
+    )
+
     data class ApplicationRealtimeEvent(
         val eventId: String = "",
         val source: String = "",
@@ -240,7 +244,6 @@ class FirebaseSyncManager @Inject constructor(
                 }.onFailure {
                     Log.w("FirebaseSyncManager", "Firebase realtime event failed for $entity", it)
                 }
-            }
             }
         }
     }
