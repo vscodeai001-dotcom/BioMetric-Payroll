@@ -269,20 +269,27 @@ class LoginActivity : MotionBaseActivity() {
                     UserRole.STAFF.name
             }
 
-            // Employee authentication is now Firebase-first. The established
-            // mobile endpoint is used only to preserve the existing Employee
-            // single-device lock, force-replace dialog, and mobile session token.
-            // It also synchronizes the successfully verified Identity password
-            // into Firebase so future Employee logins can authenticate directly.
+            // Employee authentication is Firebase-native. The existing Web API
+            // is used only as a compatibility session bridge after Firebase has
+            // already verified the password. This preserves every existing
+            // Employee screen/API and the established single-device rule while
+            // removing the password-dependent legacy login/provisioning path.
             if (role == UserRole.STAFF.name) {
-                setLoading(false)
+                if (tokenResult?.token.isNullOrBlank()) {
+                    setLoading(false)
+                    Toast.makeText(
+                        this@LoginActivity,
+                        "Firebase login succeeded but no session token was returned.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
 
-                handleEmployeeLoginViaExistingFlow(
-                    email,
-                    pass,
-                    forceReplace
+                handleFirebaseEmployeeSession(
+                    email = email,
+                    firebaseIdToken = tokenResult!!.token!!,
+                    forceReplace = forceReplace
                 )
-
                 return@launch
             }
 
@@ -362,6 +369,115 @@ class LoginActivity : MotionBaseActivity() {
             // SuperAdmin/Admin -> MainActivity
             // Employee -> EmployeeHomeActivity
             proceedToMain()
+        }
+    }
+
+    private fun handleFirebaseEmployeeSession(
+        email: String,
+        firebaseIdToken: String,
+        forceReplace: Boolean
+    ) {
+        lifecycleScope.launch {
+            try {
+                setLoading(true)
+                val deviceId = getAndroidDeviceId()
+                val response = mobileApi.firebaseSession(
+                    com.biometric.app.api.FirebaseSessionRequest(
+                        idToken = firebaseIdToken,
+                        deviceId = deviceId,
+                        forceReplace = forceReplace
+                    )
+                )
+
+                if (response.isSuccessful) {
+                    val result = response.body()
+                    if (result?.success != true || result.token.isNullOrBlank()) {
+                        setLoading(false)
+                        Toast.makeText(
+                            this@LoginActivity,
+                            result?.message ?: "Unable to create employee session.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        return@launch
+                    }
+
+                    val role = UserRole.STAFF.name
+                    val displayName = result.name.ifBlank { email.substringBefore("@") }
+
+                    // Keep the established mobile session token so every existing
+                    // Employee screen and business API continues unchanged.
+                    FirebaseAuth.getInstance().currentUser?.let { firebaseUser ->
+                        mobileSessionStore.saveLogin(
+                            token = result.token!!,
+                            employeeId = result.employeeId,
+                            name = displayName,
+                            email = firebaseUser.email ?: result.email.ifBlank { email },
+                            firebaseOwnerUid = result.firebaseOwnerUid
+                        )
+                    } ?: mobileSessionStore.saveLogin(
+                        token = result.token!!,
+                        employeeId = result.employeeId,
+                        name = displayName,
+                        email = result.email.ifBlank { email },
+                        firebaseOwnerUid = result.firebaseOwnerUid
+                    )
+
+                    applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
+                        putBoolean("is_logged_in", true)
+                        putString("user_role", role)
+                        putInt("employee_id", result.employeeId)
+                        putString("employee_name", displayName)
+                        putString("user_uid", FirebaseAuth.getInstance().currentUser?.uid ?: email)
+                    }
+
+                    applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+                        putBoolean("has_logged_in_before", true)
+                        putBoolean("is_locked", false)
+                        putString("user_role", role)
+                        putString("user_uid", FirebaseAuth.getInstance().currentUser?.uid ?: email)
+                        putInt("employee_id", result.employeeId)
+                        putString("employee_name", displayName)
+                        putLong("last_active_time", System.currentTimeMillis())
+                    }
+
+                    adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                    setLoading(false)
+                    proceedToMain()
+                    return@launch
+                }
+
+                if (response.code() == 409) {
+                    setLoading(false)
+                    AlertDialog.Builder(this@LoginActivity)
+                        .setTitle("Employee already logged in")
+                        .setMessage("This employee account is already active on another device. Replace that active session with this device?")
+                        .setPositiveButton("Replace & Login") { _, _ ->
+                            handleFirebaseEmployeeSession(email, firebaseIdToken, forceReplace = true)
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                    return@launch
+                }
+
+                setLoading(false)
+                val errorBody = response.errorBody()?.string()
+                val msg = try {
+                    val json = JSONObject(errorBody ?: "{}")
+                    json.optString("message", json.optString("Message", "Unable to create employee session."))
+                } catch (_: Exception) {
+                    "Unable to create employee session. HTTP ${response.code()}"
+                }
+                Log.e("LoginActivity", "Firebase employee session failed: $errorBody (code: ${response.code()})")
+                Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                setLoading(false)
+                Log.e("LoginActivity", "Firebase employee session bridge failed", e)
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Firebase login succeeded, but the employee session server is unreachable. Check the Android API base URL/network.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
 

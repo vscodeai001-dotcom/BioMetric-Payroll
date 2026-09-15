@@ -16,6 +16,9 @@ interface MobileApiService {
     @POST("api/mobile/employee/login")
     suspend fun login(@Body request: MobileLoginRequest): Response<MobileLoginResponse>
 
+    @POST("api/mobile/employee/firebase-session")
+    suspend fun firebaseSession(@Body request: FirebaseSessionRequest): Response<MobileLoginResponse>
+
     @GET("api/mobile/employee/me")
     suspend fun me(@Header("Authorization") authorization: String): Response<MobileLoginResponse>
 
@@ -279,6 +282,12 @@ interface MobileApiService {
     @POST("api/mobile/admin/finance/year-end/consolidate")
     suspend fun consolidateAdminYearEnd(@Header("Authorization") authorization: String, @Query("year") year: Int): Response<Unit>
 }
+
+data class FirebaseSessionRequest(
+    @SerializedName("IdToken") val idToken: String,
+    @SerializedName("DeviceId") val deviceId: String,
+    @SerializedName("ForceReplace") val forceReplace: Boolean = false
+)
 
 data class MobileLoginRequest(
     @SerializedName("Email") val email: String,

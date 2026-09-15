@@ -276,6 +276,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         maps.forEach { map ->
             map.apply {
                 setTileSource(TileSourceFactory.MAPNIK)
+                setUseDataConnection(true)
                 setMultiTouchControls(true)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 controller.setZoom(16.0)
@@ -435,7 +436,24 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             }
             officeMarker?.position = point
             geofenceCircle?.points = Polygon.pointsAsCircle(point, radius.toDouble())
-            maps.forEach { it.invalidate() }
+
+            // The dashboard map previously stayed at OSMDroid's default world
+            // position until a live employee packet arrived, which could leave
+            // the card looking like a grey/empty map. Center it once on the
+            // authoritative office location, then never recenter during GPS
+            // movement so the admin can freely pan/inspect.
+            if (!adminMapAutoCentered) {
+                maps.forEach { map ->
+                    map.controller.setCenter(point)
+                    map.controller.setZoom(15.5)
+                    map.post {
+                        map.invalidate()
+                        map.tileProvider.rescaleCache()
+                    }
+                }
+            } else {
+                maps.forEach { it.invalidate() }
+            }
         }
     }
 
