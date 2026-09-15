@@ -1,6 +1,7 @@
 package com.biometric.app.di
 
 import com.biometric.app.ai.GeminiService
+import com.biometric.app.BuildConfig
 import com.biometric.app.api.ApiService
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.OsrmApiService
@@ -19,20 +20,23 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object ApiModule {
     private const val GEMINI_API_KEY = "AIzaSyBptaB9GQdDhsWZ0u6dxnellgNJPhTK95Q"
-    private const val BIOMETRIC_BASE_URL = "https://biometricpayroll.onrender.com/"
 
     @Provides
     @Singleton
     fun provideRetrofit(): Retrofit {
         val logging = HttpLoggingInterceptor()
         logging.setLevel(HttpLoggingInterceptor.Level.BODY)
-        
+
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
             .build()
 
+        val baseUrl = BuildConfig.BIOMETRIC_API_BASE_URL
+            .trim()
+            .let { if (it.endsWith("/")) it else "$it/" }
+
         return Retrofit.Builder()
-            .baseUrl(BIOMETRIC_BASE_URL)
+            .baseUrl(baseUrl)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create())
             .build()

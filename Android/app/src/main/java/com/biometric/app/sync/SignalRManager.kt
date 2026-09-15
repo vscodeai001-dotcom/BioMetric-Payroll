@@ -2,6 +2,7 @@ package com.biometric.app.sync
 
 import android.util.Log
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.BuildConfig
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.microsoft.signalr.HubConnection
@@ -23,24 +24,26 @@ class SignalRManager @Inject constructor(
     private var hubConnection: HubConnection? = null
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     @Volatile private var connectInProgress = false
-    
+
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 10)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
 
     private val _liveLocations = MutableStateFlow<Map<Int, LiveLocation>>(emptyMap())
     val liveLocations = _liveLocations.asStateFlow()
 
-    private val hubUrl = "https://biometricpayroll.onrender.com/hubs/attendance-refresh"
+    private val hubUrl: String
+        get() = BuildConfig.BIOMETRIC_API_BASE_URL
+            .trimEnd('/') + "/hubs/attendance-refresh"
 
     @Synchronized
     fun start() {
         if (!sessionStore.isLoggedIn()) return
-        
+
         if (hubConnection != null) {
-             if (hubConnection?.connectionState == HubConnectionState.DISCONNECTED) {
-                 connect()
-             }
-             return
+            if (hubConnection?.connectionState == HubConnectionState.DISCONNECTED) {
+                connect()
+            }
+            return
         }
 
         managerScope.launch {
@@ -138,9 +141,9 @@ class SignalRManager @Inject constructor(
             try {
                 val json = Gson().toJson(data)
                 val event = Gson().fromJson(json, SessionEndedEvent::class.java)
-                
-                managerScope.launch { 
-                    _dataChangeEvents.emit(SyncEvent.SessionEnded(event?.employeeId ?: 0, event?.sessionId ?: "", event?.endReason)) 
+
+                managerScope.launch {
+                    _dataChangeEvents.emit(SyncEvent.SessionEnded(event?.employeeId ?: 0, event?.sessionId ?: "", event?.endReason))
                 }
             } catch (e: Exception) {
                 Log.e("SignalR", "Failed to parse SessionEnded", e)
@@ -174,7 +177,7 @@ class SignalRManager @Inject constructor(
 
         hub.on("SessionStarted", { data ->
             Log.d("SignalR", "SessionStarted received: $data")
-            managerScope.launch { 
+            managerScope.launch {
                 try {
                     val json = Gson().toJson(data)
                     val event = Gson().fromJson(json, SessionStartedEvent::class.java)
