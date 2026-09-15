@@ -269,12 +269,12 @@ class LoginActivity : MotionBaseActivity() {
                     UserRole.STAFF.name
             }
 
-            // Existing Employee behavior remains unchanged.
-            // Only STAFF accounts use the compatibility endpoint and its
-            // existing employee single-device rules.
+            // Employee authentication is now Firebase-first. The established
+            // mobile endpoint is used only to preserve the existing Employee
+            // single-device lock, force-replace dialog, and mobile session token.
+            // It also synchronizes the successfully verified Identity password
+            // into Firebase so future Employee logins can authenticate directly.
             if (role == UserRole.STAFF.name) {
-                FirebaseAuth.getInstance().signOut()
-
                 setLoading(false)
 
                 handleEmployeeLoginViaExistingFlow(
@@ -404,6 +404,11 @@ class LoginActivity : MotionBaseActivity() {
                         val displayName = result.name
                         val role = UserRole.STAFF.name
 
+                        // The compatibility endpoint remains the authoritative
+                        // single-device/session gate for Employees. Its successful
+                        // response also carries a Firebase custom token, so the
+                        // authenticated Android session is Firebase-backed after
+                        // the lock is acquired.
                         mobileSessionStore.saveLogin(
                             token,
                             result.employeeId,
