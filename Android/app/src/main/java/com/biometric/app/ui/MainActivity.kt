@@ -276,12 +276,36 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val maps = listOf(binding.adminMapView, binding.commandCenterMapView)
         maps.forEach { map ->
             map.apply {
+                // Always allow the tile overlay to use the device network.
+                // The Employee map already proves the same OSMDroid tile stack
+                // works on this APK; the Admin dashboard additionally needs an
+                // explicit usable viewport because it is created inside a
+                // nested dashboard container.
+                setUseDataConnection(true)
                 setTileSource(TileSourceFactory.MAPNIK)
                 setMultiTouchControls(true)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-                controller.setZoom(16.0)
+                minZoomLevel = 3.0
+                maxZoomLevel = 20.0
+                controller.setZoom(13.0)
+
+                // Never leave a fresh Admin map at the world origin. Company
+                // settings/live locations will recenter it immediately when
+                // available; Pondicherry is only a safe visual fallback.
+                controller.setCenter(GeoPoint(11.9139, 79.8145))
                 applyCurrentThemeToMap(this)
-                post { invalidate() }
+
+                // NestedScrollView/card measurement can happen after the map is
+                // initialized. Recalculate its viewport after layout and again
+                // shortly after tiles begin loading.
+                post {
+                    onResume()
+                    invalidate()
+                    controller.setCenter(mapCenterFallback(this))
+                    postDelayed({
+                        invalidate()
+                    }, 700L)
+                }
             }
         }
         setupAdminDashboardMapControls()
@@ -303,6 +327,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         if (!isFinishing && !isDestroyed) {
             updateAdminMarkers(current)
         }
+    }
+
+    private fun mapCenterFallback(map: MapView): GeoPoint {
+        val current = map.mapCenter
+        return if (current.latitude.isFinite() && current.longitude.isFinite() &&
+            kotlin.math.abs(current.latitude) <= 90.0 && kotlin.math.abs(current.longitude) <= 180.0 &&
+            !(current.latitude == 0.0 && current.longitude == 0.0)
+        ) current else GeoPoint(11.9139, 79.8145)
     }
 
     private fun setupAdminDashboardMapControls() {

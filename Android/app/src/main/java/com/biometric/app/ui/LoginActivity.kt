@@ -471,10 +471,14 @@ class LoginActivity : MotionBaseActivity() {
                 Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
                 setLoading(false)
-                Log.e("LoginActivity", "Firebase employee session bridge failed", e)
+                Log.e(
+                    "LoginActivity",
+                    "Firebase employee session bridge failed. baseUrl=${BuildConfig.BIOMETRIC_API_BASE_URL}",
+                    e
+                )
                 Toast.makeText(
                     this@LoginActivity,
-                    "Firebase login succeeded, but the employee session server is unreachable. Check the Android API base URL/network.",
+                    "Firebase login succeeded, but the Employee session bridge could not be reached. Check the Android API URL/network. Firebase itself is working.",
                     Toast.LENGTH_LONG
                 ).show()
             }
