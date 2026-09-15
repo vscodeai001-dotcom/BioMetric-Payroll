@@ -70,6 +70,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.view.ViewGroup
@@ -146,7 +147,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
         _binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        
+
         applyWindowInsets(binding.main, binding.appBar)
         binding.tvLiveDate.text = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date())
 
@@ -168,7 +169,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         setupSwipeRefresh()
         setupRecyclerViews()
         observeViewModel()
-        
+
         lifecycleScope.launch {
             // High-priority UI components first
             delay(300)
@@ -185,8 +186,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
             // Firebase realtime source: listeners remain active without manual refresh.
             delay(1200)
-            viewModel.triggerRefresh() 
-            
+            viewModel.triggerRefresh()
+
             // Low-priority animations last
             findViewById<LottieAnimationView>(R.id.backgroundParticles)?.let {
                 it.visibility = View.VISIBLE
@@ -220,7 +221,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         binding.hubApprovals.visibility = if (hub == "APPROVALS") View.VISIBLE else View.GONE
         binding.hubTracking.visibility = if (hub == "TRACKING") View.VISIBLE else View.GONE
         binding.hubReports.visibility = if (hub == "REPORTS") View.VISIBLE else View.GONE
-        
+
         val activeHub = when (hub) {
             "DASHBOARD" -> binding.hubDashboard
             "WORKFORCE" -> binding.hubWorkforce
@@ -276,7 +277,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         maps.forEach { map ->
             map.apply {
                 setTileSource(TileSourceFactory.MAPNIK)
-                setUseDataConnection(true)
                 setMultiTouchControls(true)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 controller.setZoom(16.0)
@@ -406,7 +406,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         lifecycleScope.launch {
             viewModel.companySettings.collectLatest { settings ->
-                settings?.let { s -> 
+                settings?.let { s ->
                     _binding?.let { updateOfficeOnMap(s.officeLatitude, s.officeLongitude, s.geoRadiusMeters) }
                 }
             }
@@ -436,24 +436,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             }
             officeMarker?.position = point
             geofenceCircle?.points = Polygon.pointsAsCircle(point, radius.toDouble())
-
-            // The dashboard map previously stayed at OSMDroid's default world
-            // position until a live employee packet arrived, which could leave
-            // the card looking like a grey/empty map. Center it once on the
-            // authoritative office location, then never recenter during GPS
-            // movement so the admin can freely pan/inspect.
-            if (!adminMapAutoCentered) {
-                maps.forEach { map ->
-                    map.controller.setCenter(point)
-                    map.controller.setZoom(15.5)
-                    map.post {
-                        map.invalidate()
-                        map.tileProvider.rescaleCache()
-                    }
-                }
-            } else {
-                maps.forEach { it.invalidate() }
-            }
+            maps.forEach { it.invalidate() }
         }
     }
 
@@ -461,28 +444,28 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val bitmap = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        
+
         // Shadow
         paint.color = Color.parseColor("#40000000")
-        canvas.drawRoundRect(10f, 10f, 75f, 75f, 18f, 18f, paint)
-        
+        canvas.drawRoundRect(RectF(10f, 10f, 75f, 75f), 18f, 18f, paint)
+
         // Background (Blue Gradient feel)
         paint.color = Color.parseColor("#4F46E5")
-        canvas.drawRoundRect(5f, 5f, 70f, 70f, 18f, 18f, paint)
-        
+        canvas.drawRoundRect(RectF(5f, 5f, 70f, 70f), 18f, 18f, paint)
+
         // Border
         paint.style = Paint.Style.STROKE
         paint.color = Color.WHITE
         paint.strokeWidth = 4f
-        canvas.drawRoundRect(5f, 5f, 70f, 70f, 18f, 18f, paint)
-        
+        canvas.drawRoundRect(RectF(5f, 5f, 70f, 70f), 18f, 18f, paint)
+
         // Building Icon (Simplified drawing)
         paint.style = Paint.Style.FILL
         val path = Path()
         path.moveTo(25f, 50f); path.lineTo(25f, 25f); path.lineTo(50f, 25f); path.lineTo(50f, 50f); path.close()
         path.moveTo(32f, 32f); path.lineTo(38f, 32f); path.lineTo(38f, 38f); path.lineTo(32f, 38f); path.close()
         canvas.drawPath(path, paint)
-        
+
         return BitmapDrawable(resources, bitmap)
     }
 
@@ -493,7 +476,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val employeeData = sharedViewModel.allEmployees.value
             val geoPoints = mutableListOf<GeoPoint>()
             val currentIds = locations.map { it.employeeId }
-            
+
             markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
                 dashboardMap.overlays.remove(markers[id]); markers.remove(id)
                 dashboardMap.overlays.remove(roadLines[id]); roadLines.remove(id)
@@ -550,9 +533,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                         commandMap.overlays.add(this)
                     }
                 }
-                
+
                 m1.alpha = 1f; m2.alpha = 1f; m1.title = emp?.name; m2.title = emp?.name
-                
+
                 // Optimization: Only animate if the position changed significantly (> 0.5m)
                 val prevPos = m1.position
                 val dist = distanceBetween(prevPos, point)
@@ -562,11 +545,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     m1.position = point
                     m2.position = point
                 }
-                
+
                 val initials = getInitials(emp?.name ?: "E")
                 val cacheKey = "${initials}_${loc.isWithinAllowedRadius}_$status"
-                val icon = iconCache.getOrPut(cacheKey) { 
-                    createPremiumMarkerIcon(initials, loc.isWithinAllowedRadius, status) 
+                val icon = iconCache.getOrPut(cacheKey) {
+                    createPremiumMarkerIcon(initials, loc.isWithinAllowedRadius, status)
                 }
                 m1.icon = icon; m2.icon = icon
                 val snippet = "Status: $status | Speed: ${formatSpeed(loc.speedMps)}\nDist: ${formatDistance(loc.distanceMeters)}"
@@ -610,8 +593,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             override fun onOpen(item: Any?) {
                 val root = mView as? android.widget.TextView ?: return
                 root.text = "$employeeName\n$status  •  ${formatSpeed(loc.speedMps)}\n" +
-                    "Distance: ${formatDistance(loc.distanceMeters)}  •  Accuracy: ±${loc.accuracyMeters.toInt()} m\n" +
-                    "Radius: ${loc.allowedRadiusMeters} m  •  ${if (loc.isWithinAllowedRadius) "Within range" else "Outside range"}"
+                        "Distance: ${formatDistance(loc.distanceMeters)}  •  Accuracy: ±${loc.accuracyMeters.toInt()} m\n" +
+                        "Radius: ${loc.allowedRadiusMeters} m  •  ${if (loc.isWithinAllowedRadius) "Within range" else "Outside range"}"
                 root.setPadding(24, 16, 24, 16)
                 root.setTextSize(12f)
                 root.setTextColor(Color.DKGRAY)
@@ -628,7 +611,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun updateAdminRoadRoute(empId: Int, userPoint: GeoPoint) {
         val last = lastRouteUpdate[empId] ?: 0L
         if (System.currentTimeMillis() - last < 30000L) return
-        
+
         adminRoadRouteJobs[empId]?.cancel()
         adminRoadRouteJobs[empId] = lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -638,10 +621,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 if (response.isSuccessful) {
                     response.body()?.routes?.firstOrNull()?.geometry?.let { encoded ->
                         val decoded = PolylineDecoder.decode(encoded)
-                        withContext(Dispatchers.Main) { 
+                        withContext(Dispatchers.Main) {
                             _binding?.let {
                                 drawAdminRoute(empId, decoded)
-                                lastRouteUpdate[empId] = System.currentTimeMillis() 
+                                lastRouteUpdate[empId] = System.currentTimeMillis()
                             }
                         }
                     }
@@ -653,15 +636,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun drawAdminRoute(empId: Int, points: List<GeoPoint>) {
         val map1 = binding.adminMapView
         val map2 = binding.commandCenterMapView
-        
+
         val c1 = roadCasings.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = 150; map1.overlays.add(0, this) } }
         val l1 = roadLines.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; map1.overlays.add(1, this) } }
         c1.setPoints(points); l1.setPoints(points)
-        
+
         val c2 = roadCasings2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = 150; map2.overlays.add(0, this) } }
         val l2 = roadLines2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; map2.overlays.add(1, this) } }
         c2.setPoints(points); l2.setPoints(points)
-        
+
         map1.invalidate(); map2.invalidate()
     }
 
@@ -712,7 +695,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let {
                 viewModel.triggerRefresh()
                 sharedViewModel.warmUpDashboard()
-                }
+            }
         }
     }
 
@@ -733,17 +716,17 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun getLocStatus(loc: SignalRManager.LiveLocation): String {
         // Ported from Web: LiveLocationStore.cs
         // Requirement: Status remains "Live" for 10 years to prevent dashboard flicker on backgrounding
-        val timestamp = loc.timestamp ?: return "Live" 
+        val timestamp = loc.timestamp ?: return "Live"
         return try {
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
             val serverTime = sdf.parse(timestamp)?.time ?: 0L
             val ageMs = Math.abs(System.currentTimeMillis() - serverTime)
-            
+
             // Web: LiveTimeoutSeconds = 315360000 (10 years)
             val liveTimeoutMs = 10L * 365 * 24 * 60 * 60 * 1000
-            when { 
-                ageMs <= liveTimeoutMs -> "Live" 
-                else -> "Offline" 
+            when {
+                ageMs <= liveTimeoutMs -> "Live"
+                else -> "Offline"
             }
         } catch (_: Exception) { "Live" }
     }
@@ -768,33 +751,33 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val bitmap = Bitmap.createBitmap(100, 130, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        
+
         // Pin Shadow
         paint.color = Color.parseColor("#40000000")
         canvas.drawCircle(50f, 120f, 15f, paint)
-        
+
         paint.color = color
         val path = Path()
         path.moveTo(50f, 130f); path.cubicTo(100f, 80f, 100f, 10f, 50f, 10f); path.cubicTo(0f, 10f, 0f, 80f, 50f, 130f); canvas.drawPath(path, paint)
-        
+
         // Inner Circle
         paint.color = Color.WHITE
         canvas.drawCircle(50f, 55f, 35f, paint)
-        
+
         // Initials
         paint.color = color
         paint.textSize = 34f
         paint.textAlign = Paint.Align.CENTER
         paint.isFakeBoldText = true
         canvas.drawText(initials, 50f, 66f, paint)
-        
+
         // Status Dot at Bottom-Right of Bulb
         val sColor = when(status) { "Live" -> "#22C55E".toColorInt(); "Stale" -> "#F59E0B".toColorInt(); else -> "#94A3B8".toColorInt() }
         paint.color = Color.WHITE
         canvas.drawCircle(82f, 82f, 14f, paint) // Outer glow
         paint.color = sColor
         canvas.drawCircle(82f, 82f, 10f, paint) // Actual dot
-        
+
         return BitmapDrawable(resources, bitmap)
     }
 
@@ -807,34 +790,34 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun animateMarker(m1: Marker, m2: Marker, toPosition: GeoPoint, empId: Int) {
         // Cancel existing animation for this employee to prevent main thread pinning
         markerAnimations[empId]?.cancel()
-        
+
         val startPosition = m1.position
-        if (startPosition.latitude == 0.0) { 
+        if (startPosition.latitude == 0.0) {
             m1.position = toPosition
             m2.position = toPosition
-            return 
+            return
         }
-        
+
         val animator = ValueAnimator.ofFloat(0f, 1f)
         animator.duration = 1200L // 1.2s ultra-smooth glide
         animator.interpolator = AccelerateDecelerateInterpolator()
-        
+
         animator.addUpdateListener { animation ->
             val t = animation.animatedValue as Float
-            
+
             val lat = t * toPosition.latitude + (1 - t) * startPosition.latitude
             val lng = t * toPosition.longitude + (1 - t) * startPosition.longitude
-            
+
             val point = GeoPoint(lat, lng)
             m1.position = point
             m2.position = point
-            
+
             syncRoadLineWithMarker(empId, point)
-            
+
             binding.adminMapView.invalidate()
             binding.commandCenterMapView.invalidate()
         }
-        
+
         markerAnimations[empId] = animator
         animator.start()
     }
@@ -864,12 +847,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
     }
 
-    override fun onResume() { 
+    override fun onResume() {
         super.onResume()
         _binding?.adminMapView?.onResume()
         _binding?.commandCenterMapView?.onResume()
-        checkBatteryOptimizations() 
-        
+        checkBatteryOptimizations()
+
         lifecycleScope.launch {
             // Anti-Inactivity: Stagger to avoid UI jank on resume
             delay(400)
@@ -879,39 +862,39 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             }
         }
     }
-    override fun onPause() { 
-        super.onPause() 
+    override fun onPause() {
+        super.onPause()
         _binding?.adminMapView?.onPause()
-        _binding?.commandCenterMapView?.onPause() 
+        _binding?.commandCenterMapView?.onPause()
     }
-    override fun onDestroy() { 
+    override fun onDestroy() {
         adminRoadRouteJobs.values.forEach { it.cancel() }
         adminRoadRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }
         markerAnimations.clear()
         refreshJob?.cancel()
         iconCache.clear()
-        
+
         _binding?.adminMapView?.onDetach()
         _binding?.commandCenterMapView?.onDetach()
-        
+
         super.onDestroy()
-        _binding = null 
+        _binding = null
     }
 
     private fun setupRecyclerViews() {
         adapter = ShopAdapter(
-            onShopClick = { shop -> 
+            onShopClick = { shop ->
                 sharedViewModel.setSelectedShop(shop)
-                startActivity(Intent(this, StaffActivity::class.java)) 
-            }, 
-            onDeleteClick = { shop -> 
+                startActivity(Intent(this, StaffActivity::class.java))
+            },
+            onDeleteClick = { shop ->
                 MaterialAlertDialogBuilder(this)
                     .setTitle("🗑️ Delete Shop")
                     .setMessage("Are you sure you want to delete ${shop.name}?")
                     .setPositiveButton("Delete") { _, _ -> viewModel.deleteShop(shop) }
                     .setNegativeButton("Cancel", null)
-                    .show() 
+                    .show()
             }
         )
         binding.rvShops.layoutManager = LinearLayoutManager(this)
@@ -932,92 +915,92 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupListeners() {
-        binding.btnAddShop.setOnClickListener { 
+        binding.btnAddShop.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            showAddShopDialog() 
+            showAddShopDialog()
         }
-        binding.cvLiveMapCard.setOnClickListener { 
+        binding.cvLiveMapCard.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            showHub("TRACKING"); binding.bottomNavigation.selectedItemId = R.id.nav_tracking 
+            showHub("TRACKING"); binding.bottomNavigation.selectedItemId = R.id.nav_tracking
         }
         binding.cvManualPunchCorrection.setOnClickListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, AdminManualPunchCorrectionActivity::class.java))
         }
-        binding.btnApproveRegs.setOnClickListener { 
+        binding.btnApproveRegs.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, RegularizationActivity::class.java)) 
+            startActivity(Intent(this, RegularizationActivity::class.java))
         }
-        binding.btnRunPayroll.setOnClickListener { 
+        binding.btnRunPayroll.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, AdminPayrollActivity::class.java)) 
+            startActivity(Intent(this, AdminPayrollActivity::class.java))
         }
-        binding.btnLeaveManagement.setOnClickListener { 
+        binding.btnLeaveManagement.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, LeaveManagementActivity::class.java)) 
+            startActivity(Intent(this, LeaveManagementActivity::class.java))
         }
-        binding.btnAuditTrail.setOnClickListener { 
+        binding.btnAuditTrail.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, AuditTrailActivity::class.java)) 
+            startActivity(Intent(this, AuditTrailActivity::class.java))
         }
-        binding.btnRecycleBin.setOnClickListener { 
+        binding.btnRecycleBin.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, RecycleBinActivity::class.java)) 
+            startActivity(Intent(this, RecycleBinActivity::class.java))
         }
-        binding.btnReportCenter.setOnClickListener { 
+        binding.btnReportCenter.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, ReportCenterActivity::class.java)) 
+            startActivity(Intent(this, ReportCenterActivity::class.java))
         }
-        binding.btnAddEmployee.setOnClickListener { 
+        binding.btnAddEmployee.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, StaffActivity::class.java)) 
+            startActivity(Intent(this, StaffActivity::class.java))
         }
-        binding.btnViewAllAdvances.setOnClickListener { 
+        binding.btnViewAllAdvances.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            showHub("REPORTS"); binding.bottomNavigation.selectedItemId = R.id.nav_reports 
+            showHub("REPORTS"); binding.bottomNavigation.selectedItemId = R.id.nav_reports
         }
-        binding.btnUserManagement.setOnClickListener { 
+        binding.btnUserManagement.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, UserManagementActivity::class.java)) 
+            startActivity(Intent(this, UserManagementActivity::class.java))
         }
-        binding.btnOpenFullReportCenter.setOnClickListener { 
+        binding.btnOpenFullReportCenter.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, ReportCenterActivity::class.java)) 
+            startActivity(Intent(this, ReportCenterActivity::class.java))
         }
     }
 
     private fun observeViewModel() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { 
-                    sharedViewModel.userProfile.collectLatest { profile -> 
+                launch {
+                    sharedViewModel.userProfile.collectLatest { profile ->
                         _binding?.let { b ->
                             profile?.let { p ->
                                 brandingManager.updateBranding(
                                     BrandingManager.BrandingConfig(
-                                        appName = p.brandingName ?: "Biometric Payroll", 
+                                        appName = p.brandingName ?: "Biometric Payroll",
                                         logoUrl = p.brandingLogoUrl
                                     )
-                                ) 
+                                )
                             }
                         }
-                    } 
+                    }
                 }
-                launch { 
-                    viewModel.shopsWorkforceState.collectLatest { 
+                launch {
+                    viewModel.shopsWorkforceState.collectLatest {
                         _binding?.let { b ->
-                            adapter.submitList(it) 
+                            adapter.submitList(it)
                         }
-                    } 
+                    }
                 }
-                launch { 
-                    sharedViewModel.allShops.collectLatest { shops -> 
+                launch {
+                    sharedViewModel.allShops.collectLatest { shops ->
                         if (shops.isNotEmpty() && sharedViewModel.selectedShop.value == null) {
                             sharedViewModel.setSelectedShop(shops.first())
                         }
-                    } 
+                    }
                 }
-                launch { 
+                launch {
                     viewModel.isLoading.collectLatest { isLoading ->
                         _binding?.let { b ->
                             if (isLoading) {
@@ -1028,32 +1011,32 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                         }
                     }
                 }
-                launch { 
+                launch {
                     sharedViewModel.isWarmingUp.collect { isWarming ->
                         _binding?.let { b ->
-                            b.swipeRefresh.isRefreshing = isWarming 
+                            b.swipeRefresh.isRefreshing = isWarming
                         }
-                    } 
+                    }
                 }
-                launch { 
+                launch {
                     viewModel.globalStats.collectLatest { stats ->
                         _binding?.let { b ->
                             b.tvKpiWorkforce.text = stats.totalWorkforce.toString()
                             b.tvKpiPresent.text = getString(R.string.present_format, stats.presentToday, stats.activeEmployees)
                             b.tvKpiAbsent.text = getString(R.string.absent_format, stats.absentToday)
-                            
+
                             val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
                             b.tvKpiAdvances.text = currency.format(stats.unpaidAdvances)
-                            
+
                             // Payroll KPI: Done/Pending matching web
                             b.tvKpiPayroll.text = if (stats.pendingPayrolls > 0) "Pending" else "Done"
-                            
+
                             val month = SimpleDateFormat("MMM", Locale.US).format(Date())
                             b.tvPayrollLabel.text = "PAYROLL ($month)".uppercase()
-                            
+
                             b.tvPayrollVariance.text = String.format(Locale.US, "📈 %.1f%% vs Last Month", stats.payrollVariancePercent)
                             b.tvShiftsToday.text = stats.shiftsScheduledToday.toString()
-                            
+
                             // Web Parity: Xh Ym formatting
                             val totalMinutes = stats.totalMonthScheduledMs / (1000 * 60)
                             val h = totalMinutes / 60
@@ -1064,7 +1047,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                         }
                     }
                 }
-                
+
                 // Ported: Workforce Hub Data 1:1 with Web
                 launch {
                     combine(sharedViewModel.allEmployees, workforceSearchQuery) { employees, query ->
@@ -1162,8 +1145,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     tvDate.text = "🗓️ ${sdf.format(Date(item.startDate))}"
                     tvReason.text = "📝 ${item.reason}"
                     tvIcon.text = "🌴"
-                    holder.itemView.setOnClickListener { 
-                         Toast.makeText(this@MainActivity, "✨ Redirecting to Leave Management 🌴", Toast.LENGTH_SHORT).show()
+                    holder.itemView.setOnClickListener {
+                        Toast.makeText(this@MainActivity, "✨ Redirecting to Leave Management 🌴", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -1205,15 +1188,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             if (dealsWithAlready) return
 
             if (System.currentTimeMillis() - prefs.getLong("battery_prompt_time", 0L) > 24 * 60 * 60 * 1000) {
-                MaterialAlertDialogBuilder(this).setTitle("Continuous Sync ⚡").setMessage("To ensure location tracking never stops, please disable battery optimization and enable 'Auto-start' if available on your device.").setPositiveButton("Configure") { _, _ -> 
+                MaterialAlertDialogBuilder(this).setTitle("Continuous Sync ⚡").setMessage("To ensure location tracking never stops, please disable battery optimization and enable 'Auto-start' if available on your device.").setPositiveButton("Configure") { _, _ ->
                     prefs.edit { putBoolean("battery_opt_dealt_with", true) }
                     BatteryOptimizationHelper.requestIgnoreBatteryOptimizations(this)
                     OemBackgroundHelper.showAutoStartSettings(this)
-                }.setNegativeButton("Later") { _, _ -> 
-                    prefs.edit { 
-                        putLong("battery_prompt_time", System.currentTimeMillis()) 
+                }.setNegativeButton("Later") { _, _ ->
+                    prefs.edit {
+                        putLong("battery_prompt_time", System.currentTimeMillis())
                         putBoolean("battery_opt_dealt_with", true)
-                    } 
+                    }
                 }.show()
             }
         }
@@ -1253,7 +1236,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             b.tvRecentAdvancesCount.text = advances.size.toString()
             b.tvNoAdvances.isVisible = advances.isEmpty()
             b.llRecentAdvancesContainer.removeAllViews()
-            
+
             val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
             val sdf = SimpleDateFormat("dd-MMM", Locale.US)
             val employees = sharedViewModel.allEmployees.value
