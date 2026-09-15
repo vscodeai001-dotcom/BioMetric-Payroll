@@ -17,4 +17,7 @@ interface LocalSalarySnapshotDao {
 
     @Query("SELECT * FROM local_salary_snapshots WHERE syncState = 0")
     fun getUnsynced(): List<LocalSalarySnapshot>
+
+    @Query("DELETE FROM local_salary_snapshots WHERE snapshotId = :id")
+    fun deleteById(id: String)
 }

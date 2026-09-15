@@ -17,4 +17,7 @@ interface LocalAuditLogDao {
 
     @Query("SELECT * FROM local_audit_logs WHERE syncState = 0")
     fun getUnsynced(): List<LocalAuditLog>
+
+    @Query("DELETE FROM local_audit_logs WHERE logId = :id")
+    fun deleteById(id: String)
 }

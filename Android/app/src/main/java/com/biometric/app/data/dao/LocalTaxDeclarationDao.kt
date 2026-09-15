@@ -14,4 +14,7 @@ interface LocalTaxDeclarationDao {
 
     @Query("SELECT * FROM local_tax_declarations WHERE syncState = 0")
     fun getUnsynced(): List<LocalTaxDeclaration>
+
+    @Query("DELETE FROM local_tax_declarations WHERE declarationId = :id")
+    fun deleteById(id: Int)
 }

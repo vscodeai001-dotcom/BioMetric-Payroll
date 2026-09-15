@@ -85,12 +85,24 @@ class FirebaseSyncManager @Inject constructor(
         val ref = getOwnerRef() ?: return
 
         ref.child("employees").keepSynced(true)
-        ref.child("summaries").keepSynced(true)
-        ref.child("monthly_snapshots").keepSynced(true)
+        ref.child("shops").keepSynced(true)
+        ref.child("attendance").keepSynced(true)
         ref.child("attendance_punches").keepSynced(true)
+        ref.child("advance_payments").keepSynced(true)
+        ref.child("employee_history").keepSynced(true)
+        ref.child("shop_closed_days").keepSynced(true)
         ref.child("regularizations").keepSynced(true)
         ref.child("leave_requests").keepSynced(true)
         ref.child("resignation_requests").keepSynced(true)
+        ref.child("salary_snapshots").keepSynced(true)
+        ref.child("audit_logs").keepSynced(true)
+        ref.child("daily_summaries").keepSynced(true)
+        ref.child("shift_schedules").keepSynced(true)
+        ref.child("payroll_history").keepSynced(true)
+        ref.child("bonus_records").keepSynced(true)
+        ref.child("tax_declarations").keepSynced(true)
+        ref.child("fbp_components").keepSynced(true)
+        ref.child("fbp_declarations").keepSynced(true)
 
         hasInitializedSync = true
     }

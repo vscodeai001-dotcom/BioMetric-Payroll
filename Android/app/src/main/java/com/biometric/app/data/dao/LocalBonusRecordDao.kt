@@ -14,4 +14,7 @@ interface LocalBonusRecordDao {
 
     @Query("SELECT * FROM local_bonus_records WHERE syncState = 0")
     fun getUnsynced(): List<LocalBonusRecord>
+
+    @Query("DELETE FROM local_bonus_records WHERE bonusId = :id")
+    fun deleteById(id: Int)
 }

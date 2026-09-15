@@ -14,4 +14,7 @@ interface LocalFbpComponentDao {
 
     @Query("SELECT * FROM local_fbp_components WHERE syncState = 0")
     fun getUnsynced(): List<LocalFbpComponent>
+
+    @Query("DELETE FROM local_fbp_components WHERE componentId = :id")
+    fun deleteById(id: Int)
 }

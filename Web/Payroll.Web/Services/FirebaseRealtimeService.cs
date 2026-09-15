@@ -203,7 +203,11 @@ public sealed class FirebaseRealtimeService
             if (string.IsNullOrWhiteSpace(key))
                 continue;
 
-            var path = $"owners/{ownerUid}/data/{entityName}/{EscapeFirebaseKey(key)}";
+            var firebaseTable = GetFirebaseTable(entityName);
+            if (string.IsNullOrWhiteSpace(firebaseTable))
+                continue;
+
+            var path = $"owners/{ownerUid}/{firebaseTable}/{EscapeFirebaseKey(key)}";
             if (entry.State == EntityState.Deleted)
             {
                 updates[path] = null;
@@ -298,7 +302,11 @@ public sealed class FirebaseRealtimeService
                     row["_entity"] = entityName;
                     row["_key"] = key;
                     row["_syncedUtc"] = DateTime.UtcNow.ToString("O");
-                    page[$"owners/{ownerUid}/data/{entityName}/{EscapeFirebaseKey(key)}"] = row;
+                    var firebaseTable = GetFirebaseTable(entityName);
+                    if (string.IsNullOrWhiteSpace(firebaseTable))
+                        continue;
+
+                    page[$"owners/{ownerUid}/{firebaseTable}/{EscapeFirebaseKey(key)}"] = row;
                     count++;
                 }
                 if (page.Count > 0)
@@ -313,6 +321,37 @@ public sealed class FirebaseRealtimeService
         }
         return total;
     }
+
+    // Firebase paths intentionally match the existing Android owner-node
+    // layout. This is a transport/read-model mapping only; it does not alter
+    // the Neon schema or any business logic.
+    private static string? GetFirebaseTable(string entityName)
+        => entityName switch
+        {
+            "Employee" => "employees",
+            "AttendanceLog" => "attendance",
+            "SalaryAdvance" => "advance_payments",
+            "PayrollHistory" => "payroll_history",
+            "LeaveRequest" => "leave_requests",
+            "ShiftSchedule" => "shift_schedules",
+            "CompanyHoliday" => "shop_closed_days",
+            "CompanySetting" => "company_settings",
+            "DailySummary" => "daily_summaries",
+            "FeatureSettings" => "feature_settings",
+            "ProfessionalTaxSlab" => "professional_tax_slabs",
+            "AuditLog" => "audit_logs",
+            "BonusRecord" => "bonus_records",
+            "YearEndSummary" => "year_end_summaries",
+            "TaxDeclaration" => "tax_declarations",
+            "ResignationRequest" => "resignation_requests",
+            "FnFSettlement" => "fnf_settlements",
+            "ReportDefinition" => "report_definitions",
+            "AttendanceRegularization" => "regularizations",
+            "FBPComponent" => "fbp_components",
+            "FlexibleBenefitDeclaration" => "fbp_declarations",
+            "GeoPunchAudit" => "geo_punch_audits",
+            _ => null
+        };
 
     private static readonly HashSet<string> RealtimeEntities = new(StringComparer.Ordinal)
     {

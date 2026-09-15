@@ -14,4 +14,7 @@ interface LocalFbpDeclarationDao {
 
     @Query("SELECT * FROM local_fbp_declarations WHERE syncState = 0")
     fun getUnsynced(): List<LocalFbpDeclaration>
+
+    @Query("DELETE FROM local_fbp_declarations WHERE declarationId = :id")
+    fun deleteById(id: Int)
 }
