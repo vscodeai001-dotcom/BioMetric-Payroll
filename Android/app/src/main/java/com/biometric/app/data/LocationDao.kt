@@ -13,7 +13,7 @@ interface LocationDao {
     @Query("UPDATE offline_locations SET syncState = 'PENDING' WHERE syncState = 'IN_FLIGHT' AND lastAttemptAt IS NOT NULL AND lastAttemptAt < :cutoff")
     suspend fun recoverStaleInFlight(cutoff: Long): Int
 
-    @Query("SELECT * FROM offline_locations WHERE syncState IN ('PENDING','FAILED') ORDER BY timestamp ASC, id ASC")
+    @Query("SELECT * FROM offline_locations WHERE syncState IN ('PENDING','FAILED','FIREBASE_SYNCED') ORDER BY timestamp ASC, id ASC")
     suspend fun getPendingForSync(): List<LocalLocation>
 
     @Query("SELECT * FROM offline_locations WHERE sessionId = :sessionId ORDER BY timestamp ASC, id ASC")

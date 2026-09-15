@@ -49,6 +49,11 @@ class FirebaseSyncManager @Inject constructor(
 
     fun getGlobalRef() = database
 
+    /** Firebase Auth persists its session across app/process/device restarts.
+     * The tracking service can therefore continue using Firebase even when
+     * Payroll.Web/Render is temporarily unavailable. */
+    fun isAuthenticated(): Boolean = auth.currentUser != null
+
     val lastSyncTime = MutableStateFlow(System.currentTimeMillis())
 
     val syncStatus: Flow<Boolean> = callbackFlow {
@@ -66,8 +71,10 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { connectedRef.removeEventListener(listener) }
     }
 
+    fun getOwnerUid(): String? = sessionStore.firebaseOwnerUid() ?: auth.currentUser?.uid
+
     fun getOwnerRef(): DatabaseReference? {
-        val uid = auth.currentUser?.uid ?: return null
+        val uid = getOwnerUid() ?: return null
         return database.child("owners").child(uid)
     }
 
@@ -145,6 +152,52 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { query.removeEventListener(listener) }
     }
 
+    data class ApplicationRealtimeEvent(
+        val eventId: String = "",
+        val source: String = "",
+        val timestamp: String = "",
+        val changes: List<RealtimeChangedItem> = emptyList()
+    )
+
+    fun applicationEventsFlow(): Flow<ApplicationRealtimeEvent> = callbackFlow {
+        val ownerUid = getOwnerUid() ?: run {
+            close()
+            return@callbackFlow
+        }
+        // ChildEventListener replays existing children. Restrict startup to a
+        // tiny recent window; the normal Neon pull already reconciles older
+        // state, while new events remain Render-independent.
+        val startAt = Date(System.currentTimeMillis() - 5000L).toInstant().toString()
+        val ref = database.child("owner_events").child(ownerUid)
+            .orderByChild("timestamp")
+            .startAt(startAt)
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                val eventId = snapshot.child("eventId").getValue(String::class.java) ?: snapshot.key.orEmpty()
+                val source = snapshot.child("source").getValue(String::class.java).orEmpty()
+                val timestamp = snapshot.child("timestamp").getValue(String::class.java).orEmpty()
+                val changes = snapshot.child("changes").children.mapNotNull { child ->
+                    val entity = child.child("Entity").getValue(String::class.java) ?: child.child("entity").getValue(String::class.java)
+                    if (entity.isNullOrBlank()) null else RealtimeChangedItem(
+                        entity = entity,
+                        action = child.child("Action").getValue(String::class.java)
+                            ?: child.child("action").getValue(String::class.java)
+                            ?: "MODIFIED"
+                    )
+                }
+                trySend(ApplicationRealtimeEvent(eventId, source, timestamp, changes))
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onChildRemoved(snapshot: DataSnapshot) {}
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("FirebaseSyncManager", "Owner realtime event listener cancelled", error.toException())
+            }
+        }
+        ref.addChildEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
     inline fun <reified T : Any> getGlobalItemFlow(path: String): Flow<T?> = callbackFlow {
         val ref = getGlobalRef().child(path)
         val listener = object : ValueEventListener {
@@ -161,21 +214,56 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { ref.removeEventListener(listener) }
     }
 
-    fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED") {
-        val token = sessionStore.token() ?: return
+    fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED", recordId: String? = null) {
+        val ownerUid = getOwnerUid()
+        val token = sessionStore.token()
         syncScope.launch {
-            runCatching {
-                mobileApi.notifyRealtimeChanged(
-                    "Bearer $token",
-                    RealtimeChangedRequest(listOf(RealtimeChangedItem(entity, action)))
-                )
-            }.onFailure {
-                // Notification is best-effort. The existing Firebase write is
-                // authoritative for this legacy path and must never fail because
-                // SignalR is temporarily unavailable.
-                Log.w("FirebaseSyncManager", "Realtime notification failed for $entity", it)
+            // Firebase owner event is the Render-independent invalidation path.
+            if (!ownerUid.isNullOrBlank()) {
+                runCatching {
+                    publishClientApplicationChange(entity, action, recordId)
+                }.onFailure {
+                    Log.w("FirebaseSyncManager", "Firebase realtime event failed for $entity", it)
+                }
+            }
+
+            // Preserve the existing SignalR compatibility notification.
+            if (!token.isNullOrBlank()) {
+                runCatching {
+                    mobileApi.notifyRealtimeChanged(
+                        "Bearer $token",
+                        RealtimeChangedRequest(listOf(RealtimeChangedItem(entity, action)))
+                    )
+                }.onFailure {
+                    Log.w("FirebaseSyncManager", "Legacy realtime notification failed for $entity", it)
+                }
             }
         }
+    }
+
+    private suspend fun publishClientApplicationChange(
+        entity: String,
+        action: String,
+        recordId: String?
+    ) {
+        if (!isAuthenticated()) return
+        val employeeId = sessionStore.employeeId()
+        if (employeeId <= 0) return
+
+        val eventId = UUID.randomUUID().toString().replace("-", "")
+        val change = mutableMapOf<String, Any?>(
+            "Entity" to entity,
+            "Action" to action
+        )
+        if (!recordId.isNullOrBlank()) change["RecordId"] = recordId
+        val payload = mapOf(
+            "eventId" to eventId,
+            "source" to "FIREBASE_CLIENT",
+            "employeeId" to employeeId,
+            "timestamp" to Date().toInstant().toString(),
+            "changes" to listOf(change)
+        )
+        database.child("client_events").child(employeeId.toString()).child(eventId).setValue(payload).await()
     }
 
     suspend fun pushShop(shop: Shop) { getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await(); notifyRealtimeChanged("Shop", "MODIFIED") }
@@ -184,6 +272,59 @@ class FirebaseSyncManager @Inject constructor(
         val id = att.attendanceId.ifBlank { return }
         getOwnerRef()?.child("attendance")?.child(id)?.setValue(att)?.await()
         notifyRealtimeChanged("Attendance", "MODIFIED")
+    }
+
+    /**
+     * Render-independent GPS transport. The Android tracking service writes
+     * the current live position and an immutable history event in one Firebase
+     * multi-location update. Neon remains the payroll/business SSOT; this path
+     * exists so a Render outage cannot stop GPS capture or realtime map updates.
+     */
+    suspend fun pushLiveLocation(
+        employeeId: Int,
+        sessionId: String,
+        clientEventId: String,
+        sequence: Long,
+        latitude: Double,
+        longitude: Double,
+        accuracy: Double,
+        speed: Double,
+        batteryLevel: Int,
+        timestamp: Long
+    ): Boolean {
+        if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank()) return false
+
+        val payload = mapOf(
+            "EmployeeId" to employeeId,
+            "SessionId" to sessionId,
+            "Latitude" to latitude,
+            "Longitude" to longitude,
+            "AccuracyMeters" to accuracy.coerceAtLeast(0.0),
+            "SpeedMps" to speed.coerceAtLeast(0.0),
+            "BatteryLevel" to batteryLevel,
+            "Sequence" to sequence,
+            "Timestamp" to Date(timestamp).toInstant().toString(),
+            "LastUpdatedUtc" to Date().toInstant().toString(),
+            "Source" to "ANDROID_FIREBASE"
+        )
+
+        if (!isAuthenticated()) {
+            Log.w("FirebaseSyncManager", "GPS Firebase write deferred: Firebase user is not authenticated")
+            return false
+        }
+
+        return try {
+            getGlobalRef().updateChildren(
+                mapOf(
+                    "tracking/live/$employeeId" to payload,
+                    "tracking/history/$employeeId/$clientEventId" to payload
+                )
+            ).await()
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "GPS Firebase write deferred", e)
+            false
+        }
     }
     suspend fun pushAttendancePunch(punch: AttendancePunch) {
         val id = punch.punchId.ifBlank { return }

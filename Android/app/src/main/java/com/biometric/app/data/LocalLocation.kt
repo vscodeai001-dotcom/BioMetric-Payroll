@@ -42,6 +42,7 @@ data class LocalLocation(
         const val SYNC_PENDING = "PENDING"
         const val SYNC_IN_FLIGHT = "IN_FLIGHT"
         const val SYNCED = "SYNCED"
+        const val FIREBASE_SYNCED = "FIREBASE_SYNCED"
         const val SYNC_FAILED = "FAILED"
     }
 }

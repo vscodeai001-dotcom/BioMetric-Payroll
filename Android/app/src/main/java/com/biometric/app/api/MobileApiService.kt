@@ -291,6 +291,8 @@ data class MobileLoginRequest(
 data class MobileLoginResponse(
     @SerializedName("success") val success: Boolean = false,
     @SerializedName("token") val token: String? = null,
+    @SerializedName("firebaseToken") val firebaseToken: String? = null,
+    @SerializedName("firebaseOwnerUid") val firebaseOwnerUid: String? = null,
     @SerializedName("message") val message: String? = null,
     @SerializedName("employeeId") val employeeId: Int = 0,
     @SerializedName("name") val name: String = "",

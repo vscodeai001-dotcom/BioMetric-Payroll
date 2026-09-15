@@ -21,6 +21,20 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = true
+    }
+
+    // Sensitive Neon API credentials are supplied from local.properties or
+    // CI/Gradle properties and are never hard-coded in source.
+    val localSecrets = java.util.Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+    val neonApiKey = providers.gradleProperty("NEON_API_KEY")
+        .orElse(localSecrets.getProperty("NEON_API_KEY", ""))
+        .get()
+    defaultConfig {
+        buildConfigField("String", "NEON_API_KEY", "\"${neonApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     buildTypes {

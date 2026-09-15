@@ -1,6 +1,7 @@
 package com.biometric.app.data
 
 import android.util.Log
+import com.biometric.app.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.InetAddress
@@ -18,7 +19,7 @@ object DatabaseManager {
     private const val HOST = "ep-twilight-water-ayvo4m3p-pooler.c-5.us-east-2.aws.neon.tech"
     private const val DB_NAME = "neondb"
     private const val USER = "neondb_owner"
-    private const val PASS = "npg_Sa3OuPEVeR8Y"
+    private val PASS: String get() = BuildConfig.NEON_API_KEY
     
     // Direct JDBC URL. Using maxResultBuffer in URL to avoid JMX parsing logic in some driver versions.
     private const val JDBC_URL = "jdbc:postgresql://$HOST:5432/$DB_NAME?sslmode=require&maxResultBuffer=67108864"

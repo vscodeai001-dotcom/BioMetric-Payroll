@@ -25,6 +25,8 @@ import com.biometric.app.sync.ThemePreferenceSync
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.MotionManager
 import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.tasks.await
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
@@ -190,7 +192,24 @@ class LoginActivity : MotionBaseActivity() {
                             else -> UserRole.STAFF.name
                         }
                         
-                        mobileSessionStore.saveLogin(token, result.employeeId, result.name, result.email)
+                        mobileSessionStore.saveLogin(token, result.employeeId, result.name, result.email, result.firebaseOwnerUid)
+
+                        // Authenticate the existing Firebase realtime layer with
+                        // a server-issued custom token. Firebase then maintains
+                        // its own session independently of Render, so GPS and
+                        // realtime listeners do not depend on the Payroll.Web
+                        // process staying alive. If Firebase is temporarily
+                        // unavailable, the existing login flow remains intact.
+                        result.firebaseToken?.takeIf { it.isNotBlank() }?.let { customToken ->
+                            try {
+                                FirebaseAuth.getInstance()
+                                    .signInWithCustomToken(customToken)
+                                    .await()
+                            } catch (firebaseEx: Exception) {
+                                Log.w("LoginActivity", "Firebase realtime authentication deferred: ${firebaseEx.message}")
+                            }
+                        }
+
                         // Server preference is authoritative across devices. Refresh it before entering the app.
                         themePreferenceSync.refreshFromServer()
                         adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }

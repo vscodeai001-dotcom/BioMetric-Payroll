@@ -1,0 +1,2 @@
+# Copy to local.properties for local development; do not commit local.properties.
+NEON_API_KEY=replace-with-your-credential

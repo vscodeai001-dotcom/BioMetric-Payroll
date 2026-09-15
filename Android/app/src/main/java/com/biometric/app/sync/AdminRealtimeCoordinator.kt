@@ -25,7 +25,8 @@ import javax.inject.Singleton
 @Singleton
 class AdminRealtimeCoordinator @Inject constructor(
     private val signalR: SignalRManager,
-    private val repository: MainRepository
+    private val repository: MainRepository,
+    private val firebaseSync: FirebaseSyncManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncMutex = Mutex()
@@ -37,7 +38,20 @@ class AdminRealtimeCoordinator @Inject constructor(
 
         signalR.start()
         collectJob = scope.launch {
-            signalR.dataChangeEvents.collectLatest { event ->
+            launch {
+                firebaseSync.applicationEventsFlow().collectLatest { event ->
+                    if (event.changes.isEmpty()) return@collectLatest
+                    pendingRefresh?.cancel()
+                    pendingRefresh = launch {
+                        delay(120)
+                        syncFromAuthoritativeStore()
+                        withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
+                    }
+                }
+            }
+
+            launch {
+                signalR.dataChangeEvents.collectLatest { event ->
                 // Only database/application invalidation events enter the
                 // authoritative Neon pull pipeline. High-frequency GPS and
                 // session/geofence events have their own realtime consumers.
@@ -50,6 +64,7 @@ class AdminRealtimeCoordinator @Inject constructor(
                     delay(180)
                     syncFromAuthoritativeStore()
                     withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
+                }
                 }
             }
         }

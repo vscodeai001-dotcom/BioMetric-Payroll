@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.biometric.app.sync.SignalRManager
+import com.biometric.app.sync.FirebaseSyncManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -43,6 +44,7 @@ class TrackingService : Service() {
     @Inject lateinit var syncManager: LocationSyncManager
     @Inject lateinit var locationDao: LocationDao
     @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var offlineMonitor: OfflineTrackingMonitor
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -428,13 +430,63 @@ class TrackingService : Service() {
     }
 
     private suspend fun uploadLocationToServer(location: LocalLocation) {
-        if (!ensureServerSession()) return
-
-        val token = sessionStore.token() ?: return
         var sessionId = location.sessionId
 
+        var firebaseUploaded = false
         try {
             locationDao.markAttempt(location.id, LocalLocation.SYNC_IN_FLIGHT, location.attemptCount + 1, System.currentTimeMillis(), null)
+
+            // PRIMARY LIVE TRANSPORT: Firebase is independent of Render.
+            // Keep the original server upload below as the authoritative Neon
+            // persistence path and compatibility layer.
+            firebaseUploaded = firebaseSync.pushLiveLocation(
+                employeeId = sessionStore.employeeId(),
+                sessionId = location.sessionId,
+                clientEventId = location.clientEventId,
+                sequence = location.sequence,
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracy = location.accuracy.toDouble(),
+                speed = location.speed.toDouble(),
+                batteryLevel = location.batteryLevel,
+                timestamp = location.timestamp
+            )
+
+            if (firebaseUploaded) {
+                locationDao.markAttempt(
+                    location.id,
+                    LocalLocation.FIREBASE_SYNCED,
+                    location.attemptCount + 1,
+                    System.currentTimeMillis(),
+                    null
+                )
+                offlineMonitor.record(
+                    OfflineTrackingMonitor.UPLOAD_SUCCESS,
+                    OfflineTrackingMonitor.INFO,
+                    "GPS fix ${location.sequence} published to Firebase realtime transport",
+                    sessionId = location.sessionId,
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    accuracy = location.accuracy,
+                    correlationId = location.clientEventId
+                )
+            }
+
+            // Neon/server persistence is best-effort from the tracking
+            // service. It is deliberately attempted only after Firebase has
+            // accepted the fix, so Render availability cannot stop tracking.
+            val token = sessionStore.token()
+            if (token.isNullOrBlank() || !ensureServerSession()) {
+                locationDao.markAttempt(
+                    location.id,
+                    if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
+                    location.attemptCount + 1,
+                    System.currentTimeMillis(),
+                    "SERVER_UNAVAILABLE"
+                )
+                return
+            }
+
             var response = mobileApi.updateGps(
                 "Bearer $token",
                 GpsUpdateRequest(
@@ -499,7 +551,13 @@ class TrackingService : Service() {
                 }
                 OfflineSyncWorker.schedule(this@TrackingService)
             } else {
-                locationDao.markAttempt(location.id, LocalLocation.SYNC_FAILED, location.attemptCount + 1, System.currentTimeMillis(), "HTTP_${response.code()}")
+                locationDao.markAttempt(
+                    location.id,
+                    if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
+                    location.attemptCount + 1,
+                    System.currentTimeMillis(),
+                    "HTTP_${response.code()}"
+                )
                 offlineMonitor.record(
                     OfflineTrackingMonitor.UPLOAD_FAILED,
                     OfflineTrackingMonitor.WARNING,
@@ -511,7 +569,15 @@ class TrackingService : Service() {
         } catch (ce: CancellationException) {
             throw ce
         } catch (ex: Exception) {
-            locationDao.markAttempt(location.id, LocalLocation.SYNC_FAILED, location.attemptCount + 1, System.currentTimeMillis(), ex.message?.take(500))
+            // If Firebase already accepted the point, retain FIREBASE_SYNCED
+            // rather than losing the durable local-to-cloud handoff state.
+            locationDao.markAttempt(
+                location.id,
+                if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
+                location.attemptCount + 1,
+                System.currentTimeMillis(),
+                ex.message?.take(500)
+            )
             offlineMonitor.record(
                 OfflineTrackingMonitor.UPLOAD_FAILED,
                 OfflineTrackingMonitor.WARNING,
