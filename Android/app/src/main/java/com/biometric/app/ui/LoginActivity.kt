@@ -478,7 +478,7 @@ class LoginActivity : MotionBaseActivity() {
                 )
                 Toast.makeText(
                     this@LoginActivity,
-                    "Firebase login succeeded, but the Employee session bridge could not be reached. Check the Android API URL/network. Firebase itself is working.",
+                    "Firebase login succeeded, but the Employee session service is unreachable. API: ${BuildConfig.BIOMETRIC_API_BASE_URL}",
                     Toast.LENGTH_LONG
                 ).show()
             }
@@ -605,7 +605,7 @@ class LoginActivity : MotionBaseActivity() {
                 setLoading(false)
                 Toast.makeText(
                     this@LoginActivity,
-                    "Employee account is not yet Firebase-provisioned. Web compatibility login is unavailable.",
+                    "Employee login service is unreachable. Check the Android API URL/network.",
                     Toast.LENGTH_LONG
                 ).show()
                 Log.e("LoginActivity", "Employee compatibility login failed", e)

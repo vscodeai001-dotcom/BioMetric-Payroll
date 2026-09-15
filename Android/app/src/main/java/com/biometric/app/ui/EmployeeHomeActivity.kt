@@ -69,6 +69,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.osmdroid.config.Configuration as OsmConfig
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -161,6 +162,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
         setupToolbar()
         setupClickListeners()
+        setupEmployeeMapControls()
 
         // UX: Immediate local settings restoration
         restoreOfficeSettings()
@@ -297,7 +299,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun setupMap() {
         binding.mapview.apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(employeeOpenStreetMapSource())
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(17.0)
@@ -445,6 +447,66 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             true
         } else {
             super.onOptionsItemSelected(item)
+        }
+    }
+
+    private fun employeeOpenStreetMapSource(): OnlineTileSourceBase =
+        object : OnlineTileSourceBase(
+            "OSM Standard",
+            0,
+            20,
+            256,
+            ".png",
+            arrayOf("https://tile.openstreetmap.org/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: org.osmdroid.util.MapTileIndex): String =
+                baseUrl + pMapTileIndex.zoom + "/" + pMapTileIndex.x + "/" + pMapTileIndex.y + mImageFilenameEnding
+        }
+
+    private fun setupEmployeeMapControls() {
+        binding.btnEmployeeMapRoute.setOnClickListener {
+            if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
+                val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
+                createBoundingBox(points)?.let { binding.mapview.zoomToBoundingBox(it, true, 120) }
+            }
+        }
+        binding.btnEmployeeMapOffice.setOnClickListener {
+            if (officeLat != 0.0 && officeLon != 0.0) {
+                binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
+                binding.mapview.controller.setZoom(16.0)
+            }
+        }
+        binding.btnEmployeeMapLayers.setOnClickListener {
+            val next = ((binding.mapview.tag as? Int ?: 0) + 1) % 3
+            binding.mapview.tag = next
+            when (next) {
+                0 -> {
+                    binding.mapview.setTileSource(employeeOpenStreetMapSource())
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+                1 -> {
+                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+                else -> {
+                    binding.mapview.setTileSource(employeeOpenStreetMapSource())
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(floatArrayOf(
+                        0.25f, 0f, 0f, 0f, 0f,
+                        0f, 0.25f, 0f, 0f, 0f,
+                        0f, 0f, 0.25f, 0f, 30f,
+                        0f, 0f, 0f, 1f, 0f
+                    )))
+                }
+            }
+            binding.mapview.invalidate()
+        }
+        binding.btnEmployeeMapFullscreen.setOnClickListener {
+            val intent = Intent(this, TrackingMapActivity::class.java)
+            intent.putExtra("EMPLOYEE_ID", sessionStore.employeeId())
+            startActivity(intent)
+        }
+        binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            binding.mapview.post { binding.mapview.invalidate() }
         }
     }
 
