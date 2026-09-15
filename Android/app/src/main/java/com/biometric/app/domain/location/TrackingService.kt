@@ -16,15 +16,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
-import com.biometric.app.sync.SignalRManager
 import com.biometric.app.sync.FirebaseSyncManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import com.biometric.app.R
-import com.biometric.app.api.GpsSessionRequest
-import com.biometric.app.api.GpsUpdateRequest
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.LocalLocation
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MobileSessionStore
@@ -33,17 +29,16 @@ import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import com.google.android.gms.location.*
 
 @AndroidEntryPoint
 class TrackingService : Service() {
     @Inject lateinit var qualityManager: LocationQualityManager
-    @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var syncManager: LocationSyncManager
     @Inject lateinit var locationDao: LocationDao
-    @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var offlineMonitor: OfflineTrackingMonitor
 
@@ -134,15 +129,14 @@ class TrackingService : Service() {
                 if (!locationUpdatesStarted) {
                     startLocationUpdates()
                 }
+                // Firebase is the independent realtime transport. Tracking
+                // does not require Payroll.Web, Render, or SignalR.
                 if (!signalRStarted) {
                     signalRStarted = true
-                    serviceScope.launch {
-                        ensureServerSession()
-                        signalR.start()
-                    }
+                    firebaseSync.startSync()
                 }
 
-                if (heartbeatJob?.isActive != true) {
+if (heartbeatJob?.isActive != true) {
                     startHeartbeatLoop()
                 }
 
@@ -392,54 +386,37 @@ class TrackingService : Service() {
         heartbeatJob = serviceScope.launch {
             while (isActive) {
                 try {
-                    val token = sessionStore.token()
-                    if (!token.isNullOrBlank()) {
-                        // The me() endpoint refreshes LastSeenAtUtc on the server,
-                        // keeping the Admin Dashboard status "Live" even if stationary.
-                        val response = mobileApi.me("Bearer $token")
-                        if (response.isSuccessful) {
-                            // Authentication can remain valid while the server-side
-                            // GPS session is recreated after a process restart.
-                            // Restore only the GPS session here; never log out.
-                            if (!serverSessionStarted) {
-                                ensureServerSession()
-                            }
-                            Log.d("TrackingService", "Heartbeat success 💓")
-                        } else if (response.code() == 401 || response.code() == 403) {
-                            val state = response.headers()["X-Mobile-Session-State"] ?: ""
-                            if (state.equals("SESSION_REVOKED", true) ||
-                                state.equals("REAUTH_REQUIRED", true)) {
-                                // Do not clear the persisted login here. The
-                                // foreground service must remain alive long
-                                // enough for the UI/session owner to process an
-                                // authoritative revocation. Network failures
-                                // never enter this branch.
-                                Log.w("TrackingService", "Heartbeat: server explicitly rejected this mobile session (${state}); preserving local session until authoritative UI handling.")
-                            } else {
-                                Log.w("TrackingService", "Heartbeat HTTP ${response.code()} without explicit revocation. Tracking/session state retained.")
-                            }
-                        }
+                    val connected = withTimeoutOrNull(5_000L) {
+                        firebaseSync.syncStatus.firstOrNull()
+                    } ?: false
+
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
+                        putString(KEY_LAST_STATUS, if (connected) "Active" else "Offline")
+                    }
+
+                    if (connected) {
+                        firebaseSync.startSync()
                     }
                 } catch (e: Exception) {
-                    Log.d("TrackingService", "Heartbeat deferred: ${e.message}")
+                    Log.d("TrackingService", "Firebase heartbeat deferred: ${e.message}")
                 }
-                // Periodic ping every 5 minutes
                 delay(300_000L)
             }
         }
     }
 
     private suspend fun uploadLocationToServer(location: LocalLocation) {
-        var sessionId = location.sessionId
-
-        var firebaseUploaded = false
         try {
-            locationDao.markAttempt(location.id, LocalLocation.SYNC_IN_FLIGHT, location.attemptCount + 1, System.currentTimeMillis(), null)
+            locationDao.markAttempt(
+                location.id,
+                LocalLocation.SYNC_IN_FLIGHT,
+                location.attemptCount + 1,
+                System.currentTimeMillis(),
+                null
+            )
 
-            // PRIMARY LIVE TRANSPORT: Firebase is independent of Render.
-            // Keep the original server upload below as the authoritative Neon
-            // persistence path and compatibility layer.
-            firebaseUploaded = firebaseSync.pushLiveLocation(
+            val uploaded = firebaseSync.pushLiveLocation(
                 employeeId = sessionStore.employeeId(),
                 sessionId = location.sessionId,
                 clientEventId = location.clientEventId,
@@ -452,166 +429,70 @@ class TrackingService : Service() {
                 timestamp = location.timestamp
             )
 
-            if (firebaseUploaded) {
-                locationDao.markAttempt(
-                    location.id,
-                    LocalLocation.FIREBASE_SYNCED,
-                    location.attemptCount + 1,
-                    System.currentTimeMillis(),
-                    null
-                )
+            if (uploaded) {
+                locationDao.markSynced(location.id, System.currentTimeMillis())
+
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                    putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
+                    putString(KEY_LAST_STATUS, "Active")
+                }
+
                 offlineMonitor.record(
                     OfflineTrackingMonitor.UPLOAD_SUCCESS,
                     OfflineTrackingMonitor.INFO,
-                    "GPS fix ${location.sequence} published to Firebase realtime transport",
+                    "GPS fix ${location.sequence} published to Firebase",
                     sessionId = location.sessionId,
                     latitude = location.latitude,
                     longitude = location.longitude,
                     accuracy = location.accuracy,
                     correlationId = location.clientEventId
                 )
-            }
-
-            // Neon/server persistence is best-effort from the tracking
-            // service. It is deliberately attempted only after Firebase has
-            // accepted the fix, so Render availability cannot stop tracking.
-            val token = sessionStore.token()
-            if (token.isNullOrBlank() || !ensureServerSession()) {
-                locationDao.markAttempt(
-                    location.id,
-                    if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
-                    location.attemptCount + 1,
-                    System.currentTimeMillis(),
-                    "SERVER_UNAVAILABLE"
-                )
-                return
-            }
-
-            var response = mobileApi.updateGps(
-                "Bearer $token",
-                GpsUpdateRequest(
-                    sessionId = sessionId,
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    accuracy = location.accuracy.toDouble(),
-                    speed = location.speed.toDouble(),
-                    timestamp = location.timestamp,
-                    batteryLevel = location.batteryLevel,
-                    clientEventId = location.clientEventId,
-                    sequence = location.sequence
-                )
-            )
-
-            // The server remains authoritative. If this client session was ended
-            // elsewhere, create one fresh session and retry this fix once.
-            if (response.code() == 409) {
-                Log.w(
-                    "TrackingService",
-                    "GPS Session 409: authoritative session ended. Creating a fresh session."
-                )
-
-                serverSessionStarted = false
-                sessionStore.clearGpsSession()
-                sessionId = sessionStore.gpsSessionId()
-                locationDao.rebindSession(location.id, sessionId)
-
-                if (!ensureServerSession()) return
-
-                response = mobileApi.updateGps(
-                    "Bearer $token",
-                    GpsUpdateRequest(
-                        sessionId = sessionId,
-                        latitude = location.latitude,
-                        longitude = location.longitude,
-                        accuracy = location.accuracy.toDouble(),
-                        speed = location.speed.toDouble(),
-                        timestamp = location.timestamp,
-                        batteryLevel = location.batteryLevel,
-                        clientEventId = location.clientEventId,
-                        sequence = location.sequence
-                    )
-                )
-            }
-
-            if (response.isSuccessful) {
-                locationDao.markSynced(location.id, System.currentTimeMillis())
-                offlineMonitor.record(
-                    OfflineTrackingMonitor.UPLOAD_SUCCESS,
-                    OfflineTrackingMonitor.INFO,
-                    "GPS fix ${location.sequence} acknowledged by server",
-                    sessionId = sessionId,
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    accuracy = location.accuracy,
-                    correlationId = location.clientEventId
-                )
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                    putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
-                    putString(KEY_LAST_STATUS, "Active")
-                }
-                OfflineSyncWorker.schedule(this@TrackingService)
             } else {
                 locationDao.markAttempt(
                     location.id,
-                    if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
+                    LocalLocation.SYNC_FAILED,
                     location.attemptCount + 1,
                     System.currentTimeMillis(),
-                    "HTTP_${response.code()}"
+                    "FIREBASE_UNAVAILABLE"
                 )
+
                 offlineMonitor.record(
                     OfflineTrackingMonitor.UPLOAD_FAILED,
                     OfflineTrackingMonitor.WARNING,
-                    "GPS upload deferred with HTTP ${response.code()}; local evidence retained",
-                    sessionId = sessionId,
+                    "Firebase unavailable; GPS evidence retained locally",
+                    sessionId = location.sessionId,
                     correlationId = location.clientEventId
                 )
             }
-        } catch (ce: CancellationException) {
-            throw ce
-        } catch (ex: Exception) {
-            // If Firebase already accepted the point, retain FIREBASE_SYNCED
-            // rather than losing the durable local-to-cloud handoff state.
+        } catch (e: Exception) {
             locationDao.markAttempt(
                 location.id,
-                if (firebaseUploaded) LocalLocation.FIREBASE_SYNCED else LocalLocation.SYNC_FAILED,
+                LocalLocation.SYNC_FAILED,
                 location.attemptCount + 1,
                 System.currentTimeMillis(),
-                ex.message?.take(500)
+                e.message?.take(500)
             )
+
             offlineMonitor.record(
                 OfflineTrackingMonitor.UPLOAD_FAILED,
                 OfflineTrackingMonitor.WARNING,
-                "GPS upload deferred: ${ex.message ?: "network unavailable"}",
+                "Firebase GPS upload deferred: ${e.message ?: "network unavailable"}",
                 sessionId = location.sessionId,
                 correlationId = location.clientEventId
             )
-            Log.d("TrackingService", "GPS upload deferred: ${ex.message}")
         }
-    }
-
-    private suspend fun ensureServerSession(): Boolean {
-        if (serverSessionStarted) return true
-        val token = sessionStore.token() ?: return false
-        return try {
-            val response = mobileApi.startGps("Bearer $token", GpsSessionRequest(sessionStore.gpsSessionId()))
-            if (response.isSuccessful && response.body()?.success == true) {
-                serverSessionStarted = true
-                true
-            } else false
-        } catch (_: Exception) { false }
     }
 
     private fun stopTracking() {
         isManualStopping = true
-        serviceScope.launch {
-            val token = sessionStore.token()
-            if (!token.isNullOrBlank()) {
-                runCatching { mobileApi.endGps("Bearer $token", GpsSessionRequest(sessionStore.gpsSessionId())) }
-            }
-            sessionStore.clearGpsSession()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+        sessionStore.clearGpsSession()
+
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+            putBoolean("is_service_active_intended", false)
         }
+
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

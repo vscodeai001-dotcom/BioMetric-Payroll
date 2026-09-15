@@ -21,6 +21,10 @@
             "package_name": "com.biometric.app",
             "certificate_hash": "9d6b28f02da3b308b82d0ea7a78460ca921b3e48"
           }
+        },
+        {
+          "client_id": "63802944560-kvvtfc6h2g5llmcb7foauueun3h6g21j.apps.googleusercontent.com",
+          "client_type": 3
         }
       ],
       "api_key": [
@@ -30,7 +34,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "63802944560-kvvtfc6h2g5llmcb7foauueun3h6g21j.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

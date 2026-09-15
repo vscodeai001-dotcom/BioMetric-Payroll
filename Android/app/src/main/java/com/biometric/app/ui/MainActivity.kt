@@ -82,7 +82,6 @@ import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.core.graphics.toColorInt
 import com.biometric.app.api.AdminFeatureSettingsDto
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.AdvancePayment
@@ -108,7 +107,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var brandingManager: BrandingManager
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
-    @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var sessionStore: MobileSessionStore
 
     private lateinit var adapter: ShopAdapter
@@ -279,53 +277,18 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let { b ->
                 b.llAdminMapLoading.visibility = View.GONE
                 observeLiveLocations()
-                startLiveSnapshotHydration()
             }
         }
     }
 
-    private fun startLiveSnapshotHydration() {
-        liveSnapshotJob?.cancel()
-        liveSnapshotJob = lifecycleScope.launch {
-            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-                hydrateLiveLocationsOnce()
-                delay(3000L)
-            }
-        }
-    }
-
-    private suspend fun hydrateLiveLocationsOnce() {
-        val token = sessionStore.token() ?: return
-        try {
-            val response = mobileApi.getAdminLiveLocations("Bearer $token")
-            if (!response.isSuccessful) return
-
-            val snapshot = response.body().orEmpty()
-            val current = signalR.liveLocations.value.toMutableMap()
-            snapshot.forEach { x ->
-                if (x.employeeId <= 0 || !x.latitude.isFinite() || !x.longitude.isFinite()) return@forEach
-                if (x.latitude !in -90.0..90.0 || x.longitude !in -180.0..180.0) return@forEach
-                current[x.employeeId] = SignalRManager.LiveLocation(
-                    employeeId = x.employeeId,
-                    latitude = x.latitude,
-                    longitude = x.longitude,
-                    accuracyMeters = x.accuracyMeters,
-                    distanceMeters = x.distanceMeters,
-                    allowedRadiusMeters = x.allowedRadiusMeters,
-                    isWithinAllowedRadius = x.isWithinAllowedRadius,
-                    timestamp = x.lastUpdatedUtc,
-                    speedMps = x.speedMps,
-                    movementState = x.movementState
-                )
-            }
-
-            withContext(Dispatchers.Main) {
-                if (!isFinishing && !isDestroyed) {
-                    updateAdminMarkers(current.values.toList())
-                }
-            }
-        } catch (e: Exception) {
-            Log.d("MainActivity", "Live location snapshot unavailable: ${e.message}")
+    /**
+     * Live map data comes directly from Firebase through the existing
+     * SignalRManager compatibility facade. No polling of Payroll.Web is used.
+     */
+    private fun hydrateLiveLocationsOnce() {
+        val current = signalR.liveLocations.value.values.toList()
+        if (!isFinishing && !isDestroyed) {
+            updateAdminMarkers(current)
         }
     }
 

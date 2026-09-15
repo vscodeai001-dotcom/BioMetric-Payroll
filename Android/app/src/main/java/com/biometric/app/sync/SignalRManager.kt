@@ -2,13 +2,8 @@ package com.biometric.app.sync
 
 import android.util.Log
 import com.biometric.app.data.MobileSessionStore
-import com.biometric.app.BuildConfig
-import com.google.gson.Gson
+import com.google.firebase.database.*
 import com.google.gson.annotations.SerializedName
-import com.microsoft.signalr.HubConnection
-import com.microsoft.signalr.HubConnectionBuilder
-import com.microsoft.signalr.HubConnectionState
-import io.reactivex.rxjava3.core.Single
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,219 +12,108 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Compatibility facade retained for existing screens.
+ *
+ * The implementation is Firebase-only. No SignalR hub or Payroll.Web endpoint
+ * is opened, so realtime UI and live-location consumers remain functional
+ * when the Web application/Render is unavailable.
+ */
 @Singleton
 class SignalRManager @Inject constructor(
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val firebaseSync: FirebaseSyncManager
 ) {
-    private var hubConnection: HubConnection? = null
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    @Volatile private var connectInProgress = false
+    private var applicationJob: Job? = null
+    private var connectionJob: Job? = null
+    private var locationListener: ValueEventListener? = null
 
-    private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 10)
+    private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 64)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
 
     private val _liveLocations = MutableStateFlow<Map<Int, LiveLocation>>(emptyMap())
     val liveLocations = _liveLocations.asStateFlow()
 
-    private val hubUrl: String
-        get() = BuildConfig.BIOMETRIC_API_BASE_URL
-            .trimEnd('/') + "/hubs/attendance-refresh"
-
     @Synchronized
     fun start() {
-        if (!sessionStore.isLoggedIn()) return
+        if (!sessionStore.isLoggedIn() && !firebaseSync.isAuthenticated()) return
+        if (applicationJob?.isActive == true) return
 
-        if (hubConnection != null) {
-            if (hubConnection?.connectionState == HubConnectionState.DISCONNECTED) {
-                connect()
+        firebaseSync.startSync()
+
+        applicationJob = managerScope.launch {
+            firebaseSync.applicationEventsFlow().collect { event ->
+                if (event.changes.isNotEmpty()) {
+                    _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
+                }
             }
-            return
         }
 
-        managerScope.launch {
-            try {
-                hubConnection = HubConnectionBuilder.create(hubUrl)
-                    .withAccessTokenProvider(Single.fromCallable { sessionStore.token() ?: "" })
-                    .build()
+        val liveRef = firebaseSync.getGlobalRef()
+            .child("tracking")
+            .child("live")
 
-                setupListeners()
-                connect()
-            } catch (e: Exception) {
-                Log.e("SignalR", "Failed to build HubConnection", e)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val locations = mutableMapOf<Int, LiveLocation>()
+
+                for (child in snapshot.children) {
+                    val employeeId = child.key?.toIntOrNull() ?: continue
+                    val value = child.getValue(FirebaseLiveLocation::class.java) ?: continue
+
+                    locations[employeeId] = LiveLocation(
+                        employeeId = employeeId,
+                        latitude = value.Latitude,
+                        longitude = value.Longitude,
+                        accuracyMeters = value.AccuracyMeters,
+                        distanceMeters = value.DistanceMeters,
+                        allowedRadiusMeters = value.AllowedRadiusMeters,
+                        isWithinAllowedRadius = value.IsWithinAllowedRadius,
+                        timestamp = value.Timestamp,
+                        speedMps = value.SpeedMps,
+                        movementState = value.MovementState
+                    )
+                }
+
+                _liveLocations.value = locations
+                _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w(
+                    "SignalRManager",
+                    "Firebase live-location listener cancelled",
+                    error.toException()
+                )
             }
         }
-    }
 
-    private fun setupListeners() {
-        val hub = hubConnection ?: return
+        locationListener = listener
+        liveRef.addValueEventListener(listener)
 
-        hub.on("GeoSettingsChanged", { data ->
-            managerScope.launch {
-                Log.d("SignalR", "GeoSettingsChanged received: $data")
-                try {
-                    val json = Gson().toJson(data)
-                    val update = Gson().fromJson(json, GeoSettingsChangedEvent::class.java)
-                    if (update != null && update.geoRadiusMeters > 0) {
-                        _dataChangeEvents.emit(SyncEvent.GeoSettingsChanged(update))
-                    }
-                } catch (e: Exception) {
-                    Log.e("SignalR", "Failed to parse GeoSettingsChanged", e)
+        connectionJob = managerScope.launch {
+            firebaseSync.syncStatus.collect { connected ->
+                if (connected) {
+                    _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
                 }
-            }
-        }, Any::class.java)
-
-        hub.on("LocationChanged", { data ->
-            managerScope.launch {
-                Log.d("SignalR", "LocationChanged received: $data")
-                try {
-                    val json = Gson().toJson(data)
-                    val update = Gson().fromJson(json, LiveLocation::class.java)
-                    if (update != null && update.employeeId > 0) {
-                        val current = _liveLocations.value.toMutableMap()
-                        current[update.employeeId] = update
-                        _liveLocations.value = current
-                        _dataChangeEvents.emit(SyncEvent.LocationChanged)
-                    }
-                } catch (e: Exception) {
-                    Log.e("SignalR", "Failed to parse LocationChanged", e)
-                }
-            }
-        }, Any::class.java)
-
-        hub.on("DataChanged", { _ ->
-            Log.d("SignalR", "DataChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.DataChanged) }
-        }, Any::class.java)
-
-        hub.on("AttendanceChanged", { _ ->
-            Log.d("SignalR", "AttendanceChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.AttendanceChanged) }
-        }, Any::class.java)
-
-        hub.on("PunchChanged", { _ ->
-            Log.d("SignalR", "PunchChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.PunchChanged) }
-        }, Any::class.java)
-
-        hub.on("LeaveChanged", { _ ->
-            Log.d("SignalR", "LeaveChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.LeaveChanged) }
-        }, Any::class.java)
-
-        hub.on("AdvanceChanged", { _ ->
-            Log.d("SignalR", "AdvanceChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.AdvanceChanged) }
-        }, Any::class.java)
-
-        hub.on("BonusChanged", { _ ->
-            Log.d("SignalR", "BonusChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.BonusChanged) }
-        }, Any::class.java)
-
-        hub.on("TaxDeclarationChanged", { _ ->
-            Log.d("SignalR", "TaxDeclarationChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.TaxDeclarationChanged) }
-        }, Any::class.java)
-
-        hub.on("EmployeeChanged", { _ ->
-            Log.d("SignalR", "EmployeeChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.EmployeeChanged) }
-        }, Any::class.java)
-
-        hub.on("SessionEnded", { data ->
-            Log.d("SignalR", "SessionEnded received: $data")
-            try {
-                val json = Gson().toJson(data)
-                val event = Gson().fromJson(json, SessionEndedEvent::class.java)
-
-                managerScope.launch {
-                    _dataChangeEvents.emit(SyncEvent.SessionEnded(event?.employeeId ?: 0, event?.sessionId ?: "", event?.endReason))
-                }
-            } catch (e: Exception) {
-                Log.e("SignalR", "Failed to parse SessionEnded", e)
-                managerScope.launch { _dataChangeEvents.emit(SyncEvent.SessionEnded(0, "")) }
-            }
-        }, Any::class.java)
-
-        hub.on("GlobalRefresh", { _ ->
-            Log.d("SignalR", "GlobalRefresh received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.GlobalRefresh) }
-        }, Any::class.java)
-
-        hub.on("ApplicationDataChanged", { data ->
-            Log.d("SignalR", "ApplicationDataChanged received: $data")
-            // ApplicationDataChanged is the central post-save invalidation signal.
-            // Route it through the existing GlobalRefresh path so currently visible
-            // Android screens refresh immediately without introducing a second
-            // refresh architecture or changing business logic.
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.GlobalRefresh) }
-        }, Any::class.java)
-
-        hub.on("RegularizationChanged", { _ ->
-            Log.d("SignalR", "RegularizationChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.RegularizationChanged) }
-        }, Any::class.java)
-
-        hub.on("ExitChanged", { _ ->
-            Log.d("SignalR", "ExitChanged received")
-            managerScope.launch { _dataChangeEvents.emit(SyncEvent.ExitChanged) }
-        }, Any::class.java)
-
-        hub.on("SessionStarted", { data ->
-            Log.d("SignalR", "SessionStarted received: $data")
-            managerScope.launch {
-                try {
-                    val json = Gson().toJson(data)
-                    val event = Gson().fromJson(json, SessionStartedEvent::class.java)
-                    if (event != null) {
-                        _dataChangeEvents.emit(SyncEvent.SessionStarted(event.employeeId, event.sessionId))
-                    }
-                } catch (e: Exception) {
-                    Log.e("SignalR", "Failed to parse SessionStarted", e)
-                }
-            }
-        }, Any::class.java)
-
-        hub.onClosed { exception ->
-            Log.w("SignalR", "Connection closed. Retrying in 5s...", exception)
-            managerScope.launch {
-                delay(5000)
-                if (sessionStore.isLoggedIn()) connect()
-            }
-        }
-    }
-
-    private fun connect() {
-        if (connectInProgress) return
-        connectInProgress = true
-        managerScope.launch {
-            try {
-                val hub = hubConnection ?: return@launch
-                if (hub.connectionState == HubConnectionState.CONNECTED ||
-                    hub.connectionState == HubConnectionState.CONNECTING) {
-                    return@launch
-                }
-                hub.start()?.blockingAwait()
-                Log.i("SignalR", "Successfully connected to Real-Time Hub ✅")
-                // SignalR Java client 8.0.0 does not expose onReconnected.
-                // Every successful connect (initial or retry after onClosed) is
-                // therefore treated as a consistency boundary.
-                _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
-            } catch (e: Exception) {
-                Log.e("SignalR", "Failed to connect to Hub: ${e.message}")
-                managerScope.launch {
-                    delay(10000)
-                    if (sessionStore.isLoggedIn()) connect()
-                }
-            } finally {
-                connectInProgress = false
             }
         }
     }
 
     fun stop() {
-        hubConnection?.stop()
-        hubConnection = null
+        val liveRef = firebaseSync.getGlobalRef()
+            .child("tracking")
+            .child("live")
+
+        locationListener?.let { liveRef.removeEventListener(it) }
+        locationListener = null
+
+        applicationJob?.cancel()
+        applicationJob = null
+
+        connectionJob?.cancel()
+        connectionJob = null
     }
 
     data class SessionEndedEvent(
@@ -279,5 +163,23 @@ class SignalRManager @Inject constructor(
         @SerializedName("timestamp") val timestamp: String? = null,
         @SerializedName("speedMps") val speedMps: Double = 0.0,
         @SerializedName("movementState") val movementState: String = "Stopped"
+    )
+
+    private data class FirebaseLiveLocation(
+        val EmployeeId: Int = 0,
+        val SessionId: String = "",
+        val Latitude: Double = 0.0,
+        val Longitude: Double = 0.0,
+        val AccuracyMeters: Double = 0.0,
+        val SpeedMps: Double = 0.0,
+        val BatteryLevel: Int = 0,
+        val Sequence: Long = 0L,
+        val Timestamp: String? = null,
+        val LastUpdatedUtc: String? = null,
+        val Source: String? = null,
+        val DistanceMeters: Double = 0.0,
+        val AllowedRadiusMeters: Int = 100,
+        val IsWithinAllowedRadius: Boolean = true,
+        val MovementState: String = "Stopped"
     )
 }

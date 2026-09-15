@@ -215,26 +215,6 @@ dependencies {
     )
 
     implementation(libs.play.services.location)
-
-    // ------------------------------------------------------------
-    // SignalR
-    //
-    // Kept as the existing compatibility/realtime path.
-    // Render is NOT hard-coded.
-    // ------------------------------------------------------------
-
-    implementation(
-        "com.microsoft.signalr:signalr:8.0.0"
-    )
-
-    implementation(
-        "io.reactivex.rxjava3:rxjava:3.1.8"
-    )
-
-    implementation(
-        "org.slf4j:slf4j-android:1.7.36"
-    )
-
     // ------------------------------------------------------------
     // Paging
     // ------------------------------------------------------------

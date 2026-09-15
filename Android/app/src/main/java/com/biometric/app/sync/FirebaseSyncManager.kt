@@ -16,9 +16,7 @@ import com.biometric.app.data.entity.ShopClosedDay
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.RealtimeChangedItem
-import com.biometric.app.api.RealtimeChangedRequest
 import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
@@ -33,7 +31,6 @@ import javax.inject.Singleton
 
 @Singleton
 class FirebaseSyncManager @Inject constructor(
-    private val mobileApi: MobileApiService,
     private val sessionStore: MobileSessionStore
 ) {
 
@@ -235,7 +232,6 @@ class FirebaseSyncManager @Inject constructor(
 
     fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED", recordId: String? = null) {
         val ownerUid = getOwnerUid()
-        val token = sessionStore.token()
         syncScope.launch {
             // Firebase owner event is the Render-independent invalidation path.
             if (!ownerUid.isNullOrBlank()) {
@@ -245,17 +241,6 @@ class FirebaseSyncManager @Inject constructor(
                     Log.w("FirebaseSyncManager", "Firebase realtime event failed for $entity", it)
                 }
             }
-
-            // Preserve the existing SignalR compatibility notification.
-            if (!token.isNullOrBlank()) {
-                runCatching {
-                    mobileApi.notifyRealtimeChanged(
-                        "Bearer $token",
-                        RealtimeChangedRequest(listOf(RealtimeChangedItem(entity, action)))
-                    )
-                }.onFailure {
-                    Log.w("FirebaseSyncManager", "Legacy realtime notification failed for $entity", it)
-                }
             }
         }
     }
