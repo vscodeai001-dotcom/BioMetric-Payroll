@@ -18,10 +18,12 @@ if (secretsFile.exists()) {
 
 // Android talks to Payroll.Web only through the configured
 // local/domain endpoint. Render is not hard-coded.
+// Android Emulator -> host PC is 10.0.2.2; physical devices can override
+// this in local.properties with BIOMETRIC_API_BASE_URL.
 val biometricApiBaseUrl: String =
     providers.gradleProperty("BIOMETRIC_API_BASE_URL").orNull
         ?: localSecrets.getProperty("BIOMETRIC_API_BASE_URL")
-        ?: "http://192.168.31.38:5000/"
+        ?: "http://10.0.2.2:5050/"
 
 android {
     namespace = "com.biometric.app"

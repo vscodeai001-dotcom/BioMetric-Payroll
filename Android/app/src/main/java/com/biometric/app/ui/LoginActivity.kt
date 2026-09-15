@@ -274,7 +274,7 @@ class LoginActivity : MotionBaseActivity() {
                 }
             } catch (e: Exception) {
                 setLoading(false)
-                Toast.makeText(this@LoginActivity, "Unable to reach BioMetric server: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this@LoginActivity, "Unable to reach BioMetric server. Check the Android API URL/network. ${e.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
