@@ -9,6 +9,10 @@ import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.*
+import com.biometric.app.sync.FirebaseSyncManager
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import com.biometric.app.util.DateRangeUtil
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
@@ -59,7 +63,8 @@ class MainViewModel @Inject constructor(
     private val repository: MainRepository,
     private val sharedViewModel: SharedViewModel,
     private val mobileApi: MobileApiService,
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val firebaseSync: FirebaseSyncManager
 ) : ViewModel() {
 
     private var workforceRecalcJob: Job? = null
@@ -123,6 +128,42 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadCompanySettings() {
+        // Admin/SuperAdmin Android dashboards read the geofence configuration
+        // directly from Firebase first. This removes the map's dependency on
+        // Payroll.Web/Mobile API availability while retaining the existing API
+        // as a compatibility fallback for older installations.
+        val ownerRef = firebaseSync.getOwnerRef()
+        if (ownerRef != null) {
+            val settingsRef = ownerRef.child("company_settings").child("1")
+            settingsRef.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val officeLat = snapshot.numberValue("officeLatitude", "OfficeLatitude")
+                    val officeLon = snapshot.numberValue("officeLongitude", "OfficeLongitude")
+                    val radius = snapshot.intValue("geoRadiusMeters", "GeoRadiusMeters")
+                    val companyName = snapshot.stringValue("companyName", "CompanyName")
+                    if (officeLat != null && officeLon != null && (officeLat != 0.0 || officeLon != 0.0)) {
+                        _companySettings.value = CompanySettingsResponse(
+                            companyName = companyName.orEmpty(),
+                            officeLatitude = officeLat,
+                            officeLongitude = officeLon,
+                            geoRadiusMeters = radius ?: 1000
+                        )
+                    } else {
+                        loadCompanySettingsFromApi()
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w("MainViewModel", "Firebase company settings read cancelled: ${error.message}")
+                    loadCompanySettingsFromApi()
+                }
+            })
+        } else {
+            loadCompanySettingsFromApi()
+        }
+    }
+
+    private fun loadCompanySettingsFromApi() {
         val token = sessionStore.token() ?: return
         viewModelScope.launch {
             try {
@@ -135,6 +176,27 @@ class MainViewModel @Inject constructor(
             }
         }
     }
+
+    private fun DataSnapshot.stringValue(vararg names: String): String? =
+        names.asSequence().mapNotNull { child(it).getValue(String::class.java) }.firstOrNull()
+
+    private fun DataSnapshot.numberValue(vararg names: String): Double? =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toDouble()
+                else -> value?.toString()?.toDoubleOrNull()
+            }
+        }.firstOrNull()
+
+    private fun DataSnapshot.intValue(vararg names: String): Int? =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toInt()
+                else -> value?.toString()?.toIntOrNull()
+            }
+        }.firstOrNull()
 
     private fun loadFeatureSettings() {
         val token = sessionStore.token() ?: return

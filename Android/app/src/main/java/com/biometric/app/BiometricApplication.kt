@@ -76,14 +76,16 @@ class BiometricApplication : Application(), Configuration.Provider {
             FirebaseDatabase.getInstance().setPersistenceCacheSizeBytes(100 * 1024 * 1024)
         }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
 
+        // OSMDroid must be initialized BEFORE any Activity creates a MapView.
+        // The previous asynchronous initialization could race MainActivity and
+        // leave the map surface grey until a later redraw/restart.
         runCatching {
-            CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                org.osmdroid.config.Configuration.getInstance()
-                    .load(this@BiometricApplication, getSharedPreferences("osmdroid", MODE_PRIVATE))
-                org.osmdroid.config.Configuration.getInstance().userAgentValue =
-                    "BioMetricPayroll_Android_" + packageName
-            }
-        }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization async start failed", it) }
+            val osm = org.osmdroid.config.Configuration.getInstance()
+            osm.load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
+            osm.userAgentValue = "BioMetricPayroll_Android_" + packageName
+            osm.tileDownloadThreads = 4
+            osm.tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
+        }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization failed", it) }
 
         runCatching {
             ThemeManager.applyTheme(this, sessionStore.userThemeKey())

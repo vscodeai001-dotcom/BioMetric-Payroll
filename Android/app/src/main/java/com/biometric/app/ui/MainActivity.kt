@@ -127,6 +127,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var statusFilter = "All"
     private var adminMapAutoCentered = false
     private var adminInfoWindow: InfoWindow? = null
+    private var adminMapLayerIndex = 0
+    private var adminZoneVisible = true
     private val approvalFilter = MutableStateFlow("All")
     private val workforceSearchQuery = MutableStateFlow("")
 
@@ -262,6 +264,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupAdminMap() {
+        // OSMDroid is initialized synchronously in BiometricApplication before
+        // this MapView is inflated. Re-assert the user agent here as a safety
+        // net for cached/older application processes.
+        runCatching {
+            OsmConfig.getInstance().userAgentValue = "BioMetricPayroll_Android_" + packageName
+            OsmConfig.getInstance().tileDownloadThreads = 4
+        }
+
         val maps = listOf(binding.adminMapView, binding.commandCenterMapView)
         maps.forEach { map ->
             map.apply {
@@ -270,8 +280,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 controller.setZoom(16.0)
                 applyCurrentThemeToMap(this)
+                post { invalidate() }
             }
         }
+        setupAdminDashboardMapControls()
         lifecycleScope.launch {
             delay(800)
             _binding?.let { b ->
@@ -289,6 +301,61 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val current = signalR.liveLocations.value.values.toList()
         if (!isFinishing && !isDestroyed) {
             updateAdminMarkers(current)
+        }
+    }
+
+    private fun setupAdminDashboardMapControls() {
+        binding.btnRefreshMap.setOnClickListener {
+            val points = signalR.liveLocations.value.values
+                .map { GeoPoint(it.latitude, it.longitude) }
+            val map = binding.adminMapView
+            if (points.isEmpty()) {
+                viewModel.companySettings.value?.let { settings ->
+                    if (settings.officeLatitude != 0.0) {
+                        map.controller.setCenter(GeoPoint(settings.officeLatitude, settings.officeLongitude))
+                        map.controller.setZoom(16.0)
+                    }
+                }
+            } else {
+                createBoundingBox(points)?.let { map.zoomToBoundingBox(it, true, 120) }
+            }
+        }
+
+        binding.btnAdminMapLayer.setOnClickListener {
+            adminMapLayerIndex = (adminMapLayerIndex + 1) % 3
+            val filter = when (adminMapLayerIndex) {
+                0 -> {
+                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
+                    null
+                }
+                1 -> {
+                    binding.adminMapView.setTileSource(TileSourceFactory.USGS_SAT)
+                    null
+                }
+                else -> {
+                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
+                    ColorMatrixColorFilter(floatArrayOf(
+                        0.25f, 0f, 0f, 0f, 0f,
+                        0f, 0.25f, 0f, 0f, 0f,
+                        0f, 0f, 0.25f, 0f, 30f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                }
+            }
+            binding.adminMapView.overlayManager.tilesOverlay.setColorFilter(filter)
+            binding.adminMapView.invalidate()
+        }
+
+        binding.btnAdminMapZone.setOnClickListener {
+            adminZoneVisible = !adminZoneVisible
+            val alpha = if (adminZoneVisible) 0x40 else 0
+            geofenceCircle?.fillPaint?.alpha = alpha
+            geofenceCircle?.outlinePaint?.alpha = if (adminZoneVisible) 0xA0 else 0
+            binding.adminMapView.invalidate()
+        }
+
+        binding.btnAdminMapFullscreen.setOnClickListener {
+            startActivity(Intent(this, TrackingMapActivity::class.java))
         }
     }
 
@@ -511,11 +578,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             }
 
             b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, locations.count { getLocStatus(it) == "Live" })
-            b.btnRefreshMap.setOnClickListener {
-                createBoundingBox(geoPoints)?.let { box ->
-                    dashboardMap.zoomToBoundingBox(box, true, 120)
-                }
-            }
             dashboardMap.invalidate(); commandMap.invalidate()
         }
     }
