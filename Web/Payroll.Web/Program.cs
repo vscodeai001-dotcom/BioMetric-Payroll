@@ -885,52 +885,76 @@ app.MapHub<AttendanceRefreshHub>(
 // ============================================================
 // DATABASE MIGRATION
 // ============================================================
+//
+// Firebase is the realtime SSOT migration path. Automatic EF/Neon
+// migrations are disabled by default so application startup never
+// consumes Neon transfer just to check/apply the schema.
+//
+// IMPORTANT:
+// Existing EF/Identity business services are intentionally retained
+// until their individual modules are migrated to Firebase. This keeps
+// the current Web application flow, layout, business rules and
+// calculations intact.
+//
+// To temporarily run the legacy EF migration on a controlled/local
+// database, set:
+//     Database:AutoMigrate=true
+//
+// Production/Firebase-first deployments should leave this false.
+//
 
-try
+var autoMigrate =
+    builder.Configuration.GetValue<bool>(
+        "Database:AutoMigrate");
+
+if (autoMigrate)
 {
-    using var scope =
-        app.Services.CreateScope();
+    try
+    {
+        using var scope =
+            app.Services.CreateScope();
 
+        var db =
+            scope.ServiceProvider
+                .GetRequiredService<
+                    AppDbContext>();
 
-    var db =
-        scope.ServiceProvider
-            .GetRequiredService<
-                AppDbContext>();
+        await db.Database.MigrateAsync();
 
+        // Defensive schema repair for deployments where a feature-toggle
+        // migration was recorded but the physical column is missing.
+        await db.Database.ExecuteSqlRawAsync(@"
+            ALTER TABLE public.feature_settings
+            ADD COLUMN IF NOT EXISTS enable_dual_attendance boolean NOT NULL DEFAULT false;
 
-    await db.Database.MigrateAsync();
+            ALTER TABLE public.feature_settings
+            ADD COLUMN IF NOT EXISTS enable_automatic_geofence_punching boolean NOT NULL DEFAULT false;
+        ");
 
-    // Defensive schema repair for deployments where a feature-toggle migration
-    // was recorded in __EFMigrationsHistory but the physical column was later
-    // removed manually. This is idempotent and prevents settings pages from
-    // failing with PostgreSQL 42703 (undefined_column).
-    await db.Database.ExecuteSqlRawAsync(@"
-        ALTER TABLE public.feature_settings
-        ADD COLUMN IF NOT EXISTS enable_dual_attendance boolean NOT NULL DEFAULT false;
+        await ValidateDatabaseSchemaAsync(
+            db,
+            app.Services
+                .GetRequiredService<
+                    ILogger<Program>>());
+    }
+    catch (Exception ex)
+    {
+        var logger =
+            app.Services
+                .GetRequiredService<
+                    ILogger<Program>>();
 
-        ALTER TABLE public.feature_settings
-        ADD COLUMN IF NOT EXISTS enable_automatic_geofence_punching boolean NOT NULL DEFAULT false;
-    ");
+        logger.LogError(
+            ex,
+            "Error during optional legacy EF database migration or startup schema validation.");
 
-    await ValidateDatabaseSchemaAsync(
-        db,
-        app.Services
-            .GetRequiredService<
-                ILogger<Program>>());
+        throw;
+    }
 }
-catch (Exception ex)
+else
 {
-    var logger =
-        app.Services
-            .GetRequiredService<
-                ILogger<Program>>();
-
-
-    logger.LogError(
-        ex,
-        "Error during DB migration or startup schema validation.");
-
-    throw;
+    app.Logger.LogInformation(
+        "Automatic EF/Neon database migration is disabled. Firebase-first realtime services remain enabled.");
 }
 
 
