@@ -20,15 +20,45 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
-        try
+
+        var email =
+            _configuration["Firebase:SuperAdminEmail"] ??
+            Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ??
+            DefaultEmail;
+
+        // Give development environments time to provide SUPERADMIN_PASSWORD
+        // and recover from transient Firebase startup/authentication failures.
+        // Never log the password itself.
+        for (var attempt = 1; attempt <= 10 && !stoppingToken.IsCancellationRequested; attempt++)
         {
-            var email = _configuration["Firebase:SuperAdminEmail"] ?? Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ?? DefaultEmail;
-            var password = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
-            await EnsureFirebaseAuthAsync(email, password, stoppingToken);
-            await EnsureLocalIdentityAsync(email, password);
+            try
+            {
+                var password = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
+
+                _logger.LogInformation(
+                    "SuperAdmin provisioning attempt {Attempt}/10 for {Email}. Password configured: {Configured}",
+                    attempt,
+                    email,
+                    !string.IsNullOrWhiteSpace(password));
+
+                await EnsureFirebaseAuthAsync(email, password, stoppingToken);
+                await EnsureLocalIdentityAsync(email, password);
+
+                // Once the canonical account is successfully synchronized,
+                // no further startup attempts are necessary.
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SuperAdmin provisioning attempt {Attempt} failed.", attempt);
+                if (attempt < 10)
+                    await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+            }
         }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-        catch (Exception ex) { _logger.LogError(ex, "SuperAdmin provisioning failed."); }
     }
 
     private async Task EnsureFirebaseAuthAsync(string email, string? password, CancellationToken ct)
@@ -104,10 +134,20 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
                     string.Join("; ", passwordResult.Errors.Select(x => x.Description)));
         }
 
-        if (!await users.IsInRoleAsync(user, "SuperAdmin"))
+        // The canonical account is always the Web SuperAdmin, even if an
+        // older database row was accidentally created with Employee role.
+        var currentRoles = await users.GetRolesAsync(user);
+        if (currentRoles.Any())
         {
-            var result = await users.AddToRoleAsync(user, "SuperAdmin");
-            if (!result.Succeeded) throw new InvalidOperationException(string.Join("; ", result.Errors.Select(x => x.Description)));
+            var removeRolesResult = await users.RemoveFromRolesAsync(user, currentRoles);
+            if (!removeRolesResult.Succeeded)
+                throw new InvalidOperationException(
+                    string.Join("; ", removeRolesResult.Errors.Select(x => x.Description)));
         }
+
+        var result = await users.AddToRoleAsync(user, "SuperAdmin");
+        if (!result.Succeeded)
+            throw new InvalidOperationException(
+                string.Join("; ", result.Errors.Select(x => x.Description)));
     }
 }

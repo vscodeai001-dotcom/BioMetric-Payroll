@@ -202,9 +202,20 @@ class LoginActivity : MotionBaseActivity() {
                 // Canonical SuperAdmin is Firebase-only.
                 // Never fall back to Employee/Web compatibility login.
                 if (email.equals(superAdminEmail, ignoreCase = true)) {
+                    // A failed canonical SuperAdmin Firebase login must never
+                    // reuse an old Employee/session state.
+                    mobileSessionStore.clearLogin()
+                    SecurityBaseActivity.clearProcessAuthorization(applicationContext)
+                    applicationContext
+                        .getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                        .edit(commit = true) { clear() }
+                    applicationContext
+                        .getSharedPreferences("user_prefs", MODE_PRIVATE)
+                        .edit(commit = true) { clear() }
+
                     Toast.makeText(
                         this@LoginActivity,
-                        "Firebase login failed: $code",
+                        "SuperAdmin Firebase login failed: $code. Ensure the Firebase account exists with the configured SuperAdmin password.",
                         Toast.LENGTH_LONG
                     ).show()
 
