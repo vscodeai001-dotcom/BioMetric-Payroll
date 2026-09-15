@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
 using Payroll.Shared.Data;
@@ -25,6 +26,7 @@ public sealed class ApplicationDataChangeInterceptor : SaveChangesInterceptor
     {
         public bool Notify;
         public AttendanceRefreshService.ApplicationDataChange[] Changes { get; set; } = Array.Empty<AttendanceRefreshService.ApplicationDataChange>();
+        public EntityEntry[] Entries { get; set; } = Array.Empty<EntityEntry>();
         public double? OfficeLatitude;
         public double? OfficeLongitude;
         public int? GeoRadiusMeters;
@@ -192,10 +194,9 @@ public sealed class ApplicationDataChangeInterceptor : SaveChangesInterceptor
             await _refreshService.NotifyApplicationDataChangedAsync(
                 pending.Changes);
 
-            // Firebase is a second realtime transport. Neon remains the
-            // authoritative database and SignalR remains as a compatibility
-            // path. A Firebase write failure must never roll back a successful
-            // Neon transaction.
+            // Firebase is the shared durable SSOT. The local SQLite transaction has
+            // already committed, so Firebase synchronization is independent
+            // of the existing business transaction.
             var actorUid = _httpContextAccessor.HttpContext?.User
                 ?.FindFirstValue(ClaimTypes.NameIdentifier);
             var role = _httpContextAccessor.HttpContext?.User
@@ -208,12 +209,11 @@ public sealed class ApplicationDataChangeInterceptor : SaveChangesInterceptor
                 pending.Changes.Cast<object>().ToArray(),
                 ownerUid);
 
-            // Publish the actual committed Neon row snapshots as a Firebase
-            // read model. This is best-effort and never participates in the
-            // Neon transaction. Existing SignalR/UI behaviour is untouched.
+            // Publish the actual committed local-projection row snapshots to Firebase.
+            // This never changes business calculations.
             if (!string.IsNullOrWhiteSpace(ownerUid))
             {
-                _ = _firebase.PublishNeonChangesAsync(
+                _ = _firebase.PublishCommittedChangesAsync(
                     db,
                     pending.Entries,
                     ownerUid,
