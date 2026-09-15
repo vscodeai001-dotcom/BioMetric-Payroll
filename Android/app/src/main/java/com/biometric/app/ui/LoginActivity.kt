@@ -38,6 +38,7 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class LoginActivity : MotionBaseActivity() {
+    private val superAdminEmail = "prakashshiva368@gmail.com"
 
     private lateinit var binding: ActivityLoginBinding
 
@@ -158,12 +159,17 @@ class LoginActivity : MotionBaseActivity() {
         }
     }
 
-    private fun handleEmployeeLogin(email: String, pass: String, forceReplace: Boolean = false) {
+    private fun handleEmployeeLogin(
+        email: String,
+        pass: String,
+        forceReplace: Boolean = false
+    ) {
         lifecycleScope.launch {
             setLoading(true)
 
-            // Firebase is the preferred Android authentication path. This makes
-            // Admin/SuperAdmin completely independent of Payroll.Web.
+            // Firebase is the primary Android authentication path.
+            // Admin/SuperAdmin authenticate directly with Firebase and do not
+            // depend on Payroll.Web.
             val firebaseResult = runCatching {
                 FirebaseAuth.getInstance()
                     .signInWithEmailAndPassword(email, pass)
@@ -173,68 +179,146 @@ class LoginActivity : MotionBaseActivity() {
 
             val firebaseUser = firebaseResult.getOrNull()
 
-            if (firebaseUser != null) {
-                val tokenResult = runCatching {
-                    firebaseUser.getIdToken(true).await()
-                }.getOrNull()
+            // Firebase authentication failed.
+            if (firebaseUser == null) {
+                val firebaseError = firebaseResult.exceptionOrNull()
 
-                val claims = tokenResult?.claims.orEmpty()
-                val rawRole = claims["role"]?.toString().orEmpty()
+                val code = when (firebaseError) {
+                    is com.google.firebase.auth.FirebaseAuthException ->
+                        firebaseError.errorCode ?: "AUTH_FAILED"
 
-                val role = when {
-                    rawRole.equals("SuperAdmin", true) ||
-                        rawRole.equals(UserRole.SUPER_ADMIN.name, true) ->
-                        UserRole.SUPER_ADMIN.name
-
-                    rawRole.equals("Admin", true) ||
-                        rawRole.equals(UserRole.ADMIN.name, true) ->
-                        UserRole.ADMIN.name
-
-                    else -> UserRole.STAFF.name
+                    else ->
+                        "AUTH_FAILED"
                 }
 
-                // Existing Employee single-device/login behavior remains on
-                // the established mobile endpoint. Admin/SuperAdmin do not
-                // use that endpoint or its single-device restriction.
-                if (role == UserRole.STAFF.name) {
-                    FirebaseAuth.getInstance().signOut()
-                    setLoading(false)
-                    handleEmployeeLoginViaExistingFlow(email, pass, forceReplace)
-                    return@launch
-                }
-
-                if (tokenResult?.token.isNullOrBlank()) {
-                    setLoading(false)
-                    Toast.makeText(
-                        this@LoginActivity,
-                        "Firebase login succeeded but no session token was returned.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    return@launch
-                }
-
-                val ownerUid = claims["owner_uid"]?.toString()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: firebaseUser.uid
-
-                val employeeId = when (val value = claims["employee_id"]) {
-                    is Number -> value.toInt()
-                    else -> value?.toString()?.toIntOrNull() ?: 0
-                }
-
-                val displayName = firebaseUser.displayName
-                    ?.takeIf { it.isNotBlank() }
-                    ?: email.substringBefore("@")
-
-                mobileSessionStore.saveLogin(
-                    token = tokenResult!!.token!!,
-                    employeeId = employeeId,
-                    name = displayName,
-                    email = firebaseUser.email ?: email,
-                    firebaseOwnerUid = ownerUid
+                Log.e(
+                    "LoginActivity",
+                    "Firebase authentication failed for $email. code=$code",
+                    firebaseError
                 )
 
-                applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
+                setLoading(false)
+
+                // Canonical SuperAdmin is Firebase-only.
+                // Never fall back to Employee/Web compatibility login.
+                if (email.equals(superAdminEmail, ignoreCase = true)) {
+                    Toast.makeText(
+                        this@LoginActivity,
+                        "Firebase login failed: $code",
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                    return@launch
+                }
+
+                // Existing Employee compatibility login remains unchanged.
+                handleEmployeeLoginViaExistingFlow(
+                    email,
+                    pass,
+                    forceReplace
+                )
+
+                return@launch
+            }
+
+            // IMPORTANT:
+            // firebaseUser is guaranteed non-null here because the null path
+            // above always returns.
+            val tokenResult = runCatching {
+                firebaseUser
+                    .getIdToken(true)
+                    .await()
+            }.getOrNull()
+
+            val claims = tokenResult?.claims.orEmpty()
+
+            val rawRole = claims["role"]?.toString().orEmpty()
+
+            // The canonical SuperAdmin account is always SuperAdmin.
+            // This also allows the account to continue into the SuperAdmin
+            // application even if claims have not refreshed yet.
+            val isCanonicalSuperAdmin =
+                firebaseUser.email?.equals(
+                    superAdminEmail,
+                    ignoreCase = true
+                ) == true
+
+            val role = when {
+                isCanonicalSuperAdmin ||
+                        rawRole.equals("SuperAdmin", ignoreCase = true) ||
+                        rawRole.equals(UserRole.SUPER_ADMIN.name, ignoreCase = true) ->
+                    UserRole.SUPER_ADMIN.name
+
+                rawRole.equals("Admin", ignoreCase = true) ||
+                        rawRole.equals(UserRole.ADMIN.name, ignoreCase = true) ->
+                    UserRole.ADMIN.name
+
+                else ->
+                    UserRole.STAFF.name
+            }
+
+            // Existing Employee behavior remains unchanged.
+            // Only STAFF accounts use the compatibility endpoint and its
+            // existing employee single-device rules.
+            if (role == UserRole.STAFF.name) {
+                FirebaseAuth.getInstance().signOut()
+
+                setLoading(false)
+
+                handleEmployeeLoginViaExistingFlow(
+                    email,
+                    pass,
+                    forceReplace
+                )
+
+                return@launch
+            }
+
+            // Admin/SuperAdmin require a valid Firebase ID token.
+            if (tokenResult?.token.isNullOrBlank()) {
+                setLoading(false)
+
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Firebase login succeeded but no session token was returned.",
+                    Toast.LENGTH_LONG
+                ).show()
+
+                return@launch
+            }
+
+            val ownerUid = claims["owner_uid"]
+                ?.toString()
+                ?.takeIf { it.isNotBlank() }
+                ?: firebaseUser.uid
+
+            val employeeId = when (val value = claims["employee_id"]) {
+                is Number ->
+                    value.toInt()
+
+                else ->
+                    value?.toString()?.toIntOrNull() ?: 0
+            }
+
+            val displayName = firebaseUser.displayName
+                ?.takeIf { it.isNotBlank() }
+                ?: email.substringBefore("@")
+
+            val firebaseToken = tokenResult!!.token!!
+
+            // Save Android session.
+            mobileSessionStore.saveLogin(
+                token = firebaseToken,
+                employeeId = employeeId,
+                name = displayName,
+                email = firebaseUser.email ?: email,
+                firebaseOwnerUid = ownerUid
+            )
+
+            // Save application user state.
+            applicationContext
+                .getSharedPreferences("user_prefs", MODE_PRIVATE)
+                .edit(commit = true) {
                     putBoolean("is_logged_in", true)
                     putString("user_role", role)
                     putInt("employee_id", employeeId)
@@ -242,7 +326,10 @@ class LoginActivity : MotionBaseActivity() {
                     putString("user_uid", firebaseUser.uid)
                 }
 
-                applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+            // Save authentication state.
+            applicationContext
+                .getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                .edit(commit = true) {
                     putBoolean("has_logged_in_before", true)
                     putBoolean("is_locked", false)
                     putString("user_role", role)
@@ -252,20 +339,17 @@ class LoginActivity : MotionBaseActivity() {
                     putLong("last_active_time", System.currentTimeMillis())
                 }
 
-                // Realtime and GPS readiness now starts directly from Firebase.
-                // Do not call a Payroll.Web theme/API endpoint here.
-                adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-
-                setLoading(false)
-                proceedToMain()
-                return@launch
+            // Start Firebase realtime synchronization directly.
+            // Android does not need Payroll.Web running for this.
+            adminRealtimeCoordinator.start {
+                realtimeUiDispatcher.refreshVisible()
             }
 
-            // Employee compatibility path. This is deliberately retained so
-            // existing employees are not broken while their Firebase Auth
-            // accounts are being provisioned. Admin/SuperAdmin never reach it.
             setLoading(false)
-            handleEmployeeLoginViaExistingFlow(email, pass, forceReplace)
+
+            // SuperAdmin/Admin -> MainActivity
+            // Employee -> EmployeeHomeActivity
+            proceedToMain()
         }
     }
 
