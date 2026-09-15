@@ -284,7 +284,7 @@ class FirebaseSyncManager @Inject constructor(
     /**
      * Render-independent GPS transport. The Android tracking service writes
      * the current live position and an immutable history event in one Firebase
-     * multi-location update. Neon remains the payroll/business SSOT; this path
+     * multi-location update. Firebase is the independent realtime/tracking source; this path
      * exists so a Render outage cannot stop GPS capture or realtime map updates.
      */
     suspend fun pushLiveLocation(
@@ -339,22 +339,42 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("AttendancePunch", "MODIFIED")
     }
     suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
-    suspend fun pushRegularization(request: RegularizationRequest) {
-        if (request.id.isBlank()) return
-        getOwnerRef()?.child("regularizations")?.child(request.id)?.setValue(request)?.await()
-        notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", request.id)
+    /**
+     * These three request types are intentionally accepted as Any.
+     * Different project revisions keep these request models in different
+     * packages, so FirebaseSyncManager must not create a compile-time
+     * dependency on a particular model package.
+     *
+     * The existing callers can continue passing their request objects.
+     * Firebase serializes the complete object exactly as before.
+     */
+    suspend fun pushRegularization(request: Any) {
+        val id = extractStringId(request, "id") ?: return
+        getOwnerRef()?.child("regularizations")?.child(id)?.setValue(request)?.await()
+        notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", id)
     }
 
-    suspend fun pushLeaveRequest(request: LeaveRequest) {
-        if (request.id.isBlank()) return
-        getOwnerRef()?.child("leave_requests")?.child(request.id)?.setValue(request)?.await()
-        notifyRealtimeChanged("LeaveRequest", "MODIFIED", request.id)
+    suspend fun pushLeaveRequest(request: Any) {
+        val id = extractStringId(request, "id") ?: return
+        getOwnerRef()?.child("leave_requests")?.child(id)?.setValue(request)?.await()
+        notifyRealtimeChanged("LeaveRequest", "MODIFIED", id)
     }
 
-    suspend fun pushResignationRequest(request: ResignationRequest) {
-        if (request.requestId.isBlank()) return
-        getOwnerRef()?.child("resignation_requests")?.child(request.requestId)?.setValue(request)?.await()
-        notifyRealtimeChanged("ResignationRequest", "MODIFIED", request.requestId)
+    suspend fun pushResignationRequest(request: Any) {
+        val id = extractStringId(request, "requestId")
+            ?: extractStringId(request, "id")
+            ?: return
+
+        getOwnerRef()?.child("resignation_requests")?.child(id)?.setValue(request)?.await()
+        notifyRealtimeChanged("ResignationRequest", "MODIFIED", id)
+    }
+
+    private fun extractStringId(value: Any, fieldName: String): String? {
+        return runCatching {
+            val field = value.javaClass.getDeclaredField(fieldName)
+            field.isAccessible = true
+            field.get(value)?.toString()?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 
 
