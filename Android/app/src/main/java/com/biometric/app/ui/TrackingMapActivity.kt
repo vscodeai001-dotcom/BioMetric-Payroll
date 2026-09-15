@@ -21,6 +21,8 @@ import java.util.TimeZone
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
@@ -76,6 +78,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         applyWindowInsets(binding.main, binding.appBar)
         setupMap()
         setupFilters()
+        setupPremiumMapControls()
         observeLiveLocations()
     }
 
@@ -91,6 +94,68 @@ class TrackingMapActivity : MotionBaseActivity() {
             // Trigger marker update with current SignalR data
             updateMapMarkers(signalR.liveLocations.value.values.toList())
         }
+    }
+
+    private var isMapFullscreen = false
+    private var mapLayerIndex = 0
+
+    private fun setupPremiumMapControls() {
+        binding.btnMapFit.setOnClickListener {
+            fitAllVisibleStaff()
+        }
+        binding.btnMapLayer.setOnClickListener {
+            mapLayerIndex = (mapLayerIndex + 1) % 3
+            when (mapLayerIndex) {
+                0 -> {
+                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+                1 -> {
+                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+                else -> {
+                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(
+                        ColorMatrixColorFilter(floatArrayOf(
+                            0.25f, 0f, 0f, 0f, 0f,
+                            0f, 0.25f, 0f, 0f, 0f,
+                            0f, 0f, 0.25f, 0f, 30f,
+                            0f, 0f, 0f, 1f, 0f
+                        ))
+                    )
+                }
+            }
+            binding.mapview.invalidate()
+        }
+        binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
+    }
+
+    private fun fitAllVisibleStaff() {
+        val points = signalR.liveLocations.value.values.map { GeoPoint(it.latitude, it.longitude) }
+        if (points.isEmpty()) return
+        val bounds = BoundingBox.fromGeoPoints(points)
+        binding.mapview.zoomToBoundingBox(bounds, true, 150)
+    }
+
+    private fun toggleMapFullscreen() {
+        isMapFullscreen = !isMapFullscreen
+        val controller = WindowInsetsControllerCompat(window, binding.main)
+        if (isMapFullscreen) {
+            binding.appBar.visibility = View.GONE
+            binding.filterScroll.visibility = View.GONE
+            binding.cardLegend.visibility = View.GONE
+            binding.cardLiveStats.visibility = View.GONE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            binding.appBar.visibility = View.VISIBLE
+            binding.filterScroll.visibility = View.VISIBLE
+            binding.cardLegend.visibility = View.VISIBLE
+            binding.cardLiveStats.visibility = View.VISIBLE
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+        binding.mapview.postDelayed({ binding.mapview.invalidate() }, 180)
     }
 
     private fun setupMap() {
@@ -120,7 +185,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         signalR.start()
         lifecycleScope.launch {
             signalR.liveLocations
-                .debounce(500L) // Throttled updates to prevent UI saturation
+                .debounce(100L) // Throttled updates to prevent UI saturation
                 .collect { liveMap ->
                     _binding?.let { updateMapMarkers(liveMap.values.toList()) }
                 }
@@ -132,6 +197,12 @@ class TrackingMapActivity : MotionBaseActivity() {
         
         val employeeData = sharedViewModel.allEmployees.value
         val geoPoints = mutableListOf<GeoPoint>()
+
+        val liveCount = locations.count { getLocStatus(it) == "Live" }
+        val outsideCount = locations.count { !it.isWithinAllowedRadius }
+        binding.tvLiveCount.text = "$liveCount Live"
+        binding.tvOutsideCount.text = "$outsideCount Outside"
+        binding.tvMapSync.text = "Realtime sync • ${locations.size} sessions"
 
         val currentIds = locations.map { it.employeeId }
         markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
@@ -163,6 +234,11 @@ class TrackingMapActivity : MotionBaseActivity() {
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = emp?.name ?: "Staff #${loc.employeeId}"
                     mapView.overlays.add(this)
+                    setOnMarkerClickListener { clicked, map ->
+                        map.controller.animateTo(clicked.position)
+                        clicked.showInfoWindow()
+                        true
+                    }
                 }
             }
 
@@ -178,7 +254,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             
             // Premium Tooltip (Snippet)
             val speedText = formatSpeed(loc.speedMps)
-            marker.snippet = "Status: $status | Speed: $speedText\nDist: ${formatDistance(loc.distanceMeters)}"
+            marker.snippet = "Status: $status | Speed: $speedText\nDist: ${formatDistance(loc.distanceMeters)} | Accuracy: ±${loc.accuracyMeters.toInt()}m"
             
             updateActivityRoadRoute(loc.employeeId, point)
             geoPoints.add(point)
