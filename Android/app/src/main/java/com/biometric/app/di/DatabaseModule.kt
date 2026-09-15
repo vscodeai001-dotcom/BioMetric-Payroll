@@ -4,6 +4,7 @@ import androidx.room.Room
 import com.biometric.app.data.AppDatabase
 import com.biometric.app.data.MainRepository
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.sync.FirebaseRoomHydrator
 import android.content.Context
 import com.biometric.app.data.DataSafetyManager
 import com.biometric.app.data.dao.*
@@ -112,6 +113,7 @@ object DatabaseModule {
     fun provideMainRepository(
         @ApplicationContext context: Context,
         firebaseSync: FirebaseSyncManager,
+        firebaseRoomHydrator: FirebaseRoomHydrator,
         dataSafety: DataSafetyManager,
         localShopDao: LocalShopDao,
         localEmployeeDao: LocalEmployeeDao,
@@ -128,7 +130,7 @@ object DatabaseModule {
         localPayrollHistoryDao: LocalPayrollHistoryDao
     ): MainRepository {
         return MainRepository(
-            context, firebaseSync, dataSafety,
+            context, firebaseSync, firebaseRoomHydrator, dataSafety,
             localShopDao, localEmployeeDao, localAttendanceDao,
             advanceDao, historyDao, closedDayDao, regularizationDao,
             localAttendancePunchDao, localLeaveRequestDao, localResignationRequestDao,

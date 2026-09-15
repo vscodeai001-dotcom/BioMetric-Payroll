@@ -30,6 +30,7 @@ import com.google.gson.reflect.TypeToken
 class MainRepository(
     private val context: Context,
     val firebaseSync: FirebaseSyncManager,
+    private val firebaseRoomHydrator: com.biometric.app.sync.FirebaseRoomHydrator,
     val dataSafety: DataSafetyManager,
     private val localShopDao: LocalShopDao,
     private val localEmployeeDao: LocalEmployeeDao,
@@ -829,6 +830,7 @@ class MainRepository(
 
     fun startSync() {
         firebaseSync.startSync()
+        firebaseRoomHydrator.start()
     }
 
 }
