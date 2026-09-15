@@ -26,17 +26,20 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
             Environment.GetEnvironmentVariable("SUPERADMIN_EMAIL") ??
             DefaultEmail;
 
-        // Give development environments time to provide SUPERADMIN_PASSWORD
-        // and recover from transient Firebase startup/authentication failures.
-        // Never log the password itself.
-        for (var attempt = 1; attempt <= 10 && !stoppingToken.IsCancellationRequested; attempt++)
+        // Firebase Authentication is the credential used by native Android.
+        // Keep provisioning alive until the Firebase account is actually
+        // synchronized. The password is read only from configuration/env and
+        // is never logged or stored by this service.
+        for (var attempt = 1; !stoppingToken.IsCancellationRequested; attempt++)
         {
             try
             {
-                var password = Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
+                var password =
+                    _configuration["Firebase:SuperAdminPassword"]
+                    ?? Environment.GetEnvironmentVariable("SUPERADMIN_PASSWORD");
 
                 _logger.LogInformation(
-                    "SuperAdmin provisioning attempt {Attempt}/10 for {Email}. Password configured: {Configured}",
+                    "SuperAdmin provisioning attempt {Attempt} for {Email}. Password configured: {Configured}",
                     attempt,
                     email,
                     !string.IsNullOrWhiteSpace(password));
@@ -55,8 +58,10 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SuperAdmin provisioning attempt {Attempt} failed.", attempt);
-                if (attempt < 10)
-                    await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+                // Keep retrying until the canonical Firebase account is actually
+                // synchronized. This is especially important when the service
+                // starts before environment/configuration is available.
+                await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
             }
         }
     }
@@ -66,17 +71,33 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
         var auth = await _firebase.GetFirebaseAuthAsync(ct);
         if (auth == null)
         {
-            _logger.LogWarning(
+            throw new InvalidOperationException(
                 "Firebase Admin SDK is not initialized. Configure Firebase:ServiceAccountPath, GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_SERVICE_ACCOUNT_JSON, or Application Default Credentials.");
-            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            throw new InvalidOperationException(
+                "Firebase SuperAdmin password is not configured. Set Firebase:SuperAdminPassword or SUPERADMIN_PASSWORD in the Web application's environment.");
         }
 
         UserRecord? user = null;
         try { user = await auth.GetUserByEmailAsync(email, ct); }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
-            if (string.IsNullOrWhiteSpace(password)) { _logger.LogWarning("Firebase SuperAdmin {Email} does not exist. Set SUPERADMIN_PASSWORD once to provision it.", email); return; }
-            user = await auth.CreateUserAsync(new UserRecordArgs { Email = email, Password = password, EmailVerified = true, DisplayName = "SuperAdmin" }, ct);
+            user = await auth.CreateUserAsync(
+                new UserRecordArgs
+                {
+                    Email = email,
+                    Password = password,
+                    EmailVerified = true,
+                    DisplayName = "SuperAdmin"
+                },
+                ct);
+
+            _logger.LogInformation(
+                "Firebase SuperAdmin {Email} account created successfully.",
+                email);
         }
         if (user != null)
         {

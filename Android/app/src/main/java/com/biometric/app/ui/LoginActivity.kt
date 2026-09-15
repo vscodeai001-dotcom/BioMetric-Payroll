@@ -113,7 +113,8 @@ class LoginActivity : MotionBaseActivity() {
 
     private fun handleEmailPasswordLogin() {
         val email = binding.etUserId.text.toString().trim().lowercase()
-        val password = binding.etDynamic.text.toString().trim()
+        // Do not trim passwords. Firebase credentials must be passed exactly as entered.
+        val password = binding.etDynamic.text.toString()
 
         if (email.isEmpty()) {
             Toast.makeText(this, "Please enter your Email Address", Toast.LENGTH_SHORT).show()
@@ -215,7 +216,7 @@ class LoginActivity : MotionBaseActivity() {
 
                     Toast.makeText(
                         this@LoginActivity,
-                        "SuperAdmin Firebase login failed: $code. Ensure the Firebase account exists with the configured SuperAdmin password.",
+                        "SuperAdmin Firebase login failed: $code. The Firebase Auth user ${superAdminEmail} must exist and its Firebase password must match the configured SuperAdmin password.",
                         Toast.LENGTH_LONG
                     ).show()
 
