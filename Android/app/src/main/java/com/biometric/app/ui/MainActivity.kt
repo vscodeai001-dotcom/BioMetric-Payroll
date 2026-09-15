@@ -331,10 +331,21 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun mapCenterFallback(map: MapView): GeoPoint {
         val current = map.mapCenter
-        return if (current.latitude.isFinite() && current.longitude.isFinite() &&
-            kotlin.math.abs(current.latitude) <= 90.0 && kotlin.math.abs(current.longitude) <= 180.0 &&
+
+        return if (
+            current.latitude.isFinite() &&
+            current.longitude.isFinite() &&
+            kotlin.math.abs(current.latitude) <= 90.0 &&
+            kotlin.math.abs(current.longitude) <= 180.0 &&
             !(current.latitude == 0.0 && current.longitude == 0.0)
-        ) current else GeoPoint(11.9139, 79.8145)
+        ) {
+            GeoPoint(
+                current.latitude,
+                current.longitude
+            )
+        } else {
+            GeoPoint(11.9139, 79.8145)
+        }
     }
 
     private fun setupAdminDashboardMapControls() {
