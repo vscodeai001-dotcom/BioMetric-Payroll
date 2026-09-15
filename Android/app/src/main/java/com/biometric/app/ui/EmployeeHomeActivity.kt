@@ -459,8 +459,13 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             ".png",
             arrayOf("https://tile.openstreetmap.org/")
         ) {
-            override fun getTileURLString(pMapTileIndex: org.osmdroid.util.MapTileIndex): String =
-                baseUrl + pMapTileIndex.zoom + "/" + pMapTileIndex.x + "/" + pMapTileIndex.y + mImageFilenameEnding
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                return getBaseUrl() +
+                        org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex) + "/" +
+                        org.osmdroid.util.MapTileIndex.getX(pMapTileIndex) + "/" +
+                        org.osmdroid.util.MapTileIndex.getY(pMapTileIndex) +
+                        mImageFilenameEnding
+            }
         }
 
     private fun setupEmployeeMapControls() {
