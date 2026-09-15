@@ -16,6 +16,7 @@ import com.biometric.app.R
 import com.biometric.app.api.AdminAttendanceRow
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.google.android.material.appbar.MaterialToolbar
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -28,6 +29,7 @@ import javax.inject.Inject
 class AdminAttendanceActivity : AppCompatActivity() {
     @Inject lateinit var api: MobileApiService
     @Inject lateinit var session: MobileSessionStore
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     private lateinit var adapter: AttendanceAdapter
     private val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     private var from = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
@@ -42,6 +44,12 @@ class AdminAttendanceActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnGenerate).setOnClickListener { load() }
         adapter=AttendanceAdapter(); findViewById<RecyclerView>(R.id.rvAttendance).layoutManager=LinearLayoutManager(this); findViewById<RecyclerView>(R.id.rvAttendance).adapter=adapter
         load()
+        realtimeCoordinator.start { if (!isFinishing) load() }
+    }
+
+    override fun onDestroy() {
+        realtimeCoordinator.stop()
+        super.onDestroy()
     }
     private fun pick(base:Calendar, done:(Calendar)->Unit) { DatePickerDialog(this,{_,y,m,d->done(Calendar.getInstance().apply{set(y,m,d)})},base.get(Calendar.YEAR),base.get(Calendar.MONTH),base.get(Calendar.DAY_OF_MONTH)).show() }
     private fun load() { lifecycleScope.launch { progress.isVisible=true; empty.isVisible=false; try { val token=session.token() ?: return@launch; val h="Bearer $token"; val f=fmt.format(from.time); val t=fmt.format(to.time); val r=api.adminAttendanceDaily(h,f,t,0); val rows=r.body()?.rows.orEmpty(); adapter.submit(rows); empty.isVisible=rows.isEmpty(); val c=api.adminCompanyAttendanceSummary(h,f,t).body()?.summary; summary.text= if(c==null) "" else "${c.totalEmployeesProcessed} employees  •  Worked ${"%.2f".format(c.totalWorkedHours)}h  •  OT ${minutes(c.totalOvertimeMinutes)}  •  Penalty ${minutes(c.totalPenaltyMinutes)}" } catch(e:Exception){ Toast.makeText(this@AdminAttendanceActivity,e.message ?: "Unable to load attendance",Toast.LENGTH_SHORT).show() } finally { progress.isVisible=false } } }

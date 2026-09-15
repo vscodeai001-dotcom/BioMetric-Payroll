@@ -16,6 +16,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import com.bumptech.glide.Glide
 import com.biometric.app.sync.ImageUploadManager
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -29,6 +30,7 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
     @Inject lateinit var featureManager: FeatureManager
     @Inject lateinit var brandingManager: BrandingManager
     @Inject lateinit var imageUploadManager: ImageUploadManager
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
 
     private var selectedUser: UserProfile? = null
     private var selectedImageUri: android.net.Uri? = null
@@ -54,6 +56,18 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
 
         setupRecyclerView()
         setupListeners()
+
+        realtimeCoordinator.start {
+            val phone = binding.etUserPhone.text.toString().trim()
+            if (!isFinishing && !isDestroyed && phone.length == 10 && selectedUser != null) {
+                fetchUser(phone)
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        realtimeCoordinator.stop()
+        super.onDestroy()
     }
 
     private fun setupRecyclerView() {

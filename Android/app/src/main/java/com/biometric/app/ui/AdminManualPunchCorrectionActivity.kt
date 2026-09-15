@@ -23,6 +23,7 @@ import com.biometric.app.databinding.ItemPunchBubbleBinding
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.DateRangeUtil
 import com.biometric.app.util.PremiumLoader
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.google.android.material.chip.Chip
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
@@ -38,6 +39,7 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityAdminManualPunchCorrectionBinding
     @Inject lateinit var sharedViewModel: SharedViewModel
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     
     private var startDate: Calendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
     private var endDate: Calendar = Calendar.getInstance()
@@ -69,6 +71,18 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
         binding.btnFindIssues.setOnClickListener {
             loadIssues()
         }
+
+        realtimeCoordinator.start {
+            if (!isFinishing && !isDestroyed) {
+                sharedViewModel.warmUpDashboard()
+                loadIssues()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        realtimeCoordinator.stop()
+        super.onDestroy()
     }
 
     private fun setupPickers() {

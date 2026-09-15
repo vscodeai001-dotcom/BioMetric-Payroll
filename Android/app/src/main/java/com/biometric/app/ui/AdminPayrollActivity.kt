@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.*
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
@@ -19,6 +20,7 @@ import javax.inject.Inject
 class AdminPayrollActivity : AppCompatActivity() {
     @Inject lateinit var api: MobileApiService
     private lateinit var session: MobileSessionStore
+    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     private lateinit var month: Spinner
     private lateinit var year: Spinner
     private lateinit var status: TextView
@@ -44,6 +46,12 @@ class AdminPayrollActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnHistory).setOnClickListener { loadHistory() }
         findViewById<Button>(R.id.btnFinalize).setOnClickListener { confirmFinalize() }
         loadHistory()
+        realtimeCoordinator.start { if (!isFinishing && !isDestroyed) loadHistory() }
+    }
+
+    override fun onDestroy() {
+        realtimeCoordinator.stop()
+        super.onDestroy()
     }
 
     private fun auth() = "Bearer ${session.token().orEmpty()}"
