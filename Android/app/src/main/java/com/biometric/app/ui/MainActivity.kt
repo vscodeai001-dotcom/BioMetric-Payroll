@@ -183,9 +183,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             setupWorkforceSearch()
             setupApprovalFilters()
 
-            // SSOT: Initial full sync
+            // Firebase realtime source: listeners remain active without manual refresh.
             delay(1200)
-            viewModel.startNeonSync()
             viewModel.triggerRefresh() 
             
             // Low-priority animations last
@@ -656,7 +655,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             // Generic CRUD/application events are owned by the
                             // application-scoped AdminRealtimeCoordinator. This
                             // Activity keeps only its special low-latency GPS and
-                            // session handling here, avoiding duplicate Neon pulls.
+                            // session handling here, avoiding duplicate database pulls.
                             else -> Unit
                         }
                     }
@@ -670,15 +669,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let {
                 viewModel.triggerRefresh()
                 sharedViewModel.warmUpDashboard()
-                viewModel.startNeonSync()
-            }
+                }
         }
     }
 
     /**
-     * Called by the application-wide realtime dispatcher after the central
-     * authoritative sync completes. This is UI invalidation only; it deliberately
-     * does not start another Neon pull.
+     * Called by the application-wide realtime dispatcher after a Firebase event.
+     * This is UI invalidation only and does not perform a database pull.
      */
     private fun refreshFromCentralRealtime() {
         if (isFinishing || isDestroyed) return

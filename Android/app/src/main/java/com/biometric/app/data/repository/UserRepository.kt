@@ -1,70 +1,62 @@
 package com.biometric.app.data.repository
 
-import com.biometric.app.data.DatabaseManager
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.sql.Connection
-import java.util.*
+import com.biometric.app.data.entity.UserProfile
+import com.biometric.app.sync.FirebaseSyncManager
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Firebase-backed user management for the native Admin/SuperAdmin UI.
+ *
+ * Android does not connect directly to Neon/PostgreSQL. Firebase is the
+ * realtime user-profile/read-model source for the mobile administrative UI.
+ * Firebase Authentication account deletion remains a server-side concern and
+ * is therefore not impersonated by a client-side database delete.
+ */
 @Singleton
-class UserRepository @Inject constructor() {
+class UserRepository @Inject constructor(
+    private val firebaseSync: FirebaseSyncManager
+) {
 
     data class UserViewModel(
         val userId: String,
         val email: String,
         val role: String,
-        val employeeName: String?
+        val employeeName: String?,
+        val phone: String = ""
     )
 
-    suspend fun getAllUsers(): List<UserViewModel> = withContext(Dispatchers.IO) {
-        val users = mutableListOf<UserViewModel>()
-        DatabaseManager.getConnection()?.use { conn ->
-            val sql = """
-                SELECT u."Id", u."Email", r."Name" as RoleName, e.name as EmployeeName
-                FROM public."AspNetUsers" u
-                LEFT JOIN public."AspNetUserRoles" ur ON u."Id" = ur."UserId"
-                LEFT JOIN public."AspNetRoles" r ON ur."RoleId" = r."Id"
-                LEFT JOIN public.employees e ON u."Id" = e."AspNetUserId"
-                ORDER BY u."Email"
-            """.trimIndent()
-            conn.prepareStatement(sql).use { stmt ->
-                stmt.executeQuery().use { rs ->
-                    while (rs.next()) {
-                        users.add(UserViewModel(
-                            userId = rs.getString("Id"),
-                            email = rs.getString("Email"),
-                            role = rs.getString("RoleName") ?: "Employee",
-                            employeeName = rs.getString("EmployeeName")
-                        ))
+    fun observeUsers(): Flow<List<UserViewModel>> =
+        firebaseSync.getDataFlow<UserProfile>("user_profiles")
+            .map { profiles ->
+                profiles
+                    .filter { it.uid.isNotBlank() }
+                    .map { profile ->
+                        UserViewModel(
+                            userId = profile.uid,
+                            email = profile.email,
+                            role = profile.role,
+                            employeeName = profile.name.ifBlank { null },
+                            phone = profile.phone
+                        )
                     }
-                }
+                    .sortedBy { it.email.lowercase() }
             }
-        }
-        users
-    }
 
-    suspend fun deleteUser(userId: String) = withContext(Dispatchers.IO) {
-        DatabaseManager.getConnection()?.use { conn ->
-            conn.autoCommit = false
-            try {
-                // 1. Unlink employee
-                conn.prepareStatement("UPDATE public.employees SET \"AspNetUserId\" = NULL, \"Email\" = NULL WHERE \"AspNetUserId\" = ?")
-                    .use { stmt -> stmt.setString(1, userId); stmt.executeUpdate() }
-                
-                // 2. Delete user (Cascades will handle roles usually if configured, but let's be safe)
-                conn.prepareStatement("DELETE FROM public.\"AspNetUserRoles\" WHERE \"UserId\" = ?")
-                    .use { stmt -> stmt.setString(1, userId); stmt.executeUpdate() }
-                
-                conn.prepareStatement("DELETE FROM public.\"AspNetUsers\" WHERE \"Id\" = ?")
-                    .use { stmt -> stmt.setString(1, userId); stmt.executeUpdate() }
-                
-                conn.commit()
-            } catch (e: Exception) {
-                conn.rollback()
-                throw e
-            }
-        }
+    suspend fun getAllUsers(): List<UserViewModel> =
+        observeUsers().first()
+
+    suspend fun deleteUser(userId: String) {
+        if (userId.isBlank()) return
+        firebaseSync.getGlobalRef()
+            .child("user_profiles")
+            .child(userId)
+            .removeValue()
+            .await()
+        firebaseSync.notifyRealtimeAfterWrite("UserProfile", "DELETED")
     }
 }

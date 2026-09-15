@@ -16,7 +16,6 @@ import com.biometric.app.domain.location.LocationSyncManager
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.TrackingRecoveryWorker
 import com.biometric.app.sync.DashboardWarmingWorker
-import com.biometric.app.sync.NeonSyncWorker
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.ThemeManager
@@ -119,21 +118,6 @@ class BiometricApplication : Application(), Configuration.Provider {
             locationSyncManager.schedulePeriodicSync()
         }.onFailure { Log.e("BiometricApplication", "Location sync scheduling failed", it) }
 
-        runCatching {
-            val neonSyncRequest = PeriodicWorkRequestBuilder<NeonSyncWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
-                .build()
-
-            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-                "neon_db_sync_periodic",
-                ExistingPeriodicWorkPolicy.KEEP,
-                neonSyncRequest
-            )
-        }.onFailure { Log.e("BiometricApplication", "Neon sync scheduling failed", it) }
 
         runCatching {
             TrackingRecoveryWorker.schedule(this)

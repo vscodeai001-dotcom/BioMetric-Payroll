@@ -353,7 +353,4 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    suspend fun startNeonSync() {
-        try { repository.startNeonSync() } catch (_: Exception) {}
-    }
 }

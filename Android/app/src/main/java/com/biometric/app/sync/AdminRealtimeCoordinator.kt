@@ -1,6 +1,5 @@
 package com.biometric.app.sync
 
-import com.biometric.app.data.MainRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,8 +8,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,17 +16,15 @@ import javax.inject.Singleton
  *
  * SignalR may deliver several domain events for one EF transaction.  The Web
  * side already treats ApplicationDataChanged as the central invalidation signal.
- * Android therefore coalesces the burst and performs at most one Neon pull at a
- * time. Room remains the UI cache while Neon/PostgreSQL remains authoritative.
+ * Android coalesces bursts and only invalidates the currently visible UI.
+ * Firebase is the realtime transport for the mobile application.
  */
 @Singleton
 class AdminRealtimeCoordinator @Inject constructor(
     private val signalR: SignalRManager,
-    private val repository: MainRepository,
     private val firebaseSync: FirebaseSyncManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val syncMutex = Mutex()
     private var collectJob: Job? = null
     private var pendingRefresh: Job? = null
 
@@ -44,7 +39,6 @@ class AdminRealtimeCoordinator @Inject constructor(
                     pendingRefresh?.cancel()
                     pendingRefresh = launch {
                         delay(120)
-                        syncFromAuthoritativeStore()
                         withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
                     }
                 }
@@ -53,7 +47,7 @@ class AdminRealtimeCoordinator @Inject constructor(
             launch {
                 signalR.dataChangeEvents.collectLatest { event ->
                 // Only database/application invalidation events enter the
-                // authoritative Neon pull pipeline. High-frequency GPS and
+                // realtime UI invalidation pipeline. High-frequency GPS and
                 // session/geofence events have their own realtime consumers.
                 if (!requiresAuthoritativeSync(event)) {
                     return@collectLatest
@@ -62,7 +56,6 @@ class AdminRealtimeCoordinator @Inject constructor(
                 pendingRefresh?.cancel()
                 pendingRefresh = launch {
                     delay(180)
-                    syncFromAuthoritativeStore()
                     withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
                 }
                 }
@@ -74,7 +67,6 @@ class AdminRealtimeCoordinator @Inject constructor(
         pendingRefresh?.cancel()
         pendingRefresh = scope.launch {
             delay(80)
-            syncFromAuthoritativeStore()
             withContext(Dispatchers.Main.immediate) { onLocalRefresh() }
         }
     }
@@ -95,7 +87,7 @@ class AdminRealtimeCoordinator @Inject constructor(
             is SignalRManager.SyncEvent.SessionStarted -> true
 
             // These are low-latency/session-state channels and must never
-            // trigger a complete Neon synchronization.
+            // trigger a complete database synchronization.
             is SignalRManager.SyncEvent.LocationChanged,
             is SignalRManager.SyncEvent.GeoSettingsChanged,
             is SignalRManager.SyncEvent.SessionEnded -> false
@@ -105,11 +97,6 @@ class AdminRealtimeCoordinator @Inject constructor(
             else -> false
         }
 
-    private suspend fun syncFromAuthoritativeStore() {
-        syncMutex.withLock {
-            runCatching { repository.startNeonSync() }
-        }
-    }
 
     fun stop() {
         pendingRefresh?.cancel()

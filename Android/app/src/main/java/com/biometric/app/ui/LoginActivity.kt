@@ -14,7 +14,6 @@ import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.MobileLoginRequest
-import com.biometric.app.data.DatabaseManager
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.AuthRepository

@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.tasks.await
 import java.math.BigDecimal
 import java.util.*
-import com.biometric.app.sync.NeonSyncManager
 import com.biometric.app.ui.viewmodel.AuditSummary
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
@@ -42,7 +41,6 @@ class MainRepository(
     private val localAttendancePunchDao: LocalAttendancePunchDao,
     private val localLeaveRequestDao: LocalLeaveRequestDao,
     private val localResignationRequestDao: LocalResignationRequestDao,
-    private val neonSync: NeonSyncManager,
     private val localDailySummaryDao: LocalDailySummaryDao,
     private val localShiftScheduleDao: LocalShiftScheduleDao,
     private val localPayrollHistoryDao: LocalPayrollHistoryDao
@@ -338,7 +336,6 @@ class MainRepository(
             lastModified = shop.lastModified
         )
         localShopDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushShop(shop)
         notifyDataChanged()
     }
@@ -346,8 +343,7 @@ class MainRepository(
     suspend fun deleteShop(shopId: String) = withContext(Dispatchers.IO) {
         localShopDao.getById(shopId)?.let { local ->
             localShopDao.upsert(local.copy(isActive = false))
-            repositoryScope.launch { neonSync.syncAll() }
-            dataSafety.recordDeletion("SHOP", shopId, local, "Shop: ${local.name}")
+                dataSafety.recordDeletion("SHOP", shopId, local, "Shop: ${local.name}")
             firebaseSync.deleteShop(shopId)
             notifyDataChanged()
         }
@@ -386,7 +382,6 @@ class MainRepository(
             lastModified = employee.lastModified
         )
         localEmployeeDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushEmployee(employee)
         notifyDataChanged()
     }
@@ -402,7 +397,6 @@ class MainRepository(
             lastModified = System.currentTimeMillis()
         )
         localEmployeeDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushEmployee(employee)
         notifyDataChanged()
     }
@@ -527,7 +521,6 @@ class MainRepository(
             lastModified = att.lastModified
         )
         localAttendanceDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushAttendance(att)
         clearSalarySnapshots(att.employeeId)
         notifyDataChanged()
@@ -565,7 +558,6 @@ class MainRepository(
             lastModified = System.currentTimeMillis()
         )
         localAttendancePunchDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushAttendancePunch(punch)
         notifyDataChanged()
     }
@@ -593,8 +585,7 @@ class MainRepository(
         val existing = regularizationDao.getAllFlow().first().find { it.id == requestId }
         if (existing != null) {
             regularizationDao.upsert(existing.copy(status = status, adminRemarks = remarks, syncState = 0))
-            repositoryScope.launch { neonSync.syncAll() }
-        }
+            }
     }
 
     fun getPendingRegularizations(): Flow<List<RegularizationRequest>> = allRegularizationsFlow
@@ -605,8 +596,7 @@ class MainRepository(
         val existing = localLeaveRequestDao.getAllFlow().first().find { it.id == requestId }
         if (existing != null) {
             localLeaveRequestDao.upsert(existing.copy(status = status, adminNotes = remarks, syncState = 0))
-            repositoryScope.launch { neonSync.syncAll() }
-        }
+            }
     }
 
     // ---------------- RESIGNATION ----------------
@@ -614,8 +604,7 @@ class MainRepository(
         val existing = localResignationRequestDao.getAllFlow().first().find { it.requestId == requestId }
         if (existing != null) {
             localResignationRequestDao.upsert(existing.copy(status = status, adminRemarks = remarks, syncState = 0))
-            repositoryScope.launch { neonSync.syncAll() }
-        }
+            }
     }
 
     fun getAdvanceRecords(employeeId: String, start: Long, end: Long): Flow<List<AdvancePayment>> = allAdvancesFlow
@@ -636,7 +625,6 @@ class MainRepository(
             syncState = 0
         )
         advanceDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushAdvance(adv)
         notifyDataChanged()
     }
@@ -653,7 +641,6 @@ class MainRepository(
             syncState = 0
         )
         advanceDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushAdvance(adv)
         notifyDataChanged()
     }
@@ -679,7 +666,6 @@ class MainRepository(
             syncState = 0
         )
         closedDayDao.upsert(local)
-        repositoryScope.launch { neonSync.syncAll() }
         firebaseSync.pushClosedDay(day)
         notifyDataChanged()
     }
@@ -845,7 +831,4 @@ class MainRepository(
         firebaseSync.startSync()
     }
 
-    suspend fun startNeonSync() {
-        neonSync.syncAll()
-    }
 }

@@ -88,6 +88,9 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("summaries").keepSynced(true)
         ref.child("monthly_snapshots").keepSynced(true)
         ref.child("attendance_punches").keepSynced(true)
+        ref.child("regularizations").keepSynced(true)
+        ref.child("leave_requests").keepSynced(true)
+        ref.child("resignation_requests").keepSynced(true)
 
         hasInitializedSync = true
     }
@@ -336,6 +339,24 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("AttendancePunch", "MODIFIED")
     }
     suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
+    suspend fun pushRegularization(request: RegularizationRequest) {
+        if (request.id.isBlank()) return
+        getOwnerRef()?.child("regularizations")?.child(request.id)?.setValue(request)?.await()
+        notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", request.id)
+    }
+
+    suspend fun pushLeaveRequest(request: LeaveRequest) {
+        if (request.id.isBlank()) return
+        getOwnerRef()?.child("leave_requests")?.child(request.id)?.setValue(request)?.await()
+        notifyRealtimeChanged("LeaveRequest", "MODIFIED", request.id)
+    }
+
+    suspend fun pushResignationRequest(request: ResignationRequest) {
+        if (request.requestId.isBlank()) return
+        getOwnerRef()?.child("resignation_requests")?.child(request.requestId)?.setValue(request)?.await()
+        notifyRealtimeChanged("ResignationRequest", "MODIFIED", request.requestId)
+    }
+
 
     fun pushSalaryPayment(p: SalaryPayment) {
         val ref = getOwnerRef() ?: return

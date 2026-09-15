@@ -7,7 +7,6 @@ import com.biometric.app.sync.FirebaseSyncManager
 import android.content.Context
 import com.biometric.app.data.DataSafetyManager
 import com.biometric.app.data.dao.*
-import com.biometric.app.sync.NeonSyncManager
 import com.biometric.app.data.AppLocalDatabase
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.dao.OfflineTrackingEventDao
@@ -124,7 +123,6 @@ object DatabaseModule {
         localAttendancePunchDao: LocalAttendancePunchDao,
         localLeaveRequestDao: LocalLeaveRequestDao,
         localResignationRequestDao: LocalResignationRequestDao,
-        neonSync: NeonSyncManager,
         localDailySummaryDao: LocalDailySummaryDao,
         localShiftScheduleDao: LocalShiftScheduleDao,
         localPayrollHistoryDao: LocalPayrollHistoryDao
@@ -134,7 +132,7 @@ object DatabaseModule {
             localShopDao, localEmployeeDao, localAttendanceDao,
             advanceDao, historyDao, closedDayDao, regularizationDao,
             localAttendancePunchDao, localLeaveRequestDao, localResignationRequestDao,
-            neonSync, localDailySummaryDao, localShiftScheduleDao, localPayrollHistoryDao
+            localDailySummaryDao, localShiftScheduleDao, localPayrollHistoryDao
         )
     }
 }

@@ -54,7 +54,7 @@ class SharedViewModel @Inject constructor(
         if (_isWarmingUp.value) return
         _isWarmingUp.value = true
         scope.launch(Dispatchers.IO) {
-            repository.startNeonSync()
+            repository.startSync()
             _isWarmingUp.value = false
         }
     }
