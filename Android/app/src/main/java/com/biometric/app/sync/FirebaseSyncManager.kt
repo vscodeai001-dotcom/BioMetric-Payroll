@@ -43,7 +43,7 @@ class FirebaseSyncManager @Inject constructor(
     private val database = FirebaseDatabase.getInstance().apply {
         try {
             setPersistenceEnabled(true)
-            setPersistenceCacheSizeBytes(100 * 1024 * 1024) 
+            setPersistenceCacheSizeBytes(100 * 1024 * 1024)
         } catch (_: Exception) {}
     }.reference
 
@@ -83,12 +83,12 @@ class FirebaseSyncManager @Inject constructor(
     fun startSync() {
         if (hasInitializedSync) return
         val ref = getOwnerRef() ?: return
-        
+
         ref.child("employees").keepSynced(true)
         ref.child("summaries").keepSynced(true)
         ref.child("monthly_snapshots").keepSynced(true)
         ref.child("attendance_punches").keepSynced(true)
-        
+
         hasInitializedSync = true
     }
 
@@ -102,7 +102,7 @@ class FirebaseSyncManager @Inject constructor(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSyncTime.value = System.currentTimeMillis()
-                
+
                 syncScope.launch(Dispatchers.Default) {
                     val list = mutableListOf<T>()
                     for (childSnapshot in snapshot.children) {
@@ -130,7 +130,7 @@ class FirebaseSyncManager @Inject constructor(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSyncTime.value = System.currentTimeMillis()
-                
+
                 syncScope.launch(Dispatchers.Default) {
                     val list = mutableListOf<T>()
                     for (childSnapshot in snapshot.children) {
@@ -164,16 +164,20 @@ class FirebaseSyncManager @Inject constructor(
             close()
             return@callbackFlow
         }
-        // ChildEventListener replays existing children. Restrict startup to a
-        // tiny recent window; the normal Neon pull already reconciles older
-        // state, while new events remain Render-independent.
-        val startAt = Date(System.currentTimeMillis() - 5000L).toInstant().toString()
+        // ChildEventListener replays existing children. Keep a bounded tail so
+        // reconnects can recover changes that happened while the device was
+        // offline, instead of using a five-second window that could silently
+        // miss events during a longer network outage. Neon remains the
+        // authoritative reconciliation store, so replaying a small tail is
+        // safe and idempotent at the UI/sync layer.
         val ref = database.child("owner_events").child(ownerUid)
             .orderByChild("timestamp")
-            .startAt(startAt)
+            .limitToLast(200)
+        val deliveredEventIds = Collections.synchronizedSet(mutableSetOf<String>())
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 val eventId = snapshot.child("eventId").getValue(String::class.java) ?: snapshot.key.orEmpty()
+                if (eventId.isBlank() || !deliveredEventIds.add(eventId)) return
                 val source = snapshot.child("source").getValue(String::class.java).orEmpty()
                 val timestamp = snapshot.child("timestamp").getValue(String::class.java).orEmpty()
                 val changes = snapshot.child("changes").children.mapNotNull { child ->
@@ -332,7 +336,7 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("AttendancePunch", "MODIFIED")
     }
     suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
-    
+
     fun pushSalaryPayment(p: SalaryPayment) {
         val ref = getOwnerRef() ?: return
         syncScope.launch {

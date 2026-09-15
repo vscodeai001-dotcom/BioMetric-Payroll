@@ -33,7 +33,8 @@ class NeonSyncManager @Inject constructor(
     private val bonusDao: LocalBonusRecordDao,
     private val taxDao: LocalTaxDeclarationDao,
     private val fbpComponentDao: LocalFbpComponentDao,
-    private val fbpDeclarationDao: LocalFbpDeclarationDao
+    private val fbpDeclarationDao: LocalFbpDeclarationDao,
+    private val firebaseSync: FirebaseSyncManager
 ) {
     private val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -44,7 +45,7 @@ class NeonSyncManager @Inject constructor(
 
     suspend fun syncAll() = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting SSOT Sync via JDBC...")
-        
+
         val conn = try {
             DatabaseManager.getConnection()
         } catch (t: Throwable) {
@@ -65,10 +66,10 @@ class NeonSyncManager @Inject constructor(
             syncTaxDeclarations(conn)
             syncFbpComponents(conn)
             syncFbpDeclarations(conn)
-            
+
             // Push local changes to PostgreSQL
             pushLocalChanges(conn)
-            
+
             Log.d(TAG, "SSOT Sync completed successfully.")
         } catch (e: Exception) {
             Log.e(TAG, "Sync process error: ${e.message}")
@@ -86,7 +87,7 @@ class NeonSyncManager @Inject constructor(
                     val employeeId = rs.getInt("employeeid").toString()
                     val name = rs.getString("name") ?: "Unknown"
                     val role = rs.getString("role") ?: "Staff"
-                    
+
                     employeeDao.upsert(LocalEmployee(
                         employeeId = employeeId,
                         shopId = DEFAULT_SHOP_ID,
@@ -111,7 +112,7 @@ class NeonSyncManager @Inject constructor(
                     val deviceId = rs.getString("DeviceId") ?: ""
                     val logType = rs.getString("LogType") ?: "Punch"
                     val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(punchTime))
-                    
+
                     // 1. Map to raw AttendancePunch (For Correction Tool)
                     attendancePunchDao.upsert(LocalAttendancePunch(
                         punchId = logId,
@@ -128,13 +129,13 @@ class NeonSyncManager @Inject constructor(
                     ))
 
                     // 2. Map to Attendance (For Salary Engine Compatibility)
-                    // Logic: Each raw log becomes a checkIn only record. 
+                    // Logic: Each raw log becomes a checkIn only record.
                     // The SalaryEngine will handle pairing if needed or treat as single entries.
                     attendanceDao.upsert(LocalAttendance(
                         attendanceId = "SQL-$logId",
                         employeeId = employeeId,
                         checkInTime = punchTime,
-                        checkOutTime = null, 
+                        checkOutTime = null,
                         syncState = 1,
                         lastModified = System.currentTimeMillis()
                     ))
@@ -153,7 +154,7 @@ class NeonSyncManager @Inject constructor(
                     val amount = rs.getDouble("amount")
                     val date = rs.getDate("advancedate")?.time ?: 0L
                     val isRecovered = rs.getObject("payrollid_paid") != null
-                    
+
                     advanceDao.upsert(LocalAdvancePayment(
                         advanceId = advanceId,
                         employeeId = employeeId,
@@ -180,15 +181,15 @@ class NeonSyncManager @Inject constructor(
                     val status = rs.getString("status") ?: "Pending"
                     val dateStr = rs.getDate("date_of_punch")?.toString() ?: ""
                     val submittedAt = rs.getTimestamp("submission_date")?.time ?: 0L
-                    
+
                     regularizationDao.upsert(LocalRegularizationRequest(
                         id = id,
                         staffId = employeeId,
-                        staffName = "Remote User", 
+                        staffName = "Remote User",
                         date = dateStr,
                         punchType = if (rs.getBoolean("is_in_punch")) "IN" else "OUT",
                         originalTime = null,
-                        requestedTime = submittedAt, 
+                        requestedTime = submittedAt,
                         reason = reason,
                         status = status,
                         adminRemarks = rs.getString("admin_remarks"),
@@ -209,7 +210,7 @@ class NeonSyncManager @Inject constructor(
                     val action = rs.getString("action_type") ?: ""
                     val module = rs.getString("entity_type") ?: ""
                     val timestamp = rs.getTimestamp("timestamp")?.time ?: 0L
-                    
+
                     auditLogDao.upsert(LocalAuditLog(
                         logId = logId,
                         shopId = DEFAULT_SHOP_ID,
@@ -408,11 +409,11 @@ class NeonSyncManager @Inject constructor(
         val unsynced = employeeDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Employees...")
-        
+
         val sql = """
             UPDATE employees SET name = ?, role = ? WHERE employeeid = ?
         """.trimIndent()
-        
+
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { emp ->
                 stmt.setString(1, emp.name)
@@ -423,18 +424,22 @@ class NeonSyncManager @Inject constructor(
             }
         }
         syncScope.launch { apiService.triggerSignalRRefresh() }
+        syncScope.launch {
+            runCatching { firebaseSync.notifyRealtimeAfterWrite("Employee", "MODIFIED") }
+                .onFailure { Log.w(TAG, "Firebase Employee realtime event deferred", it) }
+        }
     }
 
     private fun pushAttendancePunches(conn: Connection) {
         val unsynced = attendancePunchDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Attendance Punches...")
-        
+
         val sql = """
             INSERT INTO attendancelogs (employeeid, biometricid, punchtime, "DeviceID", "LogType", is_approved, latitude, longitude)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """.trimIndent()
-        
+
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { punch ->
                 stmt.setInt(1, punch.staffId.toInt())
@@ -450,18 +455,22 @@ class NeonSyncManager @Inject constructor(
             }
         }
         syncScope.launch { apiService.triggerSignalRRefresh() }
+        syncScope.launch {
+            runCatching { firebaseSync.notifyRealtimeAfterWrite("AttendancePunch", "ADDED") }
+                .onFailure { Log.w(TAG, "Firebase AttendancePunch realtime event deferred", it) }
+        }
     }
 
     private fun pushAdvances(conn: Connection) {
         val unsynced = advanceDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Advances...")
-        
+
         val sql = """
             INSERT INTO salaryadvances (employeeid, advancedate, amount, payrollid_paid, advancetype)
             VALUES (?, ?, ?, ?, ?)
         """.trimIndent()
-        
+
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { adv ->
                 stmt.setInt(1, adv.employeeId.toInt())
@@ -474,13 +483,17 @@ class NeonSyncManager @Inject constructor(
             }
         }
         syncScope.launch { apiService.triggerSignalRRefresh() }
+        syncScope.launch {
+            runCatching { firebaseSync.notifyRealtimeAfterWrite("AdvancePayment", "ADDED") }
+                .onFailure { Log.w(TAG, "Firebase AdvancePayment realtime event deferred", it) }
+        }
     }
 
     private fun pushRegularizations(conn: Connection) {
         val unsynced = regularizationDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Regularizations...")
-        
+
         val sql = "UPDATE attendance_regularizations SET status = ?, admin_remarks = ? WHERE regularization_id = ?"
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { req ->
@@ -492,13 +505,17 @@ class NeonSyncManager @Inject constructor(
             }
         }
         syncScope.launch { apiService.triggerSignalRRefresh() }
+        syncScope.launch {
+            runCatching { firebaseSync.notifyRealtimeAfterWrite("AttendanceRegularization", "MODIFIED") }
+                .onFailure { Log.w(TAG, "Firebase Regularization realtime event deferred", it) }
+        }
     }
 
     private fun pushLeaves(conn: Connection) {
         val unsynced = leaveDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Leave Requests...")
-        
+
         val sql = "UPDATE leaverequests SET \"Status\" = ?, \"AdminNotes\" = ? WHERE leaverequestid = ?"
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { req ->
@@ -510,13 +527,17 @@ class NeonSyncManager @Inject constructor(
             }
         }
         syncScope.launch { apiService.triggerSignalRRefresh() }
+        syncScope.launch {
+            runCatching { firebaseSync.notifyRealtimeAfterWrite("LeaveRequest", "MODIFIED") }
+                .onFailure { Log.w(TAG, "Firebase Leave realtime event deferred", it) }
+        }
     }
 
     private fun pushResignations(conn: Connection) {
         val unsynced = resignationDao.getUnsynced()
         if (unsynced.isEmpty()) return
         Log.d(TAG, "Pushing ${unsynced.size} Resignations...")
-        
+
         val sql = "UPDATE resignation_requests SET status = ?, admin_remarks = ? WHERE request_id = ?"
         conn.prepareStatement(sql).use { stmt ->
             unsynced.forEach { req ->
@@ -540,7 +561,7 @@ class NeonSyncManager @Inject constructor(
             if (daysMatch != null) {
                 totalMs += daysMatch.groupValues[1].toLong() * 24 * 60 * 60 * 1000
             }
-            
+
             val timePart = interval.split(" ").last()
             val parts = timePart.split(":")
             when (parts.size) {

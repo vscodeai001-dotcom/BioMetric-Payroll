@@ -2,6 +2,7 @@
   "rules": {
     ".read": false,
     ".write": false,
+
     "tracking": {
       "live": {
         "$employeeId": {
@@ -20,15 +21,17 @@
         }
       }
     },
+
     "owner_events": {
       "$ownerUid": {
-        ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') && (auth.token.owner_uid == $ownerUid || auth.uid == $ownerUid)",
+        ".read": "auth != null && (auth.token.owner_uid == $ownerUid || auth.uid == $ownerUid)",
         ".write": false,
         "$eventId": {
           ".validate": "newData.hasChildren(['eventId','timestamp','changes'])"
         }
       }
     },
+
     "client_events": {
       "$employeeId": {
         ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
@@ -38,12 +41,14 @@
         }
       }
     },
+
     "application_events": {
       "$eventId": {
         ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
         ".write": false
       }
     },
+
     "owners": {
       "$uid": {
         ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') && (auth.token.owner_uid == $uid || auth.uid == $uid)",

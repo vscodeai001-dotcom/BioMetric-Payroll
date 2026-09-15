@@ -1,9 +1,27 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.android.application)
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
 }
+
+// Sensitive Neon API credentials are supplied from local.properties
+// or CI/Gradle properties and are never hard-coded in source.
+val localSecrets = Properties()
+val secretsFile = rootProject.file("local.properties")
+
+if (secretsFile.exists()) {
+    secretsFile.inputStream().use { input ->
+        localSecrets.load(input)
+    }
+}
+
+val neonApiKey: String =
+    providers.gradleProperty("NEON_API_KEY").orNull
+        ?: localSecrets.getProperty("NEON_API_KEY")
+        ?: ""
 
 android {
     namespace = "com.biometric.app"
@@ -17,6 +35,12 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "NEON_API_KEY",
+            "\"${neonApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        )
     }
 
     buildFeatures {
@@ -24,31 +48,21 @@ android {
         buildConfig = true
     }
 
-    // Sensitive Neon API credentials are supplied from local.properties or
-    // CI/Gradle properties and are never hard-coded in source.
-    val localSecrets = java.util.Properties().apply {
-        val file = rootProject.file("local.properties")
-        if (file.exists()) file.inputStream().use { load(it) }
-    }
-    val neonApiKey = providers.gradleProperty("NEON_API_KEY")
-        .orElse(localSecrets.getProperty("NEON_API_KEY", ""))
-        .get()
-    defaultConfig {
-        buildConfigField("String", "NEON_API_KEY", "\"${neonApiKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
+
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
     }
+
     kotlin {
         jvmToolchain(17)
     }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -61,12 +75,14 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     implementation("com.google.android.flexbox:flexbox:3.0.0")
 
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
     implementation("androidx.hilt:hilt-work:1.3.0")
     ksp("androidx.hilt:hilt-compiler:1.3.0")
 
@@ -132,11 +148,11 @@ dependencies {
     // PostgreSQL
     implementation(libs.postgresql)
 
-    // Location & Mapping (Free Open Source)
+    // Location & Mapping
     implementation("org.osmdroid:osmdroid-android:6.1.18")
     implementation(libs.play.services.location)
 
-    // Real-Time CRUD Sync (SignalR)
+    // Real-Time CRUD Sync - existing SignalR compatibility
     implementation("com.microsoft.signalr:signalr:8.0.0")
     implementation("io.reactivex.rxjava3:rxjava:3.1.8")
     implementation("org.slf4j:slf4j-android:1.7.36")
@@ -144,15 +160,17 @@ dependencies {
     // Paging
     implementation(libs.androidx.paging.runtime)
 
-    // Charts
+    // Charts / UI
     implementation(libs.mpandroidchart)
     implementation(libs.generativeai)
     implementation(libs.lottie)
     implementation(libs.shimmer)
     implementation(libs.glide)
     ksp(libs.glide.compiler)
+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
 
+    // Tests
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
