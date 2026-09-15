@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
+import com.biometric.app.BuildConfig
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.MobileLoginRequest
 import com.biometric.app.data.MobileSessionStore
