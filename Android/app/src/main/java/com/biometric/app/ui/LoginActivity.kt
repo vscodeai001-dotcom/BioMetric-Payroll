@@ -160,6 +160,7 @@ class LoginActivity : MotionBaseActivity() {
     private fun handleEmployeeLogin(email: String, pass: String, forceReplace: Boolean = false) {
         lifecycleScope.launch {
             try {
+                Log.i("LoginActivity", "Attempting Payroll.Web login via ${BuildConfig.BIOMETRIC_API_BASE_URL}")
                 setLoading(true)
                 val deviceId = getAndroidDeviceId()
                 val response = mobileApi.login(
