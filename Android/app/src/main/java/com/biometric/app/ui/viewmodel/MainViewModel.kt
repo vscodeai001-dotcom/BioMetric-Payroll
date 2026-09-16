@@ -116,8 +116,8 @@ class MainViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            combine(allShops, _currentPeriod, _currentDate, _customEndDate) { shops, period, date, endDate ->
-                recalculateWorkforce(shops, period, date, endDate)
+            combine(allShops, _currentPeriod, _currentDate, _customEndDate) { shops, _, _, _ ->
+                recalculateWorkforce(shops)
             }.catch { e -> Log.e("MainViewModel", "Error in workforce trigger flow", e) }
             .collect()
         }
@@ -125,11 +125,11 @@ class MainViewModel @Inject constructor(
 
     fun triggerRefresh() {
         viewModelScope.launch {
-            recalculateWorkforce(allShops.value, _currentPeriod.value, _currentDate.value, _customEndDate.value)
+            recalculateWorkforce(allShops.value)
         }
     }
 
-    private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {
+    private fun recalculateWorkforce(shops: List<Shop>) {
         workforceRecalcJob?.cancel()
         _isLoading.value = true
 
@@ -178,8 +178,8 @@ class MainViewModel @Inject constructor(
 
                     val monthCal = Calendar.getInstance()
                     monthCal.add(Calendar.MONTH, -1)
-                    val targetMonth = monthCal.get(Calendar.MONTH) + 1
-                    val targetYear = monthCal.get(Calendar.YEAR)
+                    val targetMonth = monthCal[Calendar.MONTH] + 1
+                    val targetYear = monthCal[Calendar.YEAR]
 
                     val currentPayrollCost = payrolls.filter { it.payMonth == targetMonth && it.payYear == targetYear }.sumOf { it.netSalary }
                     
@@ -190,12 +190,12 @@ class MainViewModel @Inject constructor(
                     
                     val variance = if (previousPayrollCost == 0.0) 0.0 else ((currentPayrollCost - previousPayrollCost) / previousPayrollCost) * 100.0
 
-                    val shiftsToday = schedules.filter { it.shiftDate == dateTodayStr }.size
+                    val shiftsToday = schedules.count { it.shiftDate == dateTodayStr }
                     
                     val summariesThisMonth = summaries.filter { 
                         val sDate = it.shiftDate.split("-")
                         if (sDate.size == 3) {
-                            sDate[0].toInt() == Calendar.getInstance().get(Calendar.YEAR) && sDate[1].toInt() == Calendar.getInstance().get(Calendar.MONTH) + 1
+                            sDate[0].toInt() == Calendar.getInstance()[Calendar.YEAR] && sDate[1].toInt() == Calendar.getInstance()[Calendar.MONTH] + 1
                         } else false
                     }
                     val totalScheduledMs = summariesThisMonth.sumOf { it.scheduledShiftDurationMs }
@@ -208,7 +208,7 @@ class MainViewModel @Inject constructor(
                         totalWorkforce = employees.size,
                         activeEmployees = activeStaff.size,
                         presentToday = presentCount,
-                        absentToday = Math.max(0, activeStaff.size - presentCount),
+                        absentToday = (activeStaff.size - presentCount).coerceAtLeast(0),
                         unpaidAdvances = unpaidAdvAmount,
                         pendingPayrolls = pendingPayrollsCount,
                         currentPayrollCost = currentPayrollCost,

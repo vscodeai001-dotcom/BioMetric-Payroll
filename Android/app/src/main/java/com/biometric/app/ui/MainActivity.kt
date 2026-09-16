@@ -96,6 +96,7 @@ import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import java.text.NumberFormat
+import kotlin.math.abs
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @AndroidEntryPoint
@@ -128,7 +129,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var currentGeofenceRadiusMeters: Int = 0
     private var statusFilter = "All"
     private var adminMapAutoCentered = false
-    private var adminInfoWindow: InfoWindow? = null
     private var adminMapLayerIndex = 0
     private var adminZoneVisible = true
     private val approvalFilter = MutableStateFlow("All")
@@ -802,7 +802,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         return try {
             val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
             val serverTime = sdf.parse(timestamp)?.time ?: 0L
-            val ageMs = Math.abs(System.currentTimeMillis() - serverTime)
+            val ageMs = abs(System.currentTimeMillis() - serverTime)
 
             // Web: LiveTimeoutSeconds = 315360000 (10 years)
             val liveTimeoutMs = 10L * 365 * 24 * 60 * 60 * 1000
