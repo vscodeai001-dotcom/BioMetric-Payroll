@@ -83,10 +83,10 @@ import android.text.TextWatcher
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import androidx.core.graphics.toColorInt
-import com.biometric.app.api.AdminFeatureSettingsDto
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.AdvancePayment
+import com.biometric.app.data.entity.FeatureSettings
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
@@ -309,7 +309,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 // dashboard map when the MapView was created before network
                 // availability or after a theme/process recreation.
                 runCatching { tileProvider.clearTileCache() }
-                setBuiltInZoomControls(false)
                 setBackgroundColor(Color.TRANSPARENT)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 minZoomLevel = 3.0
@@ -1247,7 +1246,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         lifecycleScope.launch {
             viewModel.featureSettings.collectLatest { settings ->
                 _binding?.let { b ->
-                    val s = settings ?: AdminFeatureSettingsDto()
+                    val s = settings ?: FeatureSettings()
 
                     // Admin Hub Quick Actions
                     b.btnRunPayroll.isVisible = isSuperAdmin || (s.enablePayroll && s.adminCanRunPayroll)

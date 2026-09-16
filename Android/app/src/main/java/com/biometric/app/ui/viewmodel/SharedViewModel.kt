@@ -29,8 +29,12 @@ class SharedViewModel @Inject constructor(
 
     val currentEmployee: StateFlow<Employee?> = userProfile.filterNotNull()
         .flatMapLatest { profile ->
-            if (profile.isStaff()) repository.getEmployee(profile.uid)
-            else flowOf(null)
+            val empId = profile.employeeId.ifBlank { profile.uid }
+            if (profile.isStaff() || profile.isAdmin() || profile.isSuperAdmin()) {
+                repository.getEmployee(empId)
+            } else {
+                flowOf(null)
+            }
         }.stateIn(scope, SharingStarted.Eagerly, null)
 
     val allShops: StateFlow<List<Shop>> = repository.getAllShops()

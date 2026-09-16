@@ -835,12 +835,12 @@ class MainRepository(
 
     // ---------------- SETTINGS ----------------
     fun getFeatureSettings(): Flow<FeatureSettings?> {
-        val uid = firebaseSync.getOwnerUid() ?: return flowOf(null)
-        return firebaseSync.getGlobalItemFlow<FeatureSettings>("owners/$uid/feature_settings")
+        return firebaseSync.getDataFlow<FeatureSettings>("feature_settings")
+            .map { it.firstOrNull() }
     }
 
     fun getCompanySettings(): Flow<CompanySettings?> {
-        val uid = firebaseSync.getOwnerUid() ?: return flowOf(null)
-        return firebaseSync.getGlobalItemFlow<CompanySettings>("owners/$uid/company_settings")
+        return firebaseSync.getDataFlow<CompanySettings>("company_settings")
+            .map { it.firstOrNull() }
     }
 }
