@@ -3,22 +3,30 @@ package com.biometric.app.ui.viewmodel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.biometric.app.api.AdminFeatureSettingsDto
+import com.biometric.app.api.CompanySettingsResponse
+import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.*
 import com.biometric.app.sync.FirebaseSyncManager
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import com.biometric.app.util.DateRangeUtil
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 import java.io.Serializable
 import java.text.SimpleDateFormat
 import java.util.*
-import javax.inject.Inject
 
 data class ShopWorkforceState(
     val shop: Shop,
@@ -47,16 +55,14 @@ private data class DashboardDataBundle(
     val advances: List<AdvancePayment>,
     val summaries: List<LocalDailySummary>,
     val schedules: List<LocalShiftSchedule>,
-    val payrolls: List<LocalPayrollHistory>,
-    val employees: List<Employee>,
-    val attendance: List<Attendance>,
-    val regularizations: List<RegularizationRequest>
+    val payrolls: List<LocalPayrollHistory>
 )
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: MainRepository,
     private val sharedViewModel: SharedViewModel,
+    private val mobileApi: MobileApiService,
     private val sessionStore: MobileSessionStore,
     private val firebaseSync: FirebaseSyncManager
 ) : ViewModel() {
@@ -86,28 +92,18 @@ class MainViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(value = true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _companySettings = MutableStateFlow<CompanySettings?>(null)
+    private val _companySettings = MutableStateFlow<CompanySettingsResponse?>(null)
     val companySettings = _companySettings.asStateFlow()
 
-    private val _featureSettings = MutableStateFlow<FeatureSettings?>(null)
+    private val _featureSettings = MutableStateFlow<AdminFeatureSettingsDto?>(null)
     val featureSettings = _featureSettings.asStateFlow()
 
     init {
         restoreStatsCache()
         checkSubscription()
         ensureUserProfileExists()
-        
-        viewModelScope.launch {
-            repository.getCompanySettings().collectLatest { settings ->
-                _companySettings.value = settings
-            }
-        }
-
-        viewModelScope.launch {
-            repository.getFeatureSettings().collectLatest { settings ->
-                _featureSettings.value = settings
-            }
-        }
+        loadCompanySettings()
+        loadFeatureSettings()
         
         viewModelScope.launch {
             sharedViewModel.refreshRequested.collect {
@@ -116,48 +112,132 @@ class MainViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            combine(allShops, _currentPeriod, _currentDate, _customEndDate) { shops, _, _, _ ->
-                recalculateWorkforce(shops)
+            combine(allShops, _currentPeriod, _currentDate, _customEndDate) { shops, period, date, endDate ->
+                recalculateWorkforce(shops, period, date, endDate)
             }.catch { e -> Log.e("MainViewModel", "Error in workforce trigger flow", e) }
             .collect()
         }
     }
 
     fun triggerRefresh() {
+        loadCompanySettings()
+        loadFeatureSettings()
         viewModelScope.launch {
-            recalculateWorkforce(allShops.value)
+            recalculateWorkforce(allShops.value, _currentPeriod.value, _currentDate.value, _customEndDate.value)
         }
     }
 
-    private fun recalculateWorkforce(shops: List<Shop>) {
+    private fun loadCompanySettings() {
+        // Admin/SuperAdmin Android dashboards read the geofence configuration
+        // directly from Firebase first. This removes the map's dependency on
+        // Payroll.Web/Mobile API availability while retaining the existing API
+        // as a compatibility fallback for older installations.
+        val ownerRef = firebaseSync.getOwnerRef()
+        if (ownerRef != null) {
+            val settingsRef = ownerRef.child("company_settings").child("1")
+            settingsRef.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val officeLat = snapshot.numberValue("officeLatitude", "OfficeLatitude")
+                    val officeLon = snapshot.numberValue("officeLongitude", "OfficeLongitude")
+                    val radius = snapshot.intValue("geoRadiusMeters", "GeoRadiusMeters")
+                    val companyName = snapshot.stringValue("companyName", "CompanyName")
+                    if (officeLat != null && officeLon != null && (officeLat != 0.0 || officeLon != 0.0)) {
+                        _companySettings.value = CompanySettingsResponse(
+                            companyName = companyName.orEmpty(),
+                            officeLatitude = officeLat,
+                            officeLongitude = officeLon,
+                            geoRadiusMeters = radius ?: 1000
+                        )
+                    } else {
+                        loadCompanySettingsFromApi()
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w("MainViewModel", "Firebase company settings read cancelled: ${error.message}")
+                    loadCompanySettingsFromApi()
+                }
+            })
+        } else {
+            loadCompanySettingsFromApi()
+        }
+    }
+
+    private fun loadCompanySettingsFromApi() {
+        val token = sessionStore.token() ?: return
+        viewModelScope.launch {
+            try {
+                val response = mobileApi.getCompanySettings("Bearer $token")
+                if (response.isSuccessful) {
+                    _companySettings.value = response.body()
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to load company settings", e)
+            }
+        }
+    }
+
+    private fun DataSnapshot.stringValue(vararg names: String): String? =
+        names.asSequence().mapNotNull { child(it).getValue(String::class.java) }.firstOrNull()
+
+    private fun DataSnapshot.numberValue(vararg names: String): Double? =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toDouble()
+                else -> value?.toString()?.toDoubleOrNull()
+            }
+        }.firstOrNull()
+
+    private fun DataSnapshot.intValue(vararg names: String): Int? =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toInt()
+                else -> value?.toString()?.toIntOrNull()
+            }
+        }.firstOrNull()
+
+    private fun loadFeatureSettings() {
+        val token = sessionStore.token() ?: return
+        viewModelScope.launch {
+            try {
+                val response = mobileApi.getAdminFeatureSettings("Bearer $token")
+                if (response.isSuccessful) {
+                    _featureSettings.value = response.body()
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Failed to load feature settings", e)
+            }
+        }
+    }
+
+    private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {
         workforceRecalcJob?.cancel()
+        
+        // The Web dashboard is company-wide. Shops are a legacy Android cache
+        // dimension and must never prevent employee/attendance KPIs from loading.
         _isLoading.value = true
 
         workforceRecalcJob = viewModelScope.launch(Dispatchers.Default) {
             try {
-                combine(
+                val range = DateRangeUtil.getRangeForPeriod(period, date, endDate = endDate)
+                
+                val dashboardData = combine(
                     sharedViewModel.allAdvances,
                     repository.allDailySummariesFlow,
                     repository.allShiftSchedulesFlow,
-                    repository.allPayrollHistoriesFlow,
+                    repository.allPayrollHistoriesFlow
+                ) { advances, summaries, schedules, payrolls ->
+                    DashboardDataBundle(advances, summaries, schedules, payrolls)
+                }
+
+                combine(
                     sharedViewModel.allEmployees,
                     sharedViewModel.allAttendance,
-                    repository.allRegularizationsFlow
-                ) { args ->
-                    @Suppress("UNCHECKED_CAST")
-                    DashboardDataBundle(
-                        advances = args[0] as List<AdvancePayment>,
-                        summaries = args[1] as List<LocalDailySummary>,
-                        schedules = args[2] as List<LocalShiftSchedule>,
-                        payrolls = args[3] as List<LocalPayrollHistory>,
-                        employees = args[4] as List<Employee>,
-                        attendance = args[5] as List<Attendance>,
-                        regularizations = args[6] as List<RegularizationRequest>
-                    )
-                }.collect { bundle ->
-                    val employees = bundle.employees
-                    val attendance = bundle.attendance
-                    val regularizations = bundle.regularizations
+                    repository.allRegularizationsFlow,
+                    dashboardData
+                ) { employees, attendance, regularizations, bundle ->
                     val advances = bundle.advances
                     val summaries = bundle.summaries
                     val schedules = bundle.schedules
@@ -176,10 +256,12 @@ class MainViewModel @Inject constructor(
                     val unpaidAdvAmount = advances.filter { !it.isRecovered }.sumOf { it.amount }
                     val recentAdvancesList = advances.filter { !it.isRecovered }.sortedByDescending { it.date }.take(4)
 
+                    // Ported from DashboardAnalyticsService.cs & Home.razor
+                    // Blazor uses DateTime.Now.AddMonths(-1) for the "current" cycle in dashboard.
                     val monthCal = Calendar.getInstance()
                     monthCal.add(Calendar.MONTH, -1)
-                    val targetMonth = monthCal[Calendar.MONTH] + 1
-                    val targetYear = monthCal[Calendar.YEAR]
+                    val targetMonth = monthCal.get(Calendar.MONTH) + 1
+                    val targetYear = monthCal.get(Calendar.YEAR)
 
                     val currentPayrollCost = payrolls.filter { it.payMonth == targetMonth && it.payYear == targetYear }.sumOf { it.netSalary }
                     
@@ -190,12 +272,12 @@ class MainViewModel @Inject constructor(
                     
                     val variance = if (previousPayrollCost == 0.0) 0.0 else ((currentPayrollCost - previousPayrollCost) / previousPayrollCost) * 100.0
 
-                    val shiftsToday = schedules.count { it.shiftDate == dateTodayStr }
+                    val shiftsToday = schedules.filter { it.shiftDate == dateTodayStr }.size
                     
                     val summariesThisMonth = summaries.filter { 
                         val sDate = it.shiftDate.split("-")
                         if (sDate.size == 3) {
-                            sDate[0].toInt() == Calendar.getInstance()[Calendar.YEAR] && sDate[1].toInt() == Calendar.getInstance()[Calendar.MONTH] + 1
+                            sDate[0].toInt() == Calendar.getInstance().get(Calendar.YEAR) && sDate[1].toInt() == Calendar.getInstance().get(Calendar.MONTH) + 1
                         } else false
                     }
                     val totalScheduledMs = summariesThisMonth.sumOf { it.scheduledShiftDurationMs }
@@ -208,7 +290,7 @@ class MainViewModel @Inject constructor(
                         totalWorkforce = employees.size,
                         activeEmployees = activeStaff.size,
                         presentToday = presentCount,
-                        absentToday = (activeStaff.size - presentCount).coerceAtLeast(0),
+                        absentToday = Math.max(0, activeStaff.size - presentCount),
                         unpaidAdvances = unpaidAdvAmount,
                         pendingPayrolls = pendingPayrollsCount,
                         currentPayrollCost = currentPayrollCost,
@@ -219,10 +301,11 @@ class MainViewModel @Inject constructor(
                         recentAdvances = recentAdvancesList
                     )
                     
+                    // Critical: Update states and hide loader immediately upon first successful calculation
                     _globalStats.value = stats
                     saveStatsCache(stats)
 
-                    val states = shops.map { shop ->
+                    shops.map { shop ->
                         val shopEmployees = employees.filter { it.shopId == shop.shopId && it.isActive }
                         val shopPresent = attendance.filter { 
                             it.shopId == shop.shopId && it.checkInTime >= startOfToday && activeIds.contains(it.employeeId)
@@ -239,6 +322,7 @@ class MainViewModel @Inject constructor(
                             pendingRegularizations = pendingRegs
                         )
                     }
+                }.collect { states ->
                     _shopsWorkforceState.value = states
                     _isLoading.value = false
                 }
@@ -308,10 +392,10 @@ class MainViewModel @Inject constructor(
         try { repository.startSync() } catch (_: Exception) {}
     }
 
-    private fun saveStatsCache(globalStats: GlobalDashboardStats) {
+    private fun saveStatsCache(stats: GlobalDashboardStats) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val json = Gson().toJson(globalStats)
+                val json = Gson().toJson(stats)
                 sessionStore.saveDashboardCache(json)
             } catch (_: Exception) {}
         }
@@ -322,9 +406,9 @@ class MainViewModel @Inject constructor(
             try {
                 val json = sessionStore.getDashboardCache()
                 if (!json.isNullOrBlank()) {
-                    val globalStats = Gson().fromJson(json, GlobalDashboardStats::class.java)
-                    if (globalStats != null) {
-                        _globalStats.value = globalStats
+                    val stats = Gson().fromJson(json, GlobalDashboardStats::class.java)
+                    if (stats != null) {
+                        _globalStats.value = stats
                     }
                 }
             } catch (_: Exception) {}

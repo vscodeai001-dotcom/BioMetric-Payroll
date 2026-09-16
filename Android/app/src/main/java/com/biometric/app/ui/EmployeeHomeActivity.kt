@@ -48,8 +48,6 @@ import com.biometric.app.api.GpsSessionRequest
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
-import com.biometric.app.data.entity.CompanySettings
-import com.biometric.app.data.entity.FeatureSettings
 import com.biometric.app.databinding.ActivityEmployeeHomeBinding
 import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.sync.SignalRManager
@@ -114,7 +112,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var uiUpdateJob: Job? = null
     private var initJob: Job? = null
     private var roadRouteJob: Job? = null
+    private var dashboardJob: Job? = null
     private var dashboardRetryJob: Job? = null
+    private var dashboardAuthRecoveryInProgress = false
     private var sessionStartTime: Long = 0L
     private var isPermissionDialogShowing = false
 
@@ -170,7 +170,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         initJob?.cancel()
         initJob = lifecycleScope.launch {
             // Start UI/realtime work without artificial startup waits.
-            observeDashboard()
+            loadDashboard()
             checkBatteryOptimizations()
             setupMap()
             setupRealTimeSync()
@@ -262,10 +262,12 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                     }
                                 }
                                 sharedViewModel.warmUpDashboard()
+                                loadDashboard()
                             }
                             else -> {
                                 Log.d("EmployeeHome", "Real-time refresh for dashboard: $event 🔄")
                                 sharedViewModel.warmUpDashboard()
+                                loadDashboard()
                             }
                         }
                     }
@@ -834,6 +836,10 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                         }
                     }
 
+                    if (loopCount % 8 == 0 && dashboardJob?.isActive != true) {
+                        loadDashboard()
+                    }
+
                     loopCount++
                 } catch (e: Exception) {
                     Log.e("EmployeeHome", "UI Update loop error: ${e.message} ⚠️")
@@ -921,50 +927,169 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
     }
 
-    private fun observeDashboard() {
-        lifecycleScope.launch {
-            sharedViewModel.dashboardState.collectLatest { state ->
-                if (state.isLoading) return@collectLatest
+    private fun loadDashboard() {
+        val token = sessionStore.token()
+        if (token.isNullOrBlank()) {
+            goToLogin()
+            return
+        }
 
-                _binding?.let { b ->
-                    state.employee?.let { emp ->
-                        b.tvGreeting.text = "Hello, ${emp.name.ifBlank { "Employee" }}! 👋 ✨"
+        // Authoritative Sync: If just logged in (even punches), perform Auto-IN
+        // Only trigger if we are within range or dual attendance is enabled.
+        if (intent.getBooleanExtra("JUST_LOGGED_IN", false)) {
+            intent.removeExtra("JUST_LOGGED_IN")
+            lifecycleScope.launch {
+                try {
+                    val statusRes = mobileApi.punchStatus("Bearer $token")
+                    if (statusRes.isSuccessful && statusRes.body()?.nextType == "IN") {
+                        Log.i("EmployeeHome", "Authoritative Login: Performing automatic IN punch...")
+                        mobileApi.punch(
+                            "Bearer $token",
+                            EmployeePunchRequest(
+                                type = "IN",
+                                latitude = currentLat,
+                                longitude = currentLon,
+                                accuracy = currentAccuracy.toDouble()
+                            )
+                        )
                     }
-
-                    state.stats?.let { stats ->
-                        b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", stats.fullMonthSalary)} 💰 💎"
-                        b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", stats.paidLeaveCount.toDouble())
-                        b.tvSickLeaveCount.text = "0.0" // Sick leave not in local stats yet
-
-                        b.progressPaidLeave.progress = (stats.paidLeaveCount / 12.0 * 100).toInt().coerceIn(0, 100)
-                        b.progressSickLeave.progress = 0
-                    }
-
-                    officeLat = state.company.officeLatitude
-                    officeLon = state.company.officeLongitude
-                    geoRadius = state.company.geoRadiusMeters
-
-                    // Restore coordinates if non-zero
-                    if (officeLat != 0.0 && officeLon != 0.0) {
-                        updateMapMarkers()
-                    }
-
-                    applyFeatureHierarchy(state.features, state.company)
+                } catch (e: Exception) {
+                    Log.e("EmployeeHome", "Authoritative Login auto-punch failed: ${e.message}")
                 }
+            }
+        }
+
+        // UX: Immediate local data fallback
+        val cachePrefs = getSharedPreferences("dashboard_cache", MODE_PRIVATE)
+        _binding?.let { b ->
+            if (b.tvSalary.text == "₹ --") {
+                val cachedSalary = cachePrefs.getFloat("salary", 0f)
+                val cachedPaid = cachePrefs.getFloat("paid_leave", 0f)
+                val cachedSick = cachePrefs.getFloat("sick_leave", 0f)
+
+                if (cachedSalary > 0) {
+                    b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", cachedSalary.toDouble())} 💰"
+                    b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", cachedPaid.toDouble())
+                    b.tvSickLeaveCount.text = String.format(Locale.US, "%.1f", cachedSick.toDouble())
+                    b.progressPaidLeave.progress = (cachedPaid / 12.0 * 100).toInt().coerceIn(0, 100)
+                    b.progressSickLeave.progress = (cachedSick / 12.0 * 100).toInt().coerceIn(0, 100)
+                }
+            }
+        }
+
+        dashboardJob?.cancel()
+        dashboardJob = lifecycleScope.launch {
+            try {
+                val response = mobileApi.dashboard("Bearer $token")
+                _binding?.let { b ->
+                    if (response.isSuccessful) {
+                        response.body()?.let { data ->
+                            b.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋 ✨"
+                            b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", data.monthlySalary)} 💰 💎"
+                            b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", data.paidLeaveBalance)
+                            b.tvSickLeaveCount.text = String.format(Locale.US, "%.1f", data.sickLeaveBalance)
+
+                            b.progressPaidLeave.progress = (data.paidLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
+                            b.progressSickLeave.progress = (data.sickLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
+
+                            officeLat = data.officeLatitude
+                            officeLon = data.officeLongitude
+                            geoRadius = data.geoRadiusMeters
+
+                            // Persist office settings for zero-lag restoration next time
+                            getSharedPreferences("office_settings", MODE_PRIVATE).edit {
+                                putFloat("lat", officeLat.toFloat())
+                                putFloat("lon", officeLon.toFloat())
+                                putInt("radius", geoRadius)
+                            }
+
+                            // Cache for next instant load
+                            cachePrefs.edit {
+                                putFloat("salary", data.monthlySalary.toFloat())
+                                putFloat("paid_leave", data.paidLeaveBalance.toFloat())
+                                putFloat("sick_leave", data.sickLeaveBalance.toFloat())
+                            }
+
+                            // Persist feature settings for background recovery worker
+                            getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                                putBoolean("enable_geo_fencing", data.enableGeoFencing)
+                                putBoolean("enable_dual_attendance", data.enableDualAttendance)
+                                putBoolean("enable_auto_punch", data.enableAutomaticGeofencePunching)
+                            }
+
+                            applyFeatureHierarchy(data)
+                            updateMapMarkers()
+                        }
+                    } else if (response.code() == 401) {
+                        // A 401 is an authentication/session signal, not a network
+                        // failure. Do one guarded authoritative check. Never let
+                        // concurrent realtime refreshes recurse into an auth/login
+                        // loop.
+                        if (dashboardAuthRecoveryInProgress) {
+                            Log.w("EmployeeHome", "Dashboard 401 while auth recovery is already running; keeping session state stable.")
+                            return@launch
+                        }
+
+                        dashboardAuthRecoveryInProgress = true
+                        try {
+                            Log.w("EmployeeHome", "Dashboard returned 401. Verifying the existing mobile session without clearing local login state... 🛰️")
+                            val recoverResponse = mobileApi.me("Bearer $token")
+                            if (recoverResponse.isSuccessful) {
+                                Log.i("EmployeeHome", "Authoritative mobile session is valid. Retrying dashboard after a short delay. ✅")
+                                delay(750L)
+                                if (sessionStore.isLoggedIn()) {
+                                    loadDashboard()
+                                }
+                            } else if (recoverResponse.code() == 401 || recoverResponse.code() == 403) {
+                                // A server-authenticated 401/403 is different from
+                                // a network failure. Preserve the current session
+                                // unless the server explicitly reports that this
+                                // mobile session was revoked/replaced.
+                                val state = recoverResponse.headers()["X-Mobile-Session-State"] ?: ""
+                                if (state.equals("SESSION_REVOKED", true) ||
+                                    state.equals("REAUTH_REQUIRED", true)) {
+                                    Log.e("EmployeeHome", "Mobile session was explicitly rejected by the server (${state}). Returning to login.")
+                                    goToLogin()
+                                } else {
+                                    Log.w("EmployeeHome", "Temporary authentication challenge without revocation state. Keeping persisted session and retrying.")
+                                    scheduleDashboardRetry(10_000L)
+                                }
+                            } else {
+                                // 5xx and other server responses are availability
+                                // failures, not logout decisions.
+                                Log.w("EmployeeHome", "Dashboard returned HTTP ${recoverResponse.code()}. Keeping session and retrying.")
+                                scheduleDashboardRetry(10_000L)
+                            }
+                        } finally {
+                            dashboardAuthRecoveryInProgress = false
+                        }
+                    } else {
+                        Log.e("EmployeeHome", "Dashboard error: ${response.code()} ❌")
+                        if (response.code() >= 500) scheduleDashboardRetry(5_000L)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("EmployeeHome", "Dashboard load failed: ${e.message} ⚠️")
+                scheduleDashboardRetry(10_000L)
             }
         }
     }
 
-    private fun loadDashboard() {
-        // Legacy REST dashboard call removed. The UI now observes Firebase state via SharedViewModel.
+    private fun scheduleDashboardRetry(delayMs: Long) {
+        if (isFinishing || isDestroyed) return
+        if (dashboardRetryJob?.isActive == true) return
+        dashboardRetryJob = lifecycleScope.launch {
+            delay(delayMs)
+            if (isActive && dashboardJob?.isActive != true) loadDashboard()
+        }
     }
 
-    private fun applyFeatureHierarchy(features: FeatureSettings, company: CompanySettings) {
+    private fun applyFeatureHierarchy(data: EmployeeDashboardResponse) {
         _binding?.let { b ->
             // 1. Geo-Fencing (Master GPS Switch)
-            if (features.enableGeoFencing) {
+            if (data.enableGeoFencing) {
                 b.cvMapContainer.visibility = View.VISIBLE
-                b.tvTrackingStatus.text = "GPS tracking is active 🛰️. Max range: ${company.geoRadiusMeters} m."
+                b.tvTrackingStatus.text = "GPS tracking is active 🛰️. Max range: ${data.geoRadiusMeters} m."
                 // Start service if permitted
                 requestTrackingPermissions()
             } else {
@@ -976,8 +1101,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             }
 
             // 2. Attendance Priority Logic for Manual Button
-            val biometricIsActive = !features.enableGeoFencing || features.enableDualAttendance
-            val autoPunchIsActive = features.enableGeoFencing && features.enableAutomaticGeofencePunching
+            val biometricIsActive = !data.enableGeoFencing || data.enableDualAttendance
+            val autoPunchIsActive = data.enableGeoFencing && data.enableAutomaticGeofencePunching
 
             // REQUIREMENT: PUNCH button visible ONLY IF no higher-priority source is active
             if (!biometricIsActive && !autoPunchIsActive) {
@@ -1040,6 +1165,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         applyCurrentThemeToMap()
 
         lifecycleScope.launch {
+            loadDashboard()
             signalR.start()
 
             // REQUIREMENT: Extreme 24/7 background check
@@ -1062,6 +1188,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     override fun onDestroy() {
         initJob?.cancel()
         roadRouteJob?.cancel()
+        dashboardJob?.cancel()
         dashboardRetryJob?.cancel()
         userMarkerAnimator?.cancel()
         userMarkerAnimator = null

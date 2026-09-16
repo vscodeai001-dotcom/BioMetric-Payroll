@@ -1,6 +1,5 @@
 package com.biometric.app.sync
 
-import android.util.Log
 import com.biometric.app.data.dao.LocalAdvancePaymentDao
 import com.biometric.app.data.dao.LocalAttendanceDao
 import com.biometric.app.data.dao.LocalAttendancePunchDao
@@ -75,16 +74,16 @@ class FirebaseRoomHydrator @Inject constructor(
         firebaseSync.startSync()
 
         hydrationJob = scope.launch {
-            launch { firebaseSync.getDataFlow<Shop>("shops").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} shops 🏬"); items.forEach { shopDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<Employee>("employees").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} employees 👥"); items.forEach { employeeDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<Attendance>("attendance").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} attendance records 📅"); items.forEach { attendanceDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<AdvancePayment>("advance_payments").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} advances 💰"); items.forEach { advanceDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<EmployeeHistory>("employee_history").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} history records 📜"); items.forEach { historyDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<ShopClosedDay>("shop_closed_days").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} closed days 🗓️"); items.forEach { closedDayDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<RegularizationRequest>("regularizations").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} regularizations ✅"); items.forEach { regularizationDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<AttendancePunch>("attendance_punches").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} punches 👊"); items.forEach { punchDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<LeaveRequest>("leave_requests").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} leave requests 🌴"); items.forEach { leaveDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<ResignationRequest>("resignation_requests").collectLatest { items -> Log.d("FirebaseHydrator", "Syncing ${items.size} resignations 🛑"); items.forEach { resignationDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<Shop>("shops").collectLatest { items -> items.forEach { shopDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<Employee>("employees").collectLatest { items -> items.forEach { employeeDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<Attendance>("attendance").collectLatest { items -> items.forEach { attendanceDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<AdvancePayment>("advance_payments").collectLatest { items -> items.forEach { advanceDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<EmployeeHistory>("employee_history").collectLatest { items -> items.forEach { historyDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<ShopClosedDay>("shop_closed_days").collectLatest { items -> items.forEach { closedDayDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<RegularizationRequest>("regularizations").collectLatest { items -> items.forEach { regularizationDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<AttendancePunch>("attendance_punches").collectLatest { items -> items.forEach { punchDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<LeaveRequest>("leave_requests").collectLatest { items -> items.forEach { leaveDao.upsert(it.toLocal()) } } }
+            launch { firebaseSync.getDataFlow<ResignationRequest>("resignation_requests").collectLatest { items -> items.forEach { resignationDao.upsert(it.toLocal()) } } }
 
             // Admin/SuperAdmin data. These listeners mirror changes and
             // deletions into the existing Room cache, so current UI flows

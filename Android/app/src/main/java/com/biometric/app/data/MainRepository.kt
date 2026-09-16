@@ -833,14 +833,4 @@ class MainRepository(
         firebaseRoomHydrator.start()
     }
 
-    // ---------------- SETTINGS ----------------
-    fun getFeatureSettings(): Flow<FeatureSettings?> {
-        return firebaseSync.getDataFlow<FeatureSettings>("feature_settings")
-            .map { it.firstOrNull() }
-    }
-
-    fun getCompanySettings(): Flow<CompanySettings?> {
-        return firebaseSync.getDataFlow<CompanySettings>("company_settings")
-            .map { it.firstOrNull() }
-    }
 }

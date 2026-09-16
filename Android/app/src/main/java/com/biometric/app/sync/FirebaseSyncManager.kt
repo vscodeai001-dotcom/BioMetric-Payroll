@@ -3,12 +3,26 @@ package com.biometric.app.sync
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.*
-import com.biometric.app.data.entity.*
+import com.biometric.app.data.entity.Attendance
+import com.biometric.app.data.entity.AttendancePunch
+import com.biometric.app.data.entity.Employee
+import com.biometric.app.data.entity.EmployeeHistory
+import com.biometric.app.data.entity.RecycleBinItem
+import com.biometric.app.data.entity.Reminder
+import com.biometric.app.data.entity.SalaryPayment
+import com.biometric.app.data.entity.SalarySnapshot
+import com.biometric.app.data.entity.Shop
+import com.biometric.app.data.entity.ShopClosedDay
+import com.biometric.app.data.entity.UserProfile
+import com.biometric.app.data.entity.AuditLog
+import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
 import javax.inject.Inject
@@ -21,7 +35,7 @@ class FirebaseSyncManager @Inject constructor(
 
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    val auth = FirebaseAuth.getInstance()
+    private val auth = FirebaseAuth.getInstance()
     private val database = FirebaseDatabase.getInstance().apply {
         try {
             setPersistenceEnabled(true)
@@ -54,10 +68,13 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     fun getOwnerUid(): String? {
-        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let {
-            return it
-        }
+        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let { return it }
 
+        // This installation is a single-owner payroll workspace. Firebase Auth
+        // users may be created manually before their custom owner_uid claim is
+        // refreshed. Use the canonical owner namespace as the data target;
+        // Realtime Database rules still decide whether the authenticated user
+        // is authorized to read/write it.
         return if (auth.currentUser != null) "biometricpayroll" else null
     }
 
@@ -65,15 +82,6 @@ class FirebaseSyncManager @Inject constructor(
         val uid = getOwnerUid() ?: return null
         return database.child("owners").child(uid)
     }
-
-    fun getOwnerRefFlow(): Flow<DatabaseReference?> = callbackFlow {
-        val listener = FirebaseAuth.AuthStateListener {
-            trySend(getOwnerRef())
-        }
-        auth.addAuthStateListener(listener)
-        trySend(getOwnerRef())
-        awaitClose { auth.removeAuthStateListener(listener) }
-    }.distinctUntilChanged()
 
     private var hasInitializedSync = false
 
@@ -100,46 +108,43 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("tax_declarations").keepSynced(true)
         ref.child("fbp_components").keepSynced(true)
         ref.child("fbp_declarations").keepSynced(true)
-        ref.child("feature_settings").keepSynced(true)
-        ref.child("company_settings").keepSynced(true)
 
         hasInitializedSync = true
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    inline fun <reified T : Any> getDataFlow(table: String): Flow<List<T>> = getOwnerRefFlow()
-        .filterNotNull()
-        .flatMapLatest { ownerRef ->
-            callbackFlow {
-                val ref = ownerRef.child(table)
-                val listener = object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        lastSyncTime.value = System.currentTimeMillis()
+    inline fun <reified T : Any> getDataFlow(table: String): Flow<List<T>> = callbackFlow {
+        val ref = getOwnerRef()?.child(table) ?: run {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
 
-                        syncScope.launch(Dispatchers.Default) {
-                            val list = mutableListOf<T>()
-                            for (childSnapshot in snapshot.children) {
-                                try {
-                                    val item = childSnapshot.getValue(T::class.java)
-                                    if (item != null) {
-                                        list.add(item)
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("FirebaseSyncManager", "Failed to convert to ${T::class.java.name} in table '$table'", e)
-                                }
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                lastSyncTime.value = System.currentTimeMillis()
+
+                syncScope.launch(Dispatchers.Default) {
+                    val list = mutableListOf<T>()
+                    for (childSnapshot in snapshot.children) {
+                        try {
+                            if (childSnapshot.hasChildren()) {
+                                childSnapshot.getValue(T::class.java)?.let { list.add(it) }
                             }
-                            trySend(list)
+                        } catch (e: Exception) {
+                            Log.e("FirebaseSyncManager", "Failed to convert to ${T::class.java.name} in table '$table'", e)
                         }
                     }
-                    override fun onCancelled(error: DatabaseError) {
-                        trySend(emptyList())
-                        this@callbackFlow.close()
-                    }
+                    trySend(list)
                 }
-                ref.addValueEventListener(listener)
-                awaitClose { ref.removeEventListener(listener) }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                trySend(emptyList())
+                this@callbackFlow.close()
             }
         }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
 
     inline fun <reified T : Any> getQueryFlow(query: Query): Flow<List<T>> = callbackFlow {
         val listener = object : ValueEventListener {
@@ -184,6 +189,12 @@ class FirebaseSyncManager @Inject constructor(
             close()
             return@callbackFlow
         }
+        // ChildEventListener replays existing children. Keep a bounded tail so
+        // reconnects can recover changes that happened while the device was
+        // offline, instead of using a five-second window that could silently
+        // miss events during a longer network outage. Neon remains the
+        // authoritative reconciliation store, so replaying a small tail is
+        // safe and idempotent at the UI/sync layer.
         val ref = database.child("owner_events").child(ownerUid)
             .orderByChild("timestamp")
             .limitToLast(200)
@@ -235,6 +246,7 @@ class FirebaseSyncManager @Inject constructor(
     fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED", recordId: String? = null) {
         val ownerUid = getOwnerUid()
         syncScope.launch {
+            // Firebase owner event is the Render-independent invalidation path.
             if (!ownerUid.isNullOrBlank()) {
                 runCatching {
                     publishClientApplicationChange(entity, action, recordId)
@@ -278,6 +290,12 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("Attendance", "MODIFIED")
     }
 
+    /**
+     * Render-independent GPS transport. The Android tracking service writes
+     * the current live position and an immutable history event in one Firebase
+     * multi-location update. Firebase is the independent realtime/tracking source; this path
+     * exists so a Render outage cannot stop GPS capture or realtime map updates.
+     */
     suspend fun pushLiveLocation(
         employeeId: Int,
         sessionId: String,
@@ -330,7 +348,15 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("AttendancePunch", "MODIFIED")
     }
     suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
-    
+    /**
+     * These three request types are intentionally accepted as Any.
+     * Different project revisions keep these request models in different
+     * packages, so FirebaseSyncManager must not create a compile-time
+     * dependency on a particular model package.
+     *
+     * The existing callers can continue passing their request objects.
+     * Firebase serializes the complete object exactly as before.
+     */
     suspend fun pushRegularization(request: Any) {
         val id = extractStringId(request, "id") ?: return
         getOwnerRef()?.child("regularizations")?.child(id)?.setValue(request)?.await()
@@ -359,6 +385,7 @@ class FirebaseSyncManager @Inject constructor(
             field.get(value)?.toString()?.takeIf { it.isNotBlank() }
         }.getOrNull()
     }
+
 
     fun pushSalaryPayment(p: SalaryPayment) {
         val ref = getOwnerRef() ?: return
@@ -393,6 +420,9 @@ class FirebaseSyncManager @Inject constructor(
                     Log.w("FirebaseSyncManager", "Atomic history write did not commit: ${error?.message ?: "not committed"}")
                     return
                 }
+                // The realtime invalidation is emitted only after Firebase
+                // confirms the atomic transaction. This prevents another
+                // platform from reloading before the history write exists.
                 notifyRealtimeChanged("EmployeeHistory", "MODIFIED")
             }
         })
