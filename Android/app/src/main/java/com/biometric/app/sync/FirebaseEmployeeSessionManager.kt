@@ -76,25 +76,68 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         now: Long,
         forceReplace: Boolean
     ): Pair<Boolean, Boolean> = suspendCancellableCoroutine { continuation ->
-        val resumed = AtomicBoolean(false)
-        ref.runTransaction(object : Transaction.Handler {
-            override fun doTransaction(currentData: MutableData): Transaction.Result {
-                val existingDevice = currentData.child("deviceId").getValue(String::class.java).orEmpty()
-                val exists = currentData.value != null && existingDevice.isNotBlank()
 
-                if (exists && existingDevice != deviceId && !forceReplace) {
+        val resumed = AtomicBoolean(false)
+
+        fun resumeOnce(result: Pair<Boolean, Boolean>) {
+            if (resumed.compareAndSet(false, true)) {
+                continuation.resume(result)
+            }
+        }
+
+        ref.runTransaction(object : Transaction.Handler {
+
+            override fun doTransaction(
+                currentData: MutableData
+            ): Transaction.Result {
+
+                val existingDevice =
+                    currentData
+                        .child("deviceId")
+                        .getValue(String::class.java)
+                        .orEmpty()
+
+                val exists =
+                    currentData.value != null &&
+                            existingDevice.isNotBlank()
+
+                /*
+                 * Existing employee session belongs to another device.
+                 * Do not replace unless forceReplace was explicitly requested.
+                 */
+                if (
+                    exists &&
+                    existingDevice != deviceId &&
+                    !forceReplace
+                ) {
                     return Transaction.abort()
                 }
 
+                /*
+                 * First successful registration.
+                 */
                 if (!exists) {
                     currentData.child("createdAt").value = now
                 }
 
+                /*
+                 * Current active device/session.
+                 */
                 currentData.child("deviceId").value = deviceId
                 currentData.child("employeeId").value = employeeId
                 currentData.child("ownerUid").value = ownerUid
-                currentData.child("uid").value = auth.currentUser?.uid.orEmpty()
+
+                /*
+                 * Firebase authenticated user UID.
+                 */
+                currentData.child("uid").value =
+                    auth.currentUser?.uid.orEmpty()
+
+                /*
+                 * Last activity timestamp.
+                 */
                 currentData.child("lastSeenAt").value = now
+
                 return Transaction.success(currentData)
             }
 
@@ -103,19 +146,47 @@ class FirebaseEmployeeSessionManager @Inject constructor(
                 committed: Boolean,
                 currentData: DataSnapshot?
             ) {
-                if (resumed.getAndSet(true)) return
-                if (error != null) {
-                    continuation.resume(false to false)
+
+                if (resumed.getAndSet(true)) {
                     return
                 }
-                if (committed) {
-                    continuation.resume(true to false)
-                } else {
-                    val currentDevice = currentData?.child("deviceId")?.getValue(String::class.java).orEmpty()
-                    continuation.resume(false to currentDevice.isNotBlank() && currentDevice != deviceId)
+
+                if (error != null) {
+                    continuation.resume(
+                        Pair(false, false)
+                    )
+                    return
                 }
+
+                if (committed) {
+                    continuation.resume(
+                        Pair(true, false)
+                    )
+                    return
+                }
+
+                /*
+                 * Transaction was not committed.
+                 *
+                 * If another device currently owns the session,
+                 * report the second value as true.
+                 */
+                val currentDevice =
+                    currentData
+                        ?.child("deviceId")
+                        ?.getValue(String::class.java)
+                        .orEmpty()
+
+                val anotherDeviceOwnsSession =
+                    currentDevice.isNotBlank() &&
+                            currentDevice != deviceId
+
+                continuation.resume(
+                    Pair(false, anotherDeviceOwnsSession)
+                )
             }
         })
+
         continuation.invokeOnCancellation {
             // Firebase SDK owns cancellation of the underlying transaction.
         }
