@@ -271,10 +271,10 @@ interface MobileApiService {
     suspend fun updateAdminExit(@Header("Authorization") authorization: String, @Path("id") id: Int, @Body request: ExitStatusRequest): Response<Unit>
 
     @POST("api/mobile/admin/finance/exit/{id}/calculate-settlement")
-    suspend fun calculateAdminSettlement(@Header("Authorization") authorization: String, @Path("id") id: Int): Response<Any>
+    suspend fun calculateAdminSettlement(@Header("Authorization") authorization: String, @Path("id") id: Int): Response<FnFSettlement>
 
     @POST("api/mobile/admin/finance/exit/settlements/finalize")
-    suspend fun finalizeAdminSettlement(@Header("Authorization") authorization: String, @Body request: Any): Response<Unit>
+    suspend fun finalizeAdminSettlement(@Header("Authorization") authorization: String, @Body request: FnFSettlement): Response<Unit>
 
     @GET("api/mobile/admin/finance/year-end")
     suspend fun adminYearEnd(@Header("Authorization") authorization: String, @Query("year") year: Int): Response<List<Any>>

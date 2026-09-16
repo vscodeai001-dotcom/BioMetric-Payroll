@@ -1,72 +1,65 @@
-# Offline Continuous Telemetry and Attendance Radius Enforcement
+# Complete Mirroring of Web Admin/Finance Modules to Native Android
 
-Implement a robust offline tracking system that ensures continuous GPS telemetry, local geofence validation (100m radius), and seamless synchronization with Firebase upon reconnection.
+Implement the missing Admin and Finance modules in the Android application to achieve a 1:1 functional mirror of the Web application, ensuring 24/7 standalone operation and real-time bidirectional sync via Firebase.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - **Geofence Caching**: Geofences will now be stored in the local Room database to allow offline validation.
-> - **Breach Logging**: Boundary breaches will be logged as `OfflineTrackingEvent` entries in the local database with type `BOUNDARY_BREACH`.
-> - **Battery Impact**: The high-priority native tracking loop (`TrackingService`) with a partial wake lock is designed for 24/7 operation. This may impact battery life, as requested.
+> - **Standalone Architecture**: New activities will interact directly with Firebase or `MainRepository` (which handles Room + Firebase), ensuring they work independently of the Web server's availability.
+> - **Real-time UI**: All new screens will be hooked into `AdminRealtimeCoordinator` to achieve the "zero-refresh" CRUD sync requirement.
+> - **UI Consistency**: Layouts will follow existing Android XML patterns but mirror the functional steps and logic found in the Blazor `.razor` components.
 
 ## Proposed Changes
 
-### Database Layer
+### 1. Exit Management Module
+Mirroring `Admin/ExitManagement.razor`.
 
-#### [MODIFY] [GeofenceLocation.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/data/entity/GeofenceLocation.kt)
-- Annotate the class with `@Entity(tableName = "geofences")`.
-- Mark `id` as `@PrimaryKey`.
+#### [NEW] [AdminExitManagementActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/AdminExitManagementActivity.kt)
+- List resignation requests with status filtering.
+- Two-step workflow:
+  - **Step 1: Approval**: Set approved last working day and remarks.
+  - **Step 2: Settlement**: FnF Calculator showing earnings (Unpaid Salary, Leave Encash, Gratuity, Bonus) and deductions (Notice recovery, Advances, Asset recovery).
+- Finalize & Terminate action.
 
-#### [NEW] [GeofenceDao.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/data/dao/GeofenceDao.kt)
-- Create `GeofenceDao` with methods: `insertAll`, `getAll`, `clearAll`.
+### 2. Finance Hub Module
+Mirroring `Finance/SalaryAdvancePage.razor` and `Finance/BonusEntryForm.razor`.
 
-#### [MODIFY] [AppLocalDatabase.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/data/AppLocalDatabase.kt)
-- Add `GeofenceLocation` to the `entities` list.
-- Add `abstract fun geofenceDao(): GeofenceDao`.
-- Increment database version and add migration if necessary (or rely on `fallbackToDestructiveMigration` if acceptable, but better to add a migration for `geofences` table).
+#### [NEW] [AdminFinanceActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/AdminFinanceActivity.kt)
+- **Salary Advances**: View all pending/paid advances, record new advances for any employee.
+- **Bonus Management**: record bonuses with descriptions.
+- **Tax Declarations**: Approval/Rejection workflow mirroring `AdminTaxDeclarations.razor`.
 
----
+### 3. FBP & Year-End Modules
 
-### UI Layer
+#### [NEW] [FbpManagerActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/FbpManagerActivity.kt)
+- Manage FBP Components (isActive, TaxExempt).
+- Approve/Reject employee FBP declarations.
 
-#### [MODIFY] [GeofenceManagerActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/GeofenceManagerActivity.kt)
-- Inject `GeofenceDao`.
-- In `listenToGeofences`, update the local Room cache whenever Firebase data changes.
-
----
-
-### Domain Layer (Tracking & Geofencing)
-
-#### [MODIFY] [TrackingService.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/domain/location/TrackingService.kt)
-- Inject `GeofenceDao` and `GeofenceManager`.
-- In `handleLocationUpdate`, fetch cached geofences and call `geofenceManager.validatePunchLocation`.
-- If `isInside` is false (and geofences are defined), log a `BOUNDARY_BREACH` event to `OfflineTrackingEventDao`.
-- Ensure the tracking loop remains high-priority and persistent.
-
-#### [MODIFY] [GeofenceManager.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/domain/location/GeofenceManager.kt)
-- Ensure Haversine formula is correctly used (already present).
+#### [NEW] [YearEndSummaryActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/YearEndSummaryActivity.kt)
+- View year-end tax summaries.
+- Consolidate button to run yearly logic.
 
 ---
 
-### Sync Layer
+### 4. Sync & Dispatcher Integration
 
-#### [MODIFY] [OfflineSyncWorker.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/domain/location/OfflineSyncWorker.kt)
-- Ensure it also syncs `OfflineTrackingEvent` logs to Firebase if they haven't been synced. (Need to check if `OfflineTrackingEvent` has a sync state).
+#### [MODIFY] [RealtimeUiDispatcher.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/RealtimeUiDispatcher.kt)
+- Add new activities to `activityMethods` to ensure they refresh automatically:
+  - `AdminExitManagementActivity` -> `loadRequests`
+  - `AdminFinanceActivity` -> `loadFinanceData`
+  - `FbpManagerActivity` -> `loadFbpData`
+  - `YearEndSummaryActivity` -> `loadSummaries`
+
+#### [MODIFY] [MainActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/MainActivity.kt)
+- Link the new activities to the "Dashboard" or "Reports" hubs.
+- Ensure `applyRolePermissions` handles visibility based on feature toggles.
 
 ---
 
 ## Verification Plan
 
-### Automated Tests
-- Unit tests for `GeofenceManager#calculateDistance` to verify Haversine accuracy.
-- Room database tests to verify geofence caching and event logging.
-
 ### Manual Verification
-- Deploy to device.
-- Add a geofence around current location.
-- Turn off internet.
-- Move outside the 100m radius.
-- Verify log entry in `offline_tracking_events` table (using Database Inspector).
-- Turn on internet.
-- Verify logs and coordinates are synced to Firebase.
-- Verify Admin dashboard updates in real-time.
+- **Exit Workflow**: Submit resignation from Employee app -> Approve and Settle from Admin Android app -> Verify status in Firebase and Employee app.
+- **Finance**: Add an advance from Admin Android app -> Verify it appears instantly in Employee app "Advances" section without refresh.
+- **Real-time Sync**: Open Admin app on one device and Employee app on another. Modify an advance/leave -> Verify UI updates instantly on the other device.
+- **Offline Tracking**: Verify `TrackingService` continues to log points while performing these admin actions.
