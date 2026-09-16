@@ -67,7 +67,16 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { connectedRef.removeEventListener(listener) }
     }
 
-    fun getOwnerUid(): String? = sessionStore.firebaseOwnerUid() ?: auth.currentUser?.uid
+    fun getOwnerUid(): String? {
+        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let { return it }
+
+        // This installation is a single-owner payroll workspace. Firebase Auth
+        // users may be created manually before their custom owner_uid claim is
+        // refreshed. Use the canonical owner namespace as the data target;
+        // Realtime Database rules still decide whether the authenticated user
+        // is authorized to read/write it.
+        return if (auth.currentUser != null) "biometricpayroll" else null
+    }
 
     fun getOwnerRef(): DatabaseReference? {
         val uid = getOwnerUid() ?: return null

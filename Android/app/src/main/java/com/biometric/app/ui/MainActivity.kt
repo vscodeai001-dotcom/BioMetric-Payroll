@@ -302,7 +302,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 // explicit usable viewport because it is created inside a
                 // nested dashboard container.
                 setUseDataConnection(true)
-                setTileSource(TileSourceFactory.MAPNIK)
+                setTileSource(adminOpenStreetMapSource())
                 setMultiTouchControls(true)
                 setBackgroundColor(Color.TRANSPARENT)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
@@ -319,9 +319,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 // NestedScrollView/card measurement can happen after the map is
                 // initialized. Recalculate its viewport after layout and again
                 // shortly after tiles begin loading.
-                addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                    post {
-                        invalidate()
+                addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                    if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
+                        post {
+                            invalidate()
+                            controller.setCenter(mapCenterFallback(this))
+                        }
                     }
                 }
                 post {

@@ -49,7 +49,7 @@
         android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:layout_marginBottom="64dp"
+        android:layout_marginBottom="80dp"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <androidx.core.widget.NestedScrollView
@@ -280,15 +280,16 @@
                                     android:layout_height="wrap_content"
                                     android:layout_gravity="top|end"
                                     android:orientation="horizontal"
-                                    android:padding="5dp"
-                                    android:layout_margin="10dp"
+                                    android:gravity="center"
+                                    android:padding="4dp"
+                                    android:layout_margin="8dp"
                                     android:background="@drawable/bg_premium_card"
                                     android:elevation="8dp">
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAdminMapZone"
                                         style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="44dp"
-                                        android:layout_height="40dp"
+                                        android:layout_width="42dp"
+                                        android:layout_height="38dp"
                                         android:minWidth="0dp"
                                         android:text="⌖"
                                         android:textSize="16sp"
@@ -297,8 +298,8 @@
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAdminMapLayer"
                                         style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="44dp"
-                                        android:layout_height="40dp"
+                                        android:layout_width="42dp"
+                                        android:layout_height="38dp"
                                         android:minWidth="0dp"
                                         android:text="▦"
                                         android:textSize="16sp"
@@ -307,8 +308,8 @@
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAdminMapFullscreen"
                                         style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="44dp"
-                                        android:layout_height="40dp"
+                                        android:layout_width="42dp"
+                                        android:layout_height="38dp"
                                         android:minWidth="0dp"
                                         android:text="⛶"
                                         android:textSize="16sp"
@@ -923,8 +924,9 @@
     <com.google.android.material.bottomnavigation.BottomNavigationView
         android:id="@+id/bottomNavigation"
         android:layout_width="match_parent"
-        android:layout_height="64dp"
+        android:layout_height="80dp"
         android:layout_gravity="bottom"
+        android:paddingBottom="16dp"
         android:background="?attr/colorSurface"
         app:elevation="16dp"
         app:menu="@menu/main_bottom_nav"

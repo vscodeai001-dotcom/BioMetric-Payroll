@@ -81,9 +81,30 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
             // If AppBarLayout is provided, apply top padding to it for a clean header look
             if (appBarLayout != null) {
                 appBarLayout.updatePadding(top = systemBars.top)
-                v.updatePadding(bottom = systemBars.bottom)
+
+                // Fixed bottom navigation consumes the navigation inset itself.
+                // Do not apply the same inset to the whole root, otherwise
+                // edge-to-edge screens get a duplicate bottom gap/overlap.
+                val bottomNavigation = v.findViewById<View?>(R.id.bottomNavigation)
+                if (bottomNavigation != null) {
+                    val baseBottomPadding =
+                        (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)
+                            ?: bottomNavigation.paddingBottom.also {
+                                bottomNavigation.setTag(
+                                    R.id.bottom_inset_base_padding,
+                                    it
+                                )
+                            }
+
+                    bottomNavigation.updatePadding(
+                        bottom = baseBottomPadding + systemBars.bottom
+                    )
+                    v.updatePadding(bottom = 0)
+                } else {
+                    v.updatePadding(bottom = systemBars.bottom)
+                }
             } else {
-                // Fallback: apply both top and bottom to the root view
+                // Fallback: apply both top and bottom to the root view.
                 v.updatePadding(
                     top = systemBars.top,
                     bottom = systemBars.bottom
