@@ -39,7 +39,6 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private readonly ILogger<FirebaseSqliteSyncService> _logger;
     private readonly FirebaseSyncWriteScope _firebaseSyncWriteScope;
     private readonly AttendanceRefreshService _refreshService;
-    private readonly GeoLocationService _geoLocationService;
 
     public FirebaseSqliteSyncService(
         IServiceScopeFactory scopeFactory,
@@ -47,8 +46,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         IConfiguration configuration,
         ILogger<FirebaseSqliteSyncService> logger,
         FirebaseSyncWriteScope firebaseSyncWriteScope,
-        AttendanceRefreshService refreshService,
-        GeoLocationService geoLocationService)
+        AttendanceRefreshService refreshService)
     {
         _scopeFactory = scopeFactory;
         _firebase = firebase;
@@ -56,7 +54,6 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         _logger = logger;
         _firebaseSyncWriteScope = firebaseSyncWriteScope;
         _refreshService = refreshService;
-        _geoLocationService = geoLocationService;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -171,6 +168,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         CancellationToken ct,
         bool evaluateAttendance = true)
     {
+        // GeoLocationService is scoped. FirebaseSqliteSyncService is a singleton
+        // hosted service, so resolve the scoped service inside a short-lived scope
+        // for each Firebase event instead of injecting it into the hosted service.
+        using var geoScope = _scopeFactory.CreateScope();
+        var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
+
         if (!eventData.HasValue || eventData.Value.ValueKind != JsonValueKind.Object) return;
 
         var path = (relativePath ?? "/").Trim('/');
@@ -262,7 +265,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (radius <= 0 || distance < 0)
         {
-            var calculated = await _geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
+            var calculated = await geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
             if (calculated.Success)
             {
                 distance = calculated.DistanceMeters;
@@ -282,11 +285,11 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             // rules remain unchanged. Historical replay never evaluates
             // attendance, preventing an old GPS snapshot from creating a new
             // punch or resurrecting an old session.
-            await _geoLocationService.UpdateGpsSessionAsync(
+            await geoLocationService.UpdateGpsSessionAsync(
                 employeeId, sessionId, latitude, longitude, accuracy, distance, radius, within, captured);
         }
 
-        await _geoLocationService.SaveLocationHistoryAsync(
+        await geoLocationService.SaveLocationHistoryAsync(
             employeeId, sessionId, latitude, longitude, distance, radius, within,
             accuracy, captured, captureSource);
 
@@ -300,6 +303,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         JsonElement? eventData,
         CancellationToken ct)
     {
+        // GeoLocationService is scoped. FirebaseSqliteSyncService is a singleton
+        // hosted service, so resolve the scoped service inside a short-lived scope
+        // for each Firebase event instead of injecting it into the hosted service.
+        using var geoScope = _scopeFactory.CreateScope();
+        var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
+
         if (!eventData.HasValue || eventData.Value.ValueKind != JsonValueKind.Object)
             return;
 
@@ -320,7 +329,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (string.IsNullOrWhiteSpace(endedText))
         {
-            var started = await _geoLocationService.StartGpsSessionAsync(employeeId, sessionId);
+            var started = await geoLocationService.StartGpsSessionAsync(employeeId, sessionId);
             if (started)
                 await _refreshService.NotifyLocationChangedAsync(employeeId);
 
@@ -330,7 +339,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return;
         }
 
-        await _geoLocationService.EndGpsSessionAsync(employeeId, sessionId, endReason);
+        await geoLocationService.EndGpsSessionAsync(employeeId, sessionId, endReason);
         await _refreshService.NotifyLocationChangedAsync(employeeId);
 
         _logger.LogInformation(
@@ -343,6 +352,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         JsonElement? eventData,
         CancellationToken ct)
     {
+        // GeoLocationService is scoped. FirebaseSqliteSyncService is a singleton
+        // hosted service, so resolve the scoped service inside a short-lived scope
+        // for each Firebase event instead of injecting it into the hosted service.
+        using var geoScope = _scopeFactory.CreateScope();
+        var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
+
         if (!eventData.HasValue)
         {
             var key = (relativePath ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
@@ -379,7 +394,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (radius <= 0 || distance < 0)
         {
-            var calculated = await _geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
+            var calculated = await geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
             if (calculated.Success)
             {
                 distance = calculated.DistanceMeters;
