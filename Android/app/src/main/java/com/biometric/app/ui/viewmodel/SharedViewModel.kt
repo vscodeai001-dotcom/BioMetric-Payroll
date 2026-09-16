@@ -1,11 +1,21 @@
 package com.biometric.app.ui.viewmodel
 
 import com.biometric.app.data.MainRepository
+import com.biometric.app.data.EmployeeStats
 import com.biometric.app.data.entity.*
+import com.biometric.app.util.DateRangeUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 import javax.inject.Singleton
+
+data class DashboardState(
+    val employee: Employee? = null,
+    val stats: EmployeeStats? = null,
+    val features: FeatureSettings = FeatureSettings(),
+    val company: CompanySettings = CompanySettings(),
+    val isLoading: Boolean = true
+)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
@@ -43,6 +53,36 @@ class SharedViewModel @Inject constructor(
 
     val allLeaveRequests: StateFlow<List<LeaveRequest>> = repository.allLeaveRequestsFlow
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val featureSettings: StateFlow<FeatureSettings> = repository.getFeatureSettings()
+        .map { it ?: FeatureSettings() }
+        .stateIn(scope, SharingStarted.Eagerly, FeatureSettings())
+
+    val companySettings: StateFlow<CompanySettings> = repository.getCompanySettings()
+        .map { it ?: CompanySettings() }
+        .stateIn(scope, SharingStarted.Eagerly, CompanySettings())
+
+    val dashboardState: StateFlow<DashboardState> = combine(
+        currentEmployee,
+        featureSettings,
+        companySettings
+    ) { employee, features, company ->
+        Triple(employee, features, company)
+    }.flatMapLatest { (employee, features, company) ->
+        if (employee == null) return@flatMapLatest flowOf(DashboardState(isLoading = true))
+
+        val range = DateRangeUtil.getRangeForPeriod("monthly", System.currentTimeMillis())
+        repository.getEmployeeStatsFlow(employee, range.first, range.second)
+            .map { stats ->
+                DashboardState(
+                    employee = employee,
+                    stats = stats,
+                    features = features,
+                    company = company,
+                    isLoading = false
+                )
+            }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), DashboardState())
 
     private val _selectedShop = MutableStateFlow<Shop?>(null)
     val selectedShop: StateFlow<Shop?> = _selectedShop.asStateFlow()

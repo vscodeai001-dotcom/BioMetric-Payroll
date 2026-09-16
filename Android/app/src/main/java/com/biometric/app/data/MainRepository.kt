@@ -833,4 +833,14 @@ class MainRepository(
         firebaseRoomHydrator.start()
     }
 
+    // ---------------- SETTINGS ----------------
+    fun getFeatureSettings(): Flow<FeatureSettings?> {
+        val uid = firebaseSync.getOwnerUid() ?: return flowOf(null)
+        return firebaseSync.getGlobalItemFlow<FeatureSettings>("owners/$uid/feature_settings")
+    }
+
+    fun getCompanySettings(): Flow<CompanySettings?> {
+        val uid = firebaseSync.getOwnerUid() ?: return flowOf(null)
+        return firebaseSync.getGlobalItemFlow<CompanySettings>("owners/$uid/company_settings")
+    }
 }

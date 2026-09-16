@@ -108,6 +108,8 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("tax_declarations").keepSynced(true)
         ref.child("fbp_components").keepSynced(true)
         ref.child("fbp_declarations").keepSynced(true)
+        ref.child("feature_settings").keepSynced(true)
+        ref.child("company_settings").keepSynced(true)
 
         hasInitializedSync = true
     }
