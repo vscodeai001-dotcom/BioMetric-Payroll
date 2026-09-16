@@ -27,6 +27,7 @@ class MobileSessionStore @Inject constructor(
     fun token(): String? = prefs.getString(KEY_TOKEN, null)
     fun employeeId(): Int = prefs.getInt(KEY_EMPLOYEE_ID, 0)
     fun employeeName(): String = prefs.getString(KEY_NAME, "") ?: ""
+    fun updateEmployeeName(name: String) { if (name.isNotBlank()) prefs.edit { putString(KEY_NAME, name) } }
     fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
     fun firebaseOwnerUid(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
     fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }

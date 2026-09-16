@@ -984,13 +984,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     // Firebase employee record. The email remains only the login
                     // identity, never the dashboard greeting.
                     if (employeeName != sessionStore.employeeName() && employeeName != "Employee") {
-                        sessionStore.saveLogin(
-                            token = sessionStore.token().orEmpty(),
-                            employeeId = sessionStore.employeeId(),
-                            name = employeeName,
-                            email = sessionStore.userEmail(),
-                            firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                        )
+                        sessionStore.updateEmployeeName(employeeName)
                     }
 
                     b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", data.monthlySalary)} 💰 💎"

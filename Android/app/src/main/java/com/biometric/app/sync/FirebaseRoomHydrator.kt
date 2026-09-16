@@ -65,6 +65,7 @@ class FirebaseRoomHydrator @Inject constructor(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
     private val listeners = mutableListOf<Pair<Query, ChildEventListener>>()
+    private val valueListeners = mutableListOf<Pair<Query, ValueEventListener>>()
 
     @Synchronized
     fun start() {
@@ -74,16 +75,21 @@ class FirebaseRoomHydrator @Inject constructor(
         firebaseSync.startSync()
 
         hydrationJob = scope.launch {
-            launch { firebaseSync.getDataFlow<Shop>("shops").collectLatest { items -> items.forEach { shopDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<Employee>("employees").collectLatest { items -> items.forEach { employeeDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<Attendance>("attendance").collectLatest { items -> items.forEach { attendanceDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<AdvancePayment>("advance_payments").collectLatest { items -> items.forEach { advanceDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<EmployeeHistory>("employee_history").collectLatest { items -> items.forEach { historyDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<ShopClosedDay>("shop_closed_days").collectLatest { items -> items.forEach { closedDayDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<RegularizationRequest>("regularizations").collectLatest { items -> items.forEach { regularizationDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<AttendancePunch>("attendance_punches").collectLatest { items -> items.forEach { punchDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<LeaveRequest>("leave_requests").collectLatest { items -> items.forEach { leaveDao.upsert(it.toLocal()) } } }
-            launch { firebaseSync.getDataFlow<ResignationRequest>("resignation_requests").collectLatest { items -> items.forEach { resignationDao.upsert(it.toLocal()) } } }
+            // Core employee/self-service tables are hydrated from raw snapshots.
+            // Firebase records migrated from the Web DB can store employee IDs as
+            // numbers while Android's existing Room/domain models use String.
+            // Raw mapping prevents Firebase's strict getValue() mapper from
+            // dropping the records and leaving the Admin dashboard empty.
+            observeValue("shops") { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
+            observeValue("employees") { it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) } }
+            observeValue("attendance") { it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) } }
+            observeValue("advance_payments") { it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) } }
+            observeValue("employee_history") { it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) } }
+            observeValue("shop_closed_days") { it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) } }
+            observeValue("regularizations") { it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) } }
+            observeValue("attendance_punches") { it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) } }
+            observeValue("leave_requests") { it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) } }
+            observeValue("resignation_requests") { it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) } }
 
             // Admin/SuperAdmin data. These listeners mirror changes and
             // deletions into the existing Room cache, so current UI flows
@@ -118,6 +124,87 @@ class FirebaseRoomHydrator @Inject constructor(
         }
     }
 
+    private fun observeValue(table: String, onUpsert: suspend (DataSnapshot) -> Unit) {
+        val ref = firebaseSync.getOwnerRef()?.child(table) ?: return
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                scope.launch {
+                    snapshot.children.forEach { child ->
+                        runCatching { onUpsert(child) }
+                            .onFailure { error ->
+                                android.util.Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${child.key}", error)
+                            }
+                    }
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                android.util.Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table", error.toException())
+            }
+        }
+        ref.addValueEventListener(listener)
+        // Keep the ValueEventListener alive for the application lifetime.
+        valueListeners += ref to listener
+    }
+
+    private fun DataSnapshot.raw(name: String): Any? {
+        val names = listOf(name, name.replaceFirstChar { it.lowercase() }, name.replaceFirstChar { it.uppercase() })
+        return names.asSequence().map { child(it) }.firstOrNull { it.exists() }?.value
+    }
+    private fun DataSnapshot.s(name: String): String? = raw(name)?.toString()?.takeIf { it.isNotBlank() }
+    private fun DataSnapshot.i(name: String): Int = when (val v = raw(name)) { is Number -> v.toInt(); else -> v?.toString()?.toIntOrNull() ?: 0 }
+    private fun DataSnapshot.l(name: String): Long = when (val v = raw(name)) { is Number -> v.toLong(); else -> v?.toString()?.toLongOrNull() ?: 0L }
+    private fun DataSnapshot.d(name: String): Double = when (val v = raw(name)) { is Number -> v.toDouble(); else -> v?.toString()?.toDoubleOrNull() ?: 0.0 }
+    private fun DataSnapshot.b(name: String, default: Boolean = false): Boolean = when (val v = raw(name)) { is Boolean -> v; else -> v?.toString()?.toBooleanStrictOrNull() ?: default }
+
+    private fun DataSnapshot.toShop() = Shop(
+        shopId = s("shopId") ?: key.orEmpty(), name = s("name").orEmpty(), location = s("location").orEmpty(),
+        openingDate = l("openingDate"), isActive = b("isActive", true), createdAt = l("createdAt"), updatedAt = l("updatedAt"),
+        latitude = d("latitude"), longitude = d("longitude")
+    )
+    private fun DataSnapshot.toEmployee() = Employee(
+        employeeId = s("employeeId") ?: l("employeeId").toString().takeIf { it != "0" } ?: key.orEmpty(),
+        shopId = s("shopId").orEmpty(), name = s("name").orEmpty(), role = s("role") ?: "Staff", isActive = b("isActive", true),
+        syncState = 1, lastModified = l("lastModified")
+    )
+    private fun DataSnapshot.toAttendance() = Attendance(
+        attendanceId = s("attendanceId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(),
+        shopId = s("shopId").orEmpty(), checkInTime = l("checkInTime"), checkOutTime = l("checkOutTime").takeIf { it > 0 },
+        type = s("type") ?: "WORK", hoursWorked = d("hoursWorked"), syncState = 1
+    )
+    private fun DataSnapshot.toAdvancePayment() = AdvancePayment(
+        advanceId = s("advanceId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(),
+        shopId = s("shopId").orEmpty(), amount = d("amount"), date = l("date"), isRecovered = b("isRecovered"), recoveryPaymentId = s("recoveryPaymentId")
+    )
+    private fun DataSnapshot.toEmployeeHistory() = EmployeeHistory(
+        historyId = s("historyId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(), version = i("version"),
+        type = s("type") ?: "SALARY", salaryType = s("salaryType").orEmpty(), oldValue = d("oldValue"), newValue = d("newValue"),
+        shiftStart = s("shiftStart").orEmpty(), shiftEnd = s("shiftEnd").orEmpty(), breakHours = d("breakHours"),
+        changeDate = l("changeDate"), effectiveDate = l("effectiveDate"), endDate = l("endDate").takeIf { it > 0 }, changeReason = s("changeReason"), salaryRate = d("salaryRate")
+    )
+    private fun DataSnapshot.toShopClosedDay() = ShopClosedDay(
+        id = s("id") ?: key.orEmpty(), shopId = s("shopId").orEmpty(), date = l("date"), paySalary = b("paySalary", true), reason = s("reason"), affectedEmployeeIds = emptyList()
+    )
+    private fun DataSnapshot.toRegularization() = RegularizationRequest(
+        id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(), date = s("date").orEmpty(),
+        punchType = s("punchType") ?: "IN", originalTime = l("originalTime").takeIf { it > 0 }, requestedTime = l("requestedTime"),
+        reason = s("reason").orEmpty(), status = s("status") ?: "Pending", adminRemarks = s("adminRemarks"), submittedAt = l("submittedAt")
+    )
+    private fun DataSnapshot.toAttendancePunch() = AttendancePunch(
+        punchId = s("punchId") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), date = s("date").orEmpty(),
+        type = s("type") ?: "IN", timestamp = l("timestamp"), latitude = d("latitude"), longitude = d("longitude"), accuracy = d("accuracy").toFloat(),
+        source = s("source") ?: "GEOFENCE", status = s("status") ?: "PENDING"
+    )
+    private fun DataSnapshot.toLeaveRequest() = LeaveRequest(
+        id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(),
+        leaveType = s("leaveType") ?: "Casual Leave", startDate = l("startDate"), endDate = l("endDate"), reason = s("reason").orEmpty(),
+        status = s("status") ?: "Pending", adminNotes = s("adminNotes"), isHalfDay = b("isHalfDay"), createdAt = l("createdAt")
+    )
+    private fun DataSnapshot.toResignation() = ResignationRequest(
+        requestId = s("requestId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(), submissionDate = l("submissionDate"),
+        desiredLastWorkingDay = l("desiredLastWorkingDay"), reason = s("reason"), status = s("status") ?: "Pending",
+        approvedLastWorkingDay = l("approvedLastWorkingDay").takeIf { it > 0 }, adminRemarks = s("adminRemarks"), isSettled = b("isSettled")
+    )
+
     private fun observe(
         table: String,
         onUpsert: suspend (DataSnapshot) -> Unit,
@@ -147,6 +234,8 @@ class FirebaseRoomHydrator @Inject constructor(
         hydrationJob = null
         listeners.forEach { (query, listener) -> query.removeEventListener(listener) }
         listeners.clear()
+        valueListeners.forEach { (query, listener) -> query.removeEventListener(listener) }
+        valueListeners.clear()
     }
 
     private fun DataSnapshot.childValue(name: String): Any? {

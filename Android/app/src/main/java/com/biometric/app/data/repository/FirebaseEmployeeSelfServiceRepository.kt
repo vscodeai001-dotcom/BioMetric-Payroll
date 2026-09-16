@@ -62,28 +62,27 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     private suspend fun employee(): Employee? {
         val id = employeeId()
-        val direct = ownerRef().child("employees").child(id).get().await()
+        val employeesRef = ownerRef().child("employees")
+
+        // Firebase data migrated from the Web database can contain numeric
+        // employeeId values, while the Android Employee model uses String.
+        // Never use getValue(Employee::class.java) here because Firebase's
+        // automatic mapper is strict about String/Int mismatches.
+        val direct = employeesRef.child(id).get().await()
         if (direct.exists()) {
-            return direct.getValue(Employee::class.java)?.also {
-                if (it.employeeId.isBlank()) it.employeeId = id
-            }
+            return direct.toEmployee(id)
         }
 
-        // The canonical Firebase contract uses employees/{employeeId}.
-        // This fallback also supports records migrated with a legacy key,
-        // but it is only attempted when the direct canonical key is absent.
+        // Compatibility fallback for legacy Firebase keys. The canonical key
+        // remains employees/{employeeId}.
         val email = sessionStore.userEmail().trim()
         if (email.isNotBlank()) {
-            val byEmail = ownerRef().child("employees").get().await().children
-                .firstOrNull {
-                    it.child("email").getValue(String::class.java)?.equals(email, true) == true
-                }
-            if (byEmail != null) {
-                return byEmail.getValue(Employee::class.java)?.also {
-                    if (it.employeeId.isBlank()) it.employeeId = id
-                }
+            val byEmail = employeesRef.get().await().children.firstOrNull { snapshot ->
+                snapshot.string("email").equals(email, ignoreCase = true)
             }
+            if (byEmail != null) return byEmail.toEmployee(id)
         }
+
         return null
     }
 
@@ -95,9 +94,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun nextPunchType(): String {
         val id = employeeId()
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val punches = readList("attendance_punches") {
-            runCatching { it.getValue(AttendancePunch::class.java) }.getOrNull()
-        }.filter { it.staffId == id && (it.date == today || formatDate(it.timestamp) == today) }
+        val punches = readList("attendance_punches") { it.toAttendancePunch() }.filter { it.staffId == id && (it.date == today || formatDate(it.timestamp) == today) }
             .sortedBy { it.timestamp }
         val last = punches.lastOrNull()?.type?.uppercase(Locale.US)
         return if (last == "IN") "OUT" else "IN"
@@ -120,14 +117,174 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         awaitClose { ref.removeEventListener(listener) }
     }
 
+    private fun DataSnapshot.valueOf(name: String): Any? {
+        val exact = child(name)
+        if (exact.exists()) return exact.value
+        val lower = child(name.replaceFirstChar { it.lowercase() })
+        if (lower.exists()) return lower.value
+        val upper = child(name.replaceFirstChar { it.uppercase() })
+        if (upper.exists()) return upper.value
+        return null
+    }
+
+    private fun DataSnapshot.bool(name: String, default: Boolean = false): Boolean =
+        when (val v = valueOf(name)) {
+            is Boolean -> v
+            else -> v?.toString()?.toBooleanStrictOrNull() ?: default
+        }
+
+    private fun DataSnapshot.float(name: String): Float = double(name).toFloat()
+
+    private fun DataSnapshot.toEmployee(fallbackId: String): Employee = Employee(
+        employeeId = string("employeeId")?.takeIf { it.isNotBlank() } ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString() ?: fallbackId,
+        shopId = string("shopId").orEmpty(),
+        name = string("name").orEmpty(),
+        phone = string("phone").orEmpty(),
+        email = string("email"),
+        biometricId = string("biometricId").orEmpty(),
+        role = string("role") ?: "Staff",
+        salaryType = string("salaryType") ?: "MONTHLY_FIXED",
+        salaryRate = double("salaryRate"),
+        paidLeaveBalance = double("paidLeaveBalance"),
+        sickLeaveBalance = double("sickLeaveBalance"),
+        salaryCalculationMethod = string("salaryCalculationMethod") ?: "Pro-Rata Hourly",
+        shiftStart = string("shiftStart") ?: "10:00",
+        shiftEnd = string("shiftEnd") ?: "22:00",
+        breakHours = double("breakHours"),
+        shift2Start = string("shift2Start"),
+        shift2End = string("shift2End"),
+        weekendShiftStart = string("weekendShiftStart"),
+        weekendShiftEnd = string("weekendShiftEnd"),
+        weekendBreakHours = valueOf("weekendBreakHours")?.toString()?.toDoubleOrNull(),
+        weekendShift2Start = string("weekendShift2Start"),
+        weekendShift2End = string("weekendShift2End"),
+        compOffDayOfWeek = valueOf("compOffDayOfWeek")?.toString()?.toIntOrNull(),
+        otRule = string("otRule") ?: "No Overtime",
+        otFlatRate = double("otFlatRate"),
+        otRateMultiplier = double("otRateMultiplier").takeIf { it != 0.0 } ?: 1.0,
+        dailyAllowance = double("dailyAllowance"),
+        nightShiftAllowance = double("nightShiftAllowance"),
+        allowanceEffectiveDate = long("allowanceEffectiveDate"),
+        isActive = bool("isActive", true),
+        hireDate = long("hireDate").takeIf { it > 0 } ?: System.currentTimeMillis(),
+        dob = long("dob").takeIf { it > 0 },
+        terminateDate = long("terminateDate").takeIf { it > 0 },
+        enableShiftRotation = bool("enableShiftRotation"),
+        rotationGroup = string("rotationGroup"),
+        shiftRotationPattern = string("shiftRotationPattern"),
+        createdAt = long("createdAt").takeIf { it > 0 } ?: System.currentTimeMillis(),
+        isBonusEligibleRule = bool("isBonusEligibleRule", true),
+        isPaidLeaveEligibleRule = bool("isPaidLeaveEligibleRule", true),
+        paidLeaveOnWeekdays = bool("paidLeaveOnWeekdays", true),
+        paidLeaveOnWeekends = bool("paidLeaveOnWeekends"),
+        bankAccountNumber = string("bankAccountNumber"),
+        bankIfscCode = string("bankIfscCode"),
+        bankName = string("bankName"),
+        uanNumber = string("uanNumber"),
+        esiNumber = string("esiNumber"),
+        enablePf = bool("enablePf"),
+        enableEsi = bool("enableEsi"),
+        tdsRatePercent = double("tdsRatePercent"),
+        lastActive = long("lastActive").takeIf { it > 0 },
+        lastModified = long("lastModified").takeIf { it > 0 } ?: System.currentTimeMillis()
+    )
+
+    private fun DataSnapshot.toAttendance(): Attendance = Attendance(
+        attendanceId = string("attendanceId") ?: key.orEmpty(),
+        employeeId = string("employeeId") ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        shopId = string("shopId").orEmpty(),
+        checkInTime = long("checkInTime"),
+        checkOutTime = long("checkOutTime").takeIf { it > 0 },
+        type = string("type") ?: "WORK",
+        hoursWorked = double("hoursWorked"),
+        shiftStart = string("shiftStart") ?: "10:00",
+        shiftEnd = string("shiftEnd") ?: "22:00",
+        shift2Start = string("shift2Start"),
+        shift2End = string("shift2End"),
+        breakHours = double("breakHours"),
+        salaryType = string("salaryType") ?: "MONTHLY_FIXED",
+        salaryRate = double("salaryRate"),
+        note = string("note"),
+        synced = bool("synced", true),
+        lateDeduction = double("lateDeduction"),
+        otHours = double("otHours"),
+        createdAt = long("createdAt")
+    )
+
+    private fun DataSnapshot.toAttendancePunch(): AttendancePunch = AttendancePunch(
+        punchId = string("punchId") ?: key.orEmpty(),
+        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        date = string("date").orEmpty(),
+        type = string("type") ?: "IN",
+        timestamp = long("timestamp"),
+        latitude = double("latitude"),
+        longitude = double("longitude"),
+        accuracy = float("accuracy"),
+        geofenceId = string("geofenceId"),
+        distanceFromGeofence = double("distanceFromGeofence"),
+        photoId = string("photoId"),
+        deviceId = string("deviceId").orEmpty(),
+        source = string("source") ?: "GEOFENCE",
+        status = string("status") ?: "PENDING"
+    )
+
+    private fun DataSnapshot.toLeaveRequest(): LeaveRequest = LeaveRequest(
+        id = string("id") ?: key.orEmpty(),
+        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        staffName = string("staffName").orEmpty(),
+        leaveType = string("leaveType") ?: "Casual Leave",
+        startDate = long("startDate"),
+        endDate = long("endDate"),
+        reason = string("reason").orEmpty(),
+        status = string("status") ?: "Pending",
+        adminNotes = string("adminNotes"),
+        isHalfDay = bool("isHalfDay"),
+        createdAt = long("createdAt")
+    )
+
+    private fun DataSnapshot.toAdvancePayment(): AdvancePayment = AdvancePayment(
+        advanceId = string("advanceId") ?: key.orEmpty(),
+        employeeId = string("employeeId") ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        shopId = string("shopId").orEmpty(),
+        amount = double("amount"),
+        date = long("date"),
+        isRecovered = bool("isRecovered"),
+        recoveryPaymentId = string("recoveryPaymentId")
+    )
+
+    private fun DataSnapshot.toRegularizationRequest(): RegularizationRequest = RegularizationRequest(
+        id = string("id") ?: key.orEmpty(),
+        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        staffName = string("staffName").orEmpty(),
+        date = string("date").orEmpty(),
+        punchType = string("punchType") ?: "IN",
+        originalTime = long("originalTime").takeIf { it > 0 },
+        requestedTime = long("requestedTime"),
+        reason = string("reason").orEmpty(),
+        status = string("status") ?: "Pending",
+        adminRemarks = string("adminRemarks"),
+        submittedAt = long("submittedAt")
+    )
+
+    private fun DataSnapshot.toResignationRequest(): ResignationRequest = ResignationRequest(
+        requestId = string("requestId") ?: key.orEmpty(),
+        employeeId = string("employeeId") ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        submissionDate = long("submissionDate"),
+        desiredLastWorkingDay = long("desiredLastWorkingDay"),
+        reason = string("reason"),
+        status = string("status") ?: "Pending",
+        approvedLastWorkingDay = long("approvedLastWorkingDay").takeIf { it > 0 },
+        adminRemarks = string("adminRemarks"),
+        isSettled = bool("isSettled")
+    )
+
     private suspend fun <T : Any> readList(table: String, mapper: (DataSnapshot) -> T?): List<T> {
         val snapshot = ownerRef().child(table).get().await()
         return snapshot.children.mapNotNull { mapper(it) }
     }
 
     private fun DataSnapshot.string(name: String): String? =
-        child(name).getValue(String::class.java)
-            ?: child(name.replaceFirstChar { it.uppercase() }).getValue(String::class.java)
+        valueOf(name)?.toString()?.takeIf { it.isNotBlank() }
 
     private fun DataSnapshot.long(name: String): Long {
         val value = child(name).value ?: child(name.replaceFirstChar { it.uppercase() }).value
@@ -188,7 +345,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val emp = employee() ?: return emptyList()
         val start = LocalDate.parse(from, dateFormatter)
         val end = LocalDate.parse(to, dateFormatter)
-        val attendance = readList("attendance") { runCatching { it.getValue(Attendance::class.java) }.getOrNull() }
+        val attendance = readList("attendance") { it.toAttendance() }
             .filter { it.employeeId == emp.employeeId }
         val punches = readList("attendance_punches") { runCatching { it.getValue(AttendancePunch::class.java) }.getOrNull() }
             .filter { it.staffId == emp.employeeId }
@@ -269,7 +426,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun leaves(): List<LeaveDto> {
         val id = employeeId()
-        val requests = readList("leave_requests") { runCatching { it.getValue(LeaveRequest::class.java) }.getOrNull() }
+        val requests = readList("leave_requests") { it.toLeaveRequest() }
             .filter { it.staffId == id }
         val result = mutableListOf<LeaveDto>()
         requests.forEach { req ->
@@ -303,7 +460,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun advances(): List<MoneyEntryDto> {
         val id = employeeId()
-        return readList("advance_payments") { runCatching { it.getValue(AdvancePayment::class.java) }.getOrNull() }
+        return readList("advance_payments") { it.toAdvancePayment() }
             .filter { it.employeeId == id }.sortedByDescending { it.date }
             .map {
                 MoneyEntryDto(
@@ -347,7 +504,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }.sortedByDescending { it.date }
 
     suspend fun regularizations(): List<RegularizationDto> =
-        readList("regularizations") { runCatching { it.getValue(RegularizationRequest::class.java) }.getOrNull() }
+        readList("regularizations") { it.toRegularizationRequest() }
             .filter { it.staffId == employeeId() }.sortedByDescending { it.submittedAt }
             .map {
                 RegularizationDto(stableIntId(it.id), it.date, it.punchType.equals("IN", true),
@@ -370,7 +527,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun resignation(): ResignationDto? =
-        readList("resignation_requests") { runCatching { it.getValue(ResignationRequest::class.java) }.getOrNull() }
+        readList("resignation_requests") { it.toResignationRequest() }
             .filter { it.employeeId == employeeId() }.maxByOrNull { it.submissionDate }?.let {
                 ResignationDto(stableIntId(it.requestId), formatDate(it.submissionDate),
                     formatDate(it.desiredLastWorkingDay), it.reason.orEmpty(), it.status,
