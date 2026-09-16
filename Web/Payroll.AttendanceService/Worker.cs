@@ -98,6 +98,24 @@ namespace Payroll.AttendanceService
         {
             _logger.LogInformation("Attendance Service starting up...");
 
+            // The Worker may be launched independently from the Web application
+            // (for example from Visual Studio or as a Windows Service). Ensure
+            // the local SQLite compatibility schema exists before any query is
+            // executed. This is non-destructive and does not alter attendance
+            // calculations or business rules.
+            try
+            {
+                using var initScope = _serviceProvider.CreateScope();
+                var initDb = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                await initDb.Database.EnsureCreatedAsync(stoppingToken);
+                _logger.LogInformation("Local SQLite compatibility database is ready.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to initialize the local SQLite compatibility database.");
+                throw;
+            }
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 // Attendance mode is controlled from the shared FeatureSettings row.
