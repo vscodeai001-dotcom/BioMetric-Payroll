@@ -49,6 +49,7 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
+    @Inject lateinit var firebaseEmployeeSessionManager: com.biometric.app.sync.FirebaseEmployeeSessionManager
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -285,9 +286,81 @@ class LoginActivity : MotionBaseActivity() {
                     return@launch
                 }
 
+                val firebaseOwnerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
+                    ?: "biometricpayroll"
+                val firebaseEmployeeId = when (val value = claims["employee_id"]) {
+                    is Number -> value.toInt()
+                    else -> value?.toString()?.toIntOrNull() ?: 0
+                }
+
+                // Once the employee's Firebase account has been provisioned with
+                // the canonical claims, establish the single-device session
+                // directly in Firebase. No Web login/session bridge is needed.
+                if (firebaseEmployeeId > 0) {
+                    val sessionResult = firebaseEmployeeSessionManager.acquire(
+                        employeeId = firebaseEmployeeId,
+                        ownerUid = firebaseOwnerUid,
+                        forceReplace = forceReplace
+                    )
+
+                    if (sessionResult.success) {
+                        val displayName = firebaseUser.displayName
+                            ?.takeIf { it.isNotBlank() }
+                            ?: email.substringBefore("@")
+                        val firebaseToken = tokenResult.token!!
+
+                        mobileSessionStore.saveLogin(
+                            token = firebaseToken,
+                            employeeId = firebaseEmployeeId,
+                            name = displayName,
+                            email = firebaseUser.email ?: email,
+                            firebaseOwnerUid = firebaseOwnerUid
+                        )
+
+                        applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
+                            putBoolean("is_logged_in", true)
+                            putString("user_role", UserRole.STAFF.name)
+                            putInt("employee_id", firebaseEmployeeId)
+                            putString("employee_name", displayName)
+                            putString("user_uid", firebaseUser.uid)
+                        }
+                        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
+                            putBoolean("has_logged_in_before", true)
+                            putBoolean("is_locked", false)
+                            putString("user_role", UserRole.STAFF.name)
+                            putString("user_uid", firebaseUser.uid)
+                            putInt("employee_id", firebaseEmployeeId)
+                            putString("employee_name", displayName)
+                            putLong("last_active_time", System.currentTimeMillis())
+                        }
+
+                        adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                        setLoading(false)
+                        proceedToMain()
+                        return@launch
+                    }
+
+                    if (sessionResult.conflict) {
+                        setLoading(false)
+                        AlertDialog.Builder(this@LoginActivity)
+                            .setTitle("Employee already logged in")
+                            .setMessage("This employee account is already active on another device. Replace that active session with this device?")
+                            .setPositiveButton("Replace & Login") { _, _ ->
+                                handleEmployeeLogin(email, pass, forceReplace = true)
+                            }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                        return@launch
+                    }
+                }
+
+                // Firebase account is valid but its employee claims have not
+                // been provisioned yet. Keep the established compatibility
+                // bridge as a one-time migration path. Normal provisioned
+                // Employee logins never reach this branch.
                 handleFirebaseEmployeeSession(
                     email = email,
-                    firebaseIdToken = tokenResult!!.token!!,
+                    firebaseIdToken = tokenResult.token!!,
                     forceReplace = forceReplace
                 )
                 return@launch

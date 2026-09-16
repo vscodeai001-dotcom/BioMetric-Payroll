@@ -1,5 +1,12 @@
 {
   "rules": {
+    "employee_sessions": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.hasChildren(['deviceId','employeeId','ownerUid','uid','lastSeenAt']) && newData.child('uid').val() == $uid"
+      }
+    },
     ".read": false,
     ".write": false,
     "tracking": {

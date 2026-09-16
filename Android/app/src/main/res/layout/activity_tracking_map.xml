@@ -103,21 +103,21 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <LinearLayout
+        <GridLayout
             android:id="@+id/mapCommandRail"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:columnCount="2"
             android:padding="5dp"
             android:background="@drawable/bg_premium_card"
             android:elevation="10dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
             android:layout_margin="14dp">
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapFit" android:layout_width="wrap_content" android:layout_height="42dp" android:minWidth="0dp" android:text="⌖" android:textSize="17sp" android:contentDescription="Fit all staff" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapLayer" android:layout_width="wrap_content" android:layout_height="42dp" android:minWidth="0dp" android:text="▦" android:textSize="17sp" android:contentDescription="Change map layer" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapFullscreen" android:layout_width="wrap_content" android:layout_height="42dp" android:minWidth="0dp" android:text="⛶" android:textSize="17sp" android:contentDescription="Full screen map" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
-        </LinearLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapFit" android:layout_width="42dp" android:layout_height="42dp" android:minWidth="0dp" android:text="⌖" android:textSize="17sp" android:contentDescription="Fit all staff" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapLayer" android:layout_width="42dp" android:layout_height="42dp" android:minWidth="0dp" android:text="▦" android:textSize="17sp" android:contentDescription="Change map layer" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnMapFullscreen" android:layout_width="42dp" android:layout_height="42dp" android:minWidth="0dp" android:text="⛶" android:textSize="17sp" android:contentDescription="Full screen map" app:cornerRadius="12dp" style="@style/Widget.Material3.Button.TextButton"/>
+        </GridLayout>
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardLegend"

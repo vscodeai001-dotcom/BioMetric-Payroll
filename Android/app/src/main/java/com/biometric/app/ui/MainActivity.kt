@@ -290,6 +290,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         runCatching {
             OsmConfig.getInstance().userAgentValue = "BioMetricPayroll_Android_" + packageName
             OsmConfig.getInstance().tileDownloadThreads = 4
+            OsmConfig.getInstance().tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
         }
 
         val maps = listOf(binding.adminMapView, binding.commandCenterMapView)
@@ -301,8 +302,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 // explicit usable viewport because it is created inside a
                 // nested dashboard container.
                 setUseDataConnection(true)
-                setTileSource(adminOpenStreetMapSource())
+                setTileSource(TileSourceFactory.MAPNIK)
                 setMultiTouchControls(true)
+                setBackgroundColor(Color.TRANSPARENT)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 minZoomLevel = 3.0
                 maxZoomLevel = 20.0
@@ -323,7 +325,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     }
                 }
                 post {
-                    onResume()
                     invalidate()
                     controller.setCenter(mapCenterFallback(this))
                     postDelayed({
@@ -396,7 +397,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             adminMapLayerIndex = (adminMapLayerIndex + 1) % 3
             val filter = when (adminMapLayerIndex) {
                 0 -> {
-                    binding.adminMapView.setTileSource(adminOpenStreetMapSource())
+                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
                     null
                 }
                 1 -> {
@@ -404,7 +405,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     null
                 }
                 else -> {
-                    binding.adminMapView.setTileSource(adminOpenStreetMapSource())
+                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
                     ColorMatrixColorFilter(floatArrayOf(
                         0.25f, 0f, 0f, 0f, 0f,
                         0f, 0.25f, 0f, 0f, 0f,

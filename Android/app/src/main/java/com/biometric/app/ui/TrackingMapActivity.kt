@@ -159,7 +159,13 @@ class TrackingMapActivity : MotionBaseActivity() {
     }
 
     private fun setupMap() {
+        runCatching {
+            OsmConfig.getInstance().userAgentValue = "BioMetricPayroll_Android_" + packageName
+            OsmConfig.getInstance().tileDownloadThreads = 4
+            OsmConfig.getInstance().tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
+        }
         binding.mapview.apply {
+            setUseDataConnection(true)
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
