@@ -25,6 +25,25 @@
             ".validate": "newData.hasChildren(['EmployeeId','SessionId','Latitude','Longitude','Timestamp']) && newData.child('EmployeeId').val() == $employeeId"
           }
         }
+      },
+      "sessions": {
+        "$employeeId": {
+          ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+          "$sessionId": {
+            ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+            ".write": "auth != null && auth.token.employee_id == $employeeId",
+            ".validate": "newData.child('EmployeeId').val() == $employeeId && newData.child('SessionId').val() == $sessionId"
+          }
+        }
+      }
+    },
+    "mobile_auth_events": {
+      "$employeeId": {
+        "$eventId": {
+          ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+          ".write": "auth != null && auth.token.employee_id == $employeeId && !data.exists()",
+          ".validate": "newData.hasChildren(['eventId','eventType','employeeId','firebaseUid','deviceId','platform','timestamp']) && newData.child('employeeId').val() == $employeeId"
+        }
       }
     },
     "owner_events": {
@@ -57,8 +76,8 @@
         ".write": false,
         "employees": {
           "$employeeId": {
-            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
-            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
             ".validate": "newData.child('employeeId').val() == $employeeId || newData.child('EmployeeId').val() == $employeeId"
           }
         },
@@ -100,8 +119,8 @@
         },
         "advance_payments": {
           "$id": {
-            ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
-            ".write": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == newData.child('employeeId').val() || auth.token.employee_id == newData.child('EmployeeId').val() || auth.token.employee_id == newData.child('staffId').val())",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == newData.child('employeeId').val() || auth.token.employee_id == newData.child('EmployeeId').val() || auth.token.employee_id == newData.child('staffId').val())"
           }
         },
         "employee_history": {

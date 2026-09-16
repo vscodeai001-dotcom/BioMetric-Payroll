@@ -132,6 +132,22 @@ class TrackingService : Service() {
                     wakeLock?.acquire()
                 }
                 
+                // Establish the Firebase session before the first GPS fix.
+                // Web creates its existing local compatibility session from this
+                // event, which allows the existing geofence/attendance engine
+                // and history projection to process Android GPS without the
+                // legacy mobile API.
+                serviceScope.launch {
+                    val sessionId = sessionStore.gpsSessionId()
+                    val started = firebaseSync.startGpsSession(
+                        sessionStore.employeeId(),
+                        sessionId
+                    )
+                    if (!started) {
+                        Log.w("TrackingService", "Firebase GPS session start deferred; GPS remains locally queued")
+                    }
+                }
+
                 if (!locationUpdatesStarted) {
                     startLocationUpdates()
                 }
@@ -422,6 +438,26 @@ if (heartbeatJob?.isActive != true) {
                 null
             )
 
+            val officePrefs = getSharedPreferences("office_settings", MODE_PRIVATE)
+            val officeLatitude = officePrefs.getFloat("lat", 0f).toDouble()
+            val officeLongitude = officePrefs.getFloat("lon", 0f).toDouble()
+            val allowedRadius = officePrefs.getInt("radius", 0).coerceAtLeast(0)
+            val distanceResult = if (officeLatitude != 0.0 && officeLongitude != 0.0) {
+                val result = FloatArray(1)
+                Location.distanceBetween(
+                    officeLatitude, officeLongitude,
+                    location.latitude, location.longitude, result
+                )
+                result[0].toDouble()
+            } else {
+                -1.0
+            }
+            val withinRadius = if (allowedRadius > 0 && distanceResult >= 0.0) {
+                distanceResult <= allowedRadius
+            } else {
+                null
+            }
+
             val uploaded = firebaseSync.pushLiveLocation(
                 employeeId = sessionStore.employeeId(),
                 sessionId = location.sessionId,
@@ -432,9 +468,13 @@ if (heartbeatJob?.isActive != true) {
                 accuracy = location.accuracy.toDouble(),
                 speed = location.speed.toDouble(),
                 batteryLevel = location.batteryLevel,
-                timestamp = location.timestamp
+                timestamp = location.timestamp,
+                officeLatitude = officeLatitude,
+                officeLongitude = officeLongitude,
+                allowedRadiusMeters = allowedRadius,
+                distanceMeters = distanceResult,
+                isWithinAllowedRadius = withinRadius
             )
-
             if (uploaded) {
                 locationDao.markSynced(location.id, System.currentTimeMillis())
 
@@ -491,6 +531,22 @@ if (heartbeatJob?.isActive != true) {
 
     private fun stopTracking() {
         isManualStopping = true
+        val employeeId = sessionStore.employeeId()
+        val sessionId = getSharedPreferences(PREFS, MODE_PRIVATE)
+            .getString(KEY_SEQUENCE_SESSION, null)
+            ?: sessionStore.gpsSessionId()
+
+        // Publish the session end before clearing the local session identifier.
+        // This keeps Web GPS session state, live-location state and the existing
+        // attendance engine consistent when logout/stop occurs offline or online.
+        serviceScope.launch {
+            runCatching {
+                firebaseSync.endGpsSession(employeeId, sessionId, "LOGGED_OUT")
+            }.onFailure {
+                Log.w("TrackingService", "Firebase GPS session end deferred", it)
+            }
+        }
+
         sessionStore.clearGpsSession()
 
         getSharedPreferences(PREFS, MODE_PRIVATE).edit {

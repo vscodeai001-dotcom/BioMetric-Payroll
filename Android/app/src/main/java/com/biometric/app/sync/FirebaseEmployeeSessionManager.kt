@@ -28,6 +28,7 @@ class FirebaseEmployeeSessionManager @Inject constructor(
 ) {
     private val auth = FirebaseAuth.getInstance()
     private val database = FirebaseDatabase.getInstance()
+    private var sessionListener: com.google.firebase.database.ValueEventListener? = null
 
     data class Result(
         val success: Boolean,
@@ -66,6 +67,43 @@ class FirebaseEmployeeSessionManager @Inject constructor(
             Log.e("FirebaseEmployeeSession", "Employee Firebase session transaction failed", it)
             Result(false, message = "Unable to establish the Firebase employee session.")
         }
+    }
+
+
+    /**
+     * Watches the authoritative Firebase session record so a device that was
+     * replaced by another device is terminated immediately, without SignalR or
+     * the Web/API being involved.
+     */
+    fun startRealtimeGuard(onReplaced: () -> Unit) {
+        val user = auth.currentUser ?: return
+        val ref = database.getReference("employee_sessions").child(user.uid)
+        val deviceId = sessionStore.deviceId()
+
+        sessionListener?.let { ref.removeEventListener(it) }
+        val listener = object : com.google.firebase.database.ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val ownerDevice = snapshot.child("deviceId").getValue(String::class.java).orEmpty()
+                val ownerUid = snapshot.child("uid").getValue(String::class.java).orEmpty()
+                if (ownerUid == user.uid && ownerDevice.isNotBlank() && ownerDevice != deviceId) {
+                    Log.w("FirebaseEmployeeSession", "Current device was replaced by another device")
+                    onReplaced()
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("FirebaseEmployeeSession", "Realtime session guard cancelled: ${error.message}")
+            }
+        }
+        sessionListener = listener
+        ref.addValueEventListener(listener)
+    }
+
+    fun stopRealtimeGuard() {
+        val user = auth.currentUser ?: return
+        val ref = database.getReference("employee_sessions").child(user.uid)
+        sessionListener?.let { ref.removeEventListener(it) }
+        sessionListener = null
     }
 
     private suspend fun runTransaction(

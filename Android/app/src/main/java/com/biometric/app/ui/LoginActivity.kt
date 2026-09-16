@@ -16,6 +16,7 @@ import com.biometric.app.BuildConfig
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.MobileLoginRequest
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
@@ -50,6 +51,7 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var firebaseEmployeeSessionManager: com.biometric.app.sync.FirebaseEmployeeSessionManager
+    @Inject lateinit var firebaseSyncManager: FirebaseSyncManager
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -352,6 +354,16 @@ class LoginActivity : MotionBaseActivity() {
                         }
 
                         adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                        runCatching {
+                            firebaseSyncManager.pushMobileAuthEvent(
+                                eventType = if (forceReplace) "LOGIN_SUCCESS_AFTER_FORCE_REPLACE" else "LOGIN_SUCCESS",
+                                details = mapOf(
+                                    "employeeId" to firebaseEmployeeId,
+                                    "forceReplace" to forceReplace,
+                                    "sessionType" to "FIREBASE_SINGLE_DEVICE"
+                                )
+                            )
+                        }
                         setLoading(false)
                         proceedToMain()
                         return@launch

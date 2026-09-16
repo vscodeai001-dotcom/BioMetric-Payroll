@@ -372,6 +372,184 @@ public sealed class FirebaseRealtimeService
         }
     }
 
+    /// <summary>
+    /// Streams the global Firebase tracking tree used by native Android GPS.
+    /// This is intentionally separate from the owner CRUD stream because the
+    /// existing live-map contract already uses tracking/live and tracking/history.
+    /// </summary>
+    public async Task StreamTrackingChangesAsync(
+        Func<string, JsonElement?, CancellationToken, Task> onChange,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(onChange);
+
+        var context = await _context.Value;
+        if (context == null)
+            throw new InvalidOperationException("Firebase Admin bridge is not configured.");
+
+        var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+        client.Timeout = Timeout.InfiniteTimeSpan;
+
+        var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/tracking.json");
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", await context.GetAccessTokenAsync());
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Headers.ConnectionClose = false;
+
+        using var response = await client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException(
+                $"Firebase tracking stream failed with HTTP {(int)response.StatusCode}: " +
+                (body.Length > 500 ? body[..500] : body));
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+        string? eventType = null;
+        var dataLines = new List<string>();
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break;
+
+            if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = line[6..].Trim();
+                continue;
+            }
+            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                dataLines.Add(line[5..].TrimStart());
+                continue;
+            }
+            if (line.Length != 0 || dataLines.Count == 0) continue;
+
+            var data = string.Join("\n", dataLines);
+            dataLines.Clear();
+            if (string.IsNullOrWhiteSpace(data) ||
+                string.Equals(eventType, "keep-alive", StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = null;
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                var relativePath = root.TryGetProperty("path", out var pathElement)
+                    ? pathElement.GetString() ?? "/"
+                    : "/";
+                JsonElement? eventData = root.TryGetProperty("data", out var dataElement)
+                    ? dataElement.Clone()
+                    : null;
+                await onChange(relativePath, eventData, cancellationToken);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogDebug(ex, "Ignoring malformed Firebase tracking stream event.");
+            }
+            finally
+            {
+                eventType = null;
+            }
+        }
+    }
+
+    public async Task StreamGlobalChangesAsync(
+        string rootNode,
+        Func<string, JsonElement?, CancellationToken, Task> onChange,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(rootNode))
+            throw new ArgumentException("Firebase root node is required.", nameof(rootNode));
+        ArgumentNullException.ThrowIfNull(onChange);
+
+        var context = await _context.Value;
+        if (context == null)
+            throw new InvalidOperationException("Firebase Admin bridge is not configured.");
+
+        var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+        client.Timeout = Timeout.InfiniteTimeSpan;
+        var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/{rootNode.Trim('/')}.json");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer", await context.GetAccessTokenAsync());
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Headers.ConnectionClose = false;
+
+        using var response = await client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new HttpRequestException(
+                $"Firebase {rootNode} stream failed with HTTP {(int)response.StatusCode}: " +
+                (body.Length > 500 ? body[..500] : body));
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+        string? eventType = null;
+        var dataLines = new List<string>();
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break;
+
+            if (line.StartsWith("event:", StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = line[6..].Trim();
+                continue;
+            }
+            if (line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                dataLines.Add(line[5..].TrimStart());
+                continue;
+            }
+            if (line.Length != 0 || dataLines.Count == 0) continue;
+
+            var data = string.Join("\n", dataLines);
+            dataLines.Clear();
+            if (string.IsNullOrWhiteSpace(data) ||
+                string.Equals(eventType, "keep-alive", StringComparison.OrdinalIgnoreCase))
+            {
+                eventType = null;
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(data);
+                var root = document.RootElement;
+                var relativePath = root.TryGetProperty("path", out var pathElement)
+                    ? pathElement.GetString() ?? "/"
+                    : "/";
+                JsonElement? eventData = root.TryGetProperty("data", out var dataElement)
+                    ? dataElement.Clone()
+                    : null;
+                await onChange(relativePath, eventData, cancellationToken);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogDebug(ex, "Ignoring malformed Firebase {RootNode} stream event.", rootNode);
+            }
+            finally
+            {
+                eventType = null;
+            }
+        }
+    }
+
     public async Task<JsonElement?> GetOwnerTableAsync(
         string ownerUid,
         string table,
@@ -971,6 +1149,23 @@ public sealed class FirebaseRealtimeService
     }
 
 
+    private static IQueryable GetEntitySet(
+        DbContext db,
+        Type entityType)
+    {
+        var setMethod = typeof(DbContext)
+            .GetMethods()
+            .First(method =>
+                method.Name == nameof(DbContext.Set) &&
+                method.IsGenericMethodDefinition &&
+                method.GetGenericArguments().Length == 1 &&
+                method.GetParameters().Length == 0);
+
+        return (IQueryable)setMethod
+            .MakeGenericMethod(entityType)
+            .Invoke(db, null)!;
+    }
+
     /// <summary>
     /// One-time/backfill migration from the existing local compatibility database
     /// into Firebase. Existing Firebase records are never overwritten. Once a
@@ -1000,7 +1195,7 @@ public sealed class FirebaseRealtimeService
                 .FirstOrDefault(x => x.ClrType.Name == entityName);
             if (entityType == null) continue;
 
-            var rows = await db.Set(entityType.ClrType).AsNoTracking().ToListAsync(cancellationToken);
+            var rows = await GetEntitySet(db, entityType.ClrType).Cast<object>().ToListAsync(cancellationToken);
             var updates = new Dictionary<string, object?>(StringComparer.Ordinal);
 
             foreach (var row in rows)

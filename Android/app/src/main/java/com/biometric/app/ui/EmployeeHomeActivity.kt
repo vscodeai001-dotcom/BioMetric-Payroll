@@ -54,6 +54,7 @@ import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.databinding.ActivityEmployeeHomeBinding
 import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.sync.SignalRManager
+import com.biometric.app.sync.FirebaseEmployeeSessionManager
 import com.biometric.app.ui.selfservice.*
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.BatteryOptimizationHelper
@@ -94,6 +95,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
     @Inject lateinit var osrmApi: OsrmApiService
 
     private var officeMarker: Marker? = null
@@ -179,6 +181,19 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             checkBatteryOptimizations()
             setupMap()
             setupRealTimeSync()
+            firebaseEmployeeSessionManager.startRealtimeGuard {
+                runOnUiThread {
+                    Toast.makeText(
+                        this@EmployeeHomeActivity,
+                        "This employee account was signed in on another device.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply {
+                        action = TrackingService.ACTION_STOP
+                    })
+                    goToLogin()
+                }
+            }
             sharedViewModel.warmUpDashboard()
 
             // Low-priority animations last
@@ -1136,6 +1151,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     override fun onDestroy() {
+        firebaseEmployeeSessionManager.stopRealtimeGuard()
         initJob?.cancel()
         roadRouteJob?.cancel()
         dashboardJob?.cancel()
