@@ -28,7 +28,6 @@ class FirebaseEmployeeSessionManager @Inject constructor(
 ) {
     private val auth = FirebaseAuth.getInstance()
     private val database = FirebaseDatabase.getInstance()
-    private var sessionListener: com.google.firebase.database.ValueEventListener? = null
 
     data class Result(
         val success: Boolean,
@@ -69,41 +68,23 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         }
     }
 
-
-    /**
-     * Watches the authoritative Firebase session record so a device that was
-     * replaced by another device is terminated immediately, without SignalR or
-     * the Web/API being involved.
-     */
-    fun startRealtimeGuard(onReplaced: () -> Unit) {
-        val user = auth.currentUser ?: return
-        val ref = database.getReference("employee_sessions").child(user.uid)
+    suspend fun release(): Boolean {
+        val user = auth.currentUser ?: return false
         val deviceId = sessionStore.deviceId()
-
-        sessionListener?.let { ref.removeEventListener(it) }
-        val listener = object : com.google.firebase.database.ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val ownerDevice = snapshot.child("deviceId").getValue(String::class.java).orEmpty()
-                val ownerUid = snapshot.child("uid").getValue(String::class.java).orEmpty()
-                if (ownerUid == user.uid && ownerDevice.isNotBlank() && ownerDevice != deviceId) {
-                    Log.w("FirebaseEmployeeSession", "Current device was replaced by another device")
-                    onReplaced()
-                }
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseEmployeeSession", "Realtime session guard cancelled: ${error.message}")
-            }
-        }
-        sessionListener = listener
-        ref.addValueEventListener(listener)
-    }
-
-    fun stopRealtimeGuard() {
-        val user = auth.currentUser ?: return
         val ref = database.getReference("employee_sessions").child(user.uid)
-        sessionListener?.let { ref.removeEventListener(it) }
-        sessionListener = null
+        return runCatching {
+            val snapshot = ref.get().await()
+            val currentDevice = snapshot.child("deviceId").getValue(String::class.java).orEmpty()
+            if (currentDevice == deviceId || currentDevice.isBlank()) {
+                ref.removeValue().await()
+                true
+            } else {
+                false
+            }
+        }.getOrElse {
+            Log.w("FirebaseEmployeeSession", "Unable to release employee session", it)
+            false
+        }
     }
 
     private suspend fun runTransaction(

@@ -39,21 +39,22 @@ class ProfileFragment : Fragment() {
     private fun loadProfile() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val data = selfService.dashboard()
+                val emp = selfService.employeeProfile()
+                if (emp == null) throw IllegalStateException("Employee record not found in Firebase for employee ID ${selfService.currentEmployeeId()}")
                 _binding?.let { b ->
-                    b.tvProfileName.text = "${data.name} 👤"
-                    b.tvProfileRole.text = "${data.role ?: "Staff Member"} 👔"
-                    setDetail(b.detailEmpId, "🆔 Employee ID", data.employeeId.toString())
-                    setDetail(b.detailEmail, "✉️ Official Email", data.email)
-                    setDetail(b.detailHireDate, "🗓️ Joining Date", data.hireDate ?: "--")
+                    b.tvProfileName.text = "${emp.name} 👤"
+                    b.tvProfileRole.text = "${emp.role.ifBlank { "Staff Member" }} 👔"
+                    setDetail(b.detailEmpId, "🆔 Employee ID", emp.employeeId)
+                    setDetail(b.detailEmail, "✉️ Official Email", emp.email.orEmpty().ifBlank { "--" })
+                    setDetail(b.detailHireDate, "🗓️ Joining Date", emp.hireDate.takeIf { it > 0 }?.let(selfService::formatEmployeeDate) ?: "--")
                     setDetail(b.detailShift, "🕒 Assigned Shift",
-                        if (!data.shiftStartTime.isNullOrBlank()) "${data.shiftStartTime} - ${data.shiftEndTime ?: "--"}" else "General Shift")
+                        if (emp.shiftStart.isNotBlank()) "${emp.shiftStart} - ${emp.shiftEnd}" else "General Shift")
                     setDetail(b.detailSalary, "💰 Gross Salary",
-                        NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN")).format(data.monthlySalary))
-                    setDetail(b.detailBank, "🏦 Bank Name", data.bankName ?: "--")
-                    setDetail(b.detailIfsc, "🔢 IFSC Code", data.bankIfscCode ?: "--")
-                    setDetail(b.detailUan, "🛡️ PF UAN", data.uan ?: "Not Enrolled")
-                    setDetail(b.detailEsi, "🏥 ESI Number", data.esiNumber ?: "Not Enrolled")
+                        NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN")).format(emp.salaryRate))
+                    setDetail(b.detailBank, "🏦 Bank Name", emp.bankName ?: "--")
+                    setDetail(b.detailIfsc, "🔢 IFSC Code", emp.bankIfscCode ?: "--")
+                    setDetail(b.detailUan, "🛡️ PF UAN", emp.uanNumber ?: "Not Enrolled")
+                    setDetail(b.detailEsi, "🏥 ESI Number", emp.esiNumber ?: "Not Enrolled")
                 }
             } catch (e: Exception) {
                 if (isAdded) Toast.makeText(requireContext(), "Error loading profile: ${e.message ?: "Firebase unavailable"}", Toast.LENGTH_SHORT).show()

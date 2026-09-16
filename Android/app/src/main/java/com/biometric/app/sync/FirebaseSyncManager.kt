@@ -292,94 +292,6 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     /**
-     * Firebase-native GPS session lifecycle. This mirrors the existing Web
-     * EmployeeGpsSession contract so Android can start/finish a tracking
-     * session without Payroll.Web, Render, or the legacy mobile API.
-     */
-    suspend fun startGpsSession(
-        employeeId: Int,
-        sessionId: String
-    ): Boolean {
-        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
-        getOwnerUid() ?: return false
-        val now = System.currentTimeMillis()
-        val payload = mapOf(
-            "EmployeeId" to employeeId,
-            "SessionId" to sessionId,
-            "StartedAtUtc" to Date(now).toInstant().toString(),
-            "LastUpdateAtUtc" to Date(now).toInstant().toString(),
-            "EndedAtUtc" to null,
-            "EndReason" to null,
-            "Source" to "ANDROID_FIREBASE"
-        )
-        return runCatching {
-            database.child("tracking").child("sessions")
-                .child(employeeId.toString()).child(sessionId)
-                .setValue(payload).await()
-            true
-        }.getOrElse {
-            Log.w("FirebaseSyncManager", "Unable to publish GPS session start", it)
-            false
-        }
-    }
-
-    suspend fun endGpsSession(
-        employeeId: Int,
-        sessionId: String,
-        reason: String = "LOGGED_OUT"
-    ): Boolean {
-        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
-        val now = System.currentTimeMillis()
-        return runCatching {
-            database.child("tracking").child("sessions")
-                .child(employeeId.toString()).child(sessionId)
-                .updateChildren(
-                    mapOf(
-                        "EndedAtUtc" to Date(now).toInstant().toString(),
-                        "EndReason" to reason,
-                        "LastUpdateAtUtc" to Date(now).toInstant().toString()
-                    )
-                ).await()
-            true
-        }.getOrElse {
-            Log.w("FirebaseSyncManager", "Unable to publish GPS session end", it)
-            false
-        }
-    }
-
-    /**
-     * Firebase-native mobile authentication audit event. The Web monitoring
-     * bridge consumes this global stream and projects it into its existing
-     * audit screen.
-     */
-    suspend fun pushMobileAuthEvent(
-        eventType: String,
-        details: Map<String, Any?> = emptyMap()
-    ): Boolean {
-        val user = auth.currentUser ?: return false
-        val employeeId = sessionStore.employeeId()
-        if (employeeId <= 0) return false
-        val eventId = UUID.randomUUID().toString().replace("-", "")
-        val payload = HashMap<String, Any?>(details)
-        payload["eventId"] = eventId
-        payload["eventType"] = eventType
-        payload["employeeId"] = employeeId
-        payload["firebaseUid"] = user.uid
-        payload["email"] = user.email.orEmpty()
-        payload["deviceId"] = sessionStore.deviceId()
-        payload["platform"] = "Android"
-        payload["timestamp"] = Date().toInstant().toString()
-        return runCatching {
-            database.child("mobile_auth_events").child(employeeId.toString())
-                .child(eventId).setValue(payload).await()
-            true
-        }.getOrElse {
-            Log.w("FirebaseSyncManager", "Unable to publish mobile auth event $eventType", it)
-            false
-        }
-    }
-
-    /**
      * Render-independent GPS transport. The Android tracking service writes
      * the current live position and an immutable history event in one Firebase
      * multi-location update. Firebase is the independent realtime/tracking source; this path
@@ -395,60 +307,22 @@ class FirebaseSyncManager @Inject constructor(
         accuracy: Double,
         speed: Double,
         batteryLevel: Int,
-        timestamp: Long,
-        officeLatitude: Double = 0.0,
-        officeLongitude: Double = 0.0,
-        allowedRadiusMeters: Int = 0,
-        distanceMeters: Double = -1.0,
-        isWithinAllowedRadius: Boolean? = null
+        timestamp: Long
     ): Boolean {
         if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank()) return false
-
-        val safeAccuracy = accuracy.coerceAtLeast(0.0)
-        val safeSpeed = speed.coerceAtLeast(0.0)
-        val safeRadius = allowedRadiusMeters.coerceAtLeast(0)
-        val calculatedDistance = if (distanceMeters >= 0.0 && distanceMeters.isFinite()) {
-            distanceMeters
-        } else if (officeLatitude.isFinite() && officeLongitude.isFinite() &&
-            officeLatitude != 0.0 && officeLongitude != 0.0 &&
-            latitude.isFinite() && longitude.isFinite()) {
-            val result = FloatArray(1)
-            android.location.Location.distanceBetween(
-                officeLatitude, officeLongitude, latitude, longitude, result
-            )
-            result[0].toDouble()
-        } else {
-            0.0
-        }
-        val within = isWithinAllowedRadius ?:
-            (safeRadius > 0 && calculatedDistance <= safeRadius)
-        val movementState = when {
-            safeSpeed < 0.5 -> "Stopped"
-            safeSpeed < 2.0 -> "Walking"
-            safeSpeed < 8.0 -> "Moving"
-            else -> "Fast"
-        }
 
         val payload = mapOf(
             "EmployeeId" to employeeId,
             "SessionId" to sessionId,
             "Latitude" to latitude,
             "Longitude" to longitude,
-            "AccuracyMeters" to safeAccuracy,
-            "SpeedMps" to safeSpeed,
+            "AccuracyMeters" to accuracy.coerceAtLeast(0.0),
+            "SpeedMps" to speed.coerceAtLeast(0.0),
             "BatteryLevel" to batteryLevel,
             "Sequence" to sequence,
             "Timestamp" to Date(timestamp).toInstant().toString(),
             "LastUpdatedUtc" to Date().toInstant().toString(),
-            "Source" to "ANDROID_FIREBASE",
-            "CaptureSource" to "ANDROID_FIREBASE",
-            "OfficeLatitude" to officeLatitude,
-            "OfficeLongitude" to officeLongitude,
-            "DistanceMeters" to calculatedDistance.coerceAtLeast(0.0),
-            "DistanceFromOfficeMeters" to calculatedDistance.coerceAtLeast(0.0),
-            "AllowedRadiusMeters" to safeRadius,
-            "IsWithinAllowedRadius" to within,
-            "MovementState" to movementState
+            "Source" to "ANDROID_FIREBASE"
         )
 
         if (!isAuthenticated()) {

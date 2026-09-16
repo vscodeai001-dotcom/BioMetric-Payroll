@@ -43,9 +43,6 @@ import androidx.core.graphics.toColorInt
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.EmployeeDashboardResponse
-import com.biometric.app.api.EmployeePunchRequest
-import com.biometric.app.api.GpsSessionRequest
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.MainRepository
@@ -90,12 +87,11 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private val binding get() = _binding!!
 
     @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
+    @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var signalR: SignalRManager
-    @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
     @Inject lateinit var osrmApi: OsrmApiService
 
     private var officeMarker: Marker? = null
@@ -181,19 +177,6 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             checkBatteryOptimizations()
             setupMap()
             setupRealTimeSync()
-            firebaseEmployeeSessionManager.startRealtimeGuard {
-                runOnUiThread {
-                    Toast.makeText(
-                        this@EmployeeHomeActivity,
-                        "This employee account was signed in on another device.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply {
-                        action = TrackingService.ACTION_STOP
-                    })
-                    goToLogin()
-                }
-            }
             sharedViewModel.warmUpDashboard()
 
             // Low-priority animations last
@@ -1151,7 +1134,6 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     override fun onDestroy() {
-        firebaseEmployeeSessionManager.stopRealtimeGuard()
         initJob?.cancel()
         roadRouteJob?.cancel()
         dashboardJob?.cancel()
@@ -1278,33 +1260,34 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun logout() {
         lifecycleScope.launch {
-            val token = sessionStore.token()
-            if (!token.isNullOrBlank()) {
-                // Authoritative Sync: Perform Auto-OUT punch if the user is currently IN
-                try {
-                    val statusResponse = mobileApi.punchStatus("Bearer $token")
-                    if (statusResponse.isSuccessful) {
-                        val status = statusResponse.body()
-                        if (status?.nextType == "OUT") {
-                            Log.i("EmployeeHome", "Authoritative Logout: Performing automatic OUT punch...")
-                            mobileApi.punch(
-                                "Bearer $token",
-                                EmployeePunchRequest(
-                                    type = "OUT",
-                                    latitude = currentLat,
-                                    longitude = currentLon,
-                                    accuracy = currentAccuracy.toDouble()
-                                )
-                            )
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("EmployeeHome", "Authoritative Logout: Auto-punch failed: ${e.message}")
+            // Logout remains Firebase-native. Do the same automatic OUT check
+            // against the local/Firebase punch stream used by the Employee UI.
+            runCatching {
+                if (selfService.nextPunchType() == "OUT") {
+                    val punch = AttendancePunch(
+                        punchId = UUID.randomUUID().toString(),
+                        staffId = sessionStore.employeeId().toString(),
+                        date = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                        type = "OUT",
+                        timestamp = System.currentTimeMillis(),
+                        latitude = currentLat,
+                        longitude = currentLon,
+                        accuracy = currentAccuracy,
+                        geofenceId = null,
+                        distanceFromGeofence = 0.0,
+                        photoId = null,
+                        deviceId = sessionStore.deviceId(),
+                        source = "MANUAL",
+                        status = "PENDING"
+                    )
+                    repository.insertPunch(punch)
                 }
-
-                runCatching { mobileApi.endGps("Bearer $token", GpsSessionRequest(sessionStore.gpsSessionId())) }
-                runCatching { mobileApi.logout("Bearer $token") }
+            }.onFailure {
+                Log.e("EmployeeHome", "Firebase logout auto-OUT failed: ${it.message}", it)
             }
+
+            runCatching { firebaseEmployeeSessionManager.release() }
+            FirebaseAuth.getInstance().signOut()
             _binding?.let {
                 stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply { action = TrackingService.ACTION_STOP })
                 sessionStore.clearLogin()

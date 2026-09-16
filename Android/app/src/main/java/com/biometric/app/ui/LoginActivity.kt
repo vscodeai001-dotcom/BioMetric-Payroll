@@ -12,11 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
-import com.biometric.app.BuildConfig
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.api.MobileLoginRequest
 import com.biometric.app.data.MobileSessionStore
-import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
@@ -34,7 +30,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -43,7 +38,6 @@ class LoginActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityLoginBinding
 
-    @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var mobileSessionStore: MobileSessionStore
     @Inject lateinit var themePreferenceSync: ThemePreferenceSync
     @Inject lateinit var authRepository: AuthRepository
@@ -51,7 +45,6 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var firebaseEmployeeSessionManager: com.biometric.app.sync.FirebaseEmployeeSessionManager
-    @Inject lateinit var firebaseSyncManager: FirebaseSyncManager
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -226,13 +219,11 @@ class LoginActivity : MotionBaseActivity() {
                     return@launch
                 }
 
-                // Existing Employee compatibility login remains unchanged.
-                handleEmployeeLoginViaExistingFlow(
-                    email,
-                    pass,
-                    forceReplace
-                )
-
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Firebase login failed: $code. Employee accounts must be provisioned in Firebase Authentication.",
+                    Toast.LENGTH_LONG
+                ).show()
                 return@launch
             }
 
@@ -285,8 +276,23 @@ class LoginActivity : MotionBaseActivity() {
                         rawRole.equals(UserRole.ADMIN.name, ignoreCase = true) ->
                     UserRole.ADMIN.name
 
-                else ->
+                rawRole.equals("Employee", ignoreCase = true) ||
+                        rawRole.equals("Staff", ignoreCase = true) ||
+                        rawRole.equals(UserRole.STAFF.name, ignoreCase = true) ->
                     UserRole.STAFF.name
+
+                else ->
+                    "UNKNOWN"
+            }
+
+            if (role == "UNKNOWN") {
+                setLoading(false)
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Firebase account has no supported application role. Please ask Admin to provision the account.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@launch
             }
 
             // Employee authentication is Firebase-native. The existing Web API
@@ -306,21 +312,30 @@ class LoginActivity : MotionBaseActivity() {
                 }
 
                 val firebaseOwnerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
-                    ?: "biometricpayroll"
                 val firebaseEmployeeId = when (val value = claims["employee_id"]) {
                     is Number -> value.toInt()
                     else -> value?.toString()?.toIntOrNull() ?: 0
                 }
 
-                // Once the employee's Firebase account has been provisioned with
-                // the canonical claims, establish the single-device session
-                // directly in Firebase. No Web login/session bridge is needed.
-                if (firebaseEmployeeId > 0) {
-                    val sessionResult = firebaseEmployeeSessionManager.acquire(
-                        employeeId = firebaseEmployeeId,
-                        ownerUid = firebaseOwnerUid,
-                        forceReplace = forceReplace
-                    )
+                // Employee authentication is Firebase-only. The account must
+                // carry the canonical claims written by Web provisioning: role,
+                // employee_id and owner_uid. Never guess an owner or fall back to
+                // Payroll.Web because doing so can point the app at the wrong tenant.
+                if (firebaseEmployeeId <= 0 || firebaseOwnerUid.isNullOrBlank()) {
+                    setLoading(false)
+                    Toast.makeText(
+                        this@LoginActivity,
+                        "Employee Firebase profile is not provisioned yet. Please ask Admin to provision this employee, then try again.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                val sessionResult = firebaseEmployeeSessionManager.acquire(
+                    employeeId = firebaseEmployeeId,
+                    ownerUid = firebaseOwnerUid,
+                    forceReplace = forceReplace
+                )
 
                     if (sessionResult.success) {
                         val displayName = firebaseUser.displayName
@@ -354,16 +369,6 @@ class LoginActivity : MotionBaseActivity() {
                         }
 
                         adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-                        runCatching {
-                            firebaseSyncManager.pushMobileAuthEvent(
-                                eventType = if (forceReplace) "LOGIN_SUCCESS_AFTER_FORCE_REPLACE" else "LOGIN_SUCCESS",
-                                details = mapOf(
-                                    "employeeId" to firebaseEmployeeId,
-                                    "forceReplace" to forceReplace,
-                                    "sessionType" to "FIREBASE_SINGLE_DEVICE"
-                                )
-                            )
-                        }
                         setLoading(false)
                         proceedToMain()
                         return@launch
@@ -383,15 +388,6 @@ class LoginActivity : MotionBaseActivity() {
                     }
                 }
 
-                // Firebase account is valid but its employee claims have not
-                // been provisioned yet. Keep the established compatibility
-                // bridge as a one-time migration path. Normal provisioned
-                // Employee logins never reach this branch.
-                handleFirebaseEmployeeSession(
-                    email = email,
-                    firebaseIdToken = tokenResult.token!!,
-                    forceReplace = forceReplace
-                )
                 return@launch
             }
 
@@ -471,247 +467,6 @@ class LoginActivity : MotionBaseActivity() {
             // SuperAdmin/Admin -> MainActivity
             // Employee -> EmployeeHomeActivity
             proceedToMain()
-        }
-    }
-
-    private fun handleFirebaseEmployeeSession(
-        email: String,
-        firebaseIdToken: String,
-        forceReplace: Boolean
-    ) {
-        lifecycleScope.launch {
-            try {
-                setLoading(true)
-                val deviceId = getAndroidDeviceId()
-                val response = mobileApi.firebaseSession(
-                    com.biometric.app.api.FirebaseSessionRequest(
-                        idToken = firebaseIdToken,
-                        deviceId = deviceId,
-                        forceReplace = forceReplace
-                    )
-                )
-
-                if (response.isSuccessful) {
-                    val result = response.body()
-                    if (result?.success != true || result.token.isNullOrBlank()) {
-                        setLoading(false)
-                        Toast.makeText(
-                            this@LoginActivity,
-                            result?.message ?: "Unable to create employee session.",
-                            Toast.LENGTH_LONG
-                        ).show()
-                        return@launch
-                    }
-
-                    val role = UserRole.STAFF.name
-                    val displayName = result.name.ifBlank { email.substringBefore("@") }
-
-                    // Keep the established mobile session token so every existing
-                    // Employee screen and business API continues unchanged.
-                    FirebaseAuth.getInstance().currentUser?.let { firebaseUser ->
-                        mobileSessionStore.saveLogin(
-                            token = result.token!!,
-                            employeeId = result.employeeId,
-                            name = displayName,
-                            email = firebaseUser.email ?: result.email.ifBlank { email },
-                            firebaseOwnerUid = result.firebaseOwnerUid
-                        )
-                    } ?: mobileSessionStore.saveLogin(
-                        token = result.token!!,
-                        employeeId = result.employeeId,
-                        name = displayName,
-                        email = result.email.ifBlank { email },
-                        firebaseOwnerUid = result.firebaseOwnerUid
-                    )
-
-                    applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
-                        putBoolean("is_logged_in", true)
-                        putString("user_role", role)
-                        putInt("employee_id", result.employeeId)
-                        putString("employee_name", displayName)
-                        putString("user_uid", FirebaseAuth.getInstance().currentUser?.uid ?: email)
-                    }
-
-                    applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
-                        putBoolean("has_logged_in_before", true)
-                        putBoolean("is_locked", false)
-                        putString("user_role", role)
-                        putString("user_uid", FirebaseAuth.getInstance().currentUser?.uid ?: email)
-                        putInt("employee_id", result.employeeId)
-                        putString("employee_name", displayName)
-                        putLong("last_active_time", System.currentTimeMillis())
-                    }
-
-                    adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-                    setLoading(false)
-                    proceedToMain()
-                    return@launch
-                }
-
-                if (response.code() == 409) {
-                    setLoading(false)
-                    AlertDialog.Builder(this@LoginActivity)
-                        .setTitle("Employee already logged in")
-                        .setMessage("This employee account is already active on another device. Replace that active session with this device?")
-                        .setPositiveButton("Replace & Login") { _, _ ->
-                            handleFirebaseEmployeeSession(email, firebaseIdToken, forceReplace = true)
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                    return@launch
-                }
-
-                setLoading(false)
-                val errorBody = response.errorBody()?.string()
-                val msg = try {
-                    val json = JSONObject(errorBody ?: "{}")
-                    json.optString("message", json.optString("Message", "Unable to create employee session."))
-                } catch (_: Exception) {
-                    "Unable to create employee session. HTTP ${response.code()}"
-                }
-                Log.e("LoginActivity", "Firebase employee session failed: $errorBody (code: ${response.code()})")
-                Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
-            } catch (e: Exception) {
-                setLoading(false)
-                Log.e(
-                    "LoginActivity",
-                    "Firebase employee session bridge failed. baseUrl=${BuildConfig.BIOMETRIC_API_BASE_URL}",
-                    e
-                )
-                Toast.makeText(
-                    this@LoginActivity,
-                    "Firebase account verified, but Employee profile/session provisioning is not ready yet. Please keep the Web app running once so Employee Firebase claims can be provisioned, then try again.",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
-
-    private fun handleEmployeeLoginViaExistingFlow(
-        email: String,
-        pass: String,
-        forceReplace: Boolean
-    ) {
-        lifecycleScope.launch {
-            try {
-                Log.i(
-                    "LoginActivity",
-                    "Employee compatibility login via ${BuildConfig.BIOMETRIC_API_BASE_URL}"
-                )
-                setLoading(true)
-                val deviceId = getAndroidDeviceId()
-                val response = mobileApi.login(
-                    MobileLoginRequest(
-                        email = email,
-                        password = pass,
-                        deviceId = deviceId,
-                        forceReplace = forceReplace
-                    )
-                )
-
-                if (response.isSuccessful) {
-                    val result = response.body()
-                    if (result?.success == true) {
-                        val token = result.token
-                        if (token.isNullOrBlank()) {
-                            setLoading(false)
-                            Toast.makeText(
-                                this@LoginActivity,
-                                "Login succeeded but no mobile session was issued.",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            return@launch
-                        }
-
-                        val displayName = result.name
-                        val role = UserRole.STAFF.name
-
-                        // The compatibility endpoint remains the authoritative
-                        // single-device/session gate for Employees. Its successful
-                        // response also carries a Firebase custom token, so the
-                        // authenticated Android session is Firebase-backed after
-                        // the lock is acquired.
-                        mobileSessionStore.saveLogin(
-                            token,
-                            result.employeeId,
-                            displayName,
-                            result.email,
-                            result.firebaseOwnerUid
-                        )
-
-                        result.firebaseToken?.takeIf { it.isNotBlank() }?.let { customToken ->
-                            runCatching {
-                                FirebaseAuth.getInstance()
-                                    .signInWithCustomToken(customToken)
-                                    .await()
-                            }.onFailure {
-                                Log.w(
-                                    "LoginActivity",
-                                    "Employee Firebase realtime authentication deferred: ${it.message}"
-                                )
-                            }
-                        }
-
-                        applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
-                            putBoolean("is_logged_in", true)
-                            putString("user_role", role)
-                            putInt("employee_id", result.employeeId)
-                            putString("employee_name", displayName)
-                            putString("user_uid", result.email)
-                        }
-
-                        applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
-                            putBoolean("has_logged_in_before", true)
-                            putBoolean("is_locked", false)
-                            putString("user_role", role)
-                            putString("user_uid", result.email)
-                            putInt("employee_id", result.employeeId)
-                            putString("employee_name", displayName)
-                            putLong("last_active_time", System.currentTimeMillis())
-                        }
-
-                        adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-                        setLoading(false)
-                        proceedToMain()
-                    } else {
-                        setLoading(false)
-                        Toast.makeText(
-                            this@LoginActivity,
-                            result?.message ?: "Invalid ID or Password",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                } else if (response.code() == 409) {
-                    setLoading(false)
-                    AlertDialog.Builder(this@LoginActivity)
-                        .setTitle("Employee already logged in")
-                        .setMessage("This employee account is already active on another device. Replace that active session with this device?")
-                        .setPositiveButton("Replace & Login") { _, _ ->
-                            handleEmployeeLogin(email, pass, forceReplace = true)
-                        }
-                        .setNegativeButton("Cancel", null)
-                        .show()
-                } else {
-                    setLoading(false)
-                    val errorBody = response.errorBody()?.string()
-                    val msg = try {
-                        val json = JSONObject(errorBody ?: "{}")
-                        json.optString("message", json.optString("Message", "Invalid ID or Password"))
-                    } catch (_: Exception) {
-                        "Invalid ID or Password"
-                    }
-                    Log.e("Login", "Employee login failed: $errorBody (code: ${response.code()})")
-                    Toast.makeText(this@LoginActivity, msg, Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                setLoading(false)
-                Toast.makeText(
-                    this@LoginActivity,
-                    "Employee login service is unreachable. Check the Android API URL/network.",
-                    Toast.LENGTH_LONG
-                ).show()
-                Log.e("LoginActivity", "Employee compatibility login failed", e)
-            }
         }
     }
 

@@ -1355,21 +1355,6 @@ public class GeoLocationService
             if (originalCaptureUtc > serverRecordedAtUtc.AddMinutes(5))
                 originalCaptureUtc = serverRecordedAtUtc;
 
-            // Firebase REST streams replay their current snapshot whenever the
-            // connection is established. Prevent the compatibility projection
-            // from creating duplicate history rows when that happens.
-            var duplicate = await db.EmployeeLocationHistory
-                .AsNoTracking()
-                .AnyAsync(x =>
-                    x.EmployeeId == employeeId &&
-                    x.SessionId == sessionId &&
-                    x.CapturedAtUtc == originalCaptureUtc &&
-                    x.Latitude == latitude &&
-                    x.Longitude == longitude);
-
-            if (duplicate)
-                return;
-
             var record = new EmployeeLocationHistory
             {
                 EmployeeId = employeeId,

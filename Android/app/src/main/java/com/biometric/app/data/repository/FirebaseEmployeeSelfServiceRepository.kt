@@ -54,6 +54,10 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         firebaseSync.getOwnerRef()
             ?: throw IllegalStateException("Firebase employee session is not initialized")
 
+    fun currentEmployeeId(): Int = sessionStore.employeeId()
+
+    fun formatEmployeeDate(millis: Long): String = formatDate(millis)
+
     private fun employeeId(): String {
         val id = sessionStore.employeeId()
         if (id <= 0) throw IllegalStateException("Employee session is missing")
@@ -68,16 +72,22 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         // employeeId values, while the Android Employee model uses String.
         // Never use getValue(Employee::class.java) here because Firebase's
         // automatic mapper is strict about String/Int mismatches.
+        // Canonical Firebase key: owners/{ownerUid}/employees/{employeeId}.
         val direct = employeesRef.child(id).get().await()
-        if (direct.exists()) {
-            return direct.toEmployee(id)
-        }
+        if (direct.exists()) return direct.toEmployee(id)
 
-        // Compatibility fallback for legacy Firebase keys. The canonical key
-        // remains employees/{employeeId}.
+        // Some legacy migrations used a generated Firebase key while retaining
+        // employeeId as a field. Find the record by the canonical business ID.
+        val all = employeesRef.get().await().children
+        val byEmployeeId = all.firstOrNull { snapshot ->
+            snapshot.valueOf("employeeId")?.toString()?.toLongOrNull()?.toString() == id
+        }
+        if (byEmployeeId != null) return byEmployeeId.toEmployee(id)
+
+        // Final compatibility lookup by the authenticated employee email.
         val email = sessionStore.userEmail().trim()
         if (email.isNotBlank()) {
-            val byEmail = employeesRef.get().await().children.firstOrNull { snapshot ->
+            val byEmail = all.firstOrNull { snapshot ->
                 snapshot.string("email").equals(email, ignoreCase = true)
             }
             if (byEmail != null) return byEmail.toEmployee(id)
