@@ -100,7 +100,9 @@ data class MoneyEntryDto(
     @SerializedName("amount") val amount: Double = 0.0,
     @SerializedName("type") val type: String = "",
     @SerializedName("description") val description: String? = null,
-    @SerializedName("paid") val paid: Boolean = false
+    @SerializedName("paid") val paid: Boolean = false,
+    // Admin finance lists need to identify which employee owns the entry.
+    @SerializedName("employeeId") val employeeId: Int = 0
 )
 
 data class RegularizationDto(
@@ -146,8 +148,13 @@ data class TaxDeclarationDto(
     @SerializedName("hraRentPaid") val hraRentPaid: Double = 0.0,
     @SerializedName("otherExemptions") val otherExemptions: Double = 0.0,
     @SerializedName("status") val status: String = "Pending",
-    @SerializedName("adminRemarks") val adminRemarks: String? = null
-)
+    @SerializedName("adminRemarks") val adminRemarks: String? = null,
+    // Optional because Employee Self-Service records historically did not expose this field.
+    @SerializedName("employeeId") val employeeId: Int = 0
+) {
+    val totalInvestmentAmount: Double
+        get() = section80C + section80D + hraRentPaid + otherExemptions
+}
 
 data class TaxDeclarationRequest(
     @SerializedName("financialYear") val financialYear: Int,

@@ -12,10 +12,8 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.FbpRequest
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.databinding.FragmentFbpDeclarationBinding
-import com.biometric.app.sync.SignalRManager
 import com.google.android.material.card.MaterialCardView
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.FlowPreview
@@ -27,17 +25,10 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class FbpDeclarationFragment : Fragment() {
 
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
+
     private var _binding: FragmentFbpDeclarationBinding? = null
     private val binding get() = _binding!!
-
-    @Inject
-    lateinit var mobileApi: MobileApiService
-
-    @Inject
-    lateinit var sessionStore: MobileSessionStore
-
-    @Inject
-    lateinit var signalR: SignalRManager
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -64,18 +55,11 @@ class FbpDeclarationFragment : Fragment() {
     }
 
     private fun loadFbpData() {
-        val token = sessionStore.token() ?: return
-
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.fbp(
-                    "Bearer $token",
-                    financialYear()
-                )
+                val data = selfService.fbp(financialYear())
 
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        val data = response.body() ?: emptyList()
 
                         b.fbpHistoryContainer.removeAllViews()
 
@@ -179,18 +163,7 @@ class FbpDeclarationFragment : Fragment() {
 
                             b.fbpHistoryContainer.addView(empty)
                         }
-
-                    } else {
-                        if (isAdded) {
-                            Toast.makeText(
-                                requireContext(),
-                                "Unable to load FBP declarations ⚠️",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
                 }
-
             } catch (e: Exception) {
 
                 Log.e(
@@ -211,8 +184,6 @@ class FbpDeclarationFragment : Fragment() {
     }
 
     private fun saveFbpData() {
-        val token = sessionStore.token() ?: return
-
         val componentName = binding.etComponent.text?.toString()?.trim().orEmpty()
         val annualAmount = binding.etAmount.text?.toString()?.trim()?.toDoubleOrNull()
 
@@ -234,17 +205,9 @@ class FbpDeclarationFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.saveFbp("Bearer $token", request)
-
-                _binding?.let {
-                    if (response.isSuccessful) {
-                        Toast.makeText(requireContext(), "FBP declaration saved! ✅🎁 💎", Toast.LENGTH_SHORT).show()
-                        loadFbpData()
-                    } else {
-                        val message = response.errorBody()?.string()?.takeIf { it.isNotBlank() } ?: "Failed to save FBP ❌"
-                        Toast.makeText(requireContext(), "$message ⚠️", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                selfService.saveFbp(request)
+                Toast.makeText(requireContext(), "FBP declaration saved! ✅🎁 💎", Toast.LENGTH_SHORT).show()
+                loadFbpData()
             } catch (e: Exception) {
                 Log.e("FBP", "Save failed ⚠️", e)
                 if (isAdded && _binding != null) {
@@ -270,10 +233,10 @@ class FbpDeclarationFragment : Fragment() {
     @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
+            selfService.changesFlow()
                 .debounce(500L)
-                .collect { event ->
-                    Log.d("FBPDeclaration", "Real-time refresh: $event 🛰️")
+                .collect {
+                    Log.d("FBPDeclaration", "Real-time refresh: Firebase update 🛰️")
                     if (isAdded && _binding != null) {
                         loadFbpData()
                     }

@@ -13,11 +13,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.biometric.app.R
 import com.biometric.app.api.AttendanceDayDto
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.databinding.DialogAttendanceDayDetailsBinding
 import com.biometric.app.databinding.FragmentMyAttendanceBinding
-import com.biometric.app.sync.SignalRManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.FlowPreview
@@ -33,9 +31,7 @@ class AttendanceLogsFragment : Fragment() {
     private var _binding: FragmentMyAttendanceBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: AttendanceAdapter
 
@@ -54,10 +50,10 @@ class AttendanceLogsFragment : Fragment() {
     @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
+            selfService.changesFlow()
                 .debounce(500L)
-                .collect { event ->
-                    Log.d("AttendanceLogs", "Real-time refresh: $event 🛰️")
+                .collect {
+                    Log.d("AttendanceLogs", "Firebase real-time refresh 🛰️")
                     if (isAdded && _binding != null) {
                         loadAttendance()
                     }
@@ -109,32 +105,21 @@ class AttendanceLogsFragment : Fragment() {
     }
 
     private fun loadAttendance() {
-        val token = sessionStore.token() ?: return
         val sdf = SimpleDateFormat("yyyy-MM-01", Locale.US)
         val fromDate = sdf.format(Date())
         val toDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        
         val monthName = SimpleDateFormat("MMMM yyyy", Locale.US).format(Date())
         _binding?.tvSummaryTitle?.text = "Cumulative Summary ($monthName) 📊 💎"
 
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.attendance("Bearer $token", fromDate, toDate)
+                val logs = selfService.attendance(fromDate, toDate)
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        val logs = response.body() ?: emptyList()
-                        adapter.submitList(logs)
-                        updateSummary(logs)
-                        
-                        if (logs.isEmpty()) {
-                            Log.i("AttendanceLogs", "No logs found for this period.")
-                        }
-                    } else {
-                        Log.e("AttendanceLogs", "Server error: ${response.code()}")
-                    }
+                    adapter.submitList(logs)
+                    updateSummary(logs)
                 }
             } catch (e: Exception) {
-                Log.e("AttendanceLogs", "Load failed: ${e.message}")
+                Log.e("AttendanceLogs", "Firebase load failed: ${e.message}", e)
             }
         }
     }

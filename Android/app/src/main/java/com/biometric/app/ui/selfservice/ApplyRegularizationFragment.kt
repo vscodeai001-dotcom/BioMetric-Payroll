@@ -7,10 +7,9 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.RegularizationCreateRequest
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentApplyRegularizationBinding
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
@@ -26,8 +25,7 @@ class ApplyRegularizationFragment : Fragment() {
     private var _binding: FragmentApplyRegularizationBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private var selectedDate: Long = System.currentTimeMillis()
     private val dateSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -91,33 +89,23 @@ class ApplyRegularizationFragment : Fragment() {
     }
 
     private fun submitCorrection() {
-        val date = _binding?.etDate?.text?.toString() ?: ""
-        val time = _binding?.etTime?.text?.toString() ?: ""
+        val date = _binding?.etDate?.text?.toString().orEmpty()
+        val time = _binding?.etTime?.text?.toString().orEmpty()
         val isInPunch = _binding?.btnIn?.isChecked ?: true
-        val reason = _binding?.etReason?.text?.toString() ?: ""
-
+        val reason = _binding?.etReason?.text?.toString().orEmpty()
         if (reason.isBlank()) {
             if (isAdded) Toast.makeText(requireContext(), "Please provide a reason ⚠️", Toast.LENGTH_SHORT).show()
             return
         }
-
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val request = RegularizationCreateRequest(date, isInPunch, time, reason)
-                val response = mobileApi.createRegularization("Bearer $token", request)
-                _binding?.let {
-                    if (response.isSuccessful) {
-                        Toast.makeText(requireContext(), "Correction request submitted! 🛠️ 💎 ✅", Toast.LENGTH_SHORT).show()
-                        parentFragmentManager.popBackStack()
-                    } else {
-                        Toast.makeText(requireContext(), "Submission failed: ${response.code()} ❌ ⚠️", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                selfService.createRegularization(
+                    RegularizationCreateRequest(date, isInPunch, time, reason)
+                )
+                Toast.makeText(requireContext(), "Correction request submitted! 🛠️ 💎 ✅", Toast.LENGTH_SHORT).show()
+                parentFragmentManager.popBackStack()
             } catch (e: Exception) {
-                if (isAdded && _binding != null) {
-                    Toast.makeText(requireContext(), "Submission error 🌐 ⚠️", Toast.LENGTH_SHORT).show()
-                }
+                if (isAdded) Toast.makeText(requireContext(), "Submission error: ${e.message ?: "Firebase unavailable"} ⚠️", Toast.LENGTH_SHORT).show()
             }
         }
     }

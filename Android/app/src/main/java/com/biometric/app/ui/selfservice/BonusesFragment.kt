@@ -9,13 +9,9 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentMoneyListBinding
-import com.biometric.app.sync.SignalRManager
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.util.Locale
 import javax.inject.Inject
@@ -26,9 +22,7 @@ class BonusesFragment : Fragment() {
     private var _binding: FragmentMoneyListBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: MoneyAdapter
 
@@ -47,17 +41,11 @@ class BonusesFragment : Fragment() {
         setupRealTimeSync()
     }
 
-    @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
-                .debounce(500L)
-                .collect { event ->
-                    Log.d("BonusesFragment", "Real-time refresh: $event 🛰️")
-                    if (isAdded && _binding != null) {
-                        loadBonuses()
-                    }
-                }
+            selfService.changesFlow().collect {
+                if (isAdded && _binding != null) loadBonuses()
+            }
         }
     }
 
@@ -70,28 +58,22 @@ class BonusesFragment : Fragment() {
     }
 
     private fun loadBonuses() {
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.bonuses("Bearer $token")
+                val bonuses = selfService.bonuses()
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        val bonuses = response.body() ?: emptyList()
-                        adapter.submitList(bonuses)
-                        
-                        val total = bonuses.sumOf { it.amount }
-                        b.tvTotalAmount.text = String.format(Locale.US, "₹ %,.2f", total)
-                        
-                        if (bonuses.isEmpty()) {
-                            b.tvEmpty.text = "No bonuses recorded yet 🎁 💎"
-                            b.tvEmpty.visibility = View.VISIBLE
-                        } else {
-                            b.tvEmpty.visibility = View.GONE
-                        }
+                    adapter.submitList(bonuses)
+                    val total = bonuses.sumOf { it.amount }
+                    b.tvTotalAmount.text = String.format(Locale.US, "₹ %,.2f", total)
+                    if (bonuses.isEmpty()) {
+                        b.tvEmpty.text = "No bonuses recorded yet 🎁 💎"
+                        b.tvEmpty.visibility = View.VISIBLE
+                    } else {
+                        b.tvEmpty.visibility = View.GONE
                     }
                 }
             } catch (e: Exception) {
-                Log.e("Bonuses", "Load failed: ${e.message}")
+                Log.e("Bonuses", "Firebase load failed: ${e.message}", e)
                 _binding?.let { b ->
                     b.tvEmpty.text = "Unable to load bonuses. Please try again. ⚠️"
                     b.tvEmpty.visibility = View.VISIBLE

@@ -9,15 +9,11 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.PayslipDto
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentPayslipListBinding
-import com.biometric.app.sync.SignalRManager
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.util.Locale
 import javax.inject.Inject
@@ -28,9 +24,7 @@ class PayslipListFragment : Fragment() {
     private var _binding: FragmentPayslipListBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: PayslipAdapter
 
@@ -46,17 +40,11 @@ class PayslipListFragment : Fragment() {
         setupRealTimeSync()
     }
 
-    @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
-                .debounce(500L)
-                .collect { event ->
-                    Log.d("Payslips", "Real-time refresh: $event 🛰️")
-                    if (isAdded && _binding != null) {
-                        loadPayslips()
-                    }
-                }
+            selfService.changesFlow().collect {
+                if (isAdded && _binding != null) loadPayslips()
+            }
         }
     }
 
@@ -95,31 +83,19 @@ class PayslipListFragment : Fragment() {
     }
 
     private fun loadPayslips() {
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.payslips("Bearer $token")
+                val payslips = selfService.payslips()
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        val payslips = response.body() ?: emptyList()
-                        adapter.submitList(payslips)
-                        if (payslips.isEmpty()) {
-                            b.tvEmpty.text = "No payslips available 🧾 ⚠️"
-                            b.tvEmpty.visibility = View.VISIBLE
-                        } else {
-                            b.tvEmpty.visibility = View.GONE
-                        }
-                    } else {
-                        Toast.makeText(requireContext(), "Server error: ${response.code()} ❌", Toast.LENGTH_SHORT).show()
-                    }
+                    adapter.submitList(payslips)
+                    b.tvEmpty.visibility = if (payslips.isEmpty()) View.VISIBLE else View.GONE
+                    if (payslips.isEmpty()) b.tvEmpty.text = "No payslips available 🧾 ⚠️"
                 }
             } catch (e: Exception) {
-                Log.e("Payslips", "Load failed: ${e.message}")
+                Log.e("Payslips", "Firebase load failed: ${e.message}", e)
                 _binding?.let { b ->
-                    b.tvEmpty.apply {
-                        text = "Unable to load payslips. Please try again. ⚠️"
-                        visibility = View.VISIBLE
-                    }
+                    b.tvEmpty.text = "Unable to load payslips. Please try again. ⚠️"
+                    b.tvEmpty.visibility = View.VISIBLE
                 }
             }
         }

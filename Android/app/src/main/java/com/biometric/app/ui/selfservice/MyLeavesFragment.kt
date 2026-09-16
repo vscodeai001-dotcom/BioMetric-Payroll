@@ -10,14 +10,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.biometric.app.R
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentMyLeavesBinding
-import com.biometric.app.sync.SignalRManager
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.google.android.material.tabs.TabLayout
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.util.*
 import javax.inject.Inject
@@ -28,9 +24,7 @@ class MyLeavesFragment : Fragment() {
     private var _binding: FragmentMyLeavesBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: LeavesAdapter
 
@@ -78,58 +72,42 @@ class MyLeavesFragment : Fragment() {
     }
 
     private fun loadLeaves() {
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.leaves("Bearer $token")
-                _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        adapter.submitList(response.body() ?: emptyList())
-                    }
-                }
+                adapter.submitList(selfService.leaves())
             } catch (e: Exception) {
-                Log.e("MyLeaves", "Load failed: ${e.message}")
-                if (isAdded) {
-                    Toast.makeText(requireContext(), "Unable to load leave requests. Please try again. ⚠️", Toast.LENGTH_SHORT).show()
-                }
+                Log.e("MyLeaves", "Firebase load failed: ${e.message}", e)
+                if (isAdded) Toast.makeText(requireContext(), "Unable to load leave requests. Please try again. ⚠️", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun loadBalances() {
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.dashboard("Bearer $token")
+                val dashboard = selfService.dashboard()
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        response.body()?.let { dashboard ->
-                            b.tvPaidLeaveVal.text = String.format(Locale.US, "%.2f / 12.00 💎", dashboard.paidLeaveBalance)
-                            b.tvPaidSummary.text = String.format(Locale.US, "%.1f", dashboard.paidLeaveBalance)
-                            b.progressPaid.progress = (dashboard.paidLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
-                            
-                            b.tvSickLeaveVal.text = String.format(Locale.US, "%.2f / 12.00 🛡️", dashboard.sickLeaveBalance)
-                            b.tvSickSummary.text = String.format(Locale.US, "%.1f", dashboard.sickLeaveBalance)
-                            b.progressSick.progress = (dashboard.sickLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
-                        }
-                    }
+                    b.tvPaidLeaveVal.text = String.format(Locale.US, "%.2f / 12.00 💎", dashboard.paidLeaveBalance)
+                    b.tvPaidSummary.text = String.format(Locale.US, "%.1f", dashboard.paidLeaveBalance)
+                    b.progressPaid.progress = (dashboard.paidLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
+                    b.tvSickLeaveVal.text = String.format(Locale.US, "%.2f / 12.00 🛡️", dashboard.sickLeaveBalance)
+                    b.tvSickSummary.text = String.format(Locale.US, "%.1f", dashboard.sickLeaveBalance)
+                    b.progressSick.progress = (dashboard.sickLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.e("MyLeaves", "Firebase balance load failed", e)
+            }
         }
     }
 
-    @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
-                .debounce(500L)
-                .collect { event ->
-                    Log.d("MyLeavesFragment", "Real-time refresh: $event 🛰️")
-                    if (isAdded && _binding != null) {
-                        loadLeaves()
-                        loadBalances()
-                    }
+            selfService.changesFlow().collect {
+                if (isAdded && _binding != null) {
+                    loadLeaves()
+                    loadBalances()
                 }
+            }
         }
     }
 

@@ -16,14 +16,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.biometric.app.R
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.RegularizationDto
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentMyRegularizationBinding
-import com.biometric.app.sync.SignalRManager
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -37,9 +33,7 @@ class RegularizationFragment : Fragment() {
     private var _binding: FragmentMyRegularizationBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
-    @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: RegularizationAdapter
 
@@ -69,44 +63,21 @@ class RegularizationFragment : Fragment() {
     }
 
     private fun loadRegularizations() {
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val requestsResponse = mobileApi.regularizations("Bearer $token")
+                val requests = selfService.regularizations()
                 _binding?.let { b ->
-                    if (requestsResponse.isSuccessful) {
-                        val requests = requestsResponse.body() ?: emptyList()
-                        adapter.submitList(requests)
-
-                        val now = Date()
-                        val monthStart = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
-                            .let { sdf ->
-                                val cal = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
-                                sdf.format(cal.time)
-                            }
-                        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(now)
-                        
-                        viewLifecycleOwner.lifecycleScope.launch {
-                            try {
-                                val attendanceResponse = mobileApi.attendance("Bearer $token", monthStart, today)
-                                _binding?.let {
-                                    if (attendanceResponse.isSuccessful) {
-                                        renderMissingPunches(attendanceResponse.body() ?: emptyList(), requests)
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Log.e("RegularizationFragment", "Attendance load failed ⚠️", e)
-                            }
-                        }
-                    } else {
-                         Toast.makeText(requireContext(), "Server error: ${requestsResponse.code()} ❌", Toast.LENGTH_SHORT).show()
-                    }
+                    adapter.submitList(requests)
+                    val cal = Calendar.getInstance()
+                    val monthStart = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+                        .format(cal.apply { set(Calendar.DAY_OF_MONTH, 1) }.time)
+                    val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                    val days = selfService.attendance(monthStart, today)
+                    renderMissingPunches(days, requests)
                 }
             } catch (e: Exception) {
-                Log.e("RegularizationFragment", "Failed to load corrections ⚠️", e)
-                if (isAdded && _binding != null) {
-                    Toast.makeText(requireContext(), "Failed to load corrections ⚠️", Toast.LENGTH_SHORT).show()
-                }
+                Log.e("RegularizationFragment", "Firebase load failed", e)
+                if (isAdded) Toast.makeText(requireContext(), "Failed to load corrections ⚠️", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -190,17 +161,11 @@ class RegularizationFragment : Fragment() {
             .commit()
     }
 
-    @OptIn(FlowPreview::class)
     private fun setupRealTimeSync() {
         viewLifecycleOwner.lifecycleScope.launch {
-            signalR.dataChangeEvents
-                .debounce(500L)
-                .collect { event ->
-                    Log.d("RegularizationFragment", "Real-time refresh: $event 🛰️")
-                    if (isAdded && _binding != null) {
-                        loadRegularizations()
-                    }
-                }
+            selfService.changesFlow().collect {
+                if (isAdded && _binding != null) loadRegularizations()
+            }
         }
     }
 

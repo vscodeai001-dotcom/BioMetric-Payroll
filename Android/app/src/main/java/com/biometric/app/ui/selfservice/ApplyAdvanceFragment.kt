@@ -7,10 +7,8 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
-import com.biometric.app.api.AdvanceCreateRequest
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentApplyAdvanceBinding
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -21,8 +19,7 @@ class ApplyAdvanceFragment : Fragment() {
     private var _binding: FragmentApplyAdvanceBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentApplyAdvanceBinding.inflate(inflater, container, false)
@@ -37,37 +34,24 @@ class ApplyAdvanceFragment : Fragment() {
     }
 
     private fun submitRequest() {
-        val amountStr = _binding?.etAmount?.text?.toString() ?: ""
-        val reason = _binding?.etReason?.text?.toString() ?: ""
-
+        val amountStr = _binding?.etAmount?.text?.toString().orEmpty()
+        val reason = _binding?.etReason?.text?.toString().orEmpty()
+        val amount = amountStr.toDoubleOrNull() ?: 0.0
         if (amountStr.isBlank()) {
             if (isAdded) Toast.makeText(requireContext(), "Please enter amount ⚠️", Toast.LENGTH_SHORT).show()
             return
         }
-
-        val amount = amountStr.toDoubleOrNull() ?: 0.0
         if (amount <= 0) {
             if (isAdded) Toast.makeText(requireContext(), "Invalid amount ⚠️", Toast.LENGTH_SHORT).show()
             return
         }
-
-        val token = sessionStore.token() ?: return
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val request = AdvanceCreateRequest(amount, reason)
-                val response = mobileApi.createAdvance("Bearer $token", request)
-                _binding?.let {
-                    if (response.isSuccessful) {
-                        Toast.makeText(requireContext(), "Advance request submitted! 💳 💎 ✅", Toast.LENGTH_SHORT).show()
-                        parentFragmentManager.popBackStack()
-                    } else {
-                        Toast.makeText(requireContext(), "Submission failed: ${response.code()} ❌ ⚠️", Toast.LENGTH_SHORT).show()
-                    }
-                }
+                selfService.createAdvance(amount, reason)
+                Toast.makeText(requireContext(), "Advance request submitted! 💳 💎 ✅", Toast.LENGTH_SHORT).show()
+                parentFragmentManager.popBackStack()
             } catch (e: Exception) {
-                if (isAdded && _binding != null) {
-                    Toast.makeText(requireContext(), "Submission error 🌐 ⚠️", Toast.LENGTH_SHORT).show()
-                }
+                if (isAdded) Toast.makeText(requireContext(), "Submission error: ${e.message ?: "Firebase unavailable"} ⚠️", Toast.LENGTH_SHORT).show()
             }
         }
     }

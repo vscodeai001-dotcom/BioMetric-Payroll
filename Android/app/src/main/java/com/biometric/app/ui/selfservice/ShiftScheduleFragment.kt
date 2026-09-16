@@ -9,9 +9,8 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.FragmentShiftScheduleBinding
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -24,8 +23,7 @@ class ShiftScheduleFragment : Fragment() {
     private var _binding: FragmentShiftScheduleBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
     private lateinit var adapter: ShiftAdapter
 
@@ -49,28 +47,20 @@ class ShiftScheduleFragment : Fragment() {
     }
 
     private fun loadShifts() {
-        val token = sessionStore.token() ?: return
         val currentMonth = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val response = mobileApi.shifts("Bearer $token", currentMonth)
+                val shifts = selfService.shifts(currentMonth)
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        val shifts = response.body() ?: emptyList()
-                        adapter.submitList(shifts)
-                        
-                        b.tvShiftSummary.text = "You have ${shifts.size} shifts scheduled for this month 🕒 📅."
-                        
-                        if (shifts.isEmpty()) {
-                            b.tvEmpty.text = "No shifts scheduled for this month 🕒 💎"
-                            b.tvEmpty.visibility = View.VISIBLE
-                        } else {
-                            b.tvEmpty.visibility = View.GONE
-                        }
-                    }
+                    adapter.submitList(shifts)
+                    b.tvShiftSummary.text = "You have ${shifts.size} shifts scheduled for this month 🕒 📅."
+                    if (shifts.isEmpty()) {
+                        b.tvEmpty.text = "No shifts scheduled for this month 🕒 💎"
+                        b.tvEmpty.visibility = View.VISIBLE
+                    } else b.tvEmpty.visibility = View.GONE
                 }
             } catch (e: Exception) {
-                Log.e("Shifts", "Load failed: ${e.message}")
+                Log.e("Shifts", "Firebase load failed: ${e.message}", e)
                 _binding?.let { b ->
                     b.tvEmpty.text = "Unable to load shifts. Please try again. ⚠️"
                     b.tvEmpty.visibility = View.VISIBLE
