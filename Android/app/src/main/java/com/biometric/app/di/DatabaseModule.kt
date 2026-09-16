@@ -39,6 +39,11 @@ object DatabaseModule {
     }
 
     @Provides
+    fun provideGeofenceDao(database: AppLocalDatabase): GeofenceDao {
+        return database.geofenceDao()
+    }
+
+    @Provides
     @Singleton
     @Suppress("DEPRECATION")
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
