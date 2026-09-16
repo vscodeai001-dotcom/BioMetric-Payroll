@@ -168,6 +168,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             setUseDataConnection(true)
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
+            runCatching { tileProvider.clearTileCache() }
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(16.0)
             

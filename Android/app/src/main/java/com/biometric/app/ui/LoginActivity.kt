@@ -237,13 +237,30 @@ class LoginActivity : MotionBaseActivity() {
             // IMPORTANT:
             // firebaseUser is guaranteed non-null here because the null path
             // above always returns.
-            val tokenResult = runCatching {
-                firebaseUser
-                    .getIdToken(true)
-                    .await()
+            // Firebase Authentication succeeds before custom claims are necessarily
+            // available. The Web provisioning worker stamps Employee claims for
+            // existing Firebase Console-created users. Give that one-time
+            // provisioning a short window, then force-refresh the ID token.
+            var tokenResult = runCatching {
+                firebaseUser.getIdToken(true).await()
             }.getOrNull()
 
-            val claims = tokenResult?.claims.orEmpty()
+            var claims = tokenResult?.claims.orEmpty()
+            repeat(4) { attempt ->
+                val hasApplicationRole = !claims["role"]?.toString().isNullOrBlank()
+                val hasEmployeeId = (claims["employee_id"]?.toString()?.toIntOrNull() ?: 0) > 0
+                val isKnownEmployeeEmail = !firebaseUser.email.isNullOrBlank() &&
+                    !firebaseUser.email.equals(superAdminEmail, ignoreCase = true)
+
+                if (hasApplicationRole && (!isKnownEmployeeEmail || hasEmployeeId)) return@repeat
+                if (attempt == 3) return@repeat
+
+                delay(1500L)
+                tokenResult = runCatching {
+                    firebaseUser.getIdToken(true).await()
+                }.getOrNull()
+                claims = tokenResult?.claims.orEmpty()
+            }
 
             val rawRole = claims["role"]?.toString().orEmpty()
 
@@ -551,7 +568,7 @@ class LoginActivity : MotionBaseActivity() {
                 )
                 Toast.makeText(
                     this@LoginActivity,
-                    "Firebase login succeeded, but the Employee session service is unreachable. API: ${BuildConfig.BIOMETRIC_API_BASE_URL}",
+                    "Firebase account verified, but Employee profile/session provisioning is not ready yet. Please keep the Web app running once so Employee Firebase claims can be provisioned, then try again.",
                     Toast.LENGTH_LONG
                 ).show()
             }

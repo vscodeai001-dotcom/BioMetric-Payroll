@@ -304,6 +304,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 setUseDataConnection(true)
                 setTileSource(adminOpenStreetMapSource())
                 setMultiTouchControls(true)
+                // Force the tile provider to re-evaluate the network-backed
+                // source after Activity recreation. This prevents a blank/grey
+                // dashboard map when the MapView was created before network
+                // availability or after a theme/process recreation.
+                runCatching { tileProvider.clearTileCache() }
+                setBuiltInZoomControls(false)
                 setBackgroundColor(Color.TRANSPARENT)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 minZoomLevel = 3.0
@@ -330,12 +336,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 post {
                     invalidate()
                     controller.setCenter(mapCenterFallback(this))
+                    runCatching { tileProvider.clearTileCache() }
+                    invalidate()
                     postDelayed({
                         invalidate()
-                    }, 700L)
+                        runCatching { invalidate() }
+                    }, 500L)
                     postDelayed({
                         invalidate()
-                    }, 1800L)
+                    }, 1500L)
                 }
             }
         }
@@ -925,6 +934,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         super.onResume()
         _binding?.adminMapView?.onResume()
         _binding?.commandCenterMapView?.onResume()
+        _binding?.adminMapView?.post { _binding?.adminMapView?.invalidate() }
+        _binding?.commandCenterMapView?.post { _binding?.commandCenterMapView?.invalidate() }
         checkBatteryOptimizations()
 
         lifecycleScope.launch {
