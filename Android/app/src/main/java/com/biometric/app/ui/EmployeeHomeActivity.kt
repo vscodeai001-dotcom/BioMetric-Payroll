@@ -58,6 +58,7 @@ import com.biometric.app.util.BatteryOptimizationHelper
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
+import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.AndroidEntryPoint
 import org.osmdroid.tileprovider.cachemanager.CacheManager
 import kotlinx.coroutines.Dispatchers

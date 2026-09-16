@@ -389,7 +389,6 @@ class LoginActivity : MotionBaseActivity() {
                 }
 
                 return@launch
-            }
 
             // Admin/SuperAdmin require a valid Firebase ID token.
             if (tokenResult?.token.isNullOrBlank()) {
