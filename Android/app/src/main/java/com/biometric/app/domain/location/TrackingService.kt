@@ -24,6 +24,9 @@ import com.biometric.app.R
 import com.biometric.app.data.LocalLocation
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.GeofenceDao
+import com.biometric.app.data.dao.OfflineTrackingEventDao
+import com.biometric.app.data.entity.OfflineTrackingEvent
 import java.util.UUID
 import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -39,8 +42,11 @@ class TrackingService : Service() {
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var syncManager: LocationSyncManager
     @Inject lateinit var locationDao: LocationDao
+    @Inject lateinit var geofenceDao: GeofenceDao
+    @Inject lateinit var eventDao: OfflineTrackingEventDao
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var offlineMonitor: OfflineTrackingMonitor
+    @Inject lateinit var geofenceManager: GeofenceManager
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

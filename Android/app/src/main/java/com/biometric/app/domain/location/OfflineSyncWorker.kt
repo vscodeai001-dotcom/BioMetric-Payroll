@@ -7,6 +7,8 @@ import androidx.work.*
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.LocalLocation
+import com.biometric.app.data.dao.OfflineTrackingEventDao
+import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.sync.FirebaseSyncManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -24,6 +26,7 @@ class OfflineSyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
     private val locationDao: LocationDao,
+    private val eventDao: OfflineTrackingEventDao,
     private val sessionStore: MobileSessionStore,
     private val monitor: OfflineTrackingMonitor,
     private val firebaseSync: FirebaseSyncManager
@@ -43,6 +46,8 @@ class OfflineSyncWorker @AssistedInject constructor(
                 System.currentTimeMillis() - 2 * 60 * 1000L
             )
         }
+
+        syncTrackingEvents()
 
         val queued = withContext(Dispatchers.IO) {
             locationDao.getPendingForSync()
@@ -135,12 +140,37 @@ class OfflineSyncWorker @AssistedInject constructor(
 
         monitor.pruneRetention()
 
-        val remaining = locationDao.getPendingCount()
+        val remaining = locationDao.getPendingCount() + eventDao.getPendingCount()
 
         return if (!failed && remaining == 0) {
             Result.success()
         } else {
             Result.retry()
+        }
+    }
+
+    private suspend fun syncTrackingEvents() {
+        val pendingEvents = withContext(Dispatchers.IO) {
+            eventDao.getPendingSync()
+        }
+
+        for (event in pendingEvents) {
+            try {
+                // Mark as in-flight
+                eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_IN_FLIGHT, 0)
+                
+                val uploaded = firebaseSync.pushTrackingEvent(event)
+                if (uploaded) {
+                    eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNCED, System.currentTimeMillis())
+                } else {
+                    eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_FAILED, 0)
+                    break // Stop if one fails
+                }
+            } catch (e: Exception) {
+                eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_FAILED, 0)
+                Log.w("OfflineSyncWorker", "Tracking event sync failed", e)
+                break
+            }
         }
     }
 

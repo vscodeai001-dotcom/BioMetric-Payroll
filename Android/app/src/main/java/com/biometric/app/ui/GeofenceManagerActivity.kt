@@ -12,6 +12,7 @@ import com.biometric.app.data.entity.GeofenceLocation
 import com.biometric.app.databinding.ActivityGeofenceManagerBinding
 import com.biometric.app.databinding.DialogAddGeofenceBinding
 import com.biometric.app.ui.adapter.GeofenceAdapter
+import com.biometric.app.data.dao.GeofenceDao
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
@@ -33,6 +34,7 @@ import javax.inject.Inject
 class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
 
     @Inject lateinit var firebaseSync: FirebaseSyncManager
+    @Inject lateinit var geofenceDao: GeofenceDao
 
     private lateinit var binding: ActivityGeofenceManagerBinding
     private var googleMap: GoogleMap? = null
@@ -92,6 +94,16 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
                             Log.e("Geofence", "Parse error", e)
                         }
                     }
+                    
+                    // Cache locally for offline validation
+                    val snapshotList = ArrayList(geofenceList)
+                    CoroutineScope(Dispatchers.IO).launch {
+                        runCatching {
+                            geofenceDao.clearAll()
+                            geofenceDao.insertAll(snapshotList)
+                        }
+                    }
+
                     adapter.notifyDataSetChanged()
                     updateMapMarkers()
                 } catch (e: Exception) {

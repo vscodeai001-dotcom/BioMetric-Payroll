@@ -1,10 +1,13 @@
 package com.biometric.app.data.entity
 
 import androidx.annotation.Keep
+import androidx.room.Entity
+import androidx.room.PrimaryKey
 
 @Keep
+@Entity(tableName = "geofences")
 data class GeofenceLocation(
-    var id: String = "",
+    @PrimaryKey var id: String = "",
     var name: String = "",
     var latitude: Double = 0.0,
     var longitude: Double = 0.0,

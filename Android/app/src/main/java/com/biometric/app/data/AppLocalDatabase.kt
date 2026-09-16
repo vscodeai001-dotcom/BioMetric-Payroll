@@ -6,17 +6,20 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.biometric.app.data.dao.GeofenceDao
 import com.biometric.app.data.dao.OfflineTrackingEventDao
+import com.biometric.app.data.entity.GeofenceLocation
 import com.biometric.app.data.entity.OfflineTrackingEvent
 
 @Database(
-    entities = [LocalLocation::class, OfflineTrackingEvent::class],
-    version = 2,
+    entities = [LocalLocation::class, OfflineTrackingEvent::class, GeofenceLocation::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppLocalDatabase : RoomDatabase() {
     abstract fun locationDao(): LocationDao
     abstract fun offlineTrackingEventDao(): OfflineTrackingEventDao
+    abstract fun geofenceDao(): GeofenceDao
 
     companion object {
         @Volatile
@@ -44,13 +47,25 @@ abstract class AppLocalDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add sync fields to offline_tracking_events
+                db.execSQL("ALTER TABLE offline_tracking_events ADD COLUMN syncState TEXT NOT NULL DEFAULT 'PENDING'")
+                db.execSQL("ALTER TABLE offline_tracking_events ADD COLUMN syncedAt INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_offline_tracking_events_syncState_eventTime ON offline_tracking_events(syncState, eventTime)")
+                
+                // Create geofences table
+                db.execSQL("CREATE TABLE IF NOT EXISTS geofences (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius REAL NOT NULL, type TEXT NOT NULL, isActive INTEGER NOT NULL, createdAt INTEGER NOT NULL)")
+            }
+        }
+
         fun getDatabase(context: Context): AppLocalDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppLocalDatabase::class.java,
                     "biometric_local_db"
-                ).addMigrations(MIGRATION_1_2).build()
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
                 INSTANCE = instance
                 instance
             }

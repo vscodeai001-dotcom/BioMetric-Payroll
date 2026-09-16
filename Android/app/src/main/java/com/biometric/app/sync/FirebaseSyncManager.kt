@@ -16,6 +16,7 @@ import com.biometric.app.data.entity.ShopClosedDay
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
+import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
@@ -436,6 +437,21 @@ class FirebaseSyncManager @Inject constructor(
     }
     suspend fun pushRecycleBin(item: RecycleBinItem) { getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await(); notifyRealtimeChanged("RecycleBinItem", "MODIFIED") }
     suspend fun pushAuditLog(log: AuditLog) { getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await(); notifyRealtimeChanged("AuditLog", "ADDED") }
+
+    suspend fun pushTrackingEvent(event: OfflineTrackingEvent): Boolean {
+        if (!isAuthenticated()) return false
+        val employeeId = sessionStore.employeeId()
+        if (employeeId <= 0) return false
+
+        return try {
+            getGlobalRef().child("tracking/events").child(employeeId.toString())
+                .child(event.eventId).setValue(event).await()
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Tracking event write failed", e)
+            false
+        }
+    }
 
     suspend fun notifyRealtimeAfterWrite(entity: String, action: String = "MODIFIED") {
         notifyRealtimeChanged(entity, action)
