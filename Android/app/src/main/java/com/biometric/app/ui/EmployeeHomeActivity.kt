@@ -48,6 +48,9 @@ import com.biometric.app.api.GpsSessionRequest
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.MainRepository
+import com.biometric.app.data.entity.AttendancePunch
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.databinding.ActivityEmployeeHomeBinding
 import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.sync.SignalRManager
@@ -87,6 +90,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var mobileApi: MobileApiService
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
+    @Inject lateinit var repository: MainRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
@@ -204,6 +209,11 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun setupRealTimeSync() {
         signalR.start()
+        lifecycleScope.launch {
+            selfService.changesFlow().collectLatest {
+                if (_binding != null) loadDashboard()
+            }
+        }
         lifecycleScope.launch {
             signalR.dataChangeEvents.collectLatest { event ->
                 // Stable Flow API: coalesce a burst of realtime events without preview debounce API.
@@ -885,37 +895,49 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun attemptPunch() {
-        val token = sessionStore.token() ?: return
         lifecycleScope.launch {
             _binding?.let { b ->
                 b.btnPunch.isEnabled = false
                 b.btnPunch.text = "Processing... ⏳"
 
                 try {
-                    val response = mobileApi.punch(
-                        "Bearer $token",
-                        EmployeePunchRequest(
-                            type = "AUTO",
-                            latitude = currentLat,
-                            longitude = currentLon,
-                            accuracy = currentAccuracy.toDouble()
-                        )
+                    val employeeId = sessionStore.employeeId()
+                    if (employeeId <= 0) throw IllegalStateException("Employee session is missing")
+
+                    val nextType = selfService.nextPunchType()
+                    val punch = AttendancePunch(
+                        punchId = UUID.randomUUID().toString(),
+                        staffId = employeeId.toString(),
+                        date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
+                        type = nextType,
+                        timestamp = System.currentTimeMillis(),
+                        latitude = currentLat,
+                        longitude = currentLon,
+                        accuracy = currentAccuracy,
+                        deviceId = sessionStore.deviceId(),
+                        source = "MANUAL",
+                        status = "APPROVED"
                     )
-                    _binding?.let { bRes ->
-                        if (response.isSuccessful) {
-                            val result = response.body()
-                            if (result?.success == true) {
-                                Toast.makeText(this@EmployeeHomeActivity, "Punch Successful! 💎 (${result.nextType} next) ✅", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(this@EmployeeHomeActivity, "Punch Failed: ${result?.message ?: "Unknown error"} ⚠️", Toast.LENGTH_LONG).show()
-                            }
-                        } else {
-                            Toast.makeText(this@EmployeeHomeActivity, "Server Error: ${response.code()} ❌", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+
+                    // MainRepository persists locally first and Firebase queues the
+                    // write through the native SDK, so an offline punch is retained
+                    // and synchronized automatically when connectivity returns.
+                    repository.insertPunch(punch)
+
+                    Toast.makeText(
+                        this@EmployeeHomeActivity,
+                        "$nextType punch recorded successfully! 💎",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    loadDashboard()
                 } catch (e: Exception) {
+                    Log.e("EmployeeHome", "Firebase punch failed", e)
                     _binding?.let {
-                        Toast.makeText(this@EmployeeHomeActivity, "Network Error: ${e.message} 🌐 ⚠️", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            this@EmployeeHomeActivity,
+                            "Punch failed: ${e.message ?: "Firebase unavailable"} ⚠️",
+                            Toast.LENGTH_LONG
+                        ).show()
                     }
                 } finally {
                     _binding?.let { bInner ->
@@ -928,45 +950,17 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun loadDashboard() {
-        val token = sessionStore.token()
-        if (token.isNullOrBlank()) {
+        if (!sessionStore.isLoggedIn()) {
             goToLogin()
             return
         }
 
-        // Authoritative Sync: If just logged in (even punches), perform Auto-IN
-        // Only trigger if we are within range or dual attendance is enabled.
-        if (intent.getBooleanExtra("JUST_LOGGED_IN", false)) {
-            intent.removeExtra("JUST_LOGGED_IN")
-            lifecycleScope.launch {
-                try {
-                    val statusRes = mobileApi.punchStatus("Bearer $token")
-                    if (statusRes.isSuccessful && statusRes.body()?.nextType == "IN") {
-                        Log.i("EmployeeHome", "Authoritative Login: Performing automatic IN punch...")
-                        mobileApi.punch(
-                            "Bearer $token",
-                            EmployeePunchRequest(
-                                type = "IN",
-                                latitude = currentLat,
-                                longitude = currentLon,
-                                accuracy = currentAccuracy.toDouble()
-                            )
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.e("EmployeeHome", "Authoritative Login auto-punch failed: ${e.message}")
-                }
-            }
-        }
-
-        // UX: Immediate local data fallback
         val cachePrefs = getSharedPreferences("dashboard_cache", MODE_PRIVATE)
         _binding?.let { b ->
             if (b.tvSalary.text == "₹ --") {
                 val cachedSalary = cachePrefs.getFloat("salary", 0f)
                 val cachedPaid = cachePrefs.getFloat("paid_leave", 0f)
                 val cachedSick = cachePrefs.getFloat("sick_leave", 0f)
-
                 if (cachedSalary > 0) {
                     b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", cachedSalary.toDouble())} 💰"
                     b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", cachedPaid.toDouble())
@@ -980,97 +974,59 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         dashboardJob?.cancel()
         dashboardJob = lifecycleScope.launch {
             try {
-                val response = mobileApi.dashboard("Bearer $token")
+                val data = selfService.dashboard()
                 _binding?.let { b ->
-                    if (response.isSuccessful) {
-                        response.body()?.let { data ->
-                            b.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋 ✨"
-                            b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", data.monthlySalary)} 💰 💎"
-                            b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", data.paidLeaveBalance)
-                            b.tvSickLeaveCount.text = String.format(Locale.US, "%.1f", data.sickLeaveBalance)
+                    val employeeName = data.name.trim().ifBlank { sessionStore.employeeName().ifBlank { "Employee" } }
+                    b.tvGreeting.text = "Hello, $employeeName! 👋 ✨"
+                    b.tvMapUserLabel.text = employeeName
 
-                            b.progressPaidLeave.progress = (data.paidLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
-                            b.progressSickLeave.progress = (data.sickLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
-
-                            officeLat = data.officeLatitude
-                            officeLon = data.officeLongitude
-                            geoRadius = data.geoRadiusMeters
-
-                            // Persist office settings for zero-lag restoration next time
-                            getSharedPreferences("office_settings", MODE_PRIVATE).edit {
-                                putFloat("lat", officeLat.toFloat())
-                                putFloat("lon", officeLon.toFloat())
-                                putInt("radius", geoRadius)
-                            }
-
-                            // Cache for next instant load
-                            cachePrefs.edit {
-                                putFloat("salary", data.monthlySalary.toFloat())
-                                putFloat("paid_leave", data.paidLeaveBalance.toFloat())
-                                putFloat("sick_leave", data.sickLeaveBalance.toFloat())
-                            }
-
-                            // Persist feature settings for background recovery worker
-                            getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
-                                putBoolean("enable_geo_fencing", data.enableGeoFencing)
-                                putBoolean("enable_dual_attendance", data.enableDualAttendance)
-                                putBoolean("enable_auto_punch", data.enableAutomaticGeofencePunching)
-                            }
-
-                            applyFeatureHierarchy(data)
-                            updateMapMarkers()
-                        }
-                    } else if (response.code() == 401) {
-                        // A 401 is an authentication/session signal, not a network
-                        // failure. Do one guarded authoritative check. Never let
-                        // concurrent realtime refreshes recurse into an auth/login
-                        // loop.
-                        if (dashboardAuthRecoveryInProgress) {
-                            Log.w("EmployeeHome", "Dashboard 401 while auth recovery is already running; keeping session state stable.")
-                            return@launch
-                        }
-
-                        dashboardAuthRecoveryInProgress = true
-                        try {
-                            Log.w("EmployeeHome", "Dashboard returned 401. Verifying the existing mobile session without clearing local login state... 🛰️")
-                            val recoverResponse = mobileApi.me("Bearer $token")
-                            if (recoverResponse.isSuccessful) {
-                                Log.i("EmployeeHome", "Authoritative mobile session is valid. Retrying dashboard after a short delay. ✅")
-                                delay(750L)
-                                if (sessionStore.isLoggedIn()) {
-                                    loadDashboard()
-                                }
-                            } else if (recoverResponse.code() == 401 || recoverResponse.code() == 403) {
-                                // A server-authenticated 401/403 is different from
-                                // a network failure. Preserve the current session
-                                // unless the server explicitly reports that this
-                                // mobile session was revoked/replaced.
-                                val state = recoverResponse.headers()["X-Mobile-Session-State"] ?: ""
-                                if (state.equals("SESSION_REVOKED", true) ||
-                                    state.equals("REAUTH_REQUIRED", true)) {
-                                    Log.e("EmployeeHome", "Mobile session was explicitly rejected by the server (${state}). Returning to login.")
-                                    goToLogin()
-                                } else {
-                                    Log.w("EmployeeHome", "Temporary authentication challenge without revocation state. Keeping persisted session and retrying.")
-                                    scheduleDashboardRetry(10_000L)
-                                }
-                            } else {
-                                // 5xx and other server responses are availability
-                                // failures, not logout decisions.
-                                Log.w("EmployeeHome", "Dashboard returned HTTP ${recoverResponse.code()}. Keeping session and retrying.")
-                                scheduleDashboardRetry(10_000L)
-                            }
-                        } finally {
-                            dashboardAuthRecoveryInProgress = false
-                        }
-                    } else {
-                        Log.e("EmployeeHome", "Dashboard error: ${response.code()} ❌")
-                        if (response.code() >= 500) scheduleDashboardRetry(5_000L)
+                    // Keep the session's display name aligned with the canonical
+                    // Firebase employee record. The email remains only the login
+                    // identity, never the dashboard greeting.
+                    if (employeeName != sessionStore.employeeName() && employeeName != "Employee") {
+                        sessionStore.saveLogin(
+                            token = sessionStore.token().orEmpty(),
+                            employeeId = sessionStore.employeeId(),
+                            name = employeeName,
+                            email = sessionStore.userEmail(),
+                            firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                        )
                     }
+
+                    b.tvSalary.text = "₹${String.format(Locale.US, "%,.0f", data.monthlySalary)} 💰 💎"
+                    b.tvPaidLeaveCount.text = String.format(Locale.US, "%.1f", data.paidLeaveBalance)
+                    b.tvSickLeaveCount.text = String.format(Locale.US, "%.1f", data.sickLeaveBalance)
+                    b.progressPaidLeave.progress = (data.paidLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
+                    b.progressSickLeave.progress = (data.sickLeaveBalance / 12.0 * 100).toInt().coerceIn(0, 100)
+
+                    officeLat = data.officeLatitude
+                    officeLon = data.officeLongitude
+                    geoRadius = data.geoRadiusMeters
+
+                    getSharedPreferences("office_settings", MODE_PRIVATE).edit {
+                        putFloat("lat", officeLat.toFloat())
+                        putFloat("lon", officeLon.toFloat())
+                        putInt("radius", geoRadius)
+                    }
+                    cachePrefs.edit {
+                        putFloat("salary", data.monthlySalary.toFloat())
+                        putFloat("paid_leave", data.paidLeaveBalance.toFloat())
+                        putFloat("sick_leave", data.sickLeaveBalance.toFloat())
+                    }
+                    getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                        putBoolean("enable_geo_fencing", data.enableGeoFencing)
+                        putBoolean("enable_dual_attendance", data.enableDualAttendance)
+                        putBoolean("enable_auto_punch", data.enableAutomaticGeofencePunching)
+                    }
+                    applyFeatureHierarchy(data)
+                    updateMapMarkers()
                 }
             } catch (e: Exception) {
-                Log.e("EmployeeHome", "Dashboard load failed: ${e.message} ⚠️")
-                scheduleDashboardRetry(10_000L)
+                Log.e("EmployeeHome", "Firebase dashboard load failed", e)
+                _binding?.let { b ->
+                    // Keep cached/local UI visible during offline mode.
+                    b.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋 ✨"
+                }
             }
         }
     }

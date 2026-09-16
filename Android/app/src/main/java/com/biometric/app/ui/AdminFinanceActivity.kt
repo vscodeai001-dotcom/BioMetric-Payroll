@@ -47,8 +47,8 @@ class AdminFinanceActivity : AppCompatActivity() {
     private val taxDeclarations = mutableListOf<TaxDeclarationDto>()
     
     private var currentTab = 0 // 0: Advances, 1: Bonuses, 2: Tax
-    private val currencyFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
-
+    private val currencyFormat =
+        NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAdminFinanceBinding.inflate(layoutInflater)

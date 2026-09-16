@@ -12,6 +12,8 @@ data class Employee(
     var role: String = "Staff",
     var salaryType: String = "MONTHLY_FIXED",
     var salaryRate: Double = 0.0,
+    var paidLeaveBalance: Double = 0.0,
+    var sickLeaveBalance: Double = 0.0,
     var salaryCalculationMethod: String = "Pro-Rata Hourly",
     var shiftStart: String = "10:00",
     var shiftEnd: String = "22:00",

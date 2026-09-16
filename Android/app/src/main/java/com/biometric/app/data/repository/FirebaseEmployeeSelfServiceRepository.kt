@@ -63,10 +63,44 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     private suspend fun employee(): Employee? {
         val id = employeeId()
         val direct = ownerRef().child("employees").child(id).get().await()
-        if (direct.exists()) return direct.getValue(Employee::class.java)
-        return ownerRef().child("employees").get().await().children
-            .mapNotNull { runCatching { it.getValue(Employee::class.java) }.getOrNull() }
-            .firstOrNull { it.employeeId == id }
+        if (direct.exists()) {
+            return direct.getValue(Employee::class.java)?.also {
+                if (it.employeeId.isBlank()) it.employeeId = id
+            }
+        }
+
+        // The canonical Firebase contract uses employees/{employeeId}.
+        // This fallback also supports records migrated with a legacy key,
+        // but it is only attempted when the direct canonical key is absent.
+        val email = sessionStore.userEmail().trim()
+        if (email.isNotBlank()) {
+            val byEmail = ownerRef().child("employees").get().await().children
+                .firstOrNull {
+                    it.child("email").getValue(String::class.java)?.equals(email, true) == true
+                }
+            if (byEmail != null) {
+                return byEmail.getValue(Employee::class.java)?.also {
+                    if (it.employeeId.isBlank()) it.employeeId = id
+                }
+            }
+        }
+        return null
+    }
+
+    suspend fun employeeProfile(): Employee? = employee()
+
+    suspend fun employeeDisplayName(): String =
+        employee()?.name?.trim().orEmpty()
+
+    suspend fun nextPunchType(): String {
+        val id = employeeId()
+        val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        val punches = readList("attendance_punches") {
+            runCatching { it.getValue(AttendancePunch::class.java) }.getOrNull()
+        }.filter { it.staffId == id && (it.date == today || formatDate(it.timestamp) == today) }
+            .sortedBy { it.timestamp }
+        val last = punches.lastOrNull()?.type?.uppercase(Locale.US)
+        return if (last == "IN") "OUT" else "IN"
     }
 
     fun changesFlow(): Flow<Unit> = callbackFlow {
@@ -120,10 +154,10 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val latest = payrollHistory().firstOrNull()
         val settings = ownerRef().child("company_settings").child("1").get().await()
 
-        val paid = ownerRef().child("employee_leave_balances").child(employeeId()).child("paid")
-            .get().await().value?.toString()?.toDoubleOrNull() ?: 12.0
-        val sick = ownerRef().child("employee_leave_balances").child(employeeId()).child("sick")
-            .get().await().value?.toString()?.toDoubleOrNull() ?: 12.0
+        // Leave balances are part of the canonical Employee Firebase record.
+        // Never fabricate a default balance when the employee record is loaded.
+        val paid = emp.paidLeaveBalance
+        val sick = emp.sickLeaveBalance
 
         return EmployeeDashboardResponse(
             success = true,

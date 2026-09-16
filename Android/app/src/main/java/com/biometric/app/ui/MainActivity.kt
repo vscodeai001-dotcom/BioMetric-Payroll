@@ -304,22 +304,24 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 setUseDataConnection(true)
                 setTileSource(adminOpenStreetMapSource())
                 setMultiTouchControls(true)
-                // Force the tile provider to re-evaluate the network-backed
-                // source after Activity recreation. This prevents a blank/grey
-                // dashboard map when the MapView was created before network
-                // availability or after a theme/process recreation.
-                runCatching { tileProvider.clearTileCache() }
-                setBuiltInZoomControls(false)
+
+                runCatching {
+                    tileProvider.clearTileCache()
+                }
+
                 setBackgroundColor(Color.TRANSPARENT)
-                zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+
+                zoomController.setVisibility(
+                    CustomZoomButtonsController.Visibility.NEVER
+                )
+
                 minZoomLevel = 3.0
                 maxZoomLevel = 20.0
                 controller.setZoom(13.0)
 
-                // Never leave a fresh Admin map at the world origin. Company
-                // settings/live locations will recenter it immediately when
-                // available; Pondicherry is only a safe visual fallback.
-                controller.setCenter(GeoPoint(11.9139, 79.8145))
+                controller.setCenter(
+                    GeoPoint(11.9139, 79.8145)
+                )
                 applyCurrentThemeToMap(this)
 
                 // NestedScrollView/card measurement can happen after the map is
