@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         app:navigationIcon="@drawable/ic_back"
-        app:title="Tracking Assignment & Scope" />
+        app:title="Tracking Assignment Scope" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Precedence: Employee → Shop → Global. Assignments only override the global tracking configuration." android:textSize="12sp" android:alpha="0.75" android:layout_marginTop="8dp" android:layout_marginBottom="12dp" />
     <Spinner android:id="@+id/spinnerScopeType" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <Spinner android:id="@+id/spinnerScopeTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" />
