@@ -15,7 +15,7 @@
 @inject IJSRuntime JSRuntime
 @inject ILogger<EmployeeList> _logger
 @inject IToastService toastService
-@attribute [Authorize(Roles = "Employee, SuperAdmin")]
+@attribute [Authorize(Roles = "Employee, Admin, SuperAdmin")]
 
 <PageTitle>Employee Management</PageTitle>
 

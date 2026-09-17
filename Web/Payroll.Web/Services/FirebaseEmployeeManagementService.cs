@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using System.Security.Claims;
 using Payroll.Shared.Data;
 
@@ -25,18 +26,21 @@ public sealed class FirebaseEmployeeManagementService
     private readonly IConfiguration _configuration;
     private readonly ILogger<FirebaseEmployeeManagementService> _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IEmailSender _emailSender;
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> EmployeeWriteLocks = new();
 
     public FirebaseEmployeeManagementService(
         FirebaseRealtimeService firebase,
         IConfiguration configuration,
         ILogger<FirebaseEmployeeManagementService> logger,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        IEmailSender emailSender)
     {
         _firebase = firebase;
         _configuration = configuration;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
+        _emailSender = emailSender;
     }
 
     public string OwnerUid =>
@@ -51,21 +55,66 @@ public sealed class FirebaseEmployeeManagementService
             return new List<Employee>();
 
         var result = new List<Employee>();
-        foreach (var item in snapshot.Value.EnumerateObject())
+
+        // Firebase Realtime Database returns numeric-keyed collections as a JSON
+        // array in REST responses. Older data and some writes can return an
+        // object instead. Support both shapes so valid employees are never
+        // mistaken for an empty collection.
+        if (snapshot.Value.ValueKind == JsonValueKind.Object)
         {
-            try
+            foreach (var item in snapshot.Value.EnumerateObject())
             {
-                var employee = ToEmployee(item.Value, item.Name);
-                if (!employee.IsDeleted)
-                    result.Add(employee);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Ignoring malformed Firebase employee record {RecordId}.", item.Name);
+                try
+                {
+                    if (item.Value.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    var employee = ToEmployee(item.Value, item.Name);
+                    if (!employee.IsDeleted)
+                        result.Add(employee);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Ignoring malformed Firebase employee record {RecordId}.", item.Name);
+                }
             }
         }
+        else if (snapshot.Value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in snapshot.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
 
-        return result.OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
+                try
+                {
+                    if (item.ValueKind == JsonValueKind.Null)
+                        continue;
+
+                    var employee = ToEmployee(item, fallbackId);
+                    if (!employee.IsDeleted)
+                        result.Add(employee);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Ignoring malformed Firebase employee array record {RecordId}.", fallbackId);
+                }
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "Firebase employees table returned unsupported JSON shape {ValueKind} for owner {OwnerUid}.",
+                snapshot.Value.ValueKind,
+                OwnerUid);
+        }
+
+        return result
+            .GroupBy(x => x.EmployeeID)
+            .Select(g => g.First())
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public async Task<Employee?> GetEmployeeAsync(int employeeId, CancellationToken ct = default)
@@ -257,15 +306,47 @@ public sealed class FirebaseEmployeeManagementService
         if (auth == null)
             return (false, "Firebase Authentication is not configured.");
 
+        var normalizedEmail = employee.Email.Trim();
         UserRecord? user = null;
+        var createdAuthAccount = false;
+
         try
         {
-            user = await auth.GetUserByEmailAsync(employee.Email.Trim(), ct);
+            user = await auth.GetUserByEmailAsync(normalizedEmail, ct);
         }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
+            // Employee creation must not leave a dead email-only record.
+            // Create a Firebase Auth account with a random temporary password,
+            // then immediately generate a password-reset link. The temporary
+            // password is never stored or returned.
+            var temporaryPassword = CreateTemporaryFirebasePassword();
+
+            try
+            {
+                user = await auth.CreateUserAsync(
+                    new UserRecordArgs
+                    {
+                        Email = normalizedEmail,
+                        Password = temporaryPassword,
+                        DisplayName = employee.Name,
+                        EmailVerified = false,
+                        Disabled = false
+                    },
+                    ct);
+                createdAuthAccount = true;
+            }
+            catch (FirebaseAuthException createEx) when (createEx.AuthErrorCode == AuthErrorCode.EmailAlreadyExists)
+            {
+                // A concurrent provisioning request may have created it.
+                user = await auth.GetUserByEmailAsync(normalizedEmail, ct);
+            }
+        }
+
+        if (user == null)
+        {
             await WriteProvisioningStatusAsync(employee, null, false, ct);
-            return (true, "Employee saved. Firebase Auth account is pending provisioning.");
+            return (false, "Employee Firebase Auth account could not be provisioned.");
         }
 
         var existingRole = user.CustomClaims?.TryGetValue("role", out var roleValue) == true
@@ -314,7 +395,54 @@ public sealed class FirebaseEmployeeManagementService
             ct);
 
         await WriteProvisioningStatusAsync(employee, user.Uid, true, ct);
-        return (true, employee.IsDeleted ? "Employee Auth account deactivated." : "Employee Auth/profile synchronized.");
+
+        if (createdAuthAccount && !employee.IsDeleted)
+        {
+            try
+            {
+                var resetLink = await auth.GeneratePasswordResetLinkAsync(normalizedEmail);
+
+                await _emailSender.SendEmailAsync(
+                    normalizedEmail,
+                    "BioMetric Payroll - Set your employee password",
+                    $"""
+                    <p>Hello {System.Net.WebUtility.HtmlEncode(employee.Name)},</p>
+                    <p>Your BioMetric Payroll employee account has been created.</p>
+                    <p>Please use the link below to set your password before signing in to the Android application:</p>
+                    <p><a href="{System.Net.WebUtility.HtmlEncode(resetLink)}">Set / Reset Password</a></p>
+                    <p>Your login email is <strong>{System.Net.WebUtility.HtmlEncode(normalizedEmail)}</strong>.</p>
+                    <p>If you did not expect this account, please contact your administrator.</p>
+                    """);
+
+                await WriteProvisioningStatusAsync(employee, user.Uid, true, ct);
+                return (true, "Employee saved. Firebase Auth account was created and a password setup email was sent.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Firebase Auth account was created for {Email}, but the password setup email could not be generated/sent.",
+                    normalizedEmail);
+
+                return (true, "Employee saved and Firebase Auth account was created. Password setup email could not be sent; check SMTP settings.");
+            }
+        }
+
+        return (true, employee.IsDeleted
+            ? "Employee Auth account deactivated."
+            : "Employee Auth/profile synchronized.");
+    }
+
+    private static string CreateTemporaryFirebasePassword()
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        var chars = new char[32];
+
+        for (var i = 0; i < chars.Length; i++)
+            chars[i] = alphabet[bytes[i] % alphabet.Length];
+
+        return new string(chars);
     }
 
     public async Task<(bool Exists, bool IsDeleted, long Revision)> GetEmployeeDeletionStateAsync(
@@ -405,17 +533,49 @@ public sealed class FirebaseEmployeeManagementService
     public async Task<List<Employee>> GetAllEmployeesIncludingDeletedAsync(CancellationToken ct = default)
     {
         var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
-        if (!snapshot.HasValue || snapshot.Value.ValueKind != JsonValueKind.Object)
+        if (!snapshot.HasValue)
             return new List<Employee>();
 
-        return snapshot.Value.EnumerateObject()
-            .Select(x =>
+        var result = new List<Employee>();
+
+        if (snapshot.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var item in snapshot.Value.EnumerateObject())
             {
-                try { return ToEmployee(x.Value, x.Name); }
-                catch { return null; }
-            })
-            .Where(x => x != null)
-            .Cast<Employee>()
+                try
+                {
+                    if (item.Value.ValueKind != JsonValueKind.Null)
+                        result.Add(ToEmployee(item.Value, item.Name));
+                }
+                catch
+                {
+                    // Preserve existing tolerant read behavior for malformed rows.
+                }
+            }
+        }
+        else if (snapshot.Value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+            foreach (var item in snapshot.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                try
+                {
+                    if (item.ValueKind != JsonValueKind.Null)
+                        result.Add(ToEmployee(item, fallbackId));
+                }
+                catch
+                {
+                    // Preserve existing tolerant read behavior for malformed rows.
+                }
+            }
+        }
+
+        return result
+            .GroupBy(x => x.EmployeeID)
+            .Select(g => g.First())
+            .OrderBy(x => x.EmployeeID)
             .ToList();
     }
 
