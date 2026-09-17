@@ -12,6 +12,8 @@
 @inject IToastService toastService
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject AuthenticationStateProvider AuthState
+@inject CsvExportService CsvService
+@inject IJSRuntime JSRuntime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Report Center</PageTitle>
@@ -125,7 +127,12 @@ else
                 <div class="card shadow-sm border-0 h-100" style="border-radius:12px;">
                     <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
                         <h5 class="mb-0 fw-bold text-dark">Results</h5>
-                        <span class="badge bg-light text-dark border">@startDate.ToString("dd-MMM") to @endDate.ToString("dd-MMM")</span>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-light text-dark border">@startDate.ToString("dd-MMM") to @endDate.ToString("dd-MMM")</span>
+                            <button class="btn btn-sm btn-outline-success" @onclick="ExportReportCsv" disabled="@(reportData == null || isLoading)">
+                                <i class="bi bi-download me-1"></i> Export CSV
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body p-0 overflow-auto">
                         @* DYNAMIC REPORT RENDERING *@
@@ -288,6 +295,44 @@ else
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task ExportReportCsv()
+    {
+        if (reportData == null)
+        {
+            toastService.ShowWarning("Generate a report before exporting.");
+            return;
+        }
+
+        try
+        {
+            string csv;
+            string fileName = $"Report_{selectedReportType}_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.csv";
+
+            if (reportData is List<DailySummary> daily)
+                csv = CsvService.GenerateDailySummaryCsv(daily);
+            else if (reportData is List<ConsolidatedAttendanceRow> consolidated)
+                csv = CsvService.GenerateConsolidatedAttendanceCsv(consolidated);
+            else if (reportData is List<PayrollVarianceRow> variance)
+                csv = CsvService.GeneratePayrollVarianceCsv(variance);
+            else if (reportData is List<FinancialRegisterRow> register)
+                csv = CsvService.GenerateFinancialRegisterCsv(register);
+            else
+            {
+                toastService.ShowWarning("This report type does not have a CSV exporter.");
+                return;
+            }
+
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(csv));
+            using var streamRef = new DotNetStreamReference(stream);
+            await JSRuntime.InvokeVoidAsync("downloadFileFromStream", fileName, streamRef);
+            toastService.ShowSuccess("Export successful!");
+        }
+        catch (Exception ex)
+        {
+            toastService.ShowError($"Export failed: {ex.Message}");
         }
     }
 

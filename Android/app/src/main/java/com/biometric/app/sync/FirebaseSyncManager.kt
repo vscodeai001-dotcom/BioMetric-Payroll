@@ -284,6 +284,8 @@ class FirebaseSyncManager @Inject constructor(
         if (!isAuthenticated()) return
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return
+        val ownerUid = sessionStore.firebaseOwnerUid().orEmpty()
+        if (ownerUid.isBlank()) return
 
         val eventId = UUID.randomUUID().toString().replace("-", "")
         val change = mutableMapOf<String, Any?>(
@@ -295,6 +297,7 @@ class FirebaseSyncManager @Inject constructor(
             "eventId" to eventId,
             "source" to "FIREBASE_CLIENT",
             "employeeId" to employeeId,
+            "ownerUid" to ownerUid,
             "timestamp" to Date().toInstant().toString(),
             "changes" to listOf(change)
         )

@@ -47,15 +47,23 @@ class OfflineSyncWorker @AssistedInject constructor(
             )
         }
 
-        syncTrackingEvents()
+        val deferredEndEvents = syncTrackingEvents()
+        if (deferredEndEvents == null) {
+            monitor.pruneRetention()
+            return Result.retry()
+        }
 
         val queued = withContext(Dispatchers.IO) {
             locationDao.getPendingForSync()
         }
 
         if (queued.isEmpty()) {
+            if (deferredEndEvents.isNotEmpty() && !syncEventBatch(deferredEndEvents)) {
+                monitor.pruneRetention()
+                return Result.retry()
+            }
             monitor.pruneRetention()
-            return Result.success()
+            return if (eventDao.getPendingCount() == 0) Result.success() else Result.retry()
         }
 
         var failed = false
@@ -124,6 +132,15 @@ class OfflineSyncWorker @AssistedInject constructor(
             }
         }
 
+        // Close deferred sessions only after all currently queued GPS points
+        // have had a chance to reach Firebase. If the GPS drain failed, keep
+        // SESSION_ENDED pending so the next retry preserves the same ordering.
+        if (!failed && deferredEndEvents.isNotEmpty()) {
+            if (!syncEventBatch(deferredEndEvents)) {
+                failed = true
+            }
+        }
+
         monitor.record(
             if (failed) {
                 OfflineTrackingMonitor.SYNC_RETRY
@@ -149,29 +166,75 @@ class OfflineSyncWorker @AssistedInject constructor(
         }
     }
 
-    private suspend fun syncTrackingEvents() {
+    private suspend fun syncTrackingEvents(): List<OfflineTrackingEvent>? {
         val pendingEvents = withContext(Dispatchers.IO) {
             eventDao.getPendingSync()
         }
 
-        for (event in pendingEvents) {
+        if (pendingEvents.isEmpty()) return emptyList()
+
+        // Lifecycle ordering is critical after a long offline period. A queued
+        // SESSION_ENDED event can have an older eventTime than a later GPS fix,
+        // but blindly uploading all events before GPS would end the Web session
+        // before its queued locations are replayed. Start events therefore run
+        // first, non-lifecycle events remain in their original order, and end
+        // events are returned to doWork() for upload only after the GPS ledger
+        // has been drained.
+        val startEvents = pendingEvents.filter {
+            it.eventType.equals(OfflineTrackingEvent.SESSION_STARTED, ignoreCase = true)
+        }
+        val endEvents = pendingEvents.filter {
+            it.eventType.equals(OfflineTrackingEvent.SESSION_ENDED, ignoreCase = true)
+        }
+        val otherEvents = pendingEvents.filter { event ->
+            !event.eventType.equals(OfflineTrackingEvent.SESSION_STARTED, ignoreCase = true) &&
+                !event.eventType.equals(OfflineTrackingEvent.SESSION_ENDED, ignoreCase = true)
+        }
+
+        // SESSION_STARTED must be durable before the first GPS point is sent.
+        if (!syncEventBatch(startEvents)) return null
+
+        // Operational telemetry is independent of GPS session boundaries.
+        if (!syncEventBatch(otherEvents)) return null
+
+        return endEvents
+    }
+
+    private suspend fun syncEventBatch(events: List<OfflineTrackingEvent>): Boolean {
+        for (event in events) {
             try {
-                // Mark as in-flight
-                eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_IN_FLIGHT, 0)
-                
+                eventDao.markSynced(
+                    event.eventId,
+                    OfflineTrackingEvent.SYNC_IN_FLIGHT,
+                    0
+                )
+
                 val uploaded = firebaseSync.pushTrackingEvent(event)
                 if (uploaded) {
-                    eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNCED, System.currentTimeMillis())
+                    eventDao.markSynced(
+                        event.eventId,
+                        OfflineTrackingEvent.SYNCED,
+                        System.currentTimeMillis()
+                    )
                 } else {
-                    eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_FAILED, 0)
-                    break // Stop if one fails
+                    eventDao.markSynced(
+                        event.eventId,
+                        OfflineTrackingEvent.SYNC_FAILED,
+                        0
+                    )
+                    return false
                 }
             } catch (e: Exception) {
-                eventDao.markSynced(event.eventId, OfflineTrackingEvent.SYNC_FAILED, 0)
+                eventDao.markSynced(
+                    event.eventId,
+                    OfflineTrackingEvent.SYNC_FAILED,
+                    0
+                )
                 Log.w("OfflineSyncWorker", "Tracking event sync failed", e)
-                break
+                return false
             }
         }
+        return true
     }
 
     companion object {

@@ -575,6 +575,23 @@ public sealed class FirebaseRealtimeService
         return await GetJsonAsync(path.Trim('/'), cancellationToken);
     }
 
+    /// <summary>
+    /// Reads the owner-scoped live tracking collection used by the native
+    /// Android application. Dashboard aggregation must never mix tracking
+    /// records from another owner's Firebase namespace.
+    /// </summary>
+    public async Task<JsonElement?> GetOwnerTrackingLiveAsync(
+        string ownerUid,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return null;
+
+        return await GetJsonAsync(
+            $"owners/{ownerUid.Trim()}/tracking/live",
+            cancellationToken);
+    }
+
     public async Task<bool> SetGlobalRecordAsync(
         string path,
         object value,

@@ -563,8 +563,17 @@ else
     {
         await FirebaseDashboardOwnerService.StreamTrackingChangesAsync(async (_, _, token) =>
         {
-            if (!ct.IsCancellationRequested)
-                await InvokeAsync(StateHasChanged);
+            if (ct.IsCancellationRequested)
+                return;
+
+            // Tracking changes affect the Firebase-backed dashboard snapshot
+            // as well as the map. Reload the aggregate so LiveTrackingCount
+            // and the visible KPI state stay synchronized with Firebase.
+            await InvokeAsync(async () =>
+            {
+                await LoadAdminDashboard();
+                StateHasChanged();
+            });
         }, ct);
     }
 

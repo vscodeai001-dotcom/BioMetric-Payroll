@@ -34,7 +34,7 @@ public sealed class FirebaseAdminDashboardService
             _firebase.GetOwnerTableAsync(ownerUid, "payroll_history", cancellationToken),
             _firebase.GetOwnerTableAsync(ownerUid, "shift_schedules", cancellationToken),
             _firebase.GetOwnerTableAsync(ownerUid, "daily_summaries", cancellationToken),
-            _firebase.GetGlobalRecordAsync("tracking/live", cancellationToken));
+            _firebase.GetOwnerTrackingLiveAsync(ownerUid, cancellationToken));
 
         try
         {

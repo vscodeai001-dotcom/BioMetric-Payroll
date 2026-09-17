@@ -22,7 +22,7 @@ namespace Payroll.Web.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/employee-location")]
-[Authorize]
+[Authorize(Roles = "Employee,Admin,SuperAdmin")]
 public sealed class EmployeeLocationController : ControllerBase
 {
     private readonly GeoLocationService _geoLocationService;
@@ -70,6 +70,20 @@ public sealed class EmployeeLocationController : ControllerBase
             if (request.EmployeeId <= 0)
             {
                 return BadRequest("EmployeeId must be positive.");
+            }
+
+            // Employee callers may only submit GPS for their own employee record.
+            // Admin/SuperAdmin retain the existing ability to operate on any employee.
+            if (User.IsInRole("Employee"))
+            {
+                var claimedEmployeeId = 0;
+                var claimValue = User.FindFirst("employee_id")?.Value;
+                if (!int.TryParse(claimValue, out claimedEmployeeId) ||
+                    claimedEmployeeId <= 0 ||
+                    claimedEmployeeId != request.EmployeeId)
+                {
+                    return Forbid();
+                }
             }
 
             if (string.IsNullOrWhiteSpace(request.SessionId))
@@ -291,7 +305,7 @@ public sealed class EmployeeLocationController : ControllerBase
 // Diagnostic endpoints for admin debugging only
 [ApiController]
 [Route("api/diagnostics")]
-[Authorize]
+[Authorize(Roles = "Admin,SuperAdmin")]
 public sealed class DiagnosticsController : ControllerBase
 {
     [HttpGet("live-locations")]

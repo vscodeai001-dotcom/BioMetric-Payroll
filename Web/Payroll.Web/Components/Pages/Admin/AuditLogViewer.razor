@@ -121,49 +121,58 @@ else
             // Firebase is the cross-platform audit SSOT. Keep the existing SQL
             // table as a compatibility fallback so historical Web-only records
             // are never lost if Firebase is temporarily unavailable.
-            var ownerUid = Firebase.ResolveOwnerUid("audit-viewer", "SuperAdmin");
-            var remote = await Firebase.GetOwnerTableAsync(ownerUid, "audit_logs");
+            var sqlLogs = await db.AuditLogs
+                .AsNoTracking()
+                .Where(l => l.Timestamp >= queryStart && l.Timestamp < queryEndExclusive)
+                .OrderByDescending(l => l.Timestamp)
+                .Take(1000)
+                .ToListAsync();
+
             var firebaseLogs = new List<AuditLog>();
-            if (remote.HasValue && remote.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+            try
             {
-                foreach (var property in remote.Value.EnumerateObject())
+                var ownerUid = Firebase.ResolveOwnerUid("audit-viewer", "SuperAdmin");
+                var remote = await Firebase.GetOwnerTableAsync(ownerUid, "audit_logs");
+                if (remote.HasValue && remote.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
-                    if (!property.Value.TryGetProperty("timestamp", out var ts) || !ts.TryGetInt64(out var millis)) continue;
-                    var stamp = DateTimeOffset.FromUnixTimeMilliseconds(millis).UtcDateTime;
-                    if (stamp < queryStart || stamp >= queryEndExclusive) continue;
-                    var log = new AuditLog
+                    foreach (var property in remote.Value.EnumerateObject())
                     {
-                        LogID = TryLong(property.Name),
-                        Timestamp = stamp,
-                        UserID = StringProp(property.Value, "userId", "SYSTEM"),
-                        UserEmail = StringProp(property.Value, "userDisplayName", "System"),
-                        ActionType = StringProp(property.Value, "action", "UNKNOWN"),
-                        EntityType = StringProp(property.Value, "module", "Unknown"),
-                        EntityID = StringProp(property.Value, "targetId", null),
-                        Details = BuildDetails(property.Value)
-                    };
-                    firebaseLogs.Add(log);
+                        if (!property.Value.TryGetProperty("timestamp", out var ts) || !ts.TryGetInt64(out var millis)) continue;
+                        var stamp = DateTimeOffset.FromUnixTimeMilliseconds(millis).UtcDateTime;
+                        if (stamp < queryStart || stamp >= queryEndExclusive) continue;
+                        firebaseLogs.Add(new AuditLog
+                        {
+                            LogID = TryLong(property.Name),
+                            Timestamp = stamp,
+                            UserID = StringProp(property.Value, "userId", "SYSTEM"),
+                            UserEmail = StringProp(property.Value, "userDisplayName", "System"),
+                            ActionType = StringProp(property.Value, "action", "UNKNOWN"),
+                            EntityType = StringProp(property.Value, "module", "Unknown"),
+                            EntityID = StringProp(property.Value, "targetId", null),
+                            Details = BuildDetails(property.Value)
+                        });
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Firebase audit read failed; using SQL history: {ex}");
+            }
 
-            if (firebaseLogs.Count > 0)
-            {
-                logs = firebaseLogs
-                    .Where(MatchesFilters)
-                    .OrderByDescending(l => l.Timestamp)
-                    .Take(500)
-                    .ToList();
-            }
-            else
-            {
-                logs = await db.AuditLogs
-                    .AsNoTracking()
-                    .Where(l => l.Timestamp >= queryStart && l.Timestamp < queryEndExclusive)
-                    .OrderByDescending(l => l.Timestamp)
-                    .Take(500)
-                    .ToListAsync();
-                logs = logs.Where(MatchesFilters).ToList();
-            }
+            // Merge both stores so Firebase-backed events and historical SQL-only
+            // events remain visible. Firebase uses the SQL LogID as its record
+            // key for events emitted by AuditService, making LogID a stable
+            // deduplication key.
+            logs = sqlLogs
+                .Concat(firebaseLogs)
+                .GroupBy(l => l.LogID > 0
+                    ? $"ID:{l.LogID}"
+                    : $"F:{l.Timestamp:O}|{l.UserID}|{l.ActionType}|{l.EntityType}|{l.EntityID}|{l.Details}")
+                .Select(g => g.OrderByDescending(x => x.Timestamp).First())
+                .Where(MatchesFilters)
+                .OrderByDescending(l => l.Timestamp)
+                .Take(500)
+                .ToList();
 
 
 
@@ -210,11 +219,20 @@ else
 
     private static string BuildDetails(System.Text.Json.JsonElement e)
     {
-        var oldValue = StringProp(e, "oldValue", null);
-        var newValue = StringProp(e, "newValue", null);
+        var oldValue = JsonPropText(e, "oldValue");
+        var newValue = JsonPropText(e, "newValue");
         var role = StringProp(e, "actorRole", null);
         var target = StringProp(e, "targetId", null);
-        return $"Role: {role}; Target: {target}; Old: {oldValue}; New: {newValue}";
+        var correlationId = StringProp(e, "correlationId", null);
+        return $"Role: {role}; Target: {target}; Correlation: {correlationId}; Old: {oldValue}; New: {newValue}";
+    }
+
+    private static string JsonPropText(System.Text.Json.JsonElement e, string name)
+    {
+        if (!e.TryGetProperty(name, out var value)) return string.Empty;
+        return value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : value.GetRawText();
     }
 
     private string GetBadgeColor(string action) => action switch

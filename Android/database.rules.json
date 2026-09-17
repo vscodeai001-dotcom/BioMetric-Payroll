@@ -58,9 +58,9 @@
     "client_events": {
       "$employeeId": {
         ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
-        ".write": "auth != null && auth.token.employee_id == $employeeId",
+        ".write": "auth != null && auth.token.owner_uid != null && auth.token.employee_id == $employeeId && newData.child('ownerUid').val() == auth.token.owner_uid",
         "$eventId": {
-          ".validate": "newData.hasChildren(['eventId','timestamp','changes','employeeId']) && newData.child('employeeId').val() == $employeeId"
+          ".validate": "newData.hasChildren(['eventId','timestamp','changes','employeeId','ownerUid']) && newData.child('employeeId').val() == $employeeId && newData.child('ownerUid').val() == auth.token.owner_uid"
         }
       }
     },

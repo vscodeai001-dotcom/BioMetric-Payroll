@@ -2,6 +2,9 @@ package com.biometric.app.ui
 
 import android.app.DatePickerDialog
 import android.os.Bundle
+import android.content.Intent
+import androidx.core.content.FileProvider
+import java.io.File
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -87,6 +90,7 @@ class ReportCenterActivity : AppCompatActivity() {
         }
 
         binding.rvResults.layoutManager = LinearLayoutManager(this)
+        binding.btnExportCsv.setOnClickListener { exportReportCsv() }
     }
 
     private fun setupReportTypeTiles() {
@@ -135,6 +139,9 @@ class ReportCenterActivity : AppCompatActivity() {
                             b.tvEmptyState.isVisible = data == null
                             if (data != null) {
                                 b.rvResults.adapter = ReportAdapter(data)
+                                b.btnExportCsv.isVisible = data.isNotEmpty()
+                            } else {
+                                b.btnExportCsv.isVisible = false
                             }
                         }
                     }
@@ -146,6 +153,76 @@ class ReportCenterActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         _binding = null
+    }
+
+    private fun exportReportCsv() {
+        val items = viewModel.reportData.value ?: return
+        if (items.isEmpty()) return
+
+        val csv = buildString {
+            when (items.first()) {
+                is ConsolidatedAttendanceRow -> {
+                    appendLine("EmployeeID,EmployeeName,WorkedHours,OvertimeHours,PenaltyHours,AbsentDays")
+                    items.filterIsInstance<ConsolidatedAttendanceRow>().forEach {
+                        appendLine(listOf(it.employeeId, csvEscape(it.employeeName),
+                            "%.2f".format(Locale.US, it.totalWorkedHours),
+                            "%.2f".format(Locale.US, it.totalOvertimeMs / 3600000.0),
+                            "%.2f".format(Locale.US, it.totalPenaltyMs / 3600000.0),
+                            it.totalAbsentDays).joinToString(","))
+                    }
+                }
+                is PayrollVarianceRow -> {
+                    appendLine("EmployeeName,CurrentNet,PreviousNet,Difference")
+                    items.filterIsInstance<PayrollVarianceRow>().forEach {
+                        appendLine(listOf(csvEscape(it.employeeName),
+                            "%.2f".format(Locale.US, it.currentNet),
+                            "%.2f".format(Locale.US, it.previousNet),
+                            "%.2f".format(Locale.US, it.difference)).joinToString(","))
+                    }
+                }
+                is FinancialRegisterRow -> {
+                    appendLine("EmployeeID,EmployeeName,BiometricID,Email,MonthlySalary,HourlyRate,EarnedHours,OvertimeHours,OvertimePay,ShiftAllowance,Bonus,GrossPayable,AbsentDays,LeaveDays,TotalDeductions,NetPayable,PayrollStatus")
+                    items.filterIsInstance<FinancialRegisterRow>().forEach {
+                        appendLine(listOf(it.employeeId, csvEscape(it.employeeName), csvEscape(it.biometricId), csvEscape(it.email ?: ""),
+                            "%.2f".format(Locale.US, it.monthlySalary), "%.2f".format(Locale.US, it.hourlyRate),
+                            "%.2f".format(Locale.US, it.earnedHours), "%.2f".format(Locale.US, it.totalOvertimeMs / 3600000.0),
+                            "%.2f".format(Locale.US, it.totalOvertimePay), "%.2f".format(Locale.US, it.shiftAllowance),
+                            "%.2f".format(Locale.US, it.bonusPaid), "%.2f".format(Locale.US, it.grossPayable),
+                            it.absentDays, it.leaveDays, "%.2f".format(Locale.US, it.totalDeductions),
+                            "%.2f".format(Locale.US, it.netPayable), csvEscape(it.payrollStatus)).joinToString(","))
+                    }
+                }
+                is LocalDailySummary -> {
+                    appendLine("Date,Status,WorkedHours,OvertimeHours,PenaltyMinutes")
+                    items.filterIsInstance<LocalDailySummary>().forEach {
+                        appendLine(listOf(it.shiftDate, csvEscape(it.status),
+                            "%.2f".format(Locale.US, it.earnedStandardHours),
+                            "%.2f".format(Locale.US, it.totalOvertimeMs / 3600000.0),
+                            it.totalPenaltyMs / 60000).joinToString(","))
+                    }
+                }
+            }
+        }
+
+        try {
+            val file = File(cacheDir, "report_${System.currentTimeMillis()}.csv")
+            file.writeText(csv, Charsets.UTF_8)
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, "Export Report"))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "Export failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun csvEscape(value: String): String {
+        return if (value.contains(',') || value.contains('"') || value.contains('\n'))
+            "\"${value.replace("\"", "\"\"")}\""
+        else value
     }
 
     private fun showDatePicker(onDateSelected: (Calendar) -> Unit) {
