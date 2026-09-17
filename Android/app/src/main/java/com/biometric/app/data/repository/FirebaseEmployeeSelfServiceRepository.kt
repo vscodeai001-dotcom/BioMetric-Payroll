@@ -73,27 +73,13 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         // Never use getValue(Employee::class.java) here because Firebase's
         // automatic mapper is strict about String/Int mismatches.
         // Canonical Firebase key: owners/{ownerUid}/employees/{employeeId}.
+        // 1100-S security/parity boundary: Employee sessions must resolve only
+        // through the canonical employee key. Do not enumerate the owner
+        // employees collection as a fallback because Firebase rules correctly
+        // restrict Staff users to their own record. Legacy/generated-key
+        // fallbacks belong to migration tooling, not the Employee runtime path.
         val direct = employeesRef.child(id).get().await()
-        if (direct.exists()) return direct.toEmployee(id)
-
-        // Some legacy migrations used a generated Firebase key while retaining
-        // employeeId as a field. Find the record by the canonical business ID.
-        val all = employeesRef.get().await().children
-        val byEmployeeId = all.firstOrNull { snapshot ->
-            snapshot.valueOf("employeeId")?.toString()?.toLongOrNull()?.toString() == id
-        }
-        if (byEmployeeId != null) return byEmployeeId.toEmployee(id)
-
-        // Final compatibility lookup by the authenticated employee email.
-        val email = sessionStore.userEmail().trim()
-        if (email.isNotBlank()) {
-            val byEmail = all.firstOrNull { snapshot ->
-                snapshot.string("email").equals(email, ignoreCase = true)
-            }
-            if (byEmail != null) return byEmail.toEmployee(id)
-        }
-
-        return null
+        return direct.takeIf { it.exists() }?.toEmployee(id)
     }
 
     suspend fun employeeProfile(): Employee? = employee()
@@ -111,14 +97,15 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     fun changesFlow(): Flow<Unit> = callbackFlow {
-        val ref = firebaseSync.getOwnerRef()
+        val employeeKey = employeeId()
+        val ref = firebaseSync.getOwnerRef()?.child("employees")?.child(employeeKey)
         if (ref == null) {
             close()
             return@callbackFlow
         }
-        // The Employee screens must react to Admin/Web changes without SignalR.
-        // Listening at the Firebase owner node gives the portal a native
-        // Firebase realtime invalidation path for all self-service data.
+        // 1100-S: listen only to the authenticated Employee record. This keeps
+        // realtime parity with Web while avoiding owner-wide data invalidation
+        // and avoiding a Staff client dependency on collection enumeration.
         val listener = object : com.google.firebase.database.ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) { trySend(Unit) }
             override fun onCancelled(error: com.google.firebase.database.DatabaseError) { trySend(Unit) }

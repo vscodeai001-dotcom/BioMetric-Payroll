@@ -11,6 +11,7 @@
 @inject IToastService toastService
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @attribute [Authorize(Roles = "Employee")]
 
 <PageTitle>Request Leave</PageTitle>
@@ -139,9 +140,7 @@ else
 
         if (userEmail != null)
         {
-            linkedEmployee = await dbContext.Employees
-                .AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Email == userEmail);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(userEmail);
 
             if (linkedEmployee == null)
             {
@@ -208,8 +207,7 @@ else
             {
                 await dbContext.SaveChangesAsync();
 
-                var leaveEmployee = await dbContext.Employees.AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.EmployeeID == linkedEmployee!.EmployeeID);
+                var leaveEmployee = await FirebaseEmployees.GetEmployeeAsync(linkedEmployee!.EmployeeID);
                 if (leaveEmployee != null)
                 {
                     await NotificationService.NotifyAdminsAsync(

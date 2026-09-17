@@ -10,6 +10,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ReportService ReportService
 @inject IToastService toastService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject AuthenticationStateProvider AuthState
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
@@ -253,7 +254,7 @@ else
                 await SeedDefaultReports(db);
             }
             allReports = await db.ReportDefinitions.AsNoTracking().ToListAsync();
-            employees = await db.Employees.AsNoTracking().OrderBy(e => e.Name).ToListAsync();
+            employees = await FirebaseEmployees.GetEmployeesAsync();
         }
         finally
         {

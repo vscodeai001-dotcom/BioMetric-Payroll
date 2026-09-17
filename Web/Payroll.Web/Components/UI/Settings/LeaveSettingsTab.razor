@@ -2,6 +2,7 @@
 @using global::Payroll.Shared.Data
 @using global::Payroll.Shared.Services
 @inject IToastService toastService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IDbContextFactory<AppDbContext> DbFactory
 
 @if (Features?.EnableLeaveManagement != true && !IsSuperAdmin)
@@ -159,11 +160,10 @@ else
         isLoadingEmployees = true;
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            Employees = await dbContext.Employees
+            Employees = (await FirebaseEmployees.GetEmployeesAsync())
                 .Where(e => !e.TerminationDate.HasValue) // Active Only
                 .OrderBy(e => e.Name)
-                .ToListAsync();
+                .ToList();
         }
         catch (Exception) { /* Ignore for UI component */ }
         finally { isLoadingEmployees = false; }

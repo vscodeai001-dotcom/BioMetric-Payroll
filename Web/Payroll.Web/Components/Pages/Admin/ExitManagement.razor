@@ -8,6 +8,7 @@
 @inject ResignationService ExitService
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject IToastService toastService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IJSRuntime JSRuntime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
@@ -234,7 +235,7 @@ else
             return;
         }
 
-        employees = await db.Employees.AsNoTracking().ToListAsync();
+        employees = await FirebaseEmployees.GetEmployeesAsync();
         requests = await db.ResignationRequests.OrderByDescending(r => r.SubmissionDate).ToListAsync();
     }
 

@@ -5,6 +5,7 @@
 @using global::Payroll.Web.Services
 @implements IAsyncDisposable
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseEmployeeManagementService FirebaseEmployees
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Offline GPS Tracking Details</PageTitle>
@@ -295,11 +296,11 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            employees = await db.Employees.AsNoTracking()
+            employees = (await FirebaseEmployees.GetEmployeesAsync())
                 .Where(x => !x.IsDeleted)
                 .OrderBy(x => x.Name)
                 .Select(x => new EmployeeOption { EmployeeID = x.EmployeeID, Name = x.Name })
-                .ToListAsync();
+                .ToList();
 
             var fromUtc = IndiaToUtc(fromDate.Date);
             var toUtc = IndiaToUtc(toDate.Date.AddDays(1));
@@ -320,18 +321,21 @@
             if (Guid.TryParse(sessionFilter, out var sessionId))
                 historyQuery = historyQuery.Where(x => x.SessionId == sessionId);
 
-            var rawPoints = await (from p in historyQuery
-                                   join e in db.Employees.AsNoTracking() on p.EmployeeId equals e.EmployeeID
-                                   orderby p.CapturedAtUtc ascending
-                                   select new PointRow
-                                   {
-                                       EmployeeId = p.EmployeeId, EmployeeName = e.Name, SessionId = p.SessionId,
-                                       Latitude = p.Latitude, Longitude = p.Longitude, AccuracyMeters = p.AccuracyMeters,
-                                       DistanceMeters = p.DistanceFromOfficeMeters, RadiusMeters = p.AllowedRadiusMeters,
-                                       WithinRadius = p.IsWithinAllowedRadius, CapturedAtUtc = p.CapturedAtUtc,
-                                       CaptureSource = p.CaptureSource, SyncBatchId = p.SyncBatchId, SyncedAtUtc = p.SyncedAtUtc,
-                                       RecordedAtUtc = p.RecordedAtUtc
-                                   }).Take(2000).ToListAsync();
+            var rawPoints = await historyQuery
+                .OrderBy(p => p.CapturedAtUtc)
+                .Select(p => new PointRow
+                {
+                    EmployeeId = p.EmployeeId, SessionId = p.SessionId,
+                    Latitude = p.Latitude, Longitude = p.Longitude, AccuracyMeters = p.AccuracyMeters,
+                    DistanceMeters = p.DistanceFromOfficeMeters, RadiusMeters = p.AllowedRadiusMeters,
+                    WithinRadius = p.IsWithinAllowedRadius, CapturedAtUtc = p.CapturedAtUtc,
+                    CaptureSource = p.CaptureSource, SyncBatchId = p.SyncBatchId, SyncedAtUtc = p.SyncedAtUtc,
+                    RecordedAtUtc = p.RecordedAtUtc
+                }).Take(2000).ToListAsync();
+
+            var employeeNames = employees.ToDictionary(x => x.EmployeeID, x => x.Name);
+            foreach (var row in rawPoints)
+                row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
             points = BuildPointRows(rawPoints);
 
@@ -339,18 +343,20 @@
             if (employeeFilter > 0) sessionQuery = sessionQuery.Where(x => x.EmployeeId == employeeFilter);
             if (Guid.TryParse(sessionFilter, out var sessionId2)) sessionQuery = sessionQuery.Where(x => x.SessionId == sessionId2);
 
-            var rawSessions = await (from s in sessionQuery
-                                     join e in db.Employees.AsNoTracking() on s.EmployeeId equals e.EmployeeID
-                                     where s.StartedAtUtc < toUtc &&
-                                           (s.EndedAtUtc == null || s.EndedAtUtc >= fromUtc)
-                                     orderby s.StartedAtUtc descending
-                                     select new SessionRow
-                                     {
-                                         EmployeeId = s.EmployeeId, EmployeeName = e.Name, SessionId = s.SessionId,
-                                         StartedUtc = s.StartedAtUtc, LastUpdateUtc = s.LastUpdateAtUtc,
-                                         EndedUtc = s.EndedAtUtc, EndReason = s.EndReason,
-                                         TotalPoints = s.TotalPoints, TotalDistanceMeters = s.TotalDistanceMeters
-                                     }).Take(500).ToListAsync();
+            var rawSessions = await sessionQuery
+                .Where(s => s.StartedAtUtc < toUtc &&
+                            (s.EndedAtUtc == null || s.EndedAtUtc >= fromUtc))
+                .OrderByDescending(s => s.StartedAtUtc)
+                .Select(s => new SessionRow
+                {
+                    EmployeeId = s.EmployeeId, SessionId = s.SessionId,
+                    StartedUtc = s.StartedAtUtc, LastUpdateUtc = s.LastUpdateAtUtc,
+                    EndedUtc = s.EndedAtUtc, EndReason = s.EndReason,
+                    TotalPoints = s.TotalPoints, TotalDistanceMeters = s.TotalDistanceMeters
+                }).Take(500).ToListAsync();
+
+            foreach (var row in rawSessions)
+                row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
             sessions = rawSessions;
 

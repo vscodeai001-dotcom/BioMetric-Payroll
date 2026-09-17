@@ -20,6 +20,7 @@
 @inject ILogger<PunchCorrectionApproval> _logger
 @inject Payroll.Web.Services.AuditService AuditService
 @inject NavigationManager Navigation
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject AuthenticationStateProvider AuthState
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
@@ -151,7 +152,7 @@ else
             }
 
             // 2. Load Data
-            employeeList = await dbContext.Employees.AsNoTracking().ToListAsync();
+            employeeList = await FirebaseEmployees.GetEmployeesAsync();
             await LoadRequests(dbContext); // Pass context or create new? Let's use standard pattern.
         }
         finally
@@ -254,7 +255,7 @@ else
     private async Task RecalculateSingleDay(AppDbContext dbContext, int employeeId, DateTime day)
     {
         var dayOnly = DateOnly.FromDateTime(day);
-        var emp = await dbContext.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.EmployeeID == employeeId);
+        var emp = await FirebaseEmployees.GetEmployeeAsync(employeeId);
         var settings = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1) ?? new CompanySetting();
         var features = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1) ?? new FeatureSettings();
         var holidays = await dbContext.CompanyHolidays.Where(h => h.HolidayDate == dayOnly).ToListAsync();

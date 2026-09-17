@@ -17,6 +17,7 @@
 @inject AuditService AuditService
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject FirebaseRealtimeService FirebaseRealtime
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 
 @attribute [Authorize(Roles = "SuperAdmin")]
 
@@ -91,7 +92,7 @@ else
         isLoading = true;
         try
         {
-            allEmployees = await dbContext.Employees.AsNoTracking().ToListAsync();
+            allEmployees = await FirebaseEmployees.GetEmployeesAsync();
 
             // Read Identity data through the same AppDbContext that is used
             // by the SQLite compatibility store. This avoids one UserManager

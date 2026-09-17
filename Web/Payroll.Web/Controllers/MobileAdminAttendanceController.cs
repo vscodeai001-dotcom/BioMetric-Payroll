@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Payroll.Shared.Data;
+using Payroll.Web.Services;
 
 namespace Payroll.Web.Controllers;
 
@@ -11,7 +12,9 @@ namespace Payroll.Web.Controllers;
 public sealed class MobileAdminAttendanceController : ControllerBase
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
-    public MobileAdminAttendanceController(IDbContextFactory<AppDbContext> dbFactory) => _dbFactory = dbFactory;
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
+    public MobileAdminAttendanceController(IDbContextFactory<AppDbContext> dbFactory, FirebaseEmployeeManagementService firebaseEmployees)
+    { _dbFactory = dbFactory; _firebaseEmployees = firebaseEmployees; }
 
     [HttpGet("daily")]
     public async Task<IActionResult> Daily([FromQuery] string from, [FromQuery] string to, [FromQuery] int employeeId = 0)
@@ -22,7 +25,10 @@ public sealed class MobileAdminAttendanceController : ControllerBase
         var feature = await db.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1);
         if (feature != null && User.IsInRole("Admin") && !User.IsInRole("SuperAdmin") && !feature.AdminCanViewAttendance)
             return Forbid();
-        var employees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted && (employeeId <= 0 || e.EmployeeID == employeeId)).OrderBy(e => e.Name).ToListAsync();
+        var employees = (await _firebaseEmployees.GetEmployeesAsync())
+            .Where(e => employeeId <= 0 || e.EmployeeID == employeeId)
+            .OrderBy(e => e.Name)
+            .ToList();
         var ids = employees.Select(e => e.EmployeeID).ToList();
         var summaries = await db.DailySummaries.AsNoTracking().Where(x => ids.Contains(x.EmployeeID) && x.ShiftDate >= start && x.ShiftDate <= end).OrderByDescending(x => x.ShiftDate).ThenBy(x => x.EmployeeID).ToListAsync();
         var punches = await db.AttendanceLogs.AsNoTracking().Where(x => ids.Contains(x.EmployeeID ?? 0) && x.PunchTime >= start.ToDateTime(TimeOnly.MinValue) && x.PunchTime < end.AddDays(1).ToDateTime(TimeOnly.MinValue)).OrderBy(x => x.PunchTime).ToListAsync();

@@ -10,6 +10,7 @@
 @inject IJSRuntime JSRuntime
 @inject ILogger<LeaveManagement> _logger
 @inject LeaveManagementService LeaveService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Leave Management</PageTitle>
@@ -107,7 +108,7 @@ else
             }
 
             // 2. Load Data
-            employeeList = await dbContext.Employees.OrderBy(e => e.Name).ToListAsync();
+            employeeList = await FirebaseEmployees.GetEmployeesAsync();
 
             // Pass the context or handle service call carefully
             // Ideally services manage their own context scope, so we just call them here.

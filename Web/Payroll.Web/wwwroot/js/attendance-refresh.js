@@ -10,7 +10,13 @@ window.attendanceRefresh = (function () {
     let viewerRefreshInFlight = false;
     let viewerRefreshPending = false;
     let listeners = [];
+    // Each application listener may optionally subscribe to one entity.
+    // Keeping the filter in the browser avoids unnecessary Blazor reloads
+    // when unrelated domains publish application events.
     let applicationListeners = [];
+
+    let applicationRefreshTimer = null;
+    let applicationRefreshPending = new Map();
 
     // Firebase is an independent realtime transport. SignalR remains the
     // existing compatibility path, but Firebase keeps live GPS and CRUD
@@ -189,12 +195,31 @@ window.attendanceRefresh = (function () {
             if (Number.isFinite(eventTime) && eventTime + 5000 < firebaseStartTime)
                 return;
 
-            await notifyApplicationListeners('ApplicationDataChanged', data);
-            // Page-level listeners already expose ApplicationDataChanged and
-            // own their existing data loaders. This updates the visible screen
-            // without Navigation.Refresh/browser reload.
-            await notifyListeners('ApplicationDataChanged', data);
-            window.dispatchEvent(new CustomEvent('application-data-changed', { detail: data }));
+            // Coalesce bursts from one Firebase write into a single UI
+            // invalidation. The event itself remains in Firebase as the audit
+            // source; this timer only controls how often Blazor reloads.
+            const changes = Array.isArray(data.changes) ? data.changes : [];
+            const key = changes.map(function (c) {
+                return String(c && (c.Entity || c.entity) || '') + ':' +
+                    String(c && (c.RecordId || c.recordId) || '') + ':' +
+                    String(c && (c.Action || c.action) || '');
+            }).sort().join('|') || snapshot.key || String(Date.now());
+
+            applicationRefreshPending.set(key, data);
+            if (applicationRefreshTimer !== null)
+                clearTimeout(applicationRefreshTimer);
+
+            applicationRefreshTimer = setTimeout(async function () {
+                applicationRefreshTimer = null;
+                const pending = Array.from(applicationRefreshPending.values());
+                applicationRefreshPending.clear();
+
+                for (const eventData of pending) {
+                    await notifyApplicationListeners('ApplicationDataChanged', eventData);
+                    await notifyListeners('ApplicationDataChanged', eventData);
+                    window.dispatchEvent(new CustomEvent('application-data-changed', { detail: eventData }));
+                }
+            }, 80);
         } catch (error) {
             console.warn('Firebase application event callback failed.', error);
         }
@@ -234,28 +259,39 @@ window.attendanceRefresh = (function () {
         const currentListeners =
             [...applicationListeners];
 
-        for (const listener of currentListeners) {
+        for (const registration of currentListeners) {
+            const listener = registration.ref;
+
+            // An entity-filtered listener only receives events that actually
+            // contain the requested entity. This prevents an Employee page
+            // from reloading because of an unrelated payroll/attendance event.
+            if (registration.entity && !applicationEventContainsEntity(data, registration.entity))
+                continue;
 
             try {
-                // If only one argument is passed, default to ApplicationDataChanged for backward compatibility
-                const targetMethod = typeof data === "undefined" ? "ApplicationDataChanged" : (typeof methodName === "string" ? methodName : "ApplicationDataChanged");
-                const payload = typeof data === "undefined" ? methodName : data;
+                const targetMethod = typeof methodName === "string"
+                    ? methodName
+                    : "ApplicationDataChanged";
 
-                // Application-wide listeners currently consume the event as an
-                // invalidation signal. Do not marshal the arbitrary SignalR
-                // payload into Blazor JS interop. This also prevents disposed
-                // circuit references from producing parameter-registration
-                // errors in the browser console.
-                await listener.invokeMethodAsync(
-                    targetMethod
-                );
+                await listener.invokeMethodAsync(targetMethod);
             }
             catch (error) {
                 applicationListeners = applicationListeners.filter(function (item) {
-                    return item !== listener;
+                    return item.ref !== listener;
                 });
             }
         }
+    }
+
+    function applicationEventContainsEntity(data, entity) {
+        if (!data || !entity) return false;
+        const changes = Array.isArray(data.changes) ? data.changes : [];
+        const expected = String(entity).trim().toLowerCase();
+        return changes.some(function (change) {
+            const actual = String(change && (change.Entity || change.entity) || '')
+                .trim().toLowerCase();
+            return actual === expected;
+        });
     }
 
 
@@ -500,11 +536,18 @@ window.attendanceRefresh = (function () {
      * ==============================================================
      */
 
-    function registerApplication(dotNetReference) {
+    function registerApplication(dotNetReference, entityFilter) {
 
-        if (!applicationListeners.includes(dotNetReference)) {
-            applicationListeners.push(dotNetReference);
-        }
+        applicationListeners = applicationListeners.filter(function (item) {
+            return item.ref !== dotNetReference;
+        });
+
+        applicationListeners.push({
+            ref: dotNetReference,
+            entity: typeof entityFilter === "string" && entityFilter.trim()
+                ? entityFilter.trim()
+                : null
+        });
 
         start();
     }
@@ -514,11 +557,15 @@ window.attendanceRefresh = (function () {
         applicationListeners =
             applicationListeners.filter(
                 function (item) {
-                    return item !== dotNetReference;
+                    return item.ref !== dotNetReference;
                 }
             );
 
-        // No application-wide debounce timer is used.
+        if (applicationListeners.length === 0 && applicationRefreshTimer !== null) {
+            clearTimeout(applicationRefreshTimer);
+            applicationRefreshTimer = null;
+            applicationRefreshPending.clear();
+        }
     }
 
 

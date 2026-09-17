@@ -6,6 +6,7 @@
 @inject AttendanceLeavePostingService LeaveService
 @inject Payroll.Web.Services.AuditService AuditService
 @inject Payroll.Web.Services.PayrollLockService LockService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployeeManagementService
 @inject AttendanceScheduleService ScheduleService
 @inject IToastService toastService
 
@@ -90,8 +91,9 @@
         {
             await using var dbContext = await DbFactory.CreateDbContextAsync();
 
-            // Fetch necessary external data: Employee, Schedule, Settings
-            var emp = await dbContext.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.EmployeeID == Record.EmployeeID);
+            // Employee profile is read from Firebase SSOT. Schedule, settings and
+            // attendance mutation/calculation remain on their existing SQL boundary.
+            var emp = await FirebaseEmployeeManagementService.GetEmployeeAsync(Record.EmployeeID);
             var scheduleOverride = await dbContext.ShiftSchedules.AsNoTracking().FirstOrDefaultAsync(s => s.EmployeeID == Record.EmployeeID && s.ShiftDate == Record.Date);
             var companySettings = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1) ?? new CompanySetting();
             

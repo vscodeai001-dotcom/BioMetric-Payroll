@@ -8,6 +8,7 @@
 @inject IJSRuntime JSRuntime
 @inject LocationHistoryService LocationHistoryService
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseEmployeeManagementService FirebaseEmployees
 
 <div class="live-staff-card card border-0 shadow-sm mb-4 @(isPlaybackFullscreen ? "replay-fullscreen" : "")">
 
@@ -3270,16 +3271,11 @@
     {
         try
         {
-            await using var db =
-                await DbFactory.CreateDbContextAsync();
-
             var data =
-                await db.Employees
-                    .AsNoTracking()
-                    .Where(e =>
-                        !e.TerminationDate.HasValue)
+                (await FirebaseEmployees.GetEmployeesAsync())
+                    .Where(e => !e.TerminationDate.HasValue)
                     .OrderBy(e => e.Name)
-                    .ToListAsync();
+                    .ToList();
 
             employees.Clear();
 
@@ -3328,17 +3324,13 @@
                 // session even when their device-lock lifecycle is different
                 // from the mobile bearer lifecycle. Abandoned mobile sessions
                 // are closed by the dedicated mobile lease cleanup service.
-                var activeSessions = await (
-                    from session in db.EmployeeGpsSessions.AsNoTracking()
-                    join employee in db.Employees.AsNoTracking()
-                        on session.EmployeeId equals employee.EmployeeID
-                    where employeeIds.Contains(session.EmployeeId)
-                          && !employee.IsDeleted
-                          && !session.EndedAtUtc.HasValue
-                          && session.LastLatitude.HasValue
-                          && session.LastLongitude.HasValue
-                    orderby session.EmployeeId, session.StartedAtUtc descending
-                    select session)
+                var activeSessions = await db.EmployeeGpsSessions.AsNoTracking()
+                    .Where(session => employeeIds.Contains(session.EmployeeId)
+                                      && !session.EndedAtUtc.HasValue
+                                      && session.LastLatitude.HasValue
+                                      && session.LastLongitude.HasValue)
+                    .OrderBy(session => session.EmployeeId)
+                    .ThenByDescending(session => session.StartedAtUtc)
                     .ToListAsync();
 
                 var snapshot = new List<LiveEmployeeLocation>();

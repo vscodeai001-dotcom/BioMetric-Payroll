@@ -9,6 +9,7 @@
 
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider Auth
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IDbContextFactory<AppDbContext> DbFactory
 
 <PageTitle>Employee Home</PageTitle>
@@ -587,11 +588,7 @@ else
             // Load employee
             // ----------------------------------------------------
 
-            linkedEmployee =
-                await dbContext.Employees
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        e => e.Email == email);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
         }
         catch (Exception ex)
         {

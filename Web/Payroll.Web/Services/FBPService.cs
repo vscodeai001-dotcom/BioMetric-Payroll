@@ -11,11 +11,13 @@ namespace Payroll.Web.Services
     {
         private readonly IDbContextFactory<AppDbContext> _dbFactory;
         private readonly NotificationService _notificationService;
+        private readonly FirebaseEmployeeManagementService _firebaseEmployees;
 
-        public FBPService(IDbContextFactory<AppDbContext> dbFactory, NotificationService notificationService)
+        public FBPService(IDbContextFactory<AppDbContext> dbFactory, NotificationService notificationService, FirebaseEmployeeManagementService firebaseEmployees)
         {
             _dbFactory = dbFactory;
             _notificationService = notificationService;
+            _firebaseEmployees = firebaseEmployees;
         }
 
         // --- ADMIN: MANAGE COMPONENTS ---
@@ -80,8 +82,9 @@ namespace Payroll.Web.Services
             }
             await db.SaveChangesAsync();
 
-            var employee = await db.Employees.AsNoTracking()
-                .FirstOrDefaultAsync(e => e.EmployeeID == employeeId);
+            // Employee identity/name is a Firebase SSOT projection. The FBP
+            // declaration calculation and persistence above remain SQL-backed.
+            var employee = await _firebaseEmployees.GetEmployeeAsync(employeeId);
             if (employee != null)
             {
                 await _notificationService.NotifyAdminsAsync(

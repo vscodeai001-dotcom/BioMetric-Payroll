@@ -6,19 +6,29 @@
 @using global::Payroll.Shared
 @using global::Payroll.Shared.Data
 @using global::Payroll.Web.Components.Pages.Employees
-@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
 @inject AuthenticationStateProvider AuthState
-@inject IDbContextFactory<AppDbContext> DbFactory
-@inject Payroll.Web.Services.AuditService AuditService
-@inject Payroll.Web.Services.EmployeeDeletionService DeletionService
+@inject Payroll.Web.Services.FirebaseEmployeeDeletionService DeletionService
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
-@inject Payroll.Web.Services.FirebaseEmployeeProvisioningReconciliationService FirebaseEmployeeProvisioning
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IJSRuntime JSRuntime
 @inject ILogger<EmployeeList> _logger
 @inject IToastService toastService
 @attribute [Authorize(Roles = "Employee, SuperAdmin")]
 
 <PageTitle>Employee Management</PageTitle>
+
+@if (loadedFromOfflineCache)
+{
+    <div class="alert alert-warning py-2 d-flex align-items-center justify-content-between" role="status">
+        <span><i class="bi bi-cloud-slash me-2"></i>Showing the last cached employee list. Changes will reconcile automatically when Firebase reconnects.</span>
+        @if (cacheReconciliationInProgress)
+        {
+            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+        }
+    </div>
+}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3>Employee Management</h3>
@@ -147,6 +157,7 @@ else
 }
 
 <AttendanceRefreshListener OnAttendanceChanged="HandleDataRefresh" />
+<ApplicationRealtimeRefreshListener EntityFilter="Employee" OnApplicationDataChanged="HandleDataRefresh" />
 
 @* --- DELETION CONFIRMATION MODAL --- *@
 @if (showDeletionDialog && selectedEmployeeForDeletion != null)
@@ -261,11 +272,15 @@ private bool showDeletionDialog = false;
 private Employee? selectedEmployeeForDeletion;
 private bool isDeletionCheckLoading = false;
 private bool isProcessingDeletion = false;
-private EmployeeDeletionService.EmployeeDeletionDependencies? deletionDependencies;
+private FirebaseEmployeeDeletionService.EmployeeDeletionDependencies? deletionDependencies;
 
 // Helpers for Data Binding
 private DateTime? modalDob, modalHireDate, modalTerminationDate, modalShiftStartTime, modalShiftEndTime;
 private CultureInfo inrCulture = new CultureInfo("en-IN");
+private bool loadedFromOfflineCache;
+private bool cacheReconciliationInProgress;
+private bool firebaseReadFailed;
+private DotNetObjectReference<EmployeeList>? employeeCacheRef;
 
     protected override async Task OnInitializedAsync()
     {
@@ -290,41 +305,138 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
         }
     }
 
-    private async Task LoadEmployees()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // FIX: Do NOT set employees = null here. It causes unnecessary re-renders.
-        // Only Invoke StateHasChanged if it's the first load.
-        if (employees == null)
-        {
-            await InvokeAsync(StateHasChanged);
-        }
+        if (!firstRender)
+            return;
 
+        // Blazor Server can prerender before JS is available. The cache is
+        // therefore hydrated after the first interactive render. Firebase is
+        // still the authoritative source and this only supplies a read fallback.
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
-            // Load Feature Settings first
-            featureSettings = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1);
-
-            // Load Company Settings
-            companySettings = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1);
-
-            // Load Employees
-            var list = await dbContext.Employees
-            .Where(e => !e.IsDeleted)
-            .OrderBy(e => e.Name).ToListAsync();
-            employees = list;
+            employeeCacheRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("employeeCache.watchOnline", employeeCacheRef);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading employees.");
-
-            toastService.ShowError($"Error loading employees: {ex.Message}");
-            employees = new List<Employee>();
+            _logger.LogDebug(ex, "Employee browser online watcher could not be registered.");
         }
 
-        // One final UI update
+        if (firebaseReadFailed && (employees == null || employees.Count == 0))
+            await TryLoadEmployeeCacheAsync();
+    }
+
+    [JSInvokable("EmployeeBrowserOnline")]
+    public async Task EmployeeBrowserOnline()
+    {
+        // Browser connectivity returning is only a trigger. Firebase remains
+        // authoritative, and a successful read fully reconciles the cache.
+        await InvokeAsync(async () => await LoadEmployees());
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("employeeCache.unwatchOnline");
+        }
+        catch
+        {
+            // The Blazor circuit may already be disconnected.
+        }
+        finally
+        {
+            employeeCacheRef?.Dispose();
+            employeeCacheRef = null;
+        }
+    }
+
+    private async Task LoadEmployees()
+    {
+        if (employees == null)
+            await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            cacheReconciliationInProgress = true;
+            firebaseReadFailed = false;
+            // Firebase is the shared Web + Android SSOT for Employee Management.
+            // No EF/SQL read is used by this screen.
+            var settingsTask = FirebaseEmployees.GetCompanySettingsAsync();
+            var featuresTask = FirebaseEmployees.GetFeatureSettingsAsync();
+            var employeesTask = FirebaseEmployees.GetEmployeesAsync();
+
+            await Task.WhenAll(settingsTask, featuresTask, employeesTask);
+
+            companySettings = await settingsTask;
+            featureSettings = await featuresTask;
+            employees = await employeesTask;
+            loadedFromOfflineCache = false;
+
+            // Reconciliation rule: every successful Firebase read completely
+            // replaces the browser read cache. No local write is replayed.
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("employeeCache.save", employees);
+            }
+            catch (Exception cacheEx)
+            {
+                _logger.LogDebug(cacheEx, "Employee browser cache could not be updated.");
+            }
+
+            if (companySettings == null)
+                _logger.LogWarning("Firebase company_settings/1 is unavailable for Employee Management.");
+            if (featureSettings == null)
+                _logger.LogWarning("Firebase feature_settings/1 is unavailable for Employee Management.");
+        }
+        catch (Exception ex)
+        {
+            firebaseReadFailed = true;
+            _logger.LogWarning(ex, "Firebase employee read failed. Attempting browser read-model cache.");
+            if (!await TryLoadEmployeeCacheAsync())
+            {
+                toastService.ShowError($"Error loading employees from Firebase: {ex.Message}");
+                employees = new List<Employee>();
+            }
+        }
+        finally
+        {
+            cacheReconciliationInProgress = false;
+        }
+
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<bool> TryLoadEmployeeCacheAsync()
+    {
+        try
+        {
+            var cached = await JSRuntime.InvokeAsync<EmployeeCacheEnvelope?>("employeeCache.load");
+            if (cached?.payload == null || cached.payload.Count == 0)
+                return false;
+
+            employees = cached.payload;
+            loadedFromOfflineCache = true;
+            _logger.LogInformation(
+                "Employee list restored from browser read cache. Cache age: {AgeMinutes} minutes; stale={Stale}.",
+                cached.savedAt > 0 ? Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - cached.savedAt) / 60000) : -1,
+                cached.stale);
+            await InvokeAsync(StateHasChanged);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Employee browser read cache unavailable.");
+            return false;
+        }
+    }
+
+    private sealed class EmployeeCacheEnvelope
+    {
+        public List<Employee>? payload { get; set; }
+        public long savedAt { get; set; }
+        public bool stale { get; set; }
     }
 
     private void OpenAddForm()
@@ -354,8 +466,15 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
             HireDate = emp.HireDate,
             TerminationDate = emp.TerminationDate,
             MonthlySalary = emp.MonthlySalary,
+            BasicSalaryComponent = emp.BasicSalaryComponent,
+            HraComponent = emp.HraComponent,
+            DaComponent = emp.DaComponent,
+            StandardHours = emp.StandardHours,
             DirectHourlyWage = emp.DirectHourlyWage,
+            PayrollTypeOverride = emp.PayrollTypeOverride,
             SalaryCalculationMethod = emp.SalaryCalculationMethod,
+            PaidLeaveBalance = emp.PaidLeaveBalance,
+            SickLeaveBalance = emp.SickLeaveBalance,
             ShiftStartTime = emp.ShiftStartTime,
             ShiftEndTime = emp.ShiftEndTime,
             StandardBreakMinutes = emp.StandardBreakMinutes,
@@ -363,11 +482,16 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
             OT_Rule = emp.OT_Rule,
             OT_FlatRate = emp.OT_FlatRate,
             NightShiftAllowance = emp.NightShiftAllowance,
+            TdsRatePercent = emp.TdsRatePercent,
             Email = emp.Email,
             EnablePF = emp.EnablePF,
             UAN = emp.UAN,
             EnableESI = emp.EnableESI,
             ESINumber = emp.ESINumber,
+            BankAccountNumber = emp.BankAccountNumber,
+            BankIfscCode = emp.BankIfscCode,
+            BankName = emp.BankName,
+            LastRotatedDate = emp.LastRotatedDate,
             // --- NEW: ROTATION FIELDS ---
             EnableShiftRotation = emp.EnableShiftRotation,
             RotationGroup = emp.RotationGroup,
@@ -411,34 +535,21 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
 
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
-            if (currentEmployee.EmployeeID == 0)
+            var wasNew = currentEmployee.EmployeeID == 0;
+            var result = await FirebaseEmployees.SaveEmployeeAsync(currentEmployee);
+            if (!result.Success)
             {
-                dbContext.Employees.Add(currentEmployee);
-            }
-            else
-            {
-                var existing = await dbContext.Employees.FindAsync(currentEmployee.EmployeeID);
-                if (existing != null)
-                {
-                    dbContext.Entry(existing).CurrentValues.SetValues(currentEmployee);
-                }
+                toastService.ShowError(result.Message);
+                return;
             }
 
-            await dbContext.SaveChangesAsync();
-
-            // Publish the same Employee identity to Firebase immediately after
-            // the existing Web transaction succeeds. No UI/business logic is
-            // changed; this only removes the stale cross-platform window.
-            var savedEmployeeId = currentEmployee.EmployeeID;
-            var savedEmployee = await dbContext.Employees.AsNoTracking()
-                .FirstAsync(e => e.EmployeeID == savedEmployeeId);
-            var reconciliation = await FirebaseEmployeeProvisioning.ReconcileEmployeeAsync(savedEmployee);
+            var reconciliation = await FirebaseEmployees.ReconcileAuthAsync(result.Employee);
             if (!reconciliation.Success)
-                toastService.ShowWarning("Employee saved, but Firebase synchronization is pending.");
+                toastService.ShowWarning(reconciliation.Message);
 
-            await AttendanceRefresh.NotifyEmployeeChangedAsync(currentEmployee.EmployeeID == 0 ? null : currentEmployee.EmployeeID, currentEmployee.EmployeeID == 0 ? "CREATED" : "UPDATED");
+            await AttendanceRefresh.NotifyEmployeeChangedAsync(
+                result.Employee.EmployeeID,
+                wasNew ? "CREATED" : "UPDATED");
 
             toastService.ShowSuccess("Employee saved successfully.");
             CloseForm();
@@ -446,7 +557,7 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error saving employee.");
+            _logger.LogError(ex, "Error saving employee to Firebase.");
             toastService.ShowError($"Error: {ex.Message}");
         }
     }
@@ -474,7 +585,7 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
         {
             _logger.LogError(ex, "Error checking deletion dependencies");
             toastService.ShowError($"Error checking records: {ex.Message}");
-            deletionDependencies = new EmployeeDeletionService.EmployeeDeletionDependencies
+            deletionDependencies = new FirebaseEmployeeDeletionService.EmployeeDeletionDependencies
             {
                 EmployeeID = emp.EmployeeID,
                 EmployeeName = emp.Name,
@@ -503,31 +614,26 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
         isProcessingDeletion = true;
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            var entity = await dbContext.Employees.FindAsync(selectedEmployeeForDeletion.EmployeeID);
-
-            if (entity != null)
+            var result = await FirebaseEmployees.SoftDeleteEmployeeAsync(selectedEmployeeForDeletion.EmployeeID);
+            if (!result.Success || result.Employee == null)
             {
-                entity.IsDeleted = true; // SOFT DELETE ACTION
-                dbContext.Update(entity);
-                await dbContext.SaveChangesAsync();
-
-                // Soft-delete remains the existing business behavior. The
-                // reconciliation disables the linked Firebase Auth account,
-                // revokes refresh tokens, removes the mobile session and marks
-                // the Firebase employee/profile state inactive.
-                var reconciliation = await FirebaseEmployeeProvisioning.ReconcileEmployeeAsync(entity);
-                if (!reconciliation.Success)
-                    toastService.ShowWarning("Employee moved to Recycle Bin, but Firebase deactivation is pending.");
-
-                await AttendanceRefresh.NotifyEmployeeChangedAsync(entity.EmployeeID, "DELETED");
-
-                // AUDIT LOG
-                await AuditService.LogAsync("SOFT DELETE", "Employee", entity.EmployeeID.ToString(),
-                    $"Employee moved to Recycle Bin (Soft Deleted). Dependencies: {deletionDependencies.GetTotalDependencies()} related records preserved.");
+                toastService.ShowError(result.Message);
+                return;
             }
 
-            toastService.ShowSuccess($"'{selectedEmployeeForDeletion.Name}' moved to Recycle Bin. Related records preserved.");
+            var reconciliation = await FirebaseEmployees.ReconcileAuthAsync(result.Employee);
+            if (!reconciliation.Success)
+                toastService.ShowWarning(reconciliation.Message);
+
+            await AttendanceRefresh.NotifyEmployeeChangedAsync(result.Employee.EmployeeID, "DELETED");
+
+            await FirebaseEmployees.LogAuditAsync(
+                "SOFT DELETE",
+                "Employee",
+                result.Employee.EmployeeID.ToString(),
+                $"Employee moved to Recycle Bin (Soft Deleted). Dependencies: {deletionDependencies.GetTotalDependencies()} related records preserved.");
+
+            toastService.ShowSuccess($"'{result.Employee.Name}' moved to Recycle Bin. Related records preserved.");
             CloseDeletionDialog();
             await LoadEmployees();
         }

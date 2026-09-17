@@ -1,3 +1,4 @@
+using Payroll.Shared.Firebase;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
@@ -228,42 +229,8 @@ public sealed class FirebaseRealtimeService
     // can be migrated module-by-module without changing UI/layout/business
     // rules.
 
-    private static readonly HashSet<string> FirebaseSsotTables =
-        new(StringComparer.Ordinal)
-        {
-            "employees",
-            "shops",
-            "attendance",
-            "attendance_punches",
-            "advance_payments",
-            "employee_history",
-            "shop_closed_days",
-            "regularizations",
-            "leave_requests",
-            "resignation_requests",
-            "salary_snapshots",
-            "audit_logs",
-            "daily_summaries",
-            "shift_schedules",
-            "payroll_history",
-            "payroll_previews",
-            "payroll_finalization",
-            "bonus_records",
-            "tax_declarations",
-            "fbp_components",
-            "fbp_declarations",
-            "company_settings",
-            "feature_settings",
-            "professional_tax_slabs",
-            "year_end_summaries",
-            "fnf_settlements",
-            "report_definitions",
-            "geo_punch_audits"
-        };
-
     public bool IsFirebaseSsotTable(string table)
-        => !string.IsNullOrWhiteSpace(table) &&
-           FirebaseSsotTables.Contains(table.Trim());
+        => FirebaseSsotSchema.IsTable(table);
 
     /// <summary>
     /// Opens Firebase Realtime Database's REST streaming endpoint for one

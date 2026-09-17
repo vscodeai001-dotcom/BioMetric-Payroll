@@ -14,9 +14,10 @@ public sealed class MobileAdminRegularizationController : ControllerBase
 {
     private readonly IDbContextFactory<AppDbContext> _db;
     private readonly RegularizationService _service;
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
 
-    public MobileAdminRegularizationController(IDbContextFactory<AppDbContext> db, RegularizationService service)
-    { _db = db; _service = service; }
+    public MobileAdminRegularizationController(IDbContextFactory<AppDbContext> db, RegularizationService service, FirebaseEmployeeManagementService firebaseEmployees)
+    { _db = db; _service = service; _firebaseEmployees = firebaseEmployees; }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<AdminRegularizationDto>>> Get([FromQuery] string status = "Pending")
@@ -24,8 +25,8 @@ public sealed class MobileAdminRegularizationController : ControllerBase
         await using var db = await _db.CreateDbContextAsync();
         var q = db.AttendanceRegularizations.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(status)) q = q.Where(r => r.Status == status);
-        var names = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted)
-            .ToDictionaryAsync(e => e.EmployeeID, e => e.Name);
+        var names = (await _firebaseEmployees.GetEmployeesAsync())
+            .ToDictionary(e => e.EmployeeID, e => e.Name);
         var rows = await q.OrderByDescending(r => r.SubmissionDate).ThenByDescending(r => r.RegularizationId).ToListAsync();
         return Ok(rows.Select(r => new AdminRegularizationDto(
             r.RegularizationId.ToString(), r.EmployeeId,

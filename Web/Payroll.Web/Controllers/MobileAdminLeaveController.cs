@@ -12,16 +12,16 @@ namespace Payroll.Web.Controllers;
 [Authorize(Roles = "Admin,SuperAdmin")]
 public sealed class MobileAdminLeaveController : ControllerBase
 {
-    private readonly IDbContextFactory<AppDbContext> _db;
     private readonly LeaveManagementService _leave;
-    public MobileAdminLeaveController(IDbContextFactory<AppDbContext> db, LeaveManagementService leave)
-    { _db = db; _leave = leave; }
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
+    public MobileAdminLeaveController(LeaveManagementService leave, FirebaseEmployeeManagementService firebaseEmployees)
+    { _leave = leave; _firebaseEmployees = firebaseEmployees; }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<AdminLeaveDto>>> Get([FromQuery] int employeeId = 0, [FromQuery] string status = "Pending", [FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
     {
-        await using var db = await _db.CreateDbContextAsync();
-        var employees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).ToDictionaryAsync(e => e.EmployeeID, e => e.Name);
+        var employees = (await _firebaseEmployees.GetEmployeesAsync())
+            .ToDictionary(e => e.EmployeeID, e => e.Name);
         var rows = await _leave.LoadLeaveRequestsAsync(employeeId, status, from, to);
         return Ok(rows.Select(x => new AdminLeaveDto(x.LeaveRequestID, x.EmployeeID, employees.GetValueOrDefault(x.EmployeeID, "Employee"), x.LeaveDate, x.LeaveType, x.IsHalfDay, x.IsApproved, x.Notes)));
     }
@@ -32,8 +32,7 @@ public sealed class MobileAdminLeaveController : ControllerBase
         if (request.EmployeeId <= 0 || !DateTime.TryParse(request.LeaveDate, out var date)) return BadRequest(new { message = "Employee and valid leave date are required." });
         var entity = new LeaveRequest { EmployeeID = request.EmployeeId, LeaveDate = date.Date, LeaveType = string.IsNullOrWhiteSpace(request.LeaveType) ? "Paid Leave" : request.LeaveType, IsHalfDay = request.IsHalfDay, Notes = request.Notes };
         await _leave.SaveNewLeaveRequestAsync(entity);
-        await using var db = await _db.CreateDbContextAsync();
-        var name = await db.Employees.AsNoTracking().Where(e => e.EmployeeID == request.EmployeeId).Select(e => e.Name).FirstOrDefaultAsync() ?? "Employee";
+        var name = (await _firebaseEmployees.GetEmployeeAsync(request.EmployeeId))?.Name ?? "Employee";
         return Ok(new AdminLeaveDto(entity.LeaveRequestID, entity.EmployeeID, name, entity.LeaveDate, entity.LeaveType, entity.IsHalfDay, entity.IsApproved, entity.Notes));
     }
 

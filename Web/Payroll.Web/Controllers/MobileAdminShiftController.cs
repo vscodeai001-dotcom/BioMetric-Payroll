@@ -14,7 +14,8 @@ public sealed class MobileAdminShiftController : ControllerBase
 {
     private readonly IDbContextFactory<AppDbContext> _db;
     private readonly RosteringService _rostering;
-    public MobileAdminShiftController(IDbContextFactory<AppDbContext> db, RosteringService rostering) { _db = db; _rostering = rostering; }
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
+    public MobileAdminShiftController(IDbContextFactory<AppDbContext> db, RosteringService rostering, FirebaseEmployeeManagementService firebaseEmployees) { _db = db; _rostering = rostering; _firebaseEmployees = firebaseEmployees; }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<AdminShiftDto>>> Get([FromQuery] int employeeId = 0, [FromQuery] string? from = null, [FromQuery] string? to = null)
@@ -24,7 +25,8 @@ public sealed class MobileAdminShiftController : ControllerBase
         if (employeeId > 0) q = q.Where(s => s.EmployeeID == employeeId);
         if (DateOnly.TryParse(from, out var f)) q = q.Where(s => s.IsRecurringPattern || s.ShiftDate >= f);
         if (DateOnly.TryParse(to, out var t)) q = q.Where(s => s.IsRecurringPattern || s.ShiftDate <= t);
-        var employees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).ToDictionaryAsync(e => e.EmployeeID, e => e.Name);
+        var employees = (await _firebaseEmployees.GetEmployeesAsync())
+            .ToDictionary(e => e.EmployeeID, e => e.Name);
         var rows = await q.OrderBy(s => s.ShiftDate).ThenBy(s => s.EmployeeID).ThenBy(s => s.StartTime).ToListAsync();
         return Ok(rows.Select(s => new AdminShiftDto(s.ScheduleID, s.EmployeeID, employees.GetValueOrDefault(s.EmployeeID, "Employee"), s.ShiftDate.ToString("yyyy-MM-dd"), s.StartTime.ToString("HH:mm"), s.EndTime.ToString("HH:mm"), s.IsRecurringPattern, s.PatternDurationDays, (int)s.AppliesToDayOfWeek)));
     }

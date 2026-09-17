@@ -1,3 +1,4 @@
+using Payroll.Shared.Firebase;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -7,31 +8,7 @@ namespace Payroll.Web.Services;
 
 public sealed class FirebaseSqliteSyncService : BackgroundService
 {
-    private static readonly Dictionary<string, string> Tables = new(StringComparer.Ordinal)
-    {
-        ["Employee"] = "employees",
-        ["AttendanceLog"] = "attendance",
-        ["SalaryAdvance"] = "advance_payments",
-        ["PayrollHistory"] = "payroll_history",
-        ["LeaveRequest"] = "leave_requests",
-        ["ShiftSchedule"] = "shift_schedules",
-        ["CompanyHoliday"] = "shop_closed_days",
-        ["CompanySetting"] = "company_settings",
-        ["DailySummary"] = "daily_summaries",
-        ["FeatureSettings"] = "feature_settings",
-        ["ProfessionalTaxSlab"] = "professional_tax_slabs",
-        ["AuditLog"] = "audit_logs",
-        ["BonusRecord"] = "bonus_records",
-        ["YearEndSummary"] = "year_end_summaries",
-        ["TaxDeclaration"] = "tax_declarations",
-        ["ResignationRequest"] = "resignation_requests",
-        ["FnFSettlement"] = "fnf_settlements",
-        ["ReportDefinition"] = "report_definitions",
-        ["AttendanceRegularization"] = "regularizations",
-        ["FBPComponent"] = "fbp_components",
-        ["FlexibleBenefitDeclaration"] = "fbp_declarations",
-        ["GeoPunchAudit"] = "geo_punch_audits"
-    };
+    private static IReadOnlyDictionary<string, string> Tables => FirebaseSsotSchema.Tables;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly FirebaseRealtimeService _firebase;

@@ -11,6 +11,7 @@
 @inject ILogger<MyLeaveHistory> _logger
 @inject UserManager<IdentityUser> UserManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @inject NavigationManager Navigation
 
@@ -134,9 +135,7 @@ else
             if (user.Identity?.IsAuthenticated == true)
             {
                 var email = user.Identity.Name;
-                linkedEmployee = await dbContext.Employees
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.Email == email);
+                linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
 
                 if (linkedEmployee != null)
                 {

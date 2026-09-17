@@ -12,6 +12,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ILogger<MainLayout> _logger
 @inject AuthenticationStateProvider AuthState
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 
 <div class="page">
     <div class="sidebar">
@@ -255,14 +256,9 @@
                 return;
             }
 
-            await using var dbContext =
-                await DbFactory.CreateDbContextAsync();
-
-            var employee =
-                await dbContext.Employees
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        e => e.Email == email);
+            var employees = await FirebaseEmployees.GetEmployeesAsync();
+            var employee = employees.FirstOrDefault(
+                e => string.Equals(e.Email, email, StringComparison.OrdinalIgnoreCase));
 
             employeeId =
                 employee?.EmployeeID ?? 0;

@@ -11,6 +11,7 @@
 @inject ILogger<MyPayslips> _logger
 @inject UserManager<IdentityUser> UserManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @inject NavigationManager Navigation
 
@@ -179,11 +180,7 @@ else
                 return;
             }
 
-            linkedEmployee = await dbContext.Employees
-                .AsNoTracking()
-                .FirstOrDefaultAsync(e =>
-                    e.Email == email &&
-                    !e.IsDeleted);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
 
             if (linkedEmployee == null)
             {

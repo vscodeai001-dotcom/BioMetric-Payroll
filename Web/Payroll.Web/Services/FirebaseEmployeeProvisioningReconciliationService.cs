@@ -218,9 +218,14 @@ public sealed class FirebaseEmployeeProvisioningReconciliationService : Backgrou
             ["email"] = employee.Email,
             ["role"] = employee.Role ?? "Staff",
             ["salaryRate"] = employee.MonthlySalary,
+            ["basicSalaryComponent"] = employee.BasicSalaryComponent,
+            ["hraComponent"] = employee.HraComponent,
+            ["daComponent"] = employee.DaComponent,
+            ["standardHours"] = employee.StandardHours,
             ["salaryType"] = employee.PayrollTypeOverride ?? "MONTHLY_FIXED",
             ["salaryCalculationMethod"] = employee.SalaryCalculationMethod ?? "Pro-Rata Hourly",
             ["biometricId"] = employee.BiometricID,
+            ["directHourlyWage"] = employee.DirectHourlyWage,
             ["paidLeaveBalance"] = employee.PaidLeaveBalance,
             ["sickLeaveBalance"] = employee.SickLeaveBalance,
             ["shiftStart"] = Time(employee.ShiftStartTime),
@@ -243,6 +248,8 @@ public sealed class FirebaseEmployeeProvisioningReconciliationService : Backgrou
             ["enableShiftRotation"] = employee.EnableShiftRotation,
             ["rotationGroup"] = employee.RotationGroup,
             ["shiftRotationPattern"] = employee.ShiftRotationPattern,
+            ["lastRotatedDate"] = Unix(employee.LastRotatedDate),
+            ["currentShiftIndex"] = employee.CurrentShiftIndex,
             ["isActive"] = !employee.IsDeleted,
             ["lastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };

@@ -6,6 +6,7 @@
 @implements IAsyncDisposable
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IJSRuntime JSRuntime
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>GPS Connection & Offline Tracking</PageTitle>
@@ -115,30 +116,32 @@
             // Load the employee list independently of the in-memory GPS store.
             // This keeps the page useful even when an employee has no active
             // GPS session or when the app has just restarted.
-            var employeeList = await db.Employees
-                .AsNoTracking()
+            var employeeList = (await FirebaseEmployees.GetEmployeesAsync())
                 .Where(e => !e.IsDeleted)
                 .OrderBy(e => e.Name)
                 .Select(e => new { e.EmployeeID, e.Name })
-                .ToListAsync();
+                .ToList();
 
 
             // GPS capture metadata is already represented by the migration.
             // Keep the query read-only so this page never changes existing data.
-            offlineSyncRows = await (from point in db.EmployeeLocationHistory.AsNoTracking()
-                                      join employee in db.Employees.AsNoTracking() on point.EmployeeId equals employee.EmployeeID
-                                      where point.CaptureSource == "OfflineSync" &&
-                                            point.CapturedAtUtc >= DateTime.UtcNow.Date
-                                      orderby point.CapturedAtUtc descending
-                                      select new OfflineSyncRow
-                                      {
-                                          EmployeeName = employee.Name,
-                                          CapturedAtUtc = point.CapturedAtUtc,
-                                          SyncedAtUtc = point.SyncedAtUtc,
-                                          IsWithinAllowedRadius = point.IsWithinAllowedRadius,
-                                          Latitude = point.Latitude,
-                                          Longitude = point.Longitude
-                                      }).Take(500).ToListAsync();
+            var employeeNames = employeeList.ToDictionary(x => x.EmployeeID, x => x.Name);
+            offlineSyncRows = await db.EmployeeLocationHistory.AsNoTracking()
+                .Where(point => point.CaptureSource == "OfflineSync" &&
+                                point.CapturedAtUtc >= DateTime.UtcNow.Date)
+                .OrderByDescending(point => point.CapturedAtUtc)
+                .Select(point => new OfflineSyncRow
+                {
+                    EmployeeId = point.EmployeeId,
+                    CapturedAtUtc = point.CapturedAtUtc,
+                    SyncedAtUtc = point.SyncedAtUtc,
+                    IsWithinAllowedRadius = point.IsWithinAllowedRadius,
+                    Latitude = point.Latitude,
+                    Longitude = point.Longitude
+                }).Take(500).ToListAsync();
+
+            foreach (var row in offlineSyncRows)
+                row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();

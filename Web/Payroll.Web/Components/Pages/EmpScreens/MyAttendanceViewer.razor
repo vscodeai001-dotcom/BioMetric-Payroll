@@ -13,6 +13,8 @@
 @inject IToastService toastService
 @inject UserManager<IdentityUser> UserManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject Payroll.Web.Services.FirebaseAttendanceService FirebaseAttendance
 @inject NavigationManager Navigation
 @attribute [Authorize(Roles = "Employee")]
 
@@ -230,9 +232,7 @@ else
 
         if (userEmail != null)
         {
-            linkedEmployee = await dbContext.Employees
-                .AsNoTracking()
-                .FirstOrDefaultAsync(e => e.Email == userEmail);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(userEmail);
 
             if (linkedEmployee == null)
             {
@@ -262,12 +262,8 @@ else
             var emp = linkedEmployee!;
             var filterStartDate = DateOnly.FromDateTime(startDate.Value);
             var filterEndDate = DateOnly.FromDateTime(endDate.Value);
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
-            var loadedSummaries = await dbContext.DailySummaries.AsNoTracking()
-                .Where(ds => ds.EmployeeID == emp.EmployeeID &&
-                             ds.ShiftDate >= filterStartDate && ds.ShiftDate <= filterEndDate)
-                .ToListAsync();
+            var loadedSummaries = await FirebaseAttendance.GetDailySummariesAsync(
+                emp.EmployeeID, filterStartDate, filterEndDate);
 
             if (!loadedSummaries.Any())
             {
@@ -277,11 +273,8 @@ else
                 return;
             }
 
-            var relevantLogs = await dbContext.AttendanceLogs.AsNoTracking()
-                .Where(log => log.EmployeeID == emp.EmployeeID &&
-                              log.PunchTime.Date >= startDate.Value.Date && log.PunchTime.Date <= endDate.Value.Date)
-                .OrderBy(log => log.PunchTime)
-                .ToListAsync();
+            var relevantLogs = await FirebaseAttendance.GetAttendancePunchesAsync(
+                emp.EmployeeID, filterStartDate, filterEndDate);
 
             var cumulative = new CompanyCumulativeSummary
             {

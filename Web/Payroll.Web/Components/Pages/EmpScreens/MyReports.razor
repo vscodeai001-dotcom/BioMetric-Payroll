@@ -9,6 +9,7 @@
 @inject ReportService ReportService
 @inject IToastService toastService
 @inject AuthenticationStateProvider AuthState
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject CsvExportService CsvService
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
@@ -248,7 +249,7 @@ else
             var email = authState.User.Identity?.Name;
             if (email != null)
             {
-                var emp = await db.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.Email == email);
+                var emp = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
                 employeeId = emp?.EmployeeID ?? 0;
             }
         }

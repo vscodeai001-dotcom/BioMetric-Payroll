@@ -10,6 +10,7 @@
 @inject RegularizationService RegularizationService
 @inject FirebaseRegularizationService FirebaseRegularizationService
 @inject AuthenticationStateProvider AuthState
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @attribute [Authorize(Roles = "Employee, SuperAdmin")]
 
@@ -249,7 +250,7 @@ else
             if (linkedEmployee == null)
             {
                 var email = auth.User.Identity?.Name;
-                linkedEmployee = await db.Employees.FirstOrDefaultAsync(e => e.Email == email);
+                linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
             }
             if (linkedEmployee != null)
             {

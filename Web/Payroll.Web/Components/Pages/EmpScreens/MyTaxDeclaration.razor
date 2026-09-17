@@ -8,6 +8,7 @@
 @inject NotificationService NotificationService
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject AuthenticationStateProvider AuthState
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @inject NavigationManager Nav
 @attribute [Authorize(Roles = "Employee, SuperAdmin")]
@@ -223,7 +224,7 @@ else
             var email = authState.User.Identity?.Name;
             if (email == null) return;
 
-            employee = await dbContext.Employees.FirstOrDefaultAsync(e => e.Email == email);
+            employee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
             if (employee == null) return;
 
             // 3. Get or Create Declaration

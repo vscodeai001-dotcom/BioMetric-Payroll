@@ -19,10 +19,12 @@ public sealed class MobileAdminPunchController : ControllerBase
     private readonly PayrollLockService _lockService;
     private readonly AuditService _audit;
     private readonly AttendanceRefreshService _refresh;
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
 
     public MobileAdminPunchController(IDbContextFactory<AppDbContext> dbFactory, AttendanceCalculatorService calculator,
-        PayrollLockService lockService, AuditService audit, AttendanceRefreshService refresh)
-    { _dbFactory = dbFactory; _calculator = calculator; _lockService = lockService; _audit = audit; _refresh = refresh; }
+        PayrollLockService lockService, AuditService audit, AttendanceRefreshService refresh,
+        FirebaseEmployeeManagementService firebaseEmployees)
+    { _dbFactory = dbFactory; _calculator = calculator; _lockService = lockService; _audit = audit; _refresh = refresh; _firebaseEmployees = firebaseEmployees; }
 
     [HttpGet("issues")]
     public async Task<IActionResult> Issues([FromQuery] int employeeId = 0, [FromQuery] string? from = null, [FromQuery] string? to = null)
@@ -31,7 +33,9 @@ public sealed class MobileAdminPunchController : ControllerBase
         if (!DateTime.TryParseExact(to, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end)) end = DateTime.Today;
         if (end < start) return BadRequest(new { success = false, message = "Invalid date range." });
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var employees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted && (employeeId <= 0 || e.EmployeeID == employeeId)).ToListAsync();
+        var employees = (await _firebaseEmployees.GetEmployeesAsync())
+            .Where(e => employeeId <= 0 || e.EmployeeID == employeeId)
+            .ToList();
         var logs = await db.AttendanceLogs.AsNoTracking().Where(x => x.EmployeeID.HasValue && x.PunchTime >= start.Date && x.PunchTime < end.Date.AddDays(1)).OrderBy(x => x.PunchTime).ToListAsync();
         var result = new List<IssueDayDto>();
         for (var day = start.Date; day <= end.Date; day = day.AddDays(1))
@@ -52,7 +56,8 @@ public sealed class MobileAdminPunchController : ControllerBase
     {
         await using var db = await _dbFactory.CreateDbContextAsync();
         var rows = await db.AttendanceLogs.AsNoTracking().Where(x => !x.IsApproved && x.LogType == "Correction Request" && x.EmployeeID.HasValue).OrderBy(x => x.PunchTime).ToListAsync();
-        var names = await db.Employees.AsNoTracking().ToDictionaryAsync(x => x.EmployeeID, x => x.Name);
+        var names = (await _firebaseEmployees.GetEmployeesAsync())
+            .ToDictionary(x => x.EmployeeID, x => x.Name);
         return Ok(rows.Select(x => new PendingPunchDto(x.LogID, x.EmployeeID!.Value, names.TryGetValue(x.EmployeeID.Value, out var n) ? n : $"Employee #{x.EmployeeID}", x.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"), x.LogType ?? "Correction Request", x.DeviceID ?? "")));
     }
 

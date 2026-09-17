@@ -20,6 +20,8 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ILogger<AttendanceLogViewer> _logger
 @inject IToastService toastService
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject Payroll.Web.Services.FirebaseAttendanceService FirebaseAttendanceService
 @inject CsvExportService CsvService
 
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
@@ -291,10 +293,7 @@
                 await DbFactory.CreateDbContextAsync();
 
             employees =
-                await dbContext.Employees
-                    .Where(e => !e.IsDeleted)
-                    .OrderBy(e => e.Name)
-                    .ToListAsync();
+                await FirebaseEmployees.GetEmployeesAsync();
 
             // --------------------------------------------------------
             // IMPORTANT
@@ -496,26 +495,11 @@
             // EMPLOYEES
             // ----------------------------------------------------
 
-            var activeEmployeesQuery =
-                dbContext.Employees
-                    .AsNoTracking()
-                    .Where(
-                        e => !e.IsDeleted);
-
-            if (selectedEmployeeId > 0)
-            {
-                activeEmployeesQuery =
-                    activeEmployeesQuery
-                        .Where(
-                            e =>
-                                e.EmployeeID ==
-                                selectedEmployeeId);
-            }
-
-            var activeEmployees =
-                await activeEmployeesQuery
-                    .OrderBy(e => e.Name)
-                    .ToListAsync();
+            var activeEmployees = (await FirebaseEmployees.GetEmployeesAsync())
+                .Where(e => !e.IsDeleted &&
+                    (selectedEmployeeId <= 0 || e.EmployeeID == selectedEmployeeId))
+                .OrderBy(e => e.Name)
+                .ToList();
 
             var activeEmployeeIds =
     activeEmployees
@@ -587,25 +571,17 @@
             // DAILY SUMMARIES
             // ----------------------------------------------------
 
-            var query =
-                dbContext.DailySummaries
-                    .AsNoTracking()
-                    .Where(
-                        ds =>
-                            ds.ShiftDate >= dStart &&
-                            ds.ShiftDate <= dEnd);
+            var data =
+                await FirebaseAttendanceService.GetDailySummariesAsync(
+                    dStart,
+                    dEnd);
 
             if (selectedEmployeeId > 0)
             {
-                query =
-                    query.Where(
-                        ds =>
-                            ds.EmployeeID ==
-                            selectedEmployeeId);
+                data = data
+                    .Where(ds => ds.EmployeeID == selectedEmployeeId)
+                    .ToList();
             }
-
-            var data =
-                await query.ToListAsync();
 
             // ----------------------------------------------------
             // EMPLOYEE IDS
@@ -648,19 +624,17 @@
             var relevantLogs =
                 employeeIds.Count == 0
                     ? new List<AttendanceLog>()
-                    : await dbContext.AttendanceLogs
-                        .AsNoTracking()
-                        .Where(
-                            l =>
-                                employeeIds.Contains(
-                                    l.EmployeeID ?? 0) &&
-                                l.PunchTime >=
-                                    startDate.Value.Date &&
-                                l.PunchTime <
-                                    queryEndExclusive)
-                        .OrderBy(
-                            l => l.PunchTime)
-                        .ToListAsync();
+                    : await FirebaseAttendanceService.GetAttendancePunchesAsync(
+                        dStart,
+                        dEnd);
+
+            if (employeeIds.Count > 0)
+            {
+                relevantLogs = relevantLogs
+                    .Where(l => l.EmployeeID.HasValue && employeeIds.Contains(l.EmployeeID.Value))
+                    .OrderBy(l => l.PunchTime)
+                    .ToList();
+            }
 
             // ----------------------------------------------------
             // MAP DTO
@@ -1917,9 +1891,7 @@
             await using var dbContext =
                 await DbFactory.CreateDbContextAsync();
 
-            var allEmployees =
-                await dbContext.Employees
-                    .ToListAsync();
+            var allEmployees = await FirebaseEmployees.GetEmployeesAsync();
 
             var settings =
                 await dbContext.CompanySettings

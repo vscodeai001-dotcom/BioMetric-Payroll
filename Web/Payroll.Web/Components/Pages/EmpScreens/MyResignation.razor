@@ -7,6 +7,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ResignationService ExitService
 @inject AuthenticationStateProvider Auth
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @inject NavigationManager Navigation
 @attribute [Authorize(Roles = "Employee, SuperAdmin")]
@@ -198,7 +199,7 @@ else
             // 2. Employee Check
             var auth = await Auth.GetAuthenticationStateAsync();
             var email = auth.User.Identity?.Name;
-            linkedEmployee = await db.Employees.FirstOrDefaultAsync(e => e.Email == email);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
             if (linkedEmployee == null) return;
 
             // 3. Existing Request Check

@@ -17,15 +17,18 @@ public sealed class MobileAdminPayrollController : ControllerBase
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly PayrollProcessorService _processor;
     private readonly ILogger<MobileAdminPayrollController> _logger;
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
 
     public MobileAdminPayrollController(
         IDbContextFactory<AppDbContext> dbFactory,
         PayrollProcessorService processor,
-        ILogger<MobileAdminPayrollController> logger)
+        ILogger<MobileAdminPayrollController> logger,
+        FirebaseEmployeeManagementService firebaseEmployees)
     {
         _dbFactory = dbFactory;
         _processor = processor;
         _logger = logger;
+        _firebaseEmployees = firebaseEmployees;
     }
 
     [HttpGet("history")]
@@ -64,9 +67,8 @@ public sealed class MobileAdminPayrollController : ControllerBase
             })
             .ToListAsync();
 
-        var names = await db.Employees.AsNoTracking()
-            .Where(e => rows.Select(r => r.EmployeeID).Contains(e.EmployeeID))
-            .ToDictionaryAsync(e => e.EmployeeID, e => e.Name);
+        var names = await _firebaseEmployees.GetEmployeeNameMapAsync(
+            rows.Select(r => r.EmployeeID), HttpContext.RequestAborted);
 
         foreach (var row in rows)
             row.EmployeeName = names.GetValueOrDefault(row.EmployeeID, "Unknown");

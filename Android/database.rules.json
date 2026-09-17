@@ -75,10 +75,17 @@
         ".read": false,
         ".write": false,
         "employees": {
+          ".indexOn": [
+            "employeeId",
+            "email",
+            "biometricId"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
           "$employeeId": {
-            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id == $employeeId)",
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId || auth.token.employee_id == $employeeId.toDouble())",
             ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
-            ".validate": "newData.child('employeeId').val() == $employeeId || newData.child('EmployeeId').val() == $employeeId"
+            ".validate": "newData.hasChildren(['employeeId','isActive']) && newData.child('employeeId').val() == $employeeId && newData.child('isActive').isBoolean() && (!newData.child('_entity').exists() || newData.child('_entity').val() == 'Employee') && (!newData.child('_key').exists() || newData.child('_key').val() == $employeeId) && (!newData.child('_revision').exists() || newData.child('_revision').isNumber()) && (!newData.child('_writeId').exists() || newData.child('_writeId').isString()) && (!newData.child('_updatedUtc').exists() || newData.child('_updatedUtc').isString())"
           }
         },
         "attendance": {

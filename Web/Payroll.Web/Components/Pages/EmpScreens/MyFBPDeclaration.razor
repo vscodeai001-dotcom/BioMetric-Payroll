@@ -8,6 +8,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FBPService FBPService
 @inject AuthenticationStateProvider AuthState
+@inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject IToastService toastService
 @inject NavigationManager Navigation
 @attribute [Authorize(Roles = "Employee, SuperAdmin")]
@@ -183,7 +184,7 @@ else
 
             var auth = await AuthState.GetAuthenticationStateAsync();
             var email = auth.User.Identity?.Name;
-            linkedEmployee = await db.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.Email == email);
+            linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
 
             if (linkedEmployee != null)
             {
