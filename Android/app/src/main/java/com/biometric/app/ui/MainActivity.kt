@@ -122,7 +122,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private val adminRoadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var officeMarker: Marker? = null
+    private var officeMarker2: Marker? = null
     private var geofenceCircle: Polygon? = null
+    private var geofenceCircle2: Polygon? = null
     private var currentGeofenceRadiusMeters: Int = 0
     private var statusFilter = "All"
     private var adminMapAutoCentered = false
@@ -497,29 +499,94 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun updateOfficeOnMap(lat: Double, lon: Double, radius: Int) {
-        currentGeofenceRadiusMeters = radius
+        if (!lat.isFinite() || !lon.isFinite() || lat == 0.0 && lon == 0.0) return
+
+        currentGeofenceRadiusMeters = radius.coerceAtLeast(0)
+
         _binding?.let { b ->
-            val maps = listOf(b.adminMapView, b.commandCenterMapView)
-            if (lat == 0.0) return
             val point = GeoPoint(lat, lon)
+            val safeRadius = currentGeofenceRadiusMeters.toDouble()
+
             if (officeMarker == null) {
                 officeMarker = Marker(b.adminMapView).apply {
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     icon = createPremiumOfficeIcon()
                     title = "Office Hub 🏢"
+                    snippet = "Office location • Radius ${currentGeofenceRadiusMeters} m"
                 }
                 b.adminMapView.overlays.add(officeMarker)
+            }
+
+            if (officeMarker2 == null) {
+                officeMarker2 = Marker(b.commandCenterMapView).apply {
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    icon = createPremiumOfficeIcon()
+                    title = "Office Hub 🏢"
+                    snippet = "Office location • Radius ${currentGeofenceRadiusMeters} m"
+                }
+                b.commandCenterMapView.overlays.add(officeMarker2)
+            }
+
+            if (geofenceCircle == null) {
                 geofenceCircle = Polygon(b.adminMapView).apply {
-                    points = Polygon.pointsAsCircle(point, radius.toDouble())
                     fillPaint.color = 0x153B82F6
-                    outlinePaint.color = 0x403B82F6
-                    outlinePaint.strokeWidth = 2f
+                    outlinePaint.color = 0x803B82F6.toInt()
+                    outlinePaint.strokeWidth = 3f
                 }
                 b.adminMapView.overlays.add(0, geofenceCircle)
             }
-            officeMarker?.position = point
-            geofenceCircle?.points = Polygon.pointsAsCircle(point, radius.toDouble())
-            maps.forEach { it.invalidate() }
+
+            if (geofenceCircle2 == null) {
+                geofenceCircle2 = Polygon(b.commandCenterMapView).apply {
+                    fillPaint.color = 0x153B82F6
+                    outlinePaint.color = 0x803B82F6.toInt()
+                    outlinePaint.strokeWidth = 3f
+                }
+                b.commandCenterMapView.overlays.add(0, geofenceCircle2)
+            }
+
+            officeMarker?.apply {
+                position = point
+                isEnabled = true
+                alpha = 1f
+                snippet = "Office location • Radius ${currentGeofenceRadiusMeters} m"
+            }
+            officeMarker2?.apply {
+                position = point
+                isEnabled = true
+                alpha = 1f
+                snippet = "Office location • Radius ${currentGeofenceRadiusMeters} m"
+            }
+
+            val circlePoints = Polygon.pointsAsCircle(point, safeRadius)
+            geofenceCircle?.apply {
+                points = circlePoints
+                isEnabled = adminZoneVisible && currentGeofenceRadiusMeters > 0
+                fillPaint.alpha = if (adminZoneVisible) 0x40 else 0
+                outlinePaint.alpha = if (adminZoneVisible) 0xA0 else 0
+            }
+            geofenceCircle2?.apply {
+                points = circlePoints
+                isEnabled = adminZoneVisible && currentGeofenceRadiusMeters > 0
+                fillPaint.alpha = if (adminZoneVisible) 0x40 else 0
+                outlinePaint.alpha = if (adminZoneVisible) 0xA0 else 0
+            }
+
+            b.adminMapView.post {
+                b.adminMapView.invalidate()
+                b.adminMapView.requestLayout()
+            }
+            if (!adminMapAutoCentered) {
+                b.adminMapView.controller.setCenter(point)
+                b.commandCenterMapView.controller.setCenter(point)
+                b.adminMapView.controller.setZoom(16.0)
+                b.commandCenterMapView.controller.setZoom(16.0)
+            }
+
+            b.commandCenterMapView.post {
+                b.commandCenterMapView.invalidate()
+                b.commandCenterMapView.requestLayout()
+            }
         }
     }
 
@@ -557,8 +624,19 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val dashboardMap = b.adminMapView
             val commandMap = b.commandCenterMapView
             val employeeData = sharedViewModel.allEmployees.value
+            val officeForCount = officeMarker?.position
             val geoPoints = mutableListOf<GeoPoint>()
             val currentIds = locations.map { it.employeeId }
+            val outsideCount = if (officeForCount != null && currentGeofenceRadiusMeters > 0) {
+                locations.count { loc ->
+                    distanceBetween(
+                        officeForCount,
+                        GeoPoint(loc.latitude, loc.longitude)
+                    ) > currentGeofenceRadiusMeters.toDouble()
+                }
+            } else {
+                0
+            }
 
             markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
                 dashboardMap.overlays.remove(markers[id]); markers.remove(id)
@@ -578,21 +656,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     return@forEach
-                }
-
-                // Keep the configured radius as the source of truth.
-                // Avoid reading the deprecated Polygon.points property.
-                if (
-                    loc.allowedRadiusMeters > 0 &&
-                    loc.allowedRadiusMeters != currentGeofenceRadiusMeters
-                ) {
-                    officeMarker?.position?.let {
-                        updateOfficeOnMap(
-                            it.latitude,
-                            it.longitude,
-                            loc.allowedRadiusMeters
-                        )
-                    }
                 }
 
                 val point = GeoPoint(loc.latitude, loc.longitude)
@@ -629,13 +692,24 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     m2.position = point
                 }
 
+                val office = officeMarker?.position
+                val liveDistanceMeters = if (office != null) {
+                    distanceBetween(office, point).toDouble()
+                } else {
+                    loc.distanceMeters.coerceAtLeast(0.0)
+                }
+                val withinCurrentRadius = currentGeofenceRadiusMeters > 0 &&
+                    liveDistanceMeters <= currentGeofenceRadiusMeters.toDouble()
+
                 val initials = getInitials(emp?.name ?: "E")
-                val cacheKey = "${initials}_${loc.isWithinAllowedRadius}_$status"
+                val cacheKey = "${initials}_${withinCurrentRadius}_$status"
                 val icon = iconCache.getOrPut(cacheKey) {
-                    createPremiumMarkerIcon(initials, loc.isWithinAllowedRadius, status)
+                    createPremiumMarkerIcon(initials, withinCurrentRadius, status)
                 }
                 m1.icon = icon; m2.icon = icon
-                val snippet = "Status: $status | Speed: ${formatSpeed(loc.speedMps)}\nDist: ${formatDistance(loc.distanceMeters)}"
+                val snippet = "Status: $status | Speed: ${formatSpeed(loc.speedMps)}\n" +
+                    "Dist: ${formatDistance(liveDistanceMeters)} • Radius: ${currentGeofenceRadiusMeters}m • " +
+                    if (withinCurrentRadius) "Within range" else "Outside range"
                 m1.snippet = snippet; m2.snippet = snippet
                 val info1 = createAdminMarkerInfoWindow(dashboardMap, loc, emp?.name ?: "Employee", status)
                 val info2 = createAdminMarkerInfoWindow(commandMap, loc, emp?.name ?: "Employee", status)
@@ -959,6 +1033,17 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         markerAnimations.clear()
         refreshJob?.cancel()
         iconCache.clear()
+
+        _binding?.let { b ->
+            officeMarker?.let { b.adminMapView.overlays.remove(it) }
+            officeMarker2?.let { b.commandCenterMapView.overlays.remove(it) }
+            geofenceCircle?.let { b.adminMapView.overlays.remove(it) }
+            geofenceCircle2?.let { b.commandCenterMapView.overlays.remove(it) }
+        }
+        officeMarker = null
+        officeMarker2 = null
+        geofenceCircle = null
+        geofenceCircle2 = null
 
         _binding?.adminMapView?.onDetach()
         _binding?.commandCenterMapView?.onDetach()
