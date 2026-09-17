@@ -26,7 +26,7 @@ public sealed class FirebaseEmployeeManagementService
     private readonly IConfiguration _configuration;
     private readonly ILogger<FirebaseEmployeeManagementService> _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
-    private readonly IEmailSender _emailSender;
+    private readonly IServiceScopeFactory _scopeFactory;
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> EmployeeWriteLocks = new();
 
     public FirebaseEmployeeManagementService(
@@ -34,13 +34,13 @@ public sealed class FirebaseEmployeeManagementService
         IConfiguration configuration,
         ILogger<FirebaseEmployeeManagementService> logger,
         IHttpContextAccessor httpContextAccessor,
-        IEmailSender emailSender)
+        IServiceScopeFactory scopeFactory)
     {
         _firebase = firebase;
         _configuration = configuration;
         _logger = logger;
         _httpContextAccessor = httpContextAccessor;
-        _emailSender = emailSender;
+        _scopeFactory = scopeFactory;
     }
 
     public string OwnerUid =>
@@ -51,8 +51,13 @@ public sealed class FirebaseEmployeeManagementService
     public async Task<List<Employee>> GetEmployeesAsync(CancellationToken ct = default)
     {
         var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
-        if (!snapshot.HasValue || snapshot.Value.ValueKind != JsonValueKind.Object)
+        if (!snapshot.HasValue)
+        {
+            _logger.LogWarning(
+                "Firebase employees read returned no data for owner {OwnerUid}.",
+                OwnerUid);
             return new List<Employee>();
+        }
 
         var result = new List<Employee>();
 
@@ -81,6 +86,10 @@ public sealed class FirebaseEmployeeManagementService
         }
         else if (snapshot.Value.ValueKind == JsonValueKind.Array)
         {
+            _logger.LogInformation(
+                "Firebase employees collection is array-shaped for owner {OwnerUid}; reading numeric employee records.",
+                OwnerUid);
+
             var index = 0;
             foreach (var item in snapshot.Value.EnumerateArray())
             {
@@ -402,7 +411,14 @@ public sealed class FirebaseEmployeeManagementService
             {
                 var resetLink = await auth.GeneratePasswordResetLinkAsync(normalizedEmail);
 
-                await _emailSender.SendEmailAsync(
+                // IEmailSender is registered as scoped. This service is intentionally
+                // singleton because many realtime/background consumers share it, so
+                // resolve the mail sender inside a short-lived scope instead of
+                // capturing a scoped dependency in the singleton.
+                using var emailScope = _scopeFactory.CreateScope();
+                var emailSender = emailScope.ServiceProvider.GetRequiredService<IEmailSender>();
+
+                await emailSender.SendEmailAsync(
                     normalizedEmail,
                     "BioMetric Payroll - Set your employee password",
                     $"""

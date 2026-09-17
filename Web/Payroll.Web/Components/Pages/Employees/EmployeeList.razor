@@ -544,14 +544,26 @@ private DotNetObjectReference<EmployeeList>? employeeCacheRef;
             }
 
             var reconciliation = await FirebaseEmployees.ReconcileAuthAsync(result.Employee);
-            if (!reconciliation.Success)
-                toastService.ShowWarning(reconciliation.Message);
 
             await AttendanceRefresh.NotifyEmployeeChangedAsync(
                 result.Employee.EmployeeID,
                 wasNew ? "CREATED" : "UPDATED");
 
-            toastService.ShowSuccess("Employee saved successfully.");
+            if (!reconciliation.Success)
+            {
+                // The Firebase employee row is saved, but Auth/profile
+                // provisioning failed. Do not hide that state behind a
+                // misleading green success-only message.
+                toastService.ShowError(
+                    $"Employee saved, but Firebase provisioning failed: {reconciliation.Message}");
+            }
+            else
+            {
+                toastService.ShowSuccess(
+                    reconciliation.Message.Contains("password setup email", StringComparison.OrdinalIgnoreCase)
+                        ? reconciliation.Message
+                        : "Employee saved and Firebase provisioning completed.");
+            }
             CloseForm();
             await LoadEmployees();
         }
