@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import com.biometric.app.api.RegularizationCreateRequest
 import com.biometric.app.databinding.FragmentApplyRegularizationBinding
 import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
+import com.biometric.app.domain.audit.AuditLogger
 import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.timepicker.MaterialTimePicker
 import com.google.android.material.timepicker.TimeFormat
@@ -26,6 +27,7 @@ class ApplyRegularizationFragment : Fragment() {
     private val binding get() = _binding!!
 
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
+    @Inject lateinit var auditLogger: AuditLogger
 
     private var selectedDate: Long = System.currentTimeMillis()
     private val dateSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -101,6 +103,12 @@ class ApplyRegularizationFragment : Fragment() {
             try {
                 selfService.createRegularization(
                     RegularizationCreateRequest(date, isInPunch, time, reason)
+                )
+                auditLogger.logAction(
+                    shopId = null,
+                    action = "CREATE",
+                    module = "Regularization",
+                    newValue = "date=$date,type=${if (isInPunch) "IN" else "OUT"},time=$time,reason=$reason"
                 )
                 Toast.makeText(requireContext(), "Correction request submitted! 🛠️ 💎 ✅", Toast.LENGTH_SHORT).show()
                 parentFragmentManager.popBackStack()

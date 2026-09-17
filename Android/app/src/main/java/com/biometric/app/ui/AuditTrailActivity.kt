@@ -55,6 +55,7 @@ class AuditTrailActivity : MotionBaseActivity() {
     private var currentFilter = "Daily"
     private var shopId: String? = null
     private var shopName: String = ""
+    private var auditSearch: String = ""
     private lateinit var auditAdapter: AuditLogAdapter
     private lateinit var filterAdapter: com.biometric.app.ui.adapter.HorizontalFilterAdapter
 
@@ -154,8 +155,8 @@ class AuditTrailActivity : MotionBaseActivity() {
             object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    // Note: Filtering on Paging is complex, usually done at Source level
-                    // For now we keep summary logic live and list paged
+                    auditSearch = s?.toString().orEmpty().trim()
+                    refreshData()
                 }
                 override fun afterTextChanged(s: Editable?) {}
             }
@@ -209,7 +210,7 @@ class AuditTrailActivity : MotionBaseActivity() {
 
     private fun refreshData() {
         updateFilterText()
-        viewModel.loadLogs(shopId, currentFilter, selectedDate.timeInMillis)
+        viewModel.loadLogs(shopId, currentFilter, selectedDate.timeInMillis, auditSearch)
     }
 
     private fun updateFilterText() {

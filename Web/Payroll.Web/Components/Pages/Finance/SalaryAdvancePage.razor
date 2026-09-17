@@ -5,7 +5,7 @@
 @using global::Payroll.Shared.Data
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Web.Components.UI.Finance
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseAdvanceService FirebaseAdvances
 @inject AttendanceRefreshService AttendanceRefresh
 @inject IJSRuntime JSRuntime
 @inject ILogger<SalaryAdvancePage> _logger
@@ -114,18 +114,15 @@ else
     {
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
             // 1. GATE CHECK
-            var features = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1);
-            if (features != null && !features.EnableSalaryAdvance)
+            if (!await FirebaseAdvances.IsEnabledAsync())
             {
                 isAccessDenied = true;
                 return;
             }
 
             // 2. Load Data
-            employeeList = await dbContext.Employees.OrderBy(e => e.Name).ToListAsync();
+            employeeList = await FirebaseAdvances.GetActiveEmployeesAsync();
             await LoadData(); // Trigger data load
         }
         catch (Exception ex)
@@ -162,17 +159,8 @@ else
 
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            var query = dbContext.SalaryAdvances.Where(adv => adv.PayrollID_Paid == null);
-
-            if (selectedEmployeeId > 0)
-                query = query.Where(adv => adv.EmployeeID == selectedEmployeeId);
-            if (startDate.HasValue)
-                query = query.Where(adv => adv.AdvanceDate.HasValue && adv.AdvanceDate.Value.Date >= startDate.Value.Date);
-            if (endDate.HasValue)
-                query = query.Where(adv => adv.AdvanceDate.HasValue && adv.AdvanceDate.Value.Date <= endDate.Value.Date);
-
-            unpaidAdvances = await query.OrderByDescending(adv => adv.AdvanceDate).ToListAsync();
+            unpaidAdvances = await FirebaseAdvances.GetAsync(
+                selectedEmployeeId, startDate, endDate, unpaidOnly: true);
         }
         catch (Exception ex)
         {
@@ -194,17 +182,8 @@ else
         await InvokeAsync(StateHasChanged);
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            var query = dbContext.SalaryAdvances.AsQueryable();
-
-            if (selectedEmployeeId > 0)
-                query = query.Where(adv => adv.EmployeeID == selectedEmployeeId);
-            if (startDate.HasValue)
-                query = query.Where(adv => adv.AdvanceDate.HasValue && adv.AdvanceDate.Value.Date >= startDate.Value.Date);
-            if (endDate.HasValue)
-                query = query.Where(adv => adv.AdvanceDate.HasValue && adv.AdvanceDate.Value.Date <= endDate.Value.Date);
-
-            allAdvancesHistory = await query.OrderByDescending(adv => adv.AdvanceDate).ThenBy(adv => adv.EmployeeID).ToListAsync();
+            allAdvancesHistory = await FirebaseAdvances.GetAsync(
+                selectedEmployeeId, startDate, endDate, unpaidOnly: false);
         }
         catch (Exception ex)
         {
@@ -226,11 +205,13 @@ else
         {
             try
             {
-                await using var dbContext = await DbFactory.CreateDbContextAsync();
                 var employeeId = advanceToDelete.EmployeeID;
-                
-                dbContext.SalaryAdvances.Remove(advanceToDelete);
-                await dbContext.SaveChangesAsync();
+                var deleted = await FirebaseAdvances.DeleteAsync(advanceToDelete);
+                if (!deleted)
+                {
+                    toastService.ShowWarning("This advance could not be deleted. Paid advances are protected.");
+                    return;
+                }
 
                 toastService.ShowSuccess("Advance deleted.");
 

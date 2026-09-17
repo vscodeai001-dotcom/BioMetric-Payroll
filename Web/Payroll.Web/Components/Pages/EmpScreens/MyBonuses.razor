@@ -1,10 +1,8 @@
 @page "/my-bonuses"
 @using Microsoft.AspNetCore.Authorization
-@using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared
-@using global::Payroll.Shared.Data
 @using Microsoft.AspNetCore.Components.Authorization
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseBonusService FirebaseBonuses
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Navigation
 @inject IToastService toastService
@@ -79,43 +77,26 @@ else
         isLoading = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-
-            // 1. SECURITY CHECK
-            var settings = await db.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
-            if (settings != null)
+            if (!await FirebaseBonuses.IsEnabledAsync() || !await FirebaseBonuses.CanEmployeeViewAsync())
             {
-                // Strict Hierarchy: EnableBonusManagement (Parent) -> EmployeeCanViewBonus (Child)
-                bool isModuleEnabled = settings.EnableBonusManagement;
-                bool canView = settings.EmployeeCanViewBonus;
-
-                if (!isModuleEnabled || !canView)
-                {
-                    isAccessDenied = true;
-                    isLoading = false;
-                    return;
-                }
+                isAccessDenied = true;
+                return;
             }
 
-            // 2. Load Data
             var auth = await AuthState.GetAuthenticationStateAsync();
-            var email = auth.User.Identity?.Name;
-
-            if (email != null)
+            var claim = auth.User.FindFirst("employee_id")?.Value;
+            if (!int.TryParse(claim, out var employeeId) || employeeId <= 0)
             {
-                var emp = await db.Employees.FirstOrDefaultAsync(e => e.Email == email);
-                if (emp != null)
-                {
-                    bonuses = await db.BonusRecords
-                        .Where(b => b.EmployeeID == emp.EmployeeID)
-                        .OrderByDescending(b => b.BonusDate)
-                        .ToListAsync();
-                }
+                isAccessDenied = true;
+                return;
             }
+
+            bonuses = await FirebaseBonuses.GetAsync(employeeId);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Log error here
+            Console.Error.WriteLine($"Bonus load failed: {ex.Message}");
+            bonuses = new List<BonusRecord>();
         }
         finally
         {

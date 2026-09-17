@@ -18,19 +18,22 @@ namespace Payroll.Web.Services
         private readonly ILogger<PayrollProcessorService> _logger;
         private readonly AuditService _auditService;
         private readonly FBPService _fbpService;
+        private readonly PayrollFinalizationService _payrollFinalizationService;
 
         public PayrollProcessorService(
             AttendanceCalculatorService attendanceService,
             SalaryStructureService salaryService,
             ILogger<PayrollProcessorService> logger,
             AuditService auditService,
-            FBPService fbpService)
+            FBPService fbpService,
+            PayrollFinalizationService payrollFinalizationService)
         {
             _attendanceService = attendanceService;
             _salaryService = salaryService;
             _logger = logger;
             _auditService = auditService;
             _fbpService = fbpService;
+            _payrollFinalizationService = payrollFinalizationService;
         }
 
         // --- 1. PREVIEW GENERATION LOGIC ---
@@ -299,7 +302,9 @@ namespace Payroll.Web.Services
                     _logger.LogError(empEx, "Error processing {Name} during payroll preview.", emp.Name);
                 }
             }
-            return newPreviewList.OrderBy(r => r.EmployeeName).ToList();
+            var orderedPreview = newPreviewList.OrderBy(r => r.EmployeeName).ToList();
+            await _payrollFinalizationService.PublishPreviewAsync(orderedPreview, selectedYear, selectedMonth);
+            return orderedPreview;
         }
 
         // --- 2. FINALIZATION LOGIC (Updated for Compatibility) ---
@@ -429,6 +434,17 @@ namespace Payroll.Web.Services
                 await _auditService.LogAsync("FINALIZE", "Payroll",
                     $"Month: {selectedMonth}/{selectedYear}",
                     $"Finalized {payrollPreviewList.Count} payslips.");
+
+                // Read back the committed rows and verify the exact calculation
+                // payload against what was finalized before publishing Firebase state.
+                var committedRows = await dbContext.PayrollHistories
+                    .AsNoTracking()
+                    .Where(ph => ph.PayMonth == selectedMonth && ph.PayYear == selectedYear)
+                    .OrderBy(ph => ph.EmployeeID)
+                    .ToListAsync();
+                var previewHash = PayrollFinalizationService.ComputePreviewHash(payrollPreviewList, selectedYear, selectedMonth);
+                await _payrollFinalizationService.PublishFinalizedAsync(
+                    payrollPreviewList, committedRows, selectedYear, selectedMonth, previewHash);
             }
             catch (Exception ex)
             {

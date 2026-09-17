@@ -289,8 +289,20 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     )
 
     private suspend fun <T : Any> readList(table: String, mapper: (DataSnapshot) -> T?): List<T> {
-        val snapshot = ownerRef().child(table).get().await()
-        return snapshot.children.mapNotNull { mapper(it) }
+        // 1014 security parity: employee reads must be server-filtered by the
+        // same employee key enforced by Firebase RTDB rules. Admin screens use
+        // their own repositories and are not routed through this self-service class.
+        val id = sessionStore.employeeId()
+        val query = when (table) {
+            "payroll_history", "tax_declarations", "fbp_declarations", "bonus_records" ->
+                ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
+            "attendance_punches", "regularizations", "leave_requests" ->
+                ownerRef().child(table).orderByChild("staffId").equalTo(id)
+            "attendance", "salary_snapshots", "daily_summaries", "shift_schedules", "salary_payments", "resignation_requests", "advance_payments" ->
+                ownerRef().child(table).orderByChild("employeeId").equalTo(id)
+            else -> ownerRef().child(table)
+        }
+        return query.get().await().children.mapNotNull { mapper(it) }
     }
 
     private fun DataSnapshot.string(name: String): String? =
@@ -411,8 +423,10 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             .filter { it.employeeId == emp.employeeId }
         val punches = readList("attendance_punches") { runCatching { it.getValue(AttendancePunch::class.java) }.getOrNull() }
             .filter { it.staffId == emp.employeeId }
-        val summaries = ownerRef().child("daily_summaries").get().await().children
-            .filter { it.int("employeeId") == sessionStore.employeeId() }
+        val summaries = ownerRef().child("daily_summaries")
+            .orderByChild("employeeId")
+            .equalTo(sessionStore.employeeId().toDouble())
+            .get().await().children
             .associateBy { it.string("shiftDate").orEmpty() }
 
         return generateSequence(start) { if (it < end) it.plusDays(1) else null }.map { day ->
@@ -552,8 +566,11 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun bonuses(): List<MoneyEntryDto> =
-        readList("bonus_records") { s ->
-            if (s.int("employeeId") != sessionStore.employeeId()) return@readList null
+        ownerRef().child("bonus_records")
+            .orderByChild("employeeId")
+            .equalTo(sessionStore.employeeId().toDouble())
+            .get().await().children.mapNotNull { s ->
+            if (s.int("employeeId") != sessionStore.employeeId()) return@mapNotNull null
             MoneyEntryDto(
                 id = s.int("bonusId"),
                 date = formatDate(s.long("bonusDate")),
@@ -567,7 +584,8 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun regularizations(): List<RegularizationDto> =
         readList("regularizations") { it.toRegularizationRequest() }
-            .filter { it.staffId == employeeId() }.sortedByDescending { it.submittedAt }
+            .filter { it.staffId == employeeId() || it.staffId == sessionStore.employeeId() }
+            .sortedByDescending { it.submittedAt }
             .map {
                 RegularizationDto(stableIntId(it.id), it.date, it.punchType.equals("IN", true),
                     formatTime(it.requestedTime), it.reason, it.status, it.adminRemarks,
@@ -576,7 +594,12 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun createRegularization(request: RegularizationCreateRequest) {
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
-        val id = UUID.randomUUID().toString()
+        // Keep the Firebase key numeric so the existing Web SQL compatibility
+        // projection can materialize the request without introducing a second
+        // regularization identity schema. Negative IDs are reserved for
+        // client-created Firebase-first requests and cannot collide with the
+        // normal positive SQL identity sequence.
+        val id = (-System.currentTimeMillis()).toString()
         firebaseSync.pushRegularization(
             RegularizationRequest(
                 id, emp.employeeId, emp.name, request.dateOfPunch,
@@ -690,12 +713,47 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }.sortedBy { it.date }
 
     private suspend fun nextIntId(counterName: String, table: String, field: String): Int {
+        // 1015: allocate IDs atomically so two offline/reconnecting clients
+        // cannot both observe the same counter and create the same numeric ID.
+        // The existing table scan is retained as a migration-safe floor for
+        // counters created before this transaction existed.
         val existing = ownerRef().child(table).get().await().children.maxOfOrNull { it.int(field) } ?: 0
         val ref = ownerRef().child("counters").child(counterName)
-        val stored = ref.get().await().getValue(Int::class.java) ?: 0
-        val next = maxOf(existing, stored) + 1
-        ref.setValue(next).await()
-        return next
+        return ref.runTransactionAwait { current ->
+            val stored = (current.value as? Number)?.toInt() ?: current.value?.toString()?.toIntOrNull() ?: 0
+            val next = maxOf(existing, stored) + 1
+            current.value = next
+        }
+    }
+
+    private suspend fun com.google.firebase.database.DatabaseReference.runTransactionAwait(
+        handler: (com.google.firebase.database.MutableData) -> Unit
+    ): Int = kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+        runTransaction(object : com.google.firebase.database.Transaction.Handler {
+            override fun doTransaction(currentData: com.google.firebase.database.MutableData): com.google.firebase.database.Transaction.Result {
+                return try {
+                    handler(currentData)
+                    com.google.firebase.database.Transaction.success(currentData)
+                } catch (_: Exception) {
+                    com.google.firebase.database.Transaction.abort()
+                }
+            }
+
+            override fun onComplete(error: com.google.firebase.database.DatabaseError?, committed: Boolean, currentData: com.google.firebase.database.DataSnapshot?) {
+                if (error != null) continuation.resumeWith(Result.failure(error.toException()))
+                else if (!committed) continuation.resumeWith(Result.failure(IllegalStateException("Firebase counter transaction was not committed")))
+                else {
+                    val value = currentData?.value
+                    val result = when (value) {
+                        is Number -> value.toInt()
+                        else -> value?.toString()?.toIntOrNull()
+                    }
+                    if (result == null) continuation.resumeWith(Result.failure(IllegalStateException("Firebase counter returned a non-numeric value")))
+                    else continuation.resumeWith(Result.success(result))
+                }
+            }
+        })
+        continuation.invokeOnCancellation { cancel() }
     }
 
     private suspend fun notifyPortalChanged() {

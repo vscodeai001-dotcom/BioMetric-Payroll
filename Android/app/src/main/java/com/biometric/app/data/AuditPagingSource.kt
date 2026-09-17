@@ -10,7 +10,8 @@ class AuditPagingSource(
     private val firebaseSync: FirebaseSyncManager,
     private val shopId: String?,
     private val start: Long,
-    private val end: Long
+    private val end: Long,
+    private val search: String = ""
 ) : PagingSource<Long, AuditLog>() {
 
     override fun getRefreshKey(state: PagingState<Long, AuditLog>): Long? {
@@ -63,7 +64,8 @@ class AuditPagingSource(
 
                 // Filter for results matching this shop and within time range
                 val filtered = rawLogs.filter { log ->
-                    (shopId.isNullOrEmpty() || log.shopId == shopId) && 
+                    (shopId.isNullOrEmpty() || log.shopId == shopId) &&
+                    matchesSearch(log) &&
                     log.timestamp >= start && 
                     log.timestamp <= startKey 
                 }
@@ -100,5 +102,15 @@ class AuditPagingSource(
             android.util.Log.e("AuditPaging", "Error loading audit logs: ${e.message}", e)
             LoadResult.Error(e)
         }
+    }
+
+    private fun matchesSearch(log: AuditLog): Boolean {
+        val q = search.trim()
+        if (q.isBlank()) return true
+        val haystack = listOf(
+            log.userDisplayName, log.userId, log.actorRole, log.module,
+            log.action, log.targetId.orEmpty(), log.oldValue.orEmpty(), log.newValue.orEmpty()
+        ).joinToString(" ")
+        return haystack.contains(q, ignoreCase = true)
     }
 }

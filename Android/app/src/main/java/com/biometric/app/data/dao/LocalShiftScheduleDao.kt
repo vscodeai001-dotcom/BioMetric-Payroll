@@ -23,4 +23,10 @@ interface LocalShiftScheduleDao {
 
     @Query("SELECT * FROM shift_schedules WHERE employeeId = :employeeId AND shiftDate BETWEEN :fromDate AND :toDate ORDER BY shiftDate ASC, scheduleId ASC")
     fun observeForEmployeeBetween(employeeId: Int, fromDate: String, toDate: String): Flow<List<LocalShiftSchedule>>
+    @Query("SELECT * FROM shift_schedules WHERE employeeId = :employeeId AND (shiftDate BETWEEN :fromDate AND :toDate OR isRecurringPattern = 1) ORDER BY shiftDate ASC, scheduleId ASC")
+    suspend fun getForEmployeeWithPatterns(employeeId: Int, fromDate: String, toDate: String): List<LocalShiftSchedule>
+
+    @Query("SELECT * FROM shift_schedules WHERE employeeId = :employeeId AND (shiftDate BETWEEN :fromDate AND :toDate OR isRecurringPattern = 1) ORDER BY shiftDate ASC, scheduleId ASC")
+    fun observeForEmployeeWithPatterns(employeeId: Int, fromDate: String, toDate: String): Flow<List<LocalShiftSchedule>>
+
 }

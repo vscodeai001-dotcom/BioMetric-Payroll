@@ -3,6 +3,7 @@
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared.Data
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseRealtimeService Firebase
 @attribute [Authorize(Roles = "SuperAdmin")]
 
 <PageTitle>System Audit Logs</PageTitle>
@@ -21,6 +22,18 @@
     <div class="col-md-3">
         <label class="form-label small fw-bold">End Date</label>
         <input type="date" @bind="endDate" class="form-control" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold">Actor</label>
+        <input type="text" @bind="actorFilter" class="form-control" placeholder="Name / email / UID" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold">Role</label>
+        <input type="text" @bind="roleFilter" class="form-control" placeholder="Admin / Employee" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold">Module / Action</label>
+        <input type="text" @bind="moduleActionFilter" class="form-control" placeholder="Attendance / UPDATE" />
     </div>
     <div class="col-md-2 d-flex align-items-end">
         <button class="btn btn-primary w-100" @onclick="LoadLogs">
@@ -76,6 +89,9 @@ else
     private DateTime startDate = DateTime.Today.AddDays(-7);
     private DateTime endDate = DateTime.Today;
     private bool isLoading = false;
+    private string actorFilter = string.Empty;
+    private string roleFilter = string.Empty;
+    private string moduleActionFilter = string.Empty;
     
 
     protected override async Task OnInitializedAsync()
@@ -102,12 +118,52 @@ else
                 return;
             }
 
-            logs = await db.AuditLogs
-                .AsNoTracking()
-                .Where(l => l.Timestamp >= queryStart && l.Timestamp < queryEndExclusive)
-                .OrderByDescending(l => l.Timestamp)
-                .Take(500) // Safety limit
-                .ToListAsync();
+            // Firebase is the cross-platform audit SSOT. Keep the existing SQL
+            // table as a compatibility fallback so historical Web-only records
+            // are never lost if Firebase is temporarily unavailable.
+            var ownerUid = Firebase.ResolveOwnerUid("audit-viewer", "SuperAdmin");
+            var remote = await Firebase.GetOwnerTableAsync(ownerUid, "audit_logs");
+            var firebaseLogs = new List<AuditLog>();
+            if (remote.HasValue && remote.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var property in remote.Value.EnumerateObject())
+                {
+                    if (!property.Value.TryGetProperty("timestamp", out var ts) || !ts.TryGetInt64(out var millis)) continue;
+                    var stamp = DateTimeOffset.FromUnixTimeMilliseconds(millis).UtcDateTime;
+                    if (stamp < queryStart || stamp >= queryEndExclusive) continue;
+                    var log = new AuditLog
+                    {
+                        LogID = TryLong(property.Name),
+                        Timestamp = stamp,
+                        UserID = StringProp(property.Value, "userId", "SYSTEM"),
+                        UserEmail = StringProp(property.Value, "userDisplayName", "System"),
+                        ActionType = StringProp(property.Value, "action", "UNKNOWN"),
+                        EntityType = StringProp(property.Value, "module", "Unknown"),
+                        EntityID = StringProp(property.Value, "targetId", null),
+                        Details = BuildDetails(property.Value)
+                    };
+                    firebaseLogs.Add(log);
+                }
+            }
+
+            if (firebaseLogs.Count > 0)
+            {
+                logs = firebaseLogs
+                    .Where(MatchesFilters)
+                    .OrderByDescending(l => l.Timestamp)
+                    .Take(500)
+                    .ToList();
+            }
+            else
+            {
+                logs = await db.AuditLogs
+                    .AsNoTracking()
+                    .Where(l => l.Timestamp >= queryStart && l.Timestamp < queryEndExclusive)
+                    .OrderByDescending(l => l.Timestamp)
+                    .Take(500)
+                    .ToListAsync();
+                logs = logs.Where(MatchesFilters).ToList();
+            }
 
 
 
@@ -130,6 +186,25 @@ else
         TimeZoneInfo.ConvertTimeToUtc(
             DateTime.SpecifyKind(indiaTime, DateTimeKind.Unspecified),
             IndiaTimeZone);
+
+    private bool MatchesFilters(AuditLog l) =>
+        (string.IsNullOrWhiteSpace(actorFilter) || $"{l.UserEmail} {l.UserID}".Contains(actorFilter, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrWhiteSpace(roleFilter) || l.Details?.Contains(roleFilter, StringComparison.OrdinalIgnoreCase) == true) &&
+        (string.IsNullOrWhiteSpace(moduleActionFilter) || $"{l.EntityType} {l.ActionType} {l.Details}".Contains(moduleActionFilter, StringComparison.OrdinalIgnoreCase));
+
+    private static string StringProp(System.Text.Json.JsonElement e, string name, string? fallback) =>
+        e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? (v.GetString() ?? fallback) : fallback;
+
+    private static long TryLong(string value) => long.TryParse(value, out var id) ? id : 0;
+
+    private static string BuildDetails(System.Text.Json.JsonElement e)
+    {
+        var oldValue = StringProp(e, "oldValue", null);
+        var newValue = StringProp(e, "newValue", null);
+        var role = StringProp(e, "actorRole", null);
+        var target = StringProp(e, "targetId", null);
+        return $"Role: {role}; Target: {target}; Old: {oldValue}; New: {newValue}";
+    }
 
     private string GetBadgeColor(string action) => action switch
     {

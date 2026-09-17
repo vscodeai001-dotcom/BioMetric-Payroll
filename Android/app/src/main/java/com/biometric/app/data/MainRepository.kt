@@ -795,11 +795,11 @@ class MainRepository(
         }.flowOn(Dispatchers.Default)
     }
 
-    fun getAuditLogsPaged(shopId: String?, start: Long, end: Long): Flow<PagingData<AuditLog>> {
+    fun getAuditLogsPaged(shopId: String?, start: Long, end: Long, search: String = ""): Flow<PagingData<AuditLog>> {
         return Pager(
             config = PagingConfig(pageSize = 50, enablePlaceholders = false, initialLoadSize = 100)
         ) {
-            AuditPagingSource(firebaseSync, shopId, start, end)
+            AuditPagingSource(firebaseSync, shopId, start, end, search)
         }.flow
     }
 

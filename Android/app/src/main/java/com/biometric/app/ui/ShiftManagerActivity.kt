@@ -11,25 +11,26 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
-import com.biometric.app.api.*
+import com.biometric.app.api.AdminShiftDto
 import com.biometric.app.data.MainRepository
-import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.databinding.ActivityShiftManagerBinding
 import com.biometric.app.databinding.DialogAddShiftBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class ShiftManagerActivity : AppCompatActivity() {
-    @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var repository: MainRepository
     private lateinit var binding: ActivityShiftManagerBinding
     private val rows = mutableListOf<AdminShiftDto>()
-    private val auth get() = "Bearer ${sessionStore.token().orEmpty()}"
+    private var shiftsJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,24 +39,41 @@ class ShiftManagerActivity : AppCompatActivity() {
         binding.rvShifts.layoutManager = LinearLayoutManager(this); binding.rvShifts.adapter = ShiftAdapter()
         binding.fabAdd.setOnClickListener { showAddShiftDialog() }
         binding.btnGenerate.setOnClickListener { generateShifts() }
-        loadShifts()
+        observeShifts()
     }
 
-    private fun loadShifts() = lifecycleScope.launch {
-        try {
-            val r = mobileApi.adminShifts(auth)
-            if (!r.isSuccessful) throw IllegalStateException("Load failed (${r.code()})")
-            rows.clear(); rows.addAll(r.body().orEmpty()); binding.rvShifts.adapter?.notifyDataSetChanged()
-        } catch (e: Exception) { Toast.makeText(this@ShiftManagerActivity, "Unable to load shifts: ${e.message} ⚠️", Toast.LENGTH_LONG).show() }
+    private fun observeShifts() {
+        shiftsJob?.cancel()
+        shiftsJob = lifecycleScope.launch {
+            firebaseSync.observeShiftSchedules().collectLatest { remoteRows ->
+                val names = repository.allEmployeesFlow.value
+                    .associate { it.employeeId.toIntOrNull() ?: 0 to it.name }
+
+                val mapped = remoteRows.map {
+                    AdminShiftDto(
+                        id = it.scheduleId,
+                        employeeId = it.employeeId,
+                        employeeName = names[it.employeeId] ?: "Employee #${it.employeeId}",
+                        shiftDate = it.shiftDate,
+                        startTime = it.startTime,
+                        endTime = it.endTime,
+                        isRecurringPattern = it.isRecurringPattern,
+                        patternDurationDays = it.patternDurationDays,
+                        dayOfWeek = it.appliesToDayOfWeek
+                    )
+                }
+
+                rows.clear()
+                rows.addAll(mapped)
+                binding.rvShifts.adapter?.notifyDataSetChanged()
+            }
+        }
     }
 
     private fun generateShifts() = lifecycleScope.launch {
-        try {
-            val r = mobileApi.generateAdminShifts(auth)
-            if (!r.isSuccessful) throw IllegalStateException("Generation failed (${r.code()})")
-            toast("${r.body()?.count ?: 0} shifts generated for the next 30 days 📅✅")
-            loadShifts()
-        } catch (e: Exception) { toast("Unable to generate shifts: ${e.message} ⚠️") }
+        val count = firebaseSync.generateShiftSchedulesFromPatterns()
+        toast(if (count > 0) "$count shifts generated for the next 30 days 📅✅"
+              else "No new shifts were generated. Check recurring patterns or existing schedules.")
     }
 
     private fun showAddShiftDialog() {
@@ -76,17 +94,52 @@ class ShiftManagerActivity : AppCompatActivity() {
                 val duration = d.etDuration.text.toString().toIntOrNull() ?: 7
                 if (employeeId <= 0 || date.isBlank() || start.isBlank() || end.isBlank()) { toast("Employee, date and times are required ⚠️"); return@setPositiveButton }
                 lifecycleScope.launch {
-                    try {
-                        val r = mobileApi.createAdminShift(auth, CreateAdminShiftRequest(employeeId, date, start, end, recurring, duration))
-                        if (!r.isSuccessful) throw IllegalStateException("Save failed (${r.code()})")
-                        toast("Shift scheduled successfully ✅"); loadShifts()
-                    } catch (e: Exception) { toast("Unable to save shift: ${e.message} ⚠️") }
+                    val id = (rows.maxOfOrNull { it.id } ?: 0) + 1
+                    val day = runCatching { java.time.LocalDate.parse(date).dayOfWeek.value % 7 }.getOrDefault(0)
+                    val record = FirebaseSyncManager.ShiftScheduleRecord(
+                        scheduleId = id,
+                        employeeId = employeeId,
+                        shiftDate = if (recurring) {
+                            runCatching {
+                                java.time.LocalDate.parse(date)
+                                    .minusDays(java.time.LocalDate.parse(date).dayOfWeek.value.toLong() % 7)
+                                    .toString()
+                            }.getOrDefault(date)
+                        } else date,
+                        startTime = if (start.length == 5) "$start:00" else start,
+                        endTime = if (end.length == 5) "$end:00" else end,
+                        isRecurringPattern = recurring,
+                        patternDurationDays = duration,
+                        appliesToDayOfWeek = day
+                    )
+                    if (firebaseSync.pushShiftSchedule(record))
+                        toast("Shift scheduled successfully ✅")
+                    else
+                        toast("Unable to save shift to Firebase ⚠️")
                 }
             }.setNegativeButton("Cancel", null).show()
     }
 
     private fun pickDate(target: EditText) { val c=Calendar.getInstance(); DatePickerDialog(this,{_,y,m,day->target.setText(String.format(Locale.US,"%04d-%02d-%02d",y,m+1,day))},c.get(Calendar.YEAR),c.get(Calendar.MONTH),c.get(Calendar.DAY_OF_MONTH)).show() }
-    private fun deleteShift(row: AdminShiftDto) = MaterialAlertDialogBuilder(this).setTitle("Delete Shift 🗑️").setMessage("Delete ${row.employeeName}'s ${row.shiftDate} shift?").setPositiveButton("Delete") { _, _ -> lifecycleScope.launch { try { val r=mobileApi.deleteAdminShift(auth,row.id); if(!r.isSuccessful) throw IllegalStateException("Delete failed (${r.code()})"); toast("Shift deleted 🗑️"); loadShifts() } catch(e:Exception){toast("Unable to delete shift: ${e.message} ⚠️")} } }.setNegativeButton("Cancel",null).show()
+    private fun deleteShift(row: AdminShiftDto) =
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Delete Shift 🗑️")
+            .setMessage("Delete ${row.employeeName}'s ${row.shiftDate} shift?")
+            .setPositiveButton("Delete") { _, _ ->
+                lifecycleScope.launch {
+                    if (firebaseSync.deleteShiftSchedule(row.id))
+                        toast("Shift deleted 🗑️")
+                    else
+                        toast("Unable to delete shift from Firebase ⚠️")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    override fun onDestroy() {
+        shiftsJob?.cancel()
+        super.onDestroy()
+    }
+
     private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_SHORT).show()
 
     inner class ShiftAdapter : RecyclerView.Adapter<ShiftAdapter.VH>() {

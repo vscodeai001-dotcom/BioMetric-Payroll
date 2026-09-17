@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -106,8 +107,20 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("salary_snapshots").keepSynced(true)
         ref.child("audit_logs").keepSynced(true)
         ref.child("daily_summaries").keepSynced(true)
-        ref.child("shift_schedules").keepSynced(true)
+        if (sessionStore.userRole().trim().uppercase() in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")) {
+            ref.child("shift_schedules").keepSynced(true)
+        } else {
+            val employeeId = sessionStore.employeeId()
+            if (employeeId > 0) {
+                ref.child("shift_schedules").orderByChild("employeeId").equalTo(employeeId.toDouble()).keepSynced(true)
+            }
+        }
         ref.child("payroll_history").keepSynced(true)
+        if (sessionStore.userRole().trim().uppercase() in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")) {
+            ref.child("payroll_previews").keepSynced(true)
+            ref.child("payroll_finalization").keepSynced(true)
+            ref.child("year_end_summaries").keepSynced(true)
+        }
         ref.child("bonus_records").keepSynced(true)
         ref.child("tax_declarations").keepSynced(true)
         ref.child("fbp_components").keepSynced(true)
@@ -570,6 +583,34 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged("UserProfile", "MODIFIED")
         try { FirebaseFirestore.getInstance().collection("userProfiles").document(profile.uid).set(profile).await() } catch (_: Exception) {}
     }
+
+    suspend fun getUserTheme(uid: String): String? {
+        if (uid.isBlank()) return null
+        return try {
+            getGlobalRef().child("user_profiles").child(uid).child("theme").get().await()
+                .getValue(String::class.java)
+                ?.trim()
+                ?.lowercase()
+                ?.takeIf { it == "dark" || it == "light" }
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Unable to read Firebase user theme", e)
+            null
+        }
+    }
+
+    suspend fun setUserTheme(uid: String, theme: String): Boolean {
+        if (uid.isBlank()) return false
+        val normalized = if (theme.equals("dark", true)) "dark" else "light"
+        return try {
+            getGlobalRef().child("user_profiles").child(uid).child("theme")
+                .setValue(normalized).await()
+            notifyRealtimeChanged("UserProfile", "MODIFIED", uid)
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Unable to save Firebase user theme", e)
+            false
+        }
+    }
     suspend fun pushRecycleBin(item: RecycleBinItem) { getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await(); notifyRealtimeChanged("RecycleBinItem", "MODIFIED") }
     suspend fun pushAuditLog(log: AuditLog) { getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await(); notifyRealtimeChanged("AuditLog", "ADDED") }
 
@@ -602,6 +643,248 @@ class FirebaseSyncManager @Inject constructor(
         notifyRealtimeChanged(entity, action)
     }
 
+    data class ShiftScheduleRecord(
+        val scheduleId: Int = 0,
+        val employeeId: Int = 0,
+        val shiftDate: String = "",
+        val startTime: String = "",
+        val endTime: String = "",
+        val isRecurringPattern: Boolean = false,
+        val patternDurationDays: Int = 7,
+        val appliesToDayOfWeek: Int = 0
+    )
+
+    fun observeShiftSchedules(): Flow<List<ShiftScheduleRecord>> = callbackFlow {
+        val ref = getOwnerRef()?.child("shift_schedules") ?: run {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val rows = snapshot.children.mapNotNull { child ->
+                    val id = (child.child("scheduleId").value as? Number)?.toInt()
+                        ?: child.child("scheduleId").value?.toString()?.toIntOrNull()
+                        ?: child.key?.toIntOrNull()
+                        ?: return@mapNotNull null
+                    val employeeId = (child.child("employeeId").value as? Number)?.toInt()
+                        ?: child.child("employeeId").value?.toString()?.toIntOrNull()
+                        ?: 0
+                    if (employeeId <= 0) return@mapNotNull null
+                    ShiftScheduleRecord(
+                        scheduleId = id,
+                        employeeId = employeeId,
+                        shiftDate = child.child("shiftDate").value?.toString()
+                            ?: child.child("ShiftDate").value?.toString().orEmpty(),
+                        startTime = child.child("startTime").value?.toString()
+                            ?: child.child("StartTime").value?.toString().orEmpty(),
+                        endTime = child.child("endTime").value?.toString()
+                            ?: child.child("EndTime").value?.toString().orEmpty(),
+                        isRecurringPattern = child.child("isRecurringPattern").value as? Boolean
+                            ?: child.child("IsRecurringPattern").value?.toString()?.toBoolean() ?: false,
+                        patternDurationDays = (child.child("patternDurationDays").value as? Number)?.toInt()
+                            ?: child.child("patternDurationDays").value?.toString()?.toIntOrNull() ?: 7,
+                        appliesToDayOfWeek = (child.child("appliesToDayOfWeek").value as? Number)?.toInt()
+                            ?: child.child("appliesToDayOfWeek").value?.toString()?.toIntOrNull()
+                            ?: 0
+                    )
+                }.sortedWith(compareBy<ShiftScheduleRecord> { it.shiftDate }.thenBy { it.employeeId }.thenBy { it.startTime })
+                trySend(rows)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("FirebaseSyncManager", "Shift schedule listener cancelled", error.toException())
+                trySend(emptyList())
+            }
+        }
+
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    /**
+     * Employee-safe shift listener. Firebase rules require employee clients to
+     * constrain the collection by employeeId, so they must never attach a
+     * listener to the unfiltered shift_schedules collection.
+     */
+    fun observeEmployeeShiftSchedules(employeeId: Int = sessionStore.employeeId()): Flow<List<ShiftScheduleRecord>> = callbackFlow {
+        if (employeeId <= 0) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val ref = getOwnerRef()?.child("shift_schedules")
+            ?.orderByChild("employeeId")
+            ?.equalTo(employeeId.toDouble()) ?: run {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val rows = snapshot.children.mapNotNull { child ->
+                    val id = (child.child("scheduleId").value as? Number)?.toInt()
+                        ?: child.child("scheduleId").value?.toString()?.toIntOrNull()
+                        ?: child.key?.toIntOrNull() ?: return@mapNotNull null
+                    val emp = (child.child("employeeId").value as? Number)?.toInt()
+                        ?: child.child("employeeId").value?.toString()?.toIntOrNull() ?: 0
+                    if (emp != employeeId) return@mapNotNull null
+                    ShiftScheduleRecord(
+                        scheduleId = id,
+                        employeeId = emp,
+                        shiftDate = child.child("shiftDate").value?.toString()
+                            ?: child.child("ShiftDate").value?.toString().orEmpty(),
+                        startTime = child.child("startTime").value?.toString()
+                            ?: child.child("StartTime").value?.toString().orEmpty(),
+                        endTime = child.child("endTime").value?.toString()
+                            ?: child.child("EndTime").value?.toString().orEmpty(),
+                        isRecurringPattern = child.child("isRecurringPattern").value as? Boolean
+                            ?: child.child("IsRecurringPattern").value?.toString()?.toBoolean() ?: false,
+                        patternDurationDays = (child.child("patternDurationDays").value as? Number)?.toInt()
+                            ?: child.child("patternDurationDays").value?.toString()?.toIntOrNull() ?: 7,
+                        appliesToDayOfWeek = (child.child("appliesToDayOfWeek").value as? Number)?.toInt()
+                            ?: child.child("appliesToDayOfWeek").value?.toString()?.toIntOrNull() ?: 0
+                    )
+                }.sortedWith(compareBy<ShiftScheduleRecord> { it.shiftDate }.thenBy { it.startTime }.thenBy { it.scheduleId })
+                trySend(rows)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("FirebaseSyncManager", "Employee shift listener cancelled", error.toException())
+                trySend(emptyList())
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
+    suspend fun pushShiftSchedule(record: ShiftScheduleRecord): Boolean {
+        if (record.scheduleId <= 0 || record.employeeId <= 0 ||
+            record.shiftDate.isBlank() || record.startTime.isBlank() || record.endTime.isBlank())
+            return false
+
+        val ref = getOwnerRef()?.child("shift_schedules")?.child(record.scheduleId.toString()) ?: return false
+        return try {
+            ref.setValue(
+                mapOf(
+                    "scheduleId" to record.scheduleId,
+                    "employeeId" to record.employeeId,
+                    "shiftDate" to record.shiftDate,
+                    "startTime" to record.startTime,
+                    "endTime" to record.endTime,
+                    "isRecurringPattern" to record.isRecurringPattern,
+                    "patternDurationDays" to record.patternDurationDays,
+                    "appliesToDayOfWeek" to record.appliesToDayOfWeek,
+                    "_entity" to "ShiftSchedule",
+                    "_key" to record.scheduleId.toString(),
+                    "_updatedUtc" to java.time.Instant.now().toString()
+                )
+            ).await()
+            notifyRealtimeChanged("ShiftSchedule", "MODIFIED", record.scheduleId.toString())
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Shift schedule write failed", e)
+            false
+        }
+    }
+
+    suspend fun deleteShiftSchedule(scheduleId: Int): Boolean {
+        if (scheduleId <= 0) return false
+        return try {
+            getOwnerRef()?.child("shift_schedules")?.child(scheduleId.toString())?.removeValue()?.await()
+            notifyRealtimeChanged("ShiftSchedule", "DELETED", scheduleId.toString())
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Shift schedule delete failed", e)
+            false
+        }
+    }
+
+    suspend fun generateShiftSchedulesFromPatterns(
+        startDate: LocalDate = LocalDate.now(),
+        endDate: LocalDate = startDate.plusDays(30)
+    ): Int {
+        val ref = getOwnerRef() ?: return 0
+        return try {
+            val employeesSnapshot = ref.child("employees").get().await()
+            val schedulesSnapshot = ref.child("shift_schedules").get().await()
+
+            val activeEmployeeIds = employeesSnapshot.children.mapNotNull { child ->
+                val id = (child.child("employeeId").value as? Number)?.toInt()
+                    ?: child.child("employeeId").value?.toString()?.toIntOrNull()
+                    ?: child.key?.toIntOrNull()
+                val active = child.child("isActive").value as? Boolean
+                    ?: child.child("isActive").value?.toString()?.toBoolean() ?: true
+                if (id != null && id > 0 && active) id else null
+            }.toSet()
+
+            val existing = schedulesSnapshot.children.mapNotNull { child ->
+                val id = (child.child("scheduleId").value as? Number)?.toInt()
+                    ?: child.key?.toIntOrNull() ?: return@mapNotNull null
+                val emp = (child.child("employeeId").value as? Number)?.toInt()
+                    ?: child.child("employeeId").value?.toString()?.toIntOrNull() ?: 0
+                val date = child.child("shiftDate").value?.toString().orEmpty()
+                val start = child.child("startTime").value?.toString().orEmpty()
+                val end = child.child("endTime").value?.toString().orEmpty()
+                val recurring = child.child("isRecurringPattern").value as? Boolean
+                    ?: child.child("isRecurringPattern").value?.toString()?.toBoolean() ?: false
+                val day = (child.child("appliesToDayOfWeek").value as? Number)?.toInt()
+                    ?: child.child("appliesToDayOfWeek").value?.toString()?.toIntOrNull()
+                    ?: runCatching { LocalDate.parse(date).dayOfWeek.value % 7 }.getOrDefault(0)
+                ShiftScheduleRecord(id, emp, date, start, end, recurring, 7, day)
+            }
+
+            val patterns = existing.filter { it.isRecurringPattern && it.employeeId in activeEmployeeIds }
+                .groupBy { it.employeeId }
+                .mapValues { (_, rows) -> rows.associateBy { it.appliesToDayOfWeek } }
+
+            val concreteKeys = existing.filter { !it.isRecurringPattern }
+                .map { "${it.employeeId}|${it.shiftDate}" }.toMutableSet()
+
+            var nextId = existing.maxOfOrNull { it.scheduleId } ?: 0
+            val updates = mutableMapOf<String, Any?>()
+            var created = 0
+            var date = startDate
+
+            while (!date.isAfter(endDate)) {
+                val dayIndex = date.dayOfWeek.value % 7
+                for (employeeId in activeEmployeeIds) {
+                    val pattern = patterns[employeeId]?.get(dayIndex) ?: continue
+                    val unique = "$employeeId|$date"
+                    if (!concreteKeys.add(unique)) continue
+                    nextId++
+                    updates["$nextId"] = mapOf(
+                        "scheduleId" to nextId,
+                        "employeeId" to employeeId,
+                        "shiftDate" to date.toString(),
+                        "startTime" to pattern.startTime,
+                        "endTime" to pattern.endTime,
+                        "isRecurringPattern" to false,
+                        "patternDurationDays" to 0,
+                        "appliesToDayOfWeek" to dayIndex,
+                        "_entity" to "ShiftSchedule",
+                        "_key" to nextId.toString(),
+                        "_updatedUtc" to java.time.Instant.now().toString()
+                    )
+                    created++
+                }
+                date = date.plusDays(1)
+            }
+
+            if (updates.isNotEmpty()) {
+                ref.child("shift_schedules").updateChildren(updates).await()
+                notifyRealtimeChanged("ShiftSchedule", "BULK_MODIFIED")
+            }
+            created
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Firebase shift generation failed", e)
+            0
+        }
+    }
+
     suspend fun pushGeofenceRaw(id: String, value: Any?) {
         getOwnerRef()?.child("geofences")?.child(id)?.setValue(value)?.await()
         notifyRealtimeChanged("Geofence", "MODIFIED")
@@ -613,12 +896,12 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     suspend fun pushShiftRaw(id: String, value: Any?) {
-        getOwnerRef()?.child("shifts")?.child(id)?.setValue(value)?.await()
+        getOwnerRef()?.child("shift_schedules")?.child(id)?.setValue(value)?.await()
         notifyRealtimeChanged("Shift", "MODIFIED")
     }
 
     suspend fun deleteShiftRaw(id: String) {
-        getOwnerRef()?.child("shifts")?.child(id)?.removeValue()?.await()
+        getOwnerRef()?.child("shift_schedules")?.child(id)?.removeValue()?.await()
         notifyRealtimeChanged("Shift", "DELETED")
     }
 

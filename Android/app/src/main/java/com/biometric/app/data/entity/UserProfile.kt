@@ -26,6 +26,7 @@ data class UserProfile(
     var enabledFeatures: List<String>? = null,
     var brandingName: String? = null,
     var brandingLogoUrl: String? = null,
+    var theme: String = "light",
     var dataLastModified: Long = System.currentTimeMillis()
 ) {
     fun isSuperAdmin() = role == UserRole.SUPER_ADMIN.name

@@ -199,6 +199,12 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
                 brandingLogoUrl = logoUrl.ifBlank { null },
             )
             repository.pushProfileByUid(updatedProfile)
+            brandingManager.updateBranding(
+                BrandingManager.BrandingConfig(
+                    appName = updatedProfile.brandingName ?: updatedProfile.name.ifBlank { "Biometric Payroll" },
+                    logoUrl = updatedProfile.brandingLogoUrl
+                )
+            )
             
             progressToast.cancel()
             Toast.makeText(this@SuperAdminManagementActivity, "Settings saved successfully", Toast.LENGTH_SHORT).show()

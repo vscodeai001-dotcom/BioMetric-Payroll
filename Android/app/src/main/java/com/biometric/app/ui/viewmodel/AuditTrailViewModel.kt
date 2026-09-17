@@ -40,7 +40,7 @@ class AuditTrailViewModel @Inject constructor(
 
     private var auditJob: Job? = null
 
-    fun loadLogs(shopId: String?, period: String, date: Long) {
+    fun loadLogs(shopId: String?, period: String, date: Long, search: String = "") {
         auditJob?.cancel()
         auditJob = viewModelScope.launch(Dispatchers.Default) {
             val range = DateRangeUtil.getRangeForPeriod(period, date)
@@ -52,7 +52,7 @@ class AuditTrailViewModel @Inject constructor(
             
             _state.update { it.copy(summary = cachedSummary ?: AuditSummary(), isLoading = cachedSummary == null) }
 
-            val pagedFlow = repository.getAuditLogsPaged(shopId, start, end).cachedIn(viewModelScope)
+            val pagedFlow = repository.getAuditLogsPaged(shopId, start, end, search).cachedIn(viewModelScope)
 
             _pagedLogs.value = PagingData.empty()
 

@@ -18,6 +18,7 @@ import com.biometric.app.data.dao.LocalSalarySnapshotDao
 import com.biometric.app.data.dao.LocalShiftScheduleDao
 import com.biometric.app.data.dao.LocalShopClosedDayDao
 import com.biometric.app.data.dao.LocalShopDao
+import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
@@ -43,6 +44,7 @@ import javax.inject.Singleton
 class FirebaseRoomHydrator @Inject constructor(
     private val firebaseSync: FirebaseSyncManager,
     private val shopDao: LocalShopDao,
+    private val sessionStore: MobileSessionStore,
     private val employeeDao: LocalEmployeeDao,
     private val attendanceDao: LocalAttendanceDao,
     private val advanceDao: LocalAdvancePaymentDao,
@@ -103,12 +105,8 @@ class FirebaseRoomHydrator @Inject constructor(
             observe("daily_summaries",
                 onUpsert = { dailySummaryDao.upsert(it.toLocalDailySummary()) },
                 onDelete = { dailySummaryDao.deleteById(it.intValue("summaryId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
-            observe("shift_schedules",
-                onUpsert = { shiftScheduleDao.upsert(it.toLocalShiftSchedule()) },
-                onDelete = { shiftScheduleDao.deleteById(it.intValue("scheduleId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
-            observe("payroll_history",
-                onUpsert = { payrollHistoryDao.upsert(it.toLocalPayrollHistory()) },
-                onDelete = { payrollHistoryDao.deleteById(it.intValue("payrollId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+            observeShiftSchedules()
+            observePayrollHistory()
             observe("bonus_records",
                 onUpsert = { bonusRecordDao.upsert(it.toLocalBonusRecord()) },
                 onDelete = { bonusRecordDao.deleteById(it.intValue("bonusId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
@@ -256,6 +254,80 @@ class FirebaseRoomHydrator @Inject constructor(
         desiredLastWorkingDay = l("desiredLastWorkingDay"), reason = s("reason"), status = s("status") ?: "Pending",
         approvedLastWorkingDay = l("approvedLastWorkingDay").takeIf { it > 0 }, adminRemarks = s("adminRemarks"), isSettled = b("isSettled")
     )
+
+    private fun observePayrollHistory() {
+        val isEmployee = sessionStore.userRole().trim().uppercase() !in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        val employeeId = sessionStore.employeeId()
+        val query = if (isEmployee && employeeId > 0) {
+            firebaseSync.getOwnerRef()?.child("payroll_history")
+                ?.orderByChild("employeeId")
+                ?.equalTo(employeeId.toDouble())
+        } else {
+            firebaseSync.getOwnerRef()?.child("payroll_history")
+        } ?: return
+
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId)
+                        runCatching { payrollHistoryDao.upsert(snapshot.toLocalPayrollHistory()) }
+                }
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId)
+                        runCatching { payrollHistoryDao.upsert(snapshot.toLocalPayrollHistory()) }
+                }
+            }
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                val id = snapshot.intValue("payrollId") ?: snapshot.key?.toIntOrNull() ?: return
+                scope.launch { runCatching { payrollHistoryDao.deleteById(id) } }
+            }
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
+            override fun onCancelled(error: DatabaseError) {
+                android.util.Log.w("FirebaseRoomHydrator", "Payroll history hydration cancelled", error.toException())
+            }
+        }
+        query.addChildEventListener(listener)
+        listeners += query to listener
+    }
+
+    private fun observeShiftSchedules() {
+        val employeeRole = sessionStore.userRole().trim().uppercase() !in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        val employeeId = sessionStore.employeeId()
+        val query = if (employeeRole && employeeId > 0) {
+            firebaseSync.getOwnerRef()?.child("shift_schedules")
+                ?.orderByChild("employeeId")
+                ?.equalTo(employeeId.toDouble())
+        } else {
+            firebaseSync.getOwnerRef()?.child("shift_schedules")
+        } ?: return
+
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId)
+                        runCatching { shiftScheduleDao.upsert(snapshot.toLocalShiftSchedule()) }
+                }
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch {
+                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId)
+                        runCatching { shiftScheduleDao.upsert(snapshot.toLocalShiftSchedule()) }
+                }
+            }
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                val id = snapshot.intValue("scheduleId") ?: snapshot.key?.toIntOrNull() ?: return
+                scope.launch { runCatching { shiftScheduleDao.deleteById(id) } }
+            }
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
+            override fun onCancelled(error: DatabaseError) {
+                android.util.Log.w("FirebaseRoomHydrator", "Shift schedule hydration cancelled", error.toException())
+            }
+        }
+        query.addChildEventListener(listener)
+        listeners += query to listener
+    }
 
     private fun observe(
         table: String,

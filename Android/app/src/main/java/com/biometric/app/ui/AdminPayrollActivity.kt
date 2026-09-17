@@ -12,6 +12,10 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
 import java.text.NumberFormat
 import java.util.*
 import javax.inject.Inject
@@ -21,6 +25,7 @@ class AdminPayrollActivity : AppCompatActivity() {
     @Inject lateinit var api: MobileApiService
     private lateinit var session: MobileSessionStore
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var firebaseSync: com.biometric.app.sync.FirebaseSyncManager
     private lateinit var month: Spinner
     private lateinit var year: Spinner
     private lateinit var status: TextView
@@ -70,10 +75,38 @@ class AdminPayrollActivity : AppCompatActivity() {
     private fun loadHistory() = lifecycleScope.launch {
         busy(true); status.text="Loading payroll history…"; list.removeAllViews()
         try {
-            val (y,m)=period(); val r=api.adminPayrollHistory(auth(),y,m)
-            if (!r.isSuccessful || r.body()?.success != true) throw Exception(r.body()?.message ?: "Unable to load history")
-            val rows=r.body()!!.rows; renderHistory(rows); status.text="History • ${rows.size} employees"; findViewById<Button>(R.id.btnFinalize).isEnabled=false
+            val (y,m)=period()
+            val ref = firebaseSync.getOwnerRef()?.child("payroll_history")
+                ?: throw Exception("Firebase session is not initialized")
+            val snapshot = ref.get().await()
+            val employeeSnapshot = firebaseSync.getOwnerRef()?.child("employees")?.get()?.await()
+            val names = employeeSnapshot?.children?.associate {
+                val id = it.child("employeeId").value?.toString()?.toIntOrNull() ?: it.key?.toIntOrNull() ?: 0
+                id to (it.child("name").value?.toString() ?: "Unknown")
+            }.orEmpty()
+            val rows = snapshot.children.mapNotNull { it.toAdminPayrollHistoryRow() }
+                .filter { it.payYear == y && it.payMonth == m }
+                .map { it.copy(employeeName = names[it.employeeID] ?: it.employeeName ?: "Unknown") }
+                .sortedBy { it.employeeID }
+            renderHistory(rows); status.text="History • ${rows.size} employees"; findViewById<Button>(R.id.btnFinalize).isEnabled=false
         } catch(e:Exception){ status.text="History load failed"; toast(e.message ?: "Request failed") } finally { busy(false) }
+    }
+
+    private fun DataSnapshot.toAdminPayrollHistoryRow(): AdminPayrollHistoryRowDto? {
+        fun d(name: String): Double = child(name).value?.toString()?.toDoubleOrNull() ?: 0.0
+        fun i(name: String): Int = child(name).value?.toString()?.toIntOrNull() ?: 0
+        val employeeId = i("employeeId")
+        if (employeeId <= 0) return null
+        return AdminPayrollHistoryRowDto(
+            payrollID = i("payrollId"), employeeID = employeeId, employeeName = child("employeeName").value?.toString(),
+            payMonth = i("payMonth"), payYear = i("payYear"), baseSalary = d("baseSalary"),
+            totalHoursWorked = d("totalHoursWorked"), totalOvertimeMinutes = d("totalOvertimeMs") / 60000.0,
+            totalPenaltyMinutes = d("totalPenaltyMs") / 60000.0, deductionsHours = d("deductionsHours"),
+            deductionsAdvance = d("deductionsAdvance"), bonus = d("bonus"), tdsDeduction = d("tdsDeduction"),
+            totalShiftAllowance = d("totalShiftAllowance"), basicComponent = d("basicComponent"),
+            pfDeduction = d("pfDeduction"), esiDeduction = d("esiDeduction"), ptDeduction = d("ptDeduction"),
+            absentDays = i("absentDays"), manualLeaveDays = i("manualLeaveDays"), netSalary = d("netSalary")
+        )
     }
 
     private fun renderPreview(){ var sum=0.0; list.removeAllViews(); preview.forEach { row -> sum+=row.netPayable; addRow("👤 ${row.employeeName}", "Gross ${currency.format(row.earnedPay+row.overtimePay+row.bonus+row.totalShiftAllowance)}  •  Net ${currency.format(row.netPayable)}", "⏱ ${"%.1f".format(row.earnedStandardHours)}h  •  OT ${"%.1f".format(row.overtimeMinutes/60)}h  •  Absent ${row.absentDays}") }; total.text="Total Net Payable  ${currency.format(sum)}" }

@@ -81,7 +81,7 @@ class ReportRepository @Inject constructor(
                 employeeName = emp.name,
                 biometricId = emp.biometricId.ifBlank { "N/A" },
                 email = emp.email,
-                monthlySalary = if (emp.salaryType.equals("MONTHLY_FIXED", true)) emp.salaryRate else 0.0
+                monthlySalary = if (emp.salaryType.equals("MONTHLY_FIXED", true)) emp.salaryRate else 0.0,
                 hourlyRate = ph.hourlyRate,
                 baseSalaryComp = ph.basicComponent,
                 payrollType = if (emp.salaryType.equals("MONTHLY_FIXED", true)) "Monthly" else "Hourly",

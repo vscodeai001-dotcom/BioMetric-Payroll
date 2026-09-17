@@ -2,6 +2,8 @@ package com.biometric.app.data.repository
 
 import com.biometric.app.data.entity.UserProfile
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.api.MobileApiService
+import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
@@ -19,7 +21,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class UserRepository @Inject constructor(
-    private val firebaseSync: FirebaseSyncManager
+    private val firebaseSync: FirebaseSyncManager,
+    private val mobileApi: MobileApiService
 ) {
 
     data class UserViewModel(
@@ -52,11 +55,11 @@ class UserRepository @Inject constructor(
 
     suspend fun deleteUser(userId: String) {
         if (userId.isBlank()) return
-        firebaseSync.getGlobalRef()
-            .child("user_profiles")
-            .child(userId)
-            .removeValue()
-            .await()
-        firebaseSync.notifyRealtimeAfterWrite("UserProfile", "DELETED")
+        val token = FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()?.token
+            ?: throw IllegalStateException("Firebase authentication session is missing.")
+        val response = mobileApi.deleteAdminUser("Bearer $token", userId)
+        if (!response.isSuccessful || response.body()?.success != true) {
+            throw IllegalStateException(response.body()?.message ?: "Server refused Firebase Auth account deletion.")
+        }
     }
 }

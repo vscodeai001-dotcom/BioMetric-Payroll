@@ -168,11 +168,21 @@ builder.Services.AddAuthentication()
 
 builder.Services.AddHttpClient("FirebaseRealtime");
 builder.Services.AddSingleton<FirebaseRealtimeService>();
+builder.Services.AddSingleton<FirebaseShiftScheduleService>();
+builder.Services.AddSingleton<FirebaseAdvanceService>();
+builder.Services.AddSingleton<FirebaseBonusService>();
+builder.Services.AddSingleton<FirebaseRegularizationService>();
+builder.Services.AddSingleton<FirebaseYearEndSummaryService>();
+builder.Services.AddSingleton<FirebaseAdminDashboardService>();
+builder.Services.AddScoped<FirebaseUserManagementService>();
+builder.Services.AddSingleton<PayrollFinalizationService>();
 builder.Services.AddSingleton<FirebaseSyncWriteScope>();
 builder.Services.AddHostedService<FirebaseInitialDataMigrationService>();
 builder.Services.AddHostedService<FirebaseSqliteSyncService>();
 builder.Services.AddHostedService<FirebaseSuperAdminProvisioningService>();
 builder.Services.AddHostedService<FirebaseEmployeeProvisioningService>();
+builder.Services.AddSingleton<FirebaseEmployeeProvisioningReconciliationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FirebaseEmployeeProvisioningReconciliationService>());
 
 builder.Services.AddSingleton<
     AttendanceRefreshService>();

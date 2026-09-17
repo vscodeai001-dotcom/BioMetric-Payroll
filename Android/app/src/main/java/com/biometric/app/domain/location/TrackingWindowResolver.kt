@@ -39,7 +39,7 @@ class TrackingWindowResolver @Inject constructor(
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return kotlinx.coroutines.flow.flowOf(emptyList())
         val today = LocalDate.now(ZoneId.systemDefault())
-        return shiftScheduleDao.observeForEmployeeBetween(employeeId, today.minusDays(1).toString(), today.toString())
+        return shiftScheduleDao.observeForEmployeeWithPatterns(employeeId, today.minusDays(1).toString(), today.toString())
     }
 
     suspend fun resolve(now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())): Window {
@@ -62,28 +62,58 @@ class TrackingWindowResolver @Inject constructor(
 
         val today = now.toLocalDate()
         val yesterday = today.minusDays(1)
-        val schedules = shiftScheduleDao.getForEmployeeBetween(
-            employeeId,
-            yesterday.toString(),
-            today.toString()
+        val schedules = shiftScheduleDao.getForEmployeeWithPatterns(
+            employeeId, yesterday.toString(), today.toString()
         )
 
-        val candidates = schedules.flatMap { schedule ->
-            val date = runCatching { LocalDate.parse(schedule.shiftDate) }.getOrNull() ?: return@flatMap emptyList()
-            val start = parseTime(schedule.startTime) ?: return@flatMap emptyList()
-            val end = parseTime(schedule.endTime) ?: return@flatMap emptyList()
+        // Exact-date schedules are authoritative for that date. Recurring
+        // patterns are fallback rules and the newest pattern for a weekday
+        // wins, matching the Web generator's precedence.
+        val concreteByDate = schedules
+            .filter { !it.isRecurringPattern }
+            .groupBy { it.shiftDate }
+            .mapValues { (_, rows) -> rows.maxByOrNull { it.scheduleId } }
+
+        val patternsByDay = schedules
+            .filter { it.isRecurringPattern }
+            .groupBy { it.appliesToDayOfWeek.coerceIn(0, 6) }
+            .mapValues { (_, rows) -> rows.maxByOrNull { it.scheduleId } }
+
+        fun toWindow(schedule: com.biometric.app.data.entity.LocalShiftSchedule, date: LocalDate): Window? {
+            val start = parseTime(schedule.startTime) ?: return null
+            val end = parseTime(schedule.endTime) ?: return null
             val startDateTime = LocalDateTime.of(date, start)
             val endDateTime = LocalDateTime.of(
                 if (!end.isAfter(start)) date.plusDays(1) else date,
                 end
             )
-            listOf(Window(true, MODE_SHIFT, startDateTime, endDateTime, "SHIFT_SCHEDULE"))
+            return Window(
+                true,
+                MODE_SHIFT,
+                startDateTime,
+                endDateTime,
+                if (schedule.isRecurringPattern) "RECURRING_PATTERN" else "SHIFT_SCHEDULE"
+            )
         }
+
+        val candidates = buildList {
+            for (date in listOf(yesterday, today)) {
+                val concrete = concreteByDate[date.toString()]
+                if (concrete != null) {
+                    toWindow(concrete, date)?.let(::add)
+                } else {
+                    val dayIndex = date.dayOfWeek.value % 7
+                    patternsByDay[dayIndex]?.let { pattern ->
+                        toWindow(pattern, date)?.let(::add)
+                    }
+                }
+            }
+        }.sortedBy { it.start }
 
         val active = candidates.firstOrNull { !now.isBefore(it.start) && now.isBefore(it.end) }
         if (active != null) return active
 
-        val next = candidates.filter { it.start != null && it.start.isAfter(now) }.minByOrNull { it.start!! }
+        val next = candidates.firstOrNull { it.start != null && it.start.isAfter(now) }
         return Window(false, MODE_SHIFT, next?.start, next?.end, if (candidates.isEmpty()) "NO_SHIFT" else "OUTSIDE_SHIFT")
     }
 

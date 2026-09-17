@@ -12,6 +12,11 @@ import retrofit2.http.DELETE
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+/**
+ * Legacy/controlled server boundary audited by module 1013.
+ * Do not remove endpoints here until their consumer has a verified Firebase
+ * replacement or an explicit Web/SQL calculation boundary is retained.
+ */
 interface MobileApiService {
     @POST("api/mobile/employee/login")
     suspend fun login(@Body request: MobileLoginRequest): Response<MobileLoginResponse>
@@ -136,6 +141,32 @@ interface MobileApiService {
     suspend fun getAdminLiveLocations(
         @Header("Authorization") authorization: String
     ): Response<List<AdminLiveLocationDto>>
+
+    @POST("api/mobile/admin/users")
+    suspend fun createAdminUser(
+        @Header("Authorization") authorization: String,
+        @Body request: AdminCreateUserRequest
+    ): Response<AdminUserManagementResponse>
+
+    @PUT("api/mobile/admin/users/{firebaseUid}/role")
+    suspend fun changeAdminUserRole(
+        @Header("Authorization") authorization: String,
+        @Path("firebaseUid") firebaseUid: String,
+        @Body request: AdminChangeUserRoleRequest
+    ): Response<AdminUserManagementResponse>
+
+    @PUT("api/mobile/admin/users/{firebaseUid}/disabled")
+    suspend fun setAdminUserDisabled(
+        @Header("Authorization") authorization: String,
+        @Path("firebaseUid") firebaseUid: String,
+        @Body request: AdminDisabledUserRequest
+    ): Response<AdminUserManagementResponse>
+
+    @DELETE("api/mobile/admin/users/{firebaseUid}")
+    suspend fun deleteAdminUser(
+        @Header("Authorization") authorization: String,
+        @Path("firebaseUid") firebaseUid: String
+    ): Response<AdminUserManagementResponse>
 
     @GET("api/mobile/admin/feature-settings")
     suspend fun getAdminFeatureSettings(@Header("Authorization") authorization: String): Response<AdminFeatureSettingsDto>
@@ -569,4 +600,22 @@ data class ThemePreferenceDto(
 
 data class ThemePreferenceRequest(
     @SerializedName("theme") val theme: String
+)
+
+
+data class AdminCreateUserRequest(
+    @SerializedName("email") val email: String,
+    @SerializedName("password") val password: String,
+    @SerializedName("role") val role: String = "Employee",
+    @SerializedName("employeeId") val employeeId: Int = 0,
+    @SerializedName("displayName") val displayName: String? = null
+)
+
+data class AdminChangeUserRoleRequest(@SerializedName("role") val role: String)
+data class AdminDisabledUserRequest(@SerializedName("disabled") val disabled: Boolean)
+data class AdminUserManagementResponse(
+    @SerializedName("success") val success: Boolean = false,
+    @SerializedName("firebaseUid") val firebaseUid: String? = null,
+    @SerializedName("identityUserId") val identityUserId: String? = null,
+    @SerializedName("message") val message: String = ""
 )

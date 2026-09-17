@@ -2,9 +2,8 @@
 @using Microsoft.AspNetCore.Authorization
 @using global::Payroll.Shared
 @using global::Payroll.Shared.Data
-@using Microsoft.EntityFrameworkCore
 @using global::Payroll.Web.Components.UI.Finance
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseBonusService FirebaseBonuses
 @inject IToastService toastService
 @inject IJSRuntime JSRuntime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
@@ -59,19 +58,14 @@ else
         isLoading = true;
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
-            // 1. GATE CHECK
-            var features = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1);
-            if (features != null && !features.EnableBonusManagement)
+            if (!await FirebaseBonuses.IsEnabledAsync())
             {
                 isAccessDenied = true;
                 return;
             }
 
-            // 2. Load Data
-            employeeList = await dbContext.Employees.OrderBy(e => e.Name).ToListAsync();
-            bonusList = await dbContext.BonusRecords.OrderByDescending(b => b.BonusDate).ToListAsync();
+            employeeList = await FirebaseBonuses.GetActiveEmployeesAsync();
+            bonusList = await FirebaseBonuses.GetAsync();
         }
         finally
         {
@@ -84,10 +78,16 @@ else
     private async Task DeleteBonus(BonusRecord bonus)
     {
         if (!await JSRuntime.InvokeAsync<bool>("confirm", "Delete this bonus record?")) return;
-
-        await using var dbContext = await DbFactory.CreateDbContextAsync();
-        dbContext.BonusRecords.Remove(bonus);
-        await dbContext.SaveChangesAsync();
+        if (bonus.PayrollID_Paid.HasValue)
+        {
+            toastService.ShowWarning("A payroll-attached bonus cannot be deleted.");
+            return;
+        }
+        if (!await FirebaseBonuses.DeleteAsync(bonus))
+        {
+            toastService.ShowError("Unable to delete the bonus from Firebase.");
+            return;
+        }
         toastService.ShowSuccess("Bonus deleted.");
         await LoadData();
     }

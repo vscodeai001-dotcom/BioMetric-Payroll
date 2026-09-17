@@ -21,6 +21,9 @@ namespace Payroll.Web.Services
         private readonly AttendanceRefreshService _refreshService;
         private readonly NotificationService _notificationService;
         private readonly AttendanceCalculatorService _calculator;
+        private readonly FirebaseRegularizationService _firebaseRegularization;
+        private readonly FirebaseRealtimeService _firebase;
+        private readonly IConfiguration _configuration;
 
 
 
@@ -31,7 +34,10 @@ namespace Payroll.Web.Services
             UserManager<IdentityUser> userManager,
             AttendanceRefreshService refreshService,
             NotificationService notificationService,
-            AttendanceCalculatorService calculator)
+            AttendanceCalculatorService calculator,
+            FirebaseRegularizationService firebaseRegularization,
+            FirebaseRealtimeService firebase,
+            IConfiguration configuration)
         {
             _dbFactory = dbFactory;
             _httpContextAccessor = httpContextAccessor;
@@ -40,6 +46,9 @@ namespace Payroll.Web.Services
             _refreshService = refreshService;
             _notificationService = notificationService;
             _calculator = calculator;
+            _firebaseRegularization = firebaseRegularization;
+            _firebase = firebase;
+            _configuration = configuration;
         }
 
         private const string ResubmissionAllowedMarker = "[[RESUBMIT_ALLOWED]]";
@@ -73,39 +82,60 @@ namespace Payroll.Web.Services
             if (features != null && (!features.EnablePunchCorrection || !features.EnableRegularizationRequest))
                 throw new InvalidOperationException("Attendance correction requests are currently disabled by the administrator.");
 
-            // One active request per employee/date/punch type. A rejected request can
-            // be submitted again only when the administrator explicitly allows it.
-            var latest = await db.AttendanceRegularizations
-                .Where(r => r.EmployeeId == employeeId && r.DateOfPunch == date && r.IsInPunch == isInPunch)
+            if (!await _firebaseRegularization.IsEnabledAsync())
+                throw new InvalidOperationException("Attendance correction requests are currently disabled by the administrator.");
+
+            // Firebase is the request SSOT. The SQL row is only a compatibility
+            // projection so the existing Web/attendance calculation boundary can
+            // continue to operate without changing the legacy schema.
+            var remote = await _firebaseRegularization.GetAsync(employeeId);
+            var latest = remote
+                .Where(r => r.DateOfPunch == date && r.IsInPunch == isInPunch)
                 .OrderByDescending(r => r.SubmissionDate)
                 .ThenByDescending(r => r.RegularizationId)
-                .FirstOrDefaultAsync();
+                .FirstOrDefault();
 
             if (latest != null)
             {
                 if (string.Equals(latest.Status, "Pending", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("A pending request for this specific punch already exists.");
-
                 if (string.Equals(latest.Status, "Approved", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("This punch correction has already been approved.");
-
                 if (string.Equals(latest.Status, "Rejected", StringComparison.OrdinalIgnoreCase) && !CanResubmit(latest))
                     throw new InvalidOperationException("The administrator has disabled another request for this date and punch.");
             }
 
+            // Negative IDs are reserved for Firebase-first mobile/web requests.
+            // Existing SQL identity-generated records remain positive.
             var request = new AttendanceRegularization
             {
+                RegularizationId = -checked((int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() % int.MaxValue)),
                 EmployeeId = employeeId,
                 DateOfPunch = date,
                 PunchTimeNew = time,
-                Reason = reason,
+                Reason = reason.Trim(),
                 IsInPunch = isInPunch,
                 Status = "Pending",
                 SubmissionDate = DateTime.Now
             };
+            request.FirebaseKey = request.RegularizationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            db.AttendanceRegularizations.Add(request);
-            await db.SaveChangesAsync();
+            if (!await _firebaseRegularization.SaveAsync(request))
+                throw new InvalidOperationException("Unable to save the regularization request to Firebase.");
+
+            // Best-effort compatibility projection. Firebase remains the source
+            // of truth even if the legacy local projection is temporarily down.
+            try
+            {
+                db.AttendanceRegularizations.Add(request);
+                await db.SaveChangesAsync();
+            }
+            catch
+            {
+                // The Firebase request is intentionally retained for the Web
+                // compatibility bridge to reconcile later.
+            }
+
             var createdId = request.RegularizationId;
 
             await _refreshService
@@ -124,12 +154,33 @@ namespace Payroll.Web.Services
             return createdId;
         }
 
+        private async Task<AttendanceRegularization?> EnsureLocalProjectionAsync(AttendanceRegularization? request, CancellationToken ct = default)
+        {
+            if (request == null) return null;
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var existing = await db.AttendanceRegularizations.FindAsync(new object?[] { request.RegularizationId }, ct);
+            if (existing != null) return existing;
+
+            request.FirebaseKey ??= request.RegularizationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            db.AttendanceRegularizations.Add(request);
+            await db.SaveChangesAsync(ct);
+            return request;
+        }
+
         // --- 2. ADMIN/MANAGER APPROVES/REJECTS ---
         public async Task UpdateStatusAndInjectPunchAsync(int regularizationId, string newStatus, string adminRemarks, bool allowResubmission = false)
         {
             await using var db = await _dbFactory.CreateDbContextAsync();
             var request = await db.AttendanceRegularizations.FindAsync(regularizationId);
-            if (request == null) return;
+            if (request == null)
+            {
+                var remote = await _firebaseRegularization.GetAsync();
+                request = remote.FirstOrDefault(x => x.RegularizationId == regularizationId);
+                if (request == null) return;
+                request.FirebaseKey ??= regularizationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                db.AttendanceRegularizations.Add(request);
+                await db.SaveChangesAsync();
+            }
 
             if (!string.Equals(request.Status, "Pending", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("This request has already been processed.");
@@ -199,6 +250,14 @@ namespace Payroll.Web.Services
             await _refreshService
                 .NotifyRegularizationChangedAsync(
                     request.EmployeeId);
+
+            // Publish the completed SQL/calculation result to Firebase SSOT.
+            // Approval is intentionally published only after the existing
+            // AttendanceLog injection and recalculation succeed.
+            request.FirebaseKey ??= regularizationId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await _firebaseRegularization.SaveAsync(request);
+
+            await WriteFirebaseAuditAsync(request, newStatus, approvingUserId, approvingUserEmail);
 
             await _notificationService.NotifyEmployeeAsync(
                 request.EmployeeId,
@@ -286,9 +345,35 @@ namespace Payroll.Web.Services
     {
         [Required] public DateTime DateOfPunch { get; set; }
         [Required] public string PunchTimeNew { get; set; } = "09:00";
-        // CRITICAL FIX: Change bool? to string
         [Required(ErrorMessage = "Select IN or OUT.")] public string? PunchTypeString { get; set; }
         [Required, StringLength(250)] public string Reason { get; set; } = "";
+    }
+
+    private async Task WriteFirebaseAuditAsync(AttendanceRegularization request, string status, string actorId, string actorEmail)
+    {
+        try
+        {
+            var owner = _configuration["Firebase:OwnerUid"]
+                ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
+                ?? "biometricpayroll";
+            var key = Guid.NewGuid().ToString("N");
+            await _firebase.SetOwnerRecordAsync(owner, "audit_logs", key, new Dictionary<string, object?>
+            {
+                ["logId"] = key,
+                ["shopId"] = "GLOBAL",
+                ["action"] = status.Equals("Approved", StringComparison.OrdinalIgnoreCase) ? "APPROVE" : "REJECT",
+                ["module"] = "Regularization",
+                ["oldValue"] = "Pending",
+                ["newValue"] = status,
+                ["userDisplayName"] = actorEmail,
+                ["userId"] = actorId,
+                ["actorRole"] = "Admin",
+                ["ownerUid"] = owner,
+                ["targetId"] = request.RegularizationId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+        }
+        catch { }
     }
 }
 }

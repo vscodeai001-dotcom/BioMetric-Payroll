@@ -1,8 +1,6 @@
 @using global::Payroll.Shared
-@using global::Payroll.Shared.Data
-@using Microsoft.EntityFrameworkCore
 @inject IToastService toastService
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseBonusService FirebaseBonuses
 
 <details class="mb-4 border rounded p-3">
     <summary class="fw-bold text-success" style="cursor:pointer;">
@@ -66,9 +64,11 @@
 
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            dbContext.BonusRecords.Add(NewBonus);
-            await dbContext.SaveChangesAsync();
+            if (!await FirebaseBonuses.SaveAsync(NewBonus))
+            {
+                toastService.ShowError("Unable to save the bonus to Firebase.");
+                return;
+            }
 
             toastService.ShowSuccess("Bonus issued successfully.");
 

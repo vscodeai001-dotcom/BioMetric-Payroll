@@ -245,6 +245,8 @@ public sealed class FirebaseRealtimeService
             "daily_summaries",
             "shift_schedules",
             "payroll_history",
+            "payroll_previews",
+            "payroll_finalization",
             "bonus_records",
             "tax_declarations",
             "fbp_components",
@@ -563,6 +565,38 @@ public sealed class FirebaseRealtimeService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Reads an owner table using a Firebase Realtime Database child query.
+    /// This is used for employee-scoped reads where the security rules require
+    /// the client to constrain the collection by employeeId.
+    /// </summary>
+    public async Task<JsonElement?> GetOwnerTableByChildValueAsync(
+        string ownerUid,
+        string table,
+        string child,
+        object equalTo,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid) ||
+            string.IsNullOrWhiteSpace(table) ||
+            string.IsNullOrWhiteSpace(child) ||
+            !IsFirebaseSsotTable(table))
+            return null;
+
+        var orderBy = Uri.EscapeDataString($"\"{child.Trim()}\"");
+        var encodedValue = equalTo switch
+        {
+            bool b => b ? "true" : "false",
+            string text => Uri.EscapeDataString($"\"{text}\""),
+            _ => Uri.EscapeDataString(Convert.ToString(equalTo, CultureInfo.InvariantCulture) ?? string.Empty)
+        };
+
+        return await GetJsonAsync(
+            $"owners/{ownerUid.Trim()}/{table.Trim()}",
+            cancellationToken,
+            $"?orderBy={orderBy}&equalTo={encodedValue}");
+    }
+
     public async Task<JsonElement?> GetGlobalRecordAsync(
         string path,
         CancellationToken cancellationToken = default)
@@ -571,6 +605,17 @@ public sealed class FirebaseRealtimeService
             return null;
 
         return await GetJsonAsync(path.Trim('/'), cancellationToken);
+    }
+
+    public async Task<bool> SetGlobalRecordAsync(
+        string path,
+        object value,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return false;
+
+        return await SetAsync(path.Trim('/'), value, cancellationToken);
     }
 
     public async Task<bool> DeleteGlobalRecordAsync(
@@ -615,6 +660,34 @@ public sealed class FirebaseRealtimeService
             $"owners/{ownerUid.Trim()}/{table.Trim()}/{EscapeFirebaseKey(recordId.Trim())}",
             value,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Atomically writes multiple records under one Firebase SSOT table.
+    /// Used by module migrations that must publish a set of related rows
+    /// without falling back to the legacy database as the runtime authority.
+    /// </summary>
+    public async Task<bool> SetOwnerRecordsAsync(
+        string ownerUid,
+        string table,
+        IReadOnlyDictionary<string, object?> records,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid) ||
+            string.IsNullOrWhiteSpace(table) ||
+            records == null ||
+            records.Count == 0 ||
+            !IsFirebaseSsotTable(table))
+            return false;
+
+        var updates = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var record in records)
+        {
+            if (string.IsNullOrWhiteSpace(record.Key)) continue;
+            updates[$"owners/{ownerUid.Trim()}/{table.Trim()}/{EscapeFirebaseKey(record.Key.Trim())}"] = record.Value;
+        }
+
+        return updates.Count > 0 && await UpdateAsync(updates, cancellationToken);
     }
 
     public async Task<bool> DeleteOwnerRecordAsync(
@@ -917,11 +990,57 @@ public sealed class FirebaseRealtimeService
                 Put("synced", true);
                 break;
 
+            case "PayrollHistory":
+                Put("payrollId", Value("PayrollID"));
+                Put("employeeId", Value("EmployeeID"));
+                Put("employeeName", null);
+                Put("payMonth", Value("PayMonth"));
+                Put("payYear", Value("PayYear"));
+                Put("baseSalary", Value("BaseSalary"));
+                Put("totalHoursWorked", Value("TotalHoursWorked"));
+                Put("overtimePay", Value("OvertimePay"));
+                Put("deductionsHours", Value("Deductions_Hours"));
+                Put("deductionsAdvance", Value("Deductions_Advance"));
+                Put("bonus", Value("Bonus"));
+                Put("netSalary", Value("NetSalary"));
+                Put("manualLeaveDays", Value("ManualLeaveDays"));
+                Put("absentDays", Value("AbsentDays"));
+                Put("totalPenaltyMs", entry.Property("TotalPenaltyDuration").CurrentValue is TimeSpan penalty ? penalty.TotalMilliseconds : 0d);
+                Put("totalOvertimeMs", entry.Property("TotalOvertimeDuration").CurrentValue is TimeSpan overtime ? overtime.TotalMilliseconds : 0d);
+                Put("hourlyRate", Value("HourlyRate"));
+                Put("basicComponent", Value("BasicComponent"));
+                Put("pfDeduction", Value("PfDeduction"));
+                Put("esiDeduction", Value("EsiDeduction"));
+                Put("employerPfContribution", Value("EmployerPfContribution"));
+                Put("employerEsiContribution", Value("EmployerEsiContribution"));
+                Put("ptDeduction", Value("PtDeduction"));
+                Put("tdsDeduction", Value("TdsDeduction"));
+                Put("totalShiftAllowance", Value("TotalShiftAllowance"));
+                break;
+
+            case "PayrollHistory":
+                Put("payrollId", Get("payrollid")); Put("employeeId", Get("employeeid"));
+                Put("payMonth", Get("paymonth")); Put("payYear", Get("payyear"));
+                Put("baseSalary", Get("basesalary")); Put("totalHoursWorked", Get("totalhoursworked"));
+                Put("overtimePay", Get("overtimepay")); Put("deductionsHours", Get("deductions_hours"));
+                Put("deductionsAdvance", Get("deductions_advance")); Put("bonus", Get("bonus"));
+                Put("netSalary", Get("netsalary")); Put("manualLeaveDays", Get("manualleavedays"));
+                Put("absentDays", Get("absentdays"));
+                Put("totalPenaltyMs", TimeSpanToMilliseconds(Get("totalpenaltyduration")));
+                Put("totalOvertimeMs", TimeSpanToMilliseconds(Get("totalovertimeduration")));
+                Put("hourlyRate", Get("hourlyrate")); Put("basicComponent", Get("basic_salary_component"));
+                Put("pfDeduction", Get("pf_deduction")); Put("esiDeduction", Get("esi_deduction"));
+                Put("employerPfContribution", Get("employer_pf_contribution"));
+                Put("employerEsiContribution", Get("employer_esi_contribution"));
+                Put("ptDeduction", Get("pt_deduction")); Put("tdsDeduction", Get("tds_deduction"));
+                Put("totalShiftAllowance", Get("totalshiftallowance"));
+                break;
             case "SalaryAdvance":
                 Put("advanceId", StringValue("AdvanceID"));
                 Put("employeeId", StringValue("EmployeeID"));
                 Put("amount", Value("Amount"));
                 Put("date", ToUnixMilliseconds(Value("AdvanceDate")));
+                Put("advanceType", Value("AdvanceType"));
                 Put("recoveryPaymentId", Value("PayrollID_Paid"));
                 Put("isRecovered", Value("PayrollID_Paid") != null);
                 break;
@@ -1120,6 +1239,17 @@ public sealed class FirebaseRealtimeService
         return null;
     }
 
+    private static object? TimeSpanToMilliseconds(object? value)
+    {
+        if (value is TimeSpan ts) return ts.TotalMilliseconds;
+        if (value is string text && TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out var parsed))
+            return parsed.TotalMilliseconds;
+        if (value is double d) return d;
+        if (value is decimal dec) return (double)dec;
+        if (value is long l) return l;
+        return null;
+    }
+
     private static object? NormalizeFirebaseValue(object? value)
     {
         if (value == null) return null;
@@ -1249,7 +1379,8 @@ public sealed class FirebaseRealtimeService
 
     private async Task<JsonElement?> GetJsonAsync(
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? queryString = null)
     {
         var context = await _context.Value;
         if (context == null)
@@ -1259,7 +1390,7 @@ public sealed class FirebaseRealtimeService
         {
             var client = _httpClientFactory.CreateClient("FirebaseRealtime");
             var uri = new Uri(
-                $"{context.DatabaseUrl.TrimEnd('/')}/{path.TrimStart('/')}.json");
+                $"{context.DatabaseUrl.TrimEnd('/')}/{path.TrimStart('/')}.json{queryString}");
 
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.Authorization =

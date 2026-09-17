@@ -3,7 +3,7 @@
 @using Microsoft.EntityFrameworkCore
 @using System.Globalization
 @inject IToastService toastService
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseAdvanceService FirebaseAdvances
 @inject AttendanceRefreshService AttendanceRefresh
 
 <details class="mb-4 border rounded p-3">
@@ -74,9 +74,11 @@
 
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            dbContext.SalaryAdvances.Add(NewAdvance);
-            await dbContext.SaveChangesAsync();
+            if (!await FirebaseAdvances.SaveAsync(NewAdvance))
+            {
+                toastService.ShowError("Unable to save the advance to Firebase.");
+                return;
+            }
 
             toastService.ShowSuccess("Advance saved successfully.");
             

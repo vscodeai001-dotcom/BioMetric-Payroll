@@ -36,6 +36,7 @@ class BiometricApplication : Application(), Configuration.Provider {
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var sessionStore: com.biometric.app.data.MobileSessionStore
     @Inject lateinit var themePreferenceSync: com.biometric.app.sync.ThemePreferenceSync
+    @Inject lateinit var firebaseReconnectCoordinator: com.biometric.app.sync.FirebaseReconnectCoordinator
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -67,6 +68,8 @@ class BiometricApplication : Application(), Configuration.Provider {
         // continue to own authentication state; this is realtime infrastructure only.
         if (sessionStore.isLoggedIn()) {
             adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+            runCatching { firebaseReconnectCoordinator.start() }
+                .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
         }
 
         // Keep application startup resilient. A failure in an optional background

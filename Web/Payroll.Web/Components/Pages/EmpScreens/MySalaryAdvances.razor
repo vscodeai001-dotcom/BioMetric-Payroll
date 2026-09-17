@@ -1,15 +1,12 @@
 @page "/my-salary-advances"
 @using System.Globalization
 @using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Identity
-@using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared
 @using global::Payroll.Shared.Data
 @using Microsoft.AspNetCore.Components.Authorization
 
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseAdvanceService FirebaseAdvances
 @inject ILogger<MySalaryAdvances> _logger
-@inject UserManager<IdentityUser> UserManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IToastService toastService
 @inject NavigationManager Navigation
@@ -104,22 +101,12 @@ else
         isLoading = true;
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-
-            // 1. SECURITY CHECK: Load Feature Flags
-            var settings = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
-            if (settings != null)
+            // Firebase is the SSOT for the self-service gate.
+            if (!await FirebaseAdvances.IsEnabledAsync() || !await FirebaseAdvances.CanEmployeeViewAsync())
             {
-                // Strict Hierarchy Check: Parent Module AND Child Permission
-                bool isModuleEnabled = settings.EnableSalaryAdvance;
-                bool canView = settings.EmployeeCanViewAdvance;
-
-                if (!isModuleEnabled || !canView)
-                {
-                    isAccessDenied = true;
-                    isLoading = false;
-                    return; // Stop execution immediately
-                }
+                isAccessDenied = true;
+                isLoading = false;
+                return;
             }
 
             // 2. Load Data (Only if authorized)
@@ -128,21 +115,16 @@ else
 
             if (user.Identity?.IsAuthenticated == true)
             {
-                var email = user.Identity.Name;
-                linkedEmployee = await dbContext.Employees
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(e => e.Email == email);
-
-                if (linkedEmployee == null)
+                if (!int.TryParse(user.FindFirst("employee_id")?.Value, out var employeeId) || employeeId <= 0)
                 {
-                    // Not an error toast, just UI state
+                    linkedEmployee = null;
                 }
                 else
                 {
-                    advanceHistory = await dbContext.SalaryAdvances
-                        .Where(p => p.EmployeeID == linkedEmployee.EmployeeID)
-                        .OrderByDescending(p => p.AdvanceDate)
-                        .ToListAsync();
+                    linkedEmployee = (await FirebaseAdvances.GetActiveEmployeesAsync())
+                        .FirstOrDefault(e => e.EmployeeID == employeeId);
+                    if (linkedEmployee != null)
+                        advanceHistory = await FirebaseAdvances.GetAsync(employeeId);
                 }
             }
         }

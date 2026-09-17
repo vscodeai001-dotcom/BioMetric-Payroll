@@ -12,6 +12,7 @@
 @inject Payroll.Web.Services.AuditService AuditService
 @inject Payroll.Web.Services.EmployeeDeletionService DeletionService
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
+@inject Payroll.Web.Services.FirebaseEmployeeProvisioningReconciliationService FirebaseEmployeeProvisioning
 @inject IJSRuntime JSRuntime
 @inject ILogger<EmployeeList> _logger
 @inject IToastService toastService
@@ -427,6 +428,16 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
 
             await dbContext.SaveChangesAsync();
 
+            // Publish the same Employee identity to Firebase immediately after
+            // the existing Web transaction succeeds. No UI/business logic is
+            // changed; this only removes the stale cross-platform window.
+            var savedEmployeeId = currentEmployee.EmployeeID;
+            var savedEmployee = await dbContext.Employees.AsNoTracking()
+                .FirstAsync(e => e.EmployeeID == savedEmployeeId);
+            var reconciliation = await FirebaseEmployeeProvisioning.ReconcileEmployeeAsync(savedEmployee);
+            if (!reconciliation.Success)
+                toastService.ShowWarning("Employee saved, but Firebase synchronization is pending.");
+
             await AttendanceRefresh.NotifyEmployeeChangedAsync(currentEmployee.EmployeeID == 0 ? null : currentEmployee.EmployeeID, currentEmployee.EmployeeID == 0 ? "CREATED" : "UPDATED");
 
             toastService.ShowSuccess("Employee saved successfully.");
@@ -500,6 +511,14 @@ private CultureInfo inrCulture = new CultureInfo("en-IN");
                 entity.IsDeleted = true; // SOFT DELETE ACTION
                 dbContext.Update(entity);
                 await dbContext.SaveChangesAsync();
+
+                // Soft-delete remains the existing business behavior. The
+                // reconciliation disables the linked Firebase Auth account,
+                // revokes refresh tokens, removes the mobile session and marks
+                // the Firebase employee/profile state inactive.
+                var reconciliation = await FirebaseEmployeeProvisioning.ReconcileEmployeeAsync(entity);
+                if (!reconciliation.Success)
+                    toastService.ShowWarning("Employee moved to Recycle Bin, but Firebase deactivation is pending.");
 
                 await AttendanceRefresh.NotifyEmployeeChangedAsync(entity.EmployeeID, "DELETED");
 

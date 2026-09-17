@@ -1,9 +1,8 @@
 @page "/my-shifts"
 @using Microsoft.AspNetCore.Authorization
-@using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared.Data
 @using Microsoft.AspNetCore.Components.Authorization
-@inject IDbContextFactory<AppDbContext> DbFactory
+@inject Payroll.Web.Services.FirebaseShiftScheduleService FirebaseShiftSchedules
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IToastService toastService
 @inject NavigationManager Navigation
@@ -121,50 +120,47 @@ else
         isLoading = true;
         try
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-
-            // 1. SECURITY CHECK
-            var settings = await db.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
-            if (settings != null)
+            // 1. SECURITY / FEATURE CHECK from Firebase SSOT.
+            var isModuleEnabled = await FirebaseShiftSchedules.IsShiftSchedulingEnabledAsync();
+            var canView = await FirebaseShiftSchedules.CanEmployeeViewShiftsAsync();
+            if (!isModuleEnabled || !canView)
             {
-                // Strict Hierarchy: EnableShiftScheduling (Parent) -> EmployeeCanViewShifts (Child)
-                bool isModuleEnabled = settings.EnableShiftScheduling;
-                bool canView = settings.EmployeeCanViewShifts;
-
-                if (!isModuleEnabled || !canView)
-                {
-                    isAccessDenied = true;
-                    isLoading = false;
-                    return;
-                }
+                isAccessDenied = true;
+                isLoading = false;
+                return;
             }
 
-            // 2. Load Data
+            isAccessDenied = false;
+
+            // 2. Resolve the authenticated employee against the canonical
+            // Firebase employee directory.
             var auth = await AuthStateProvider.GetAuthenticationStateAsync();
-            var email = auth.User.Identity?.Name;
+            var employeeId = int.TryParse(
+                auth.User.FindFirst("employee_id")?.Value, out var claimedEmployeeId)
+                ? claimedEmployeeId
+                : 0;
 
-            if (email != null)
+            // Employee-scoped Firebase rules allow the authenticated employee
+            // to read only their own employee record. Do not read the entire
+            // employees collection and do not fall back to the legacy DB.
+            var emp = await FirebaseShiftSchedules.GetEmployeeAsync(employeeId);
+
+            if (emp == null)
             {
-                var emp = await db.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.Email == email);
-
-                if (emp != null)
-                {
-                    defaultShift = emp;
-                    var start = new DateOnly(selectedMonth.Year, selectedMonth.Month, 1);
-                    var end = start.AddMonths(1).AddDays(-1);
-
-                    daysInMonth.Clear();
-                    for (var dt = start; dt <= end; dt = dt.AddDays(1))
-                    {
-                        daysInMonth.Add(dt);
-                    }
-
-                    shifts = await db.ShiftSchedules
-                        .AsNoTracking()
-                        .Where(s => s.EmployeeID == emp.EmployeeID && s.ShiftDate >= start && s.ShiftDate <= end)
-                        .ToListAsync();
-                }
+                shifts.Clear();
+                defaultShift = null;
+                return;
             }
+
+            defaultShift = emp;
+            var start = new DateOnly(selectedMonth.Year, selectedMonth.Month, 1);
+            var end = start.AddMonths(1).AddDays(-1);
+
+            daysInMonth.Clear();
+            for (var dt = start; dt <= end; dt = dt.AddDays(1))
+                daysInMonth.Add(dt);
+
+            shifts = await FirebaseShiftSchedules.GetSchedulesAsync(emp.EmployeeID, start, end);
         }
         finally { isLoading = false; }
     }

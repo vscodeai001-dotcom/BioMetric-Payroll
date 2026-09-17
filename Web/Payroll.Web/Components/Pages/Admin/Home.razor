@@ -3,15 +3,16 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using global::Payroll.Shared.Data
 @using global::Payroll.Shared
-@using Microsoft.EntityFrameworkCore
 @using System.Globalization
-@inject IDbContextFactory<AppDbContext> DbFactory
 @inject ILogger<Home> _logger
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthState
 @inject GeoFeatureAccessService GeoAccess
+@inject FirebaseAdminDashboardService FirebaseDashboard
+@inject FirebaseRealtimeService FirebaseDashboardOwnerService
 @using global::Payroll.Web.Components.UI.Attendance
 @attribute [Authorize]
+@implements IAsyncDisposable
 
 <PageTitle>Admin Dashboard</PageTitle>
 
@@ -216,7 +217,7 @@ else
 
 
 
-        @if (userIsSuperAdmin && geoFeatureAvailable)
+        @if ((userIsSuperAdmin || userIsAdmin) && geoFeatureAvailable)
         {
             <Payroll.Web.Components.UI.Attendance.LiveStaffLocationPanel />
         }
@@ -306,6 +307,7 @@ else
     private bool isLoaded = false;
     private bool geoFeatureAvailable;
     private bool userIsSuperAdmin = false;
+    private bool userIsAdmin = false;
     private int presentToday;
     private int absentTodayEst;
     private int totalEmployees;
@@ -329,6 +331,7 @@ else
             // ROLE CHECK
             // ---------------------------------------------------------
             userIsSuperAdmin = user.IsInRole("SuperAdmin");
+            userIsAdmin = user.IsInRole("Admin");
 
             // Employee must never access Admin Dashboard
             if (user.IsInRole("Employee") &&
@@ -343,12 +346,10 @@ else
             // GEO-FENCING
             //
             // IMPORTANT:
-            // Only SuperAdmin can see/use the Live Staff Location panel.
-            //
-            // Even if Geo-Fencing is enabled in FeatureSettings,
-            // Admin and Employee will NOT see this panel.
+            // Admin/SuperAdmin may see the Live Staff Location panel when
+            // Geo-Fencing is enabled. Employee is redirected above.
             // ---------------------------------------------------------
-            if (userIsSuperAdmin)
+            if (user.IsInRole("Admin") || userIsSuperAdmin)
             {
                 geoFeatureAvailable = await GeoAccess.IsEnabledAsync();
             }
@@ -358,6 +359,11 @@ else
             }
 
             await LoadAdminDashboard();
+            var actorUid = user.FindFirst("sub")?.Value
+                           ?? user.FindFirst("user_id")?.Value
+                           ?? user.Identity?.Name
+                           ?? string.Empty;
+            await StartFirebaseDashboardStreamsAsync(actorUid);
         }
         catch (Exception ex)
         {
@@ -370,33 +376,40 @@ else
     {
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            var today = DateOnly.FromDateTime(DateTime.Now);
-            var todayStart = DateTime.Now.Date;
-            var todayEnd = todayStart.AddDays(1);
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var actorUid = authState.User.FindFirst("sub")?.Value
+                           ?? authState.User.FindFirst("user_id")?.Value
+                           ?? authState.User.Identity?.Name
+                           ?? string.Empty;
 
-            shiftsScheduledToday = await dbContext.ShiftSchedules.AsNoTracking().Where(s => s.ShiftDate == today).CountAsync();
+            // Firebase is the dashboard read authority. Existing Web/SQL
+            // calculations are not recreated here. This is an aggregation
+            // of already-published SSOT records only.
+            var snapshot = await FirebaseDashboard.GetSnapshotAsync(actorUid);
 
-            employeeList = await dbContext.Employees.AsNoTracking().ToListAsync();
-            totalEmployees = employeeList.Count;
-            activeEmployees = employeeList.Count(e => !e.TerminationDate.HasValue);
+            totalEmployees = snapshot.TotalEmployees;
+            activeEmployees = snapshot.ActiveEmployees;
+            presentToday = snapshot.PresentToday;
+            absentTodayEst = snapshot.AbsentToday;
+            totalUnpaidAdvanceAmount = snapshot.UnpaidAdvanceAmount;
+            pendingPayrolls = snapshot.PendingPayrolls;
+            shiftsScheduledToday = snapshot.ShiftsScheduledToday;
+            totalMonthScheduledNet = TimeSpan.FromMilliseconds(snapshot.TotalMonthScheduledMs);
+            employeeList = snapshot.EmployeeNames
+                .Select(x => new Employee { EmployeeID = x.Key, Name = x.Value })
+                .ToList();
 
-            var presentIds = await dbContext.AttendanceLogs.AsNoTracking().Where(l => l.PunchTime >= todayStart && l.PunchTime < todayEnd && l.EmployeeID.HasValue).Select(l => l.EmployeeID!.Value).Distinct().ToListAsync();
-            presentToday = presentIds.Count(id => employeeList.Any(e => e.EmployeeID == id && !e.TerminationDate.HasValue));
-            absentTodayEst = Math.Max(0, activeEmployees - presentToday);
-
-            unpaidAdvances = await dbContext.SalaryAdvances.AsNoTracking().Where(adv => adv.PayrollID_Paid == null).OrderByDescending(adv => adv.AdvanceDate).ToListAsync();
-            totalUnpaidAdvanceAmount = unpaidAdvances.Sum(adv => adv.Amount);
-
-            var lastMonth = DateTime.Now.AddMonths(-1);
-            var summaries = await dbContext.DailySummaries.Where(ds => ds.ShiftDate.Year == today.Year && ds.ShiftDate.Month == today.Month).AsNoTracking().ToListAsync();
-            totalMonthScheduledNet = TimeSpan.FromTicks(summaries.Sum(s => s.ScheduledShiftDuration.Ticks));
-
-            pendingPayrolls = await dbContext.PayrollHistories.AsNoTracking().AnyAsync(p => p.PayYear == lastMonth.Year && p.PayMonth == lastMonth.Month) ? 0 : 1;
+            unpaidAdvances = snapshot.RecentAdvances.Select(a => new SalaryAdvance
+            {
+                EmployeeID = a.EmployeeId,
+                Amount = a.Amount,
+                AdvanceDate = a.AdvanceDate,
+                AdvanceType = a.AdvanceType
+            }).ToList();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Dashboard loading error");
+            _logger.LogError(ex, "Firebase Admin dashboard loading error");
         }
         finally
         {
@@ -481,4 +494,84 @@ else
                 "Live regularization dashboard refresh failed.");
         }
     }
+    private CancellationTokenSource? _dashboardCts;
+    private Task? _dashboardOwnerStream;
+    private Task? _dashboardTrackingStream;
+
+    private async Task StartFirebaseDashboardStreamsAsync(string actorUid)
+    {
+        _dashboardCts?.Cancel();
+        _dashboardCts?.Dispose();
+        _dashboardCts = new CancellationTokenSource();
+        var ct = _dashboardCts.Token;
+        var ownerUid = FirebaseDashboardOwnerUid(actorUid);
+
+        _dashboardOwnerStream = Task.Run(async () =>
+        {
+            try
+            {
+                await FirebaseDashboardStream(ownerUid, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (Exception ex) { _logger.LogWarning(ex, "Firebase dashboard owner stream ended"); }
+        }, ct);
+
+        _dashboardTrackingStream = Task.Run(async () =>
+        {
+            try
+            {
+                await FirebaseDashboardTrackingStream(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (Exception ex) { _logger.LogWarning(ex, "Firebase dashboard tracking stream ended"); }
+        }, ct);
+    }
+
+    private string FirebaseDashboardOwnerUid(string actorUid)
+        => FirebaseDashboardOwnerService.ResolveOwnerUid(actorUid, "Admin");
+
+    private async Task FirebaseDashboardStream(string ownerUid, CancellationToken ct)
+    {
+        await FirebaseDashboardOwnerService.StreamOwnerChangesAsync(ownerUid, async (path, _, token) =>
+        {
+            if (IsDashboardPath(path))
+                await InvokeAsync(LoadAdminDashboard);
+        }, ct);
+    }
+
+    private async Task FirebaseDashboardTrackingStream(CancellationToken ct)
+    {
+        await FirebaseDashboardOwnerService.StreamTrackingChangesAsync(async (_, _, token) =>
+        {
+            if (!ct.IsCancellationRequested)
+                await InvokeAsync(StateHasChanged);
+        }, ct);
+    }
+
+    private static bool IsDashboardPath(string path)
+    {
+        var p = path.Trim('/');
+        return p.StartsWith("employees/", StringComparison.Ordinal)
+            || p.StartsWith("attendance/", StringComparison.Ordinal)
+            || p.StartsWith("advance_payments/", StringComparison.Ordinal)
+            || p.StartsWith("payroll_history/", StringComparison.Ordinal)
+            || p.StartsWith("shift_schedules/", StringComparison.Ordinal)
+            || p.StartsWith("daily_summaries/", StringComparison.Ordinal);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dashboardCts?.Cancel();
+        if (_dashboardOwnerStream != null)
+            await IgnoreTask(_dashboardOwnerStream);
+        if (_dashboardTrackingStream != null)
+            await IgnoreTask(_dashboardTrackingStream);
+        _dashboardCts?.Dispose();
+    }
+
+    private static async Task IgnoreTask(Task task)
+    {
+        try { await task; } catch { }
+    }
+
 }

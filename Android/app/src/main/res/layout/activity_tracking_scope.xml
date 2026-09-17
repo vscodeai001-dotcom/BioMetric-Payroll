@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@color/window_background">
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:navigationIcon="@drawable/ic_back"
+        app:title="Tracking Assignment & Scope" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Precedence: Employee → Shop → Global. Assignments only override the global tracking configuration." android:textSize="12sp" android:alpha="0.75" android:layout_marginTop="8dp" android:layout_marginBottom="12dp" />
+    <Spinner android:id="@+id/spinnerScopeType" android:layout_width="match_parent" android:layout_height="wrap_content" />
+    <Spinner android:id="@+id/spinnerScopeTarget" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" />
+    <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/switchScopeEnabled" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Tracking enabled" android:layout_marginTop="12dp" />
+    <Spinner android:id="@+id/spinnerScopeMode" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" />
+    <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Custom Start (HH:mm)" android:layout_marginTop="8dp"><com.google.android.material.textfield.TextInputEditText android:id="@+id/editScopeStart" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="time" /></com.google.android.material.textfield.TextInputLayout>
+    <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Custom End (HH:mm)" android:layout_marginTop="8dp"><com.google.android.material.textfield.TextInputEditText android:id="@+id/editScopeEnd" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="time" /></com.google.android.material.textfield.TextInputLayout>
+    <com.google.android.material.textfield.TextInputLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Tracking interval (seconds, 15-3600)" android:layout_marginTop="8dp"><com.google.android.material.textfield.TextInputEditText android:id="@+id/editScopeInterval" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" /></com.google.android.material.textfield.TextInputLayout>
+    <TextView android:id="@+id/textScopeStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Select a scope" android:textSize="12sp" android:layout_marginTop="10dp" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="12dp">
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnSaveScope" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Save Assignment" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/btnClearScope" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Clear Override" android:layout_marginStart="8dp" />
+    </LinearLayout>
+</LinearLayout>
