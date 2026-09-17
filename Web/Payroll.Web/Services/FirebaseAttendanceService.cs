@@ -205,7 +205,7 @@ public sealed class FirebaseAttendanceService
         var value = Raw(element, names);
         if (value is null) return null;
         if (value.Value.TryGetInt32(out var i)) return i;
-        return int.TryParse(value.Value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out i) ? i : null;
+        return int.TryParse(value.Value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out i) ? (int?)i : null;
     }
 
     private static int? IntFromKey(string key) => int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : null;
@@ -215,7 +215,7 @@ public sealed class FirebaseAttendanceService
         var value = Raw(element, names);
         if (value is null) return null;
         if (value.Value.TryGetDecimal(out var d)) return d;
-        return decimal.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? d : null;
+        return decimal.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? (decimal?)d : null;
     }
 
     private static double? Double(JsonElement element, params string[] names)
@@ -223,7 +223,7 @@ public sealed class FirebaseAttendanceService
         var value = Raw(element, names);
         if (value is null) return null;
         if (value.Value.TryGetDouble(out var d)) return d;
-        return double.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? d : null;
+        return double.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? (double?)d : null;
     }
 
     private static bool? Bool(JsonElement element, params string[] names)
@@ -231,7 +231,7 @@ public sealed class FirebaseAttendanceService
         var value = Raw(element, names);
         if (value is null) return null;
         if (value.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) return value.Value.GetBoolean();
-        return bool.TryParse(value.Value.ToString(), out var b) ? b : null;
+        return bool.TryParse(value.Value.ToString(), out var b) ? (bool?)b : null;
     }
 
     private static DateOnly? Date(JsonElement element, params string[] names)
@@ -241,7 +241,7 @@ public sealed class FirebaseAttendanceService
         var text = value.Value.ToString();
         if (DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) return d;
         if (value.Value.TryGetInt64(out var ms))
-            return DateTimeOffset.FromUnixTimeMilliseconds(ms).ToOffset(TimeSpan.FromHours(5.5)).Date;
+            return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(ms).ToOffset(TimeSpan.FromHours(5.5)).Date);
         return null;
     }
 

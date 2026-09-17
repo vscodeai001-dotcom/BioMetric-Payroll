@@ -211,15 +211,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (parts.Length >= 2 &&
             parts[0].Equals("live", StringComparison.OrdinalIgnoreCase))
         {
-            await ProcessFirebaseLiveLocationAsync(relativePath, eventData, ct);
-            return;
+            await ProcessFirebaseLiveLocationAsync(
+     relativePath ?? "/",
+     eventData.Value,
+     ct);
         }
 
         if (parts.Length >= 3 &&
             parts[0].Equals("sessions", StringComparison.OrdinalIgnoreCase))
         {
-            await ProcessFirebaseTrackingSessionEventAsync(relativePath, eventData, ct);
-            return;
+            await ProcessFirebaseTrackingSessionEventAsync(
+    relativePath ?? "/",
+    eventData.Value,
+    ct);
         }
 
         if (parts.Length < 3 || !parts[0].Equals("history", StringComparison.OrdinalIgnoreCase))
@@ -489,8 +493,18 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var deviceId = GetString(eventData.Value, "deviceId", "DeviceId") ?? string.Empty;
         var platform = GetString(eventData.Value, "platform", "Platform") ?? "Android";
         var timestamp = GetDateTime(eventData.Value, "timestamp", "Timestamp") ?? DateTime.UtcNow;
-        var eventId = GetString(eventData.Value, "eventId", "EventId")
-            ?? relativePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        var normalizedRelativePath =
+    (relativePath ?? string.Empty).Trim('/');
+
+        var eventId = GetString(
+            eventData.Value,
+            "eventId",
+            "EventId")
+            ?? normalizedRelativePath
+                .Split(
+                    '/',
+                    StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault();
 
         if (employeeId <= 0 || string.IsNullOrWhiteSpace(eventId)) return;
 

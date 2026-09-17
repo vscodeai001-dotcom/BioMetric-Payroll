@@ -80,33 +80,90 @@ public sealed class FirebaseEmployeeHistoryService
             if (item.Value.ValueKind != JsonValueKind.Object) continue;
             var emp = Int(item.Value, "employeeId");
             var year = Int(item.Value, "payYear");
-            if (emp != employeeId || year < minimumYear) continue;
+
+            // Both employeeId and payYear must be present.
+            // This guarantees year has a value before using year.Value below.
+            if (emp != employeeId ||
+                !year.HasValue ||
+                year.Value < minimumYear)
+            {
+                continue;
+            }
+
             result.Add(new PayrollHistory
             {
-                PayrollID = Int(item.Value, "payrollId") ?? IntFromKey(item.Name) ?? 0,
+                PayrollID = Int(item.Value, "payrollId")
+                            ?? IntFromKey(item.Name)
+                            ?? 0,
+
                 EmployeeID = employeeId,
+
                 PayMonth = Int(item.Value, "payMonth") ?? 0,
-                PayYear = year,
+
+                PayYear = year.Value,
+
                 BaseSalary = Decimal(item.Value, "baseSalary"),
-                TotalHoursWorked = Decimal(item.Value, "totalHoursWorked"),
-                OvertimePay = Decimal(item.Value, "overtimePay"),
-                Deductions_Hours = Decimal(item.Value, "deductionsHours"),
-                Deductions_Advance = Decimal(item.Value, "deductionsAdvance"),
-                Bonus = Decimal(item.Value, "bonus"),
-                NetSalary = Decimal(item.Value, "netSalary") ?? 0m,
-                ManualLeaveDays = Int(item.Value, "manualLeaveDays") ?? 0,
-                AbsentDays = Int(item.Value, "absentDays") ?? 0,
-                TotalPenaltyDuration = DurationFromMilliseconds(item.Value, "totalPenaltyMs"),
-                TotalOvertimeDuration = DurationFromMilliseconds(item.Value, "totalOvertimeMs"),
-                HourlyRate = Decimal(item.Value, "hourlyRate") ?? 0m,
-                BasicComponent = Decimal(item.Value, "basicComponent") ?? 0m,
-                PfDeduction = Decimal(item.Value, "pfDeduction") ?? 0m,
-                EsiDeduction = Decimal(item.Value, "esiDeduction") ?? 0m,
-                EmployerPfContribution = Decimal(item.Value, "employerPfContribution") ?? 0m,
-                EmployerEsiContribution = Decimal(item.Value, "employerEsiContribution") ?? 0m,
-                PtDeduction = Decimal(item.Value, "ptDeduction") ?? 0m,
-                TdsDeduction = Decimal(item.Value, "tdsDeduction") ?? 0m,
-                TotalShiftAllowance = Decimal(item.Value, "totalShiftAllowance") ?? 0m
+
+                TotalHoursWorked =
+                    Decimal(item.Value, "totalHoursWorked"),
+
+                OvertimePay =
+                    Decimal(item.Value, "overtimePay"),
+
+                Deductions_Hours =
+                    Decimal(item.Value, "deductionsHours"),
+
+                Deductions_Advance =
+                    Decimal(item.Value, "deductionsAdvance"),
+
+                Bonus =
+                    Decimal(item.Value, "bonus"),
+
+                NetSalary =
+                    Decimal(item.Value, "netSalary") ?? 0m,
+
+                ManualLeaveDays =
+                    Int(item.Value, "manualLeaveDays") ?? 0,
+
+                AbsentDays =
+                    Int(item.Value, "absentDays") ?? 0,
+
+                TotalPenaltyDuration =
+                    DurationFromMilliseconds(
+                        item.Value,
+                        "totalPenaltyMs"),
+
+                TotalOvertimeDuration =
+                    DurationFromMilliseconds(
+                        item.Value,
+                        "totalOvertimeMs"),
+
+                HourlyRate =
+                    Decimal(item.Value, "hourlyRate") ?? 0m,
+
+                BasicComponent =
+                    Decimal(item.Value, "basicComponent") ?? 0m,
+
+                PfDeduction =
+                    Decimal(item.Value, "pfDeduction") ?? 0m,
+
+                EsiDeduction =
+                    Decimal(item.Value, "esiDeduction") ?? 0m,
+
+                EmployerPfContribution =
+                    Decimal(item.Value, "employerPfContribution") ?? 0m,
+
+                EmployerEsiContribution =
+                    Decimal(item.Value, "employerEsiContribution") ?? 0m,
+
+                PtDeduction =
+                    Decimal(item.Value, "ptDeduction") ?? 0m,
+
+                TdsDeduction =
+                    Decimal(item.Value, "tdsDeduction") ?? 0m,
+
+                TotalShiftAllowance =
+                    Decimal(item.Value, "totalShiftAllowance") ?? 0m
             });
         }
         return result.OrderByDescending(x => x.PayYear).ThenByDescending(x => x.PayMonth).ToList();
@@ -170,21 +227,76 @@ public sealed class FirebaseEmployeeHistoryService
 
     private static bool TryGet(JsonElement e, string name, out JsonElement value) => e.TryGetProperty(name, out value);
     private static string? String(JsonElement e, string name) => TryGet(e, name, out var v) && v.ValueKind != JsonValueKind.Null ? v.ToString() : null;
-    private static int? Int(JsonElement e, string name) => TryGet(e, name, out var v) && (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : int.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) ? p : null);
-    private static long? Long(JsonElement e, string name) => TryGet(e, name, out var v) && (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n) ? n : long.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var p) ? p : null);
-    private static decimal? Decimal(JsonElement e, string name) => TryGet(e, name, out var v) && (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var n) ? n : decimal.TryParse(v.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var p) ? p : null);
-    private static bool? Bool(JsonElement e, string name) => TryGet(e, name, out var v) && (v.ValueKind == JsonValueKind.True ? true : v.ValueKind == JsonValueKind.False ? false : bool.TryParse(v.ToString(), out var p) ? p : null);
+    private static int? Int(JsonElement e, string name)
+    {
+        if (!TryGet(e, name, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var number)) return number;
+        return int.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? (int?)parsed
+            : null;
+    }
+
+    private static long? Long(JsonElement e, string name)
+    {
+        if (!TryGet(e, name, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var number)) return number;
+        return long.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? (long?)parsed
+            : null;
+    }
+
+    private static decimal? Decimal(JsonElement e, string name)
+    {
+        if (!TryGet(e, name, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var number)) return number;
+        return decimal.TryParse(v.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed)
+            ? (decimal?)parsed
+            : null;
+    }
+
+    private static bool? Bool(JsonElement e, string name)
+    {
+        if (!TryGet(e, name, out var v)) return null;
+        if (v.ValueKind == JsonValueKind.True) return true;
+        if (v.ValueKind == JsonValueKind.False) return false;
+        return bool.TryParse(v.ToString(), out var parsed)
+            ? (bool?)parsed
+            : null;
+    }
     private static int? IntFromKey(string key) => int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
     private static long LongFromKey(string key) => long.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0L;
     private static DateTime? UnixDate(JsonElement e, string name) { var n = Long(e, name); return n.HasValue && n.Value > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(n.Value).LocalDateTime : null; }
     private static DateTime? DateTimeFrom(JsonElement e, string name) { var s = String(e, name); return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var d) ? d : null; }
     private static DateOnly? DateOnlyFrom(JsonElement e, string name) { var d = UnixDate(e, name); if (d.HasValue) return DateOnly.FromDateTime(d.Value); var s = String(e, name); return DateOnly.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var x) ? x : null; }
-    private static TimeSpan DurationFromMilliseconds(JsonElement e, string name) => TimeSpan.FromMilliseconds(Decimal(e, name) ?? 0m);
-    private static TimeSpan Duration(JsonElement e, string millisecondsName, string durationName)
+    private static TimeSpan DurationFromMilliseconds(JsonElement e, string name)
     {
-        var ms = Decimal(e, millisecondsName);
-        if (ms.HasValue) return TimeSpan.FromMilliseconds(ms.Value);
+        var milliseconds = Decimal(e, name) ?? 0m;
+
+        return TimeSpan.FromMilliseconds(
+            (double)milliseconds
+        );
+    }
+    private static TimeSpan Duration(
+     JsonElement e,
+     string millisecondsName,
+     string durationName)
+    {
+        var milliseconds = Decimal(e, millisecondsName);
+
+        if (milliseconds.HasValue)
+        {
+            return TimeSpan.FromMilliseconds(
+                (double)milliseconds.Value
+            );
+        }
+
         var text = String(e, durationName);
-        return TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out var parsed) ? parsed : TimeSpan.Zero;
+
+        return TimeSpan.TryParse(
+            text,
+            CultureInfo.InvariantCulture,
+            out var parsed)
+            ? parsed
+            : TimeSpan.Zero;
     }
 }

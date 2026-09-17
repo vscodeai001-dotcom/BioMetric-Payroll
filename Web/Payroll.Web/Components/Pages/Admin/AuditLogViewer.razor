@@ -192,8 +192,19 @@ else
         (string.IsNullOrWhiteSpace(roleFilter) || l.Details?.Contains(roleFilter, StringComparison.OrdinalIgnoreCase) == true) &&
         (string.IsNullOrWhiteSpace(moduleActionFilter) || $"{l.EntityType} {l.ActionType} {l.Details}".Contains(moduleActionFilter, StringComparison.OrdinalIgnoreCase));
 
-    private static string StringProp(System.Text.Json.JsonElement e, string name, string? fallback) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? (v.GetString() ?? fallback) : fallback;
+   private static string StringProp(
+    System.Text.Json.JsonElement e,
+    string name,
+    string? fallback)
+{
+    if (e.TryGetProperty(name, out var v) &&
+        v.ValueKind == System.Text.Json.JsonValueKind.String)
+    {
+        return v.GetString() ?? fallback ?? string.Empty;
+    }
+
+    return fallback ?? string.Empty;
+}
 
     private static long TryLong(string value) => long.TryParse(value, out var id) ? id : 0;
 

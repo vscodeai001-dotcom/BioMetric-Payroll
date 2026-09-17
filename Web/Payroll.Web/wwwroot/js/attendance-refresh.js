@@ -218,6 +218,17 @@ window.attendanceRefresh = (function () {
                     await notifyApplicationListeners('ApplicationDataChanged', eventData);
                     await notifyListeners('ApplicationDataChanged', eventData);
                     window.dispatchEvent(new CustomEvent('application-data-changed', { detail: eventData }));
+
+                    // The Attendance Log Viewer is a route-level consumer.
+                    // Firebase application events are the realtime source for
+                    // Web-side SSOT invalidation, so bridge only attendance-
+                    // relevant entities into the viewer's existing debounced
+                    // RefreshFromNotification path. This preserves the current
+                    // load/recalculation boundary while removing dependence on
+                    // a separate SignalR attendance event for Firebase writes.
+                    if (viewerRef && applicationEventAffectsAttendanceViewer(eventData)) {
+                        await notifyViewer();
+                    }
                 }
             }, 80);
         } catch (error) {
@@ -291,6 +302,32 @@ window.attendanceRefresh = (function () {
             const actual = String(change && (change.Entity || change.entity) || '')
                 .trim().toLowerCase();
             return actual === expected;
+        });
+    }
+
+    // Attendance Log Viewer depends on the finalized attendance projection
+    // plus the inputs that can change the visible result (employee roster,
+    // punches, leave, schedules, holidays, and regularization). Do not wake
+    // the viewer for unrelated payroll/finance/admin events.
+    const attendanceViewerEntities = new Set([
+        'Employee',
+        'AttendanceLog',
+        'DailySummary',
+        'LeaveRequest',
+        'ShiftSchedule',
+        'CompanyHoliday',
+        'AttendanceRegularization'
+    ]);
+
+    function applicationEventAffectsAttendanceViewer(data) {
+        if (!data || !Array.isArray(data.changes)) return false;
+
+        return data.changes.some(function (change) {
+            const entity = String(
+                change && (change.Entity || change.entity) || ''
+            ).trim();
+
+            return attendanceViewerEntities.has(entity);
         });
     }
 

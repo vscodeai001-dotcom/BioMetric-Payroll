@@ -58,7 +58,7 @@ public sealed class MobileAdminPunchController : ControllerBase
         var rows = await db.AttendanceLogs.AsNoTracking().Where(x => !x.IsApproved && x.LogType == "Correction Request" && x.EmployeeID.HasValue).OrderBy(x => x.PunchTime).ToListAsync();
         var names = (await _firebaseEmployees.GetEmployeesAsync())
             .ToDictionary(x => x.EmployeeID, x => x.Name);
-        return Ok(rows.Select(x => new PendingPunchDto(x.LogID, x.EmployeeID!.Value, names.TryGetValue(x.EmployeeID.Value, out var n) ? n : $"Employee #{x.EmployeeID}", x.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"), x.LogType ?? "Correction Request", x.DeviceID ?? "")));
+        return Ok(rows.Where(x => x.EmployeeID.HasValue).Select(x => new PendingPunchDto(x.LogID, x.EmployeeID!.Value, names.TryGetValue(x.EmployeeID.Value, out var n) ? n : $"Employee #{x.EmployeeID.Value}", x.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"), x.LogType ?? "Correction Request", x.DeviceID ?? "")));
     }
 
     [HttpPost("manual")]

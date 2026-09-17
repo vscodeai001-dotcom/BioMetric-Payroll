@@ -102,10 +102,10 @@ public sealed class MobileTokenAuthenticationHandler : AuthenticationHandler<Aut
         if (employee == null && !isAdmin)
             return AuthenticateResult.Fail("Employee session is invalid or not linked.");
 
-        if (!isAdmin && employee.IsDeleted)
+        if (!isAdmin && employee?.IsDeleted == true)
             return AuthenticateResult.Fail("Employee account is disabled.");
 
-        if (!isAdmin && employee.EmployeeID != employeeId)
+        if (!isAdmin && (employee is null || employee.EmployeeID != employeeId))
             return AuthenticateResult.Fail("Firebase Employee claim does not match the Employee record.");
 
         if (!isAdmin)

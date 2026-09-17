@@ -12,6 +12,7 @@
 @using System.Collections.Concurrent
 @using System.Security.Cryptography
 @using System.Threading
+@using System.Text.Json
 @inject Payroll.Web.Services.AuditService AuditService
 @using global::Payroll.Web.Components.Pages.Attendance
 
@@ -158,6 +159,14 @@
     </div>
 }
 
+@if (_showingCachedAttendance)
+{
+    <div class="alert alert-warning py-2 mb-3" role="status">
+        <i class="bi bi-cloud-slash me-1"></i>
+        Firebase attendance data is temporarily unavailable. Showing the last cached attendance data.
+    </div>
+}
+
 <AttendanceLogTable
     Logs="logs"
     IsLoading="isLoading"
@@ -211,6 +220,8 @@
     // after the component has been disposed or its Blazor circuit is gone.
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private bool _disposed = false;
+    private bool _attendanceCacheReady = false;
+    private bool _showingCachedAttendance = false;
 
     private static TimeSpan GetDisplayScheduledDuration(
         TimeOnly? start,
@@ -339,6 +350,11 @@
             await JSRuntime.InvokeVoidAsync(
                 "attendanceRefresh.registerViewer",
                 _dotNetRef);
+
+            await JSRuntime.InvokeVoidAsync(
+                "attendanceCache.initialize");
+
+            _attendanceCacheReady = true;
         }
         catch (Exception ex)
         {
@@ -419,6 +435,67 @@
         }
     }
 
+    private string BuildAttendanceCacheKey(DateOnly from, DateOnly to, int employeeId) =>
+        $"attendance:{from:yyyy-MM-dd}:{to:yyyy-MM-dd}:{employeeId}";
+
+    private async Task WriteAttendanceCacheAsync(
+        string key,
+        List<DailySummary> summaries,
+        List<AttendanceLog> punches)
+    {
+        try
+        {
+            var payload = JsonSerializer.Serialize(new AttendanceCachePayload
+            {
+                SavedUtc = DateTime.UtcNow,
+                DailySummaries = summaries,
+                AttendanceLogs = punches
+            });
+
+            await JSRuntime.InvokeVoidAsync(
+                "attendanceCache.set", key, payload);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Attendance cache write skipped.");
+        }
+    }
+
+    private async Task<AttendanceCachePayload?> ReadAttendanceCacheAsync(string key)
+    {
+        try
+        {
+            var payload = await JSRuntime.InvokeAsync<string?>(
+                "attendanceCache.get", key);
+
+            if (string.IsNullOrWhiteSpace(payload))
+                return null;
+
+            var cached = JsonSerializer.Deserialize<AttendanceCachePayload>(payload);
+            if (cached == null)
+                return null;
+
+            // Cache is a resilience fallback, not an alternate SSOT.
+            // Keep it bounded so old attendance cannot silently become current data.
+            if (DateTime.UtcNow - cached.SavedUtc > TimeSpan.FromDays(7))
+                return null;
+
+            return cached;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Attendance cache read skipped.");
+            return null;
+        }
+    }
+
+    private sealed class AttendanceCachePayload
+    {
+        public DateTime SavedUtc { get; set; }
+        public List<DailySummary> DailySummaries { get; set; } = new();
+        public List<AttendanceLog> AttendanceLogs { get; set; } = new();
+    }
+
     // ============================================================
     // DISPOSE
     // ============================================================
@@ -463,6 +540,7 @@
         }
 
         isLoading = true;
+        _showingCachedAttendance = false;
 
         logs.Clear();
 
@@ -571,16 +649,30 @@
             // DAILY SUMMARIES
             // ----------------------------------------------------
 
-            var data =
-                await FirebaseAttendanceService.GetDailySummariesAsync(
-                    dStart,
-                    dEnd);
+            List<DailySummary> data;
+            var cacheKey = BuildAttendanceCacheKey(dStart, dEnd, selectedEmployeeId);
+            try
+            {
+                data = await FirebaseAttendanceService.GetDailySummariesAsync(dStart, dEnd);
+            }
+            catch (Exception firebaseReadEx)
+            {
+                if (!_attendanceCacheReady)
+                    throw;
+
+                var cached = await ReadAttendanceCacheAsync(cacheKey);
+                if (cached is null)
+                    throw;
+
+                data = cached.DailySummaries;
+                _showingCachedAttendance = true;
+                _logger.LogWarning(firebaseReadEx,
+                    "Firebase attendance summary read failed. Using cached attendance data for {CacheKey}.", cacheKey);
+            }
 
             if (selectedEmployeeId > 0)
             {
-                data = data
-                    .Where(ds => ds.EmployeeID == selectedEmployeeId)
-                    .ToList();
+                data = data.Where(ds => ds.EmployeeID == selectedEmployeeId).ToList();
             }
 
             // ----------------------------------------------------
@@ -621,12 +713,30 @@
             // Do NOT add/subtract 5:30 here.
             // ----------------------------------------------------
 
-            var relevantLogs =
-                employeeIds.Count == 0
-                    ? new List<AttendanceLog>()
-                    : await FirebaseAttendanceService.GetAttendancePunchesAsync(
-                        dStart,
-                        dEnd);
+            List<AttendanceLog> relevantLogs;
+            try
+            {
+                relevantLogs =
+                    employeeIds.Count == 0
+                        ? new List<AttendanceLog>()
+                        : await FirebaseAttendanceService.GetAttendancePunchesAsync(
+                            dStart,
+                            dEnd);
+            }
+            catch (Exception firebasePunchEx)
+            {
+                if (!_attendanceCacheReady)
+                    throw;
+
+                var cached = await ReadAttendanceCacheAsync(cacheKey);
+                if (cached is null)
+                    throw;
+
+                relevantLogs = cached.AttendanceLogs;
+                _showingCachedAttendance = true;
+                _logger.LogWarning(firebasePunchEx,
+                    "Firebase attendance punch read failed. Using cached attendance data for {CacheKey}.", cacheKey);
+            }
 
             if (employeeIds.Count > 0)
             {
@@ -634,6 +744,11 @@
                     .Where(l => l.EmployeeID.HasValue && employeeIds.Contains(l.EmployeeID.Value))
                     .OrderBy(l => l.PunchTime)
                     .ToList();
+            }
+
+            if (!_showingCachedAttendance && _attendanceCacheReady)
+            {
+                await WriteAttendanceCacheAsync(cacheKey, data, relevantLogs);
             }
 
             // ----------------------------------------------------

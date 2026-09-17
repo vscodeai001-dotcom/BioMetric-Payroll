@@ -498,34 +498,54 @@ else
     private Task? _dashboardOwnerStream;
     private Task? _dashboardTrackingStream;
 
-    private async Task StartFirebaseDashboardStreamsAsync(string actorUid)
+    private Task StartFirebaseDashboardStreamsAsync(string actorUid)
+{
+    _dashboardCts?.Cancel();
+    _dashboardCts?.Dispose();
+
+    _dashboardCts = new CancellationTokenSource();
+
+    var ct = _dashboardCts.Token;
+    var ownerUid = FirebaseDashboardOwnerUid(actorUid);
+
+    _dashboardOwnerStream = Task.Run(async () =>
     {
-        _dashboardCts?.Cancel();
-        _dashboardCts?.Dispose();
-        _dashboardCts = new CancellationTokenSource();
-        var ct = _dashboardCts.Token;
-        var ownerUid = FirebaseDashboardOwnerUid(actorUid);
-
-        _dashboardOwnerStream = Task.Run(async () =>
+        try
         {
-            try
-            {
-                await FirebaseDashboardStream(ownerUid, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-            catch (Exception ex) { _logger.LogWarning(ex, "Firebase dashboard owner stream ended"); }
-        }, ct);
-
-        _dashboardTrackingStream = Task.Run(async () =>
+            await FirebaseDashboardStream(ownerUid, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            try
-            {
-                await FirebaseDashboardTrackingStream(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-            catch (Exception ex) { _logger.LogWarning(ex, "Firebase dashboard tracking stream ended"); }
-        }, ct);
-    }
+            // Expected when the dashboard is disposed or restarted.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Firebase dashboard owner stream ended");
+        }
+    }, ct);
+
+    _dashboardTrackingStream = Task.Run(async () =>
+    {
+        try
+        {
+            await FirebaseDashboardTrackingStream(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Expected when the dashboard is disposed or restarted.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Firebase dashboard tracking stream ended");
+        }
+    }, ct);
+
+    return Task.CompletedTask;
+}
 
     private string FirebaseDashboardOwnerUid(string actorUid)
         => FirebaseDashboardOwnerService.ResolveOwnerUid(actorUid, "Admin");

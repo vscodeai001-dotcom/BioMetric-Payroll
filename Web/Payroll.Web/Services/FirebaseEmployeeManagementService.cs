@@ -465,7 +465,7 @@ public sealed class FirebaseEmployeeManagementService
         {
             var unix = UnixValue(name);
             if (unix.HasValue)
-                return DateTimeOffset.FromUnixTimeMilliseconds(unix.Value).Date;
+                return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(unix.Value).Date);
             var s = StringValue(name);
             return DateOnly.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
         }
