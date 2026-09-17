@@ -381,11 +381,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         {
             var started = await geoLocationService.StartGpsSessionAsync(employeeId, sessionId);
             if (started)
+            {
                 await _refreshService.NotifyLocationChangedAsync(employeeId);
 
-            _logger.LogInformation(
-                "Firebase GPS session started/provisioned in Web compatibility layer. EmployeeId={EmployeeId}, SessionId={SessionId}",
-                employeeId, sessionId);
+                _logger.LogInformation(
+                    "Firebase GPS session started/provisioned in Web compatibility layer. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                    employeeId, sessionId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Firebase GPS session start could not be provisioned in the Web compatibility layer. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                    employeeId, sessionId);
+            }
             return;
         }
 

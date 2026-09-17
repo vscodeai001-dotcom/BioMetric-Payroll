@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.SignalR;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 
 using Microsoft.Extensions.Hosting.WindowsServices;
 
@@ -773,18 +774,127 @@ app.MapHub<AttendanceRefreshHub>(
 // ============================================================
 // LOCAL DATABASE INITIALIZATION
 // ============================================================
-// Never connect to Neon/PostgreSQL during startup. Create the local SQLite
-// compatibility schema once, then hydrate it from Firebase.
+// Firebase is the durable SSOT. SQLite is only a local compatibility/cache
+// projection for the existing EF attendance/business engine.
+//
+// If the cache file is physically corrupted, do not let one malformed SQLite
+// page take down GPS session processing. Quarantine the bad file and recreate
+// an empty compatibility database. Firebase realtime hydration will repopulate
+// the local projection after startup.
 try
 {
+    var sqliteIntegrity = await VerifyAndRepairSqliteCacheAsync(
+        sqlitePath,
+        app.Logger);
+
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
+
+    if (sqliteIntegrity.Recreated)
+    {
+        app.Logger.LogWarning(
+            "SQLite compatibility cache was recreated after corruption. " +
+            "Firebase remains the authoritative SSOT and will rehydrate local data.");
+    }
 }
 catch (Exception ex)
 {
     app.Logger.LogError(ex, "Local SQLite compatibility database initialization failed.");
     throw;
+}
+
+static async Task<(bool Recreated, string? BackupPath)> VerifyAndRepairSqliteCacheAsync(
+    string sqlitePath,
+    ILogger logger)
+{
+    if (string.IsNullOrWhiteSpace(sqlitePath))
+        return (false, null);
+
+    if (!File.Exists(sqlitePath))
+        return (false, null);
+
+    try
+    {
+        await using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = sqlitePath,
+                Mode = SqliteOpenMode.ReadWrite,
+                Cache = SqliteCacheMode.Shared
+            }.ToString());
+
+        await connection.OpenAsync();
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA integrity_check;";
+        command.CommandTimeout = 10;
+
+        var result = Convert.ToString(
+            await command.ExecuteScalarAsync(),
+            CultureInfo.InvariantCulture);
+
+        if (string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+            return (false, null);
+
+        throw new SqliteException(
+            $"SQLite integrity_check returned '{result ?? "null"}'.",
+            11);
+    }
+    catch (Exception ex) when (
+        ex is SqliteException ||
+        ex is IOException ||
+        ex is UnauthorizedAccessException)
+    {
+        var backupPath =
+            $"{sqlitePath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}.bak";
+
+        try
+        {
+            File.Move(sqlitePath, backupPath);
+            logger.LogError(
+                ex,
+                "SQLite compatibility cache is corrupted. " +
+                "Quarantined {DatabasePath} as {BackupPath}.",
+                sqlitePath,
+                backupPath);
+
+            // SQLite may have sidecar files while WAL mode is active.
+            TryMoveSqliteSidecar($"{sqlitePath}-wal", $"{backupPath}-wal", logger);
+            TryMoveSqliteSidecar($"{sqlitePath}-shm", $"{backupPath}-shm", logger);
+
+            return (true, backupPath);
+        }
+        catch (Exception quarantineEx)
+        {
+            logger.LogCritical(
+                quarantineEx,
+                "SQLite compatibility cache is corrupted but could not be quarantined. " +
+                "Stop other Payroll Web/AttendanceService instances using {DatabasePath} " +
+                "and repair the file before restarting.",
+                sqlitePath);
+            throw;
+        }
+    }
+}
+
+static void TryMoveSqliteSidecar(
+    string source,
+    string destination,
+    ILogger logger)
+{
+    try
+    {
+        if (File.Exists(source))
+            File.Move(source, destination);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(
+            ex,
+            "Could not quarantine SQLite sidecar file {Source}.",
+            source);
+    }
 }
 
 
