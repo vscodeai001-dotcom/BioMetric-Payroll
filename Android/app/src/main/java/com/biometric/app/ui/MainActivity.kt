@@ -284,9 +284,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
 
     private fun setupAdminMap() {
-        // OSMDroid is initialized synchronously in BiometricApplication before
-        // this MapView is inflated. Re-assert the user agent here as a safety
-        // net for cached/older application processes.
+        // Keep the Admin dashboard map on the same stable OSMDroid tile path
+        // used by the working Employee map.
         runCatching {
             OsmConfig.getInstance().userAgentValue = "BioMetricPayroll_Android_" + packageName
             OsmConfig.getInstance().tileDownloadThreads = 4
@@ -294,22 +293,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
 
         val maps = listOf(binding.adminMapView, binding.commandCenterMapView)
+
         maps.forEach { map ->
             map.apply {
-                // Always allow the tile overlay to use the device network.
-                // The Employee map already proves the same OSMDroid tile stack
-                // works on this APK; the Admin dashboard additionally needs an
-                // explicit usable viewport because it is created inside a
-                // nested dashboard container.
                 setUseDataConnection(true)
                 setTileSource(adminOpenStreetMapSource())
                 setMultiTouchControls(true)
-
-                runCatching {
-                    tileProvider.clearTileCache()
-                }
-
-                setBackgroundColor(Color.TRANSPARENT)
 
                 zoomController.setVisibility(
                     CustomZoomButtonsController.Visibility.NEVER
@@ -318,15 +307,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 minZoomLevel = 3.0
                 maxZoomLevel = 20.0
                 controller.setZoom(13.0)
+                controller.setCenter(GeoPoint(11.9139, 79.8145))
 
-                controller.setCenter(
-                    GeoPoint(11.9139, 79.8145)
-                )
+                // Do not clear the tile cache here or after a delay.
+                // Clearing it after the first tiles are drawn can make the
+                // dashboard briefly show a real map and then turn into the
+                // card's flat background when the replacement tiles are not
+                // immediately available.
                 applyCurrentThemeToMap(this)
 
-                // NestedScrollView/card measurement can happen after the map is
-                // initialized. Recalculate its viewport after layout and again
-                // shortly after tiles begin loading.
                 addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
                     if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
                         post {
@@ -335,14 +324,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                         }
                     }
                 }
+
                 post {
                     invalidate()
                     controller.setCenter(mapCenterFallback(this))
-                    runCatching { tileProvider.clearTileCache() }
-                    invalidate()
                     postDelayed({
                         invalidate()
-                        runCatching { invalidate() }
                     }, 500L)
                     postDelayed({
                         invalidate()
@@ -350,7 +337,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
             }
         }
+
         setupAdminDashboardMapControls()
+
         lifecycleScope.launch {
             delay(800)
             _binding?.let { b ->
@@ -1000,7 +989,18 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun applyCurrentThemeToMap(mapView: MapView) {
         if ((resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES) {
-            mapView.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(floatArrayOf(0.25f, 0f, 0f, 0f, 0f, 0f, 0.25f, 0f, 0f, 0f, 0f, 0f, 0.25f, 0f, 30f, 0f, 0f, 0f, 1f, 0f)))
+            mapView.overlayManager.tilesOverlay.setColorFilter(
+                ColorMatrixColorFilter(
+                    floatArrayOf(
+                        0.25f, 0f, 0f, 0f, 0f,
+                        0f, 0.25f, 0f, 0f, 0f,
+                        0f, 0f, 0.25f, 0f, 30f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+            )
+        } else {
+            mapView.overlayManager.tilesOverlay.setColorFilter(null)
         }
     }
 

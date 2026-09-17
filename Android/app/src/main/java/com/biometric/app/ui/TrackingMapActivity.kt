@@ -220,7 +220,6 @@ class TrackingMapActivity : MotionBaseActivity() {
             setUseDataConnection(true)
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
-            runCatching { tileProvider.clearTileCache() }
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(16.0)
             
@@ -228,13 +227,17 @@ class TrackingMapActivity : MotionBaseActivity() {
             val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
             if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
                 overlayManager.tilesOverlay.setColorFilter(
-                    ColorMatrixColorFilter(floatArrayOf(
-                        0.25f, 0f, 0f, 0f, 0f,
-                        0f, 0.25f, 0f, 0f, 0f,
-                        0f, 0f, 0.25f, 0f, 30f,
-                        0f, 0f, 0f, 1f, 0f
-                    ))
+                    ColorMatrixColorFilter(
+                        floatArrayOf(
+                            0.25f, 0f, 0f, 0f, 0f,
+                            0f, 0.25f, 0f, 0f, 0f,
+                            0f, 0f, 0.25f, 0f, 30f,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
                 )
+            } else {
+                overlayManager.tilesOverlay.setColorFilter(null)
             }
         }
     }
