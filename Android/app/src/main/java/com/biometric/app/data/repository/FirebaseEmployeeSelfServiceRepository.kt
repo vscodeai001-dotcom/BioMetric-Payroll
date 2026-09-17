@@ -297,9 +297,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             "payroll_history", "tax_declarations", "fbp_declarations", "bonus_records" ->
                 ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
             "attendance_punches", "regularizations", "leave_requests" ->
-                ownerRef().child(table).orderByChild("staffId").equalTo(id)
+                ownerRef().child(table).orderByChild("staffId").equalTo(id.toString())
             "attendance", "salary_snapshots", "daily_summaries", "shift_schedules", "salary_payments", "resignation_requests", "advance_payments" ->
-                ownerRef().child(table).orderByChild("employeeId").equalTo(id)
+                ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
             else -> ownerRef().child(table)
         }
         return query.get().await().children.mapNotNull { mapper(it) }
@@ -584,7 +584,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun regularizations(): List<RegularizationDto> =
         readList("regularizations") { it.toRegularizationRequest() }
-            .filter { it.staffId == employeeId() || it.staffId == sessionStore.employeeId() }
+            .filter { it.staffId == employeeId() }
             .sortedByDescending { it.submittedAt }
             .map {
                 RegularizationDto(stableIntId(it.id), it.date, it.punchType.equals("IN", true),
@@ -753,7 +753,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 }
             }
         })
-        continuation.invokeOnCancellation { cancel() }
+        continuation.invokeOnCancellation { /* Firebase transaction cannot be cancelled safely here. */ }
     }
 
     private suspend fun notifyPortalChanged() {

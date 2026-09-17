@@ -47,7 +47,9 @@ class ShiftManagerActivity : AppCompatActivity() {
         shiftsJob = lifecycleScope.launch {
             firebaseSync.observeShiftSchedules().collectLatest { remoteRows ->
                 val names = repository.allEmployeesFlow.value
-                    .associate { it.employeeId.toIntOrNull() ?: 0 to it.name }
+                    .associate { employee ->
+                        (employee.employeeId.toIntOrNull() ?: 0) to employee.name
+                    }
 
                 val mapped = remoteRows.map {
                     AdminShiftDto(
@@ -78,7 +80,7 @@ class ShiftManagerActivity : AppCompatActivity() {
 
     private fun showAddShiftDialog() {
         val d = DialogAddShiftBinding.inflate(LayoutInflater.from(this))
-        val employees = repository.allEmployeesFlow.value.filter { !it.isDeleted }.sortedBy { it.name }
+        val employees = repository.allEmployeesFlow.value.filter { it.isActive }.sortedBy { it.name }
         d.etName.setText(employees.firstOrNull()?.employeeId?.toString().orEmpty())
         d.etDate.setText(String.format(Locale.US, "%tF", Date()))
         d.etDate.setOnClickListener { pickDate(d.etDate) }

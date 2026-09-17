@@ -89,7 +89,6 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var _binding: ActivityEmployeeHomeBinding? = null
     private val binding get() = _binding!!
 
-    @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
     @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
     @Inject lateinit var repository: MainRepository

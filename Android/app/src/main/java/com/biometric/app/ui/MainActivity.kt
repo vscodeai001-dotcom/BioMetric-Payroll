@@ -85,7 +85,6 @@ import android.view.animation.OvershootInterpolator
 import androidx.core.graphics.toColorInt
 import com.biometric.app.api.AdminFeatureSettingsDto
 import com.biometric.app.api.OsrmApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
@@ -109,7 +108,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var brandingManager: BrandingManager
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
 
     private lateinit var adapter: ShopAdapter
 

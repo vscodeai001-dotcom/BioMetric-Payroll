@@ -16,6 +16,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.core.content.edit
 import com.biometric.app.databinding.ActivitySettingsBinding
 import com.biometric.app.ui.viewmodel.MainViewModel
@@ -24,6 +25,7 @@ import com.biometric.app.util.HapticUtil
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 @AndroidEntryPoint

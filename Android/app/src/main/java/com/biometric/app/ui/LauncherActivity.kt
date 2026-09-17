@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.core.content.edit
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.sync.FirebaseAuthSecurityGate

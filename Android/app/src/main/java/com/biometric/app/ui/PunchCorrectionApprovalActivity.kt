@@ -9,7 +9,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.api.AdminPendingPunchDto
 import com.biometric.app.api.MobileApiService
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.R
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -20,7 +19,6 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class PunchCorrectionApprovalActivity : MotionBaseActivity() {
     @Inject lateinit var api: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
     private fun auth() = "Bearer ${sessionStore.token() ?: ""}"

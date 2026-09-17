@@ -3,12 +3,16 @@ package com.biometric.app.data.repository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalEmployeeDao
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.domain.location.TrackingWindowResolver
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.DatabaseReference
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,14 +25,14 @@ class TrackingScopeRepository @Inject constructor(
     private val trackingConfiguration: TrackingConfigurationRepository
 ) {
     data class Assignment(
-        val mode: String = TrackingConfigurationRepository.MODE_24_7,
+        val mode: String = TrackingWindowResolver.MODE_24_7,
         val customStart: String = "",
         val customEnd: String = "",
         val intervalSeconds: Int = 30,
         val enabled: Boolean = true
     ) {
         fun normalized(): Assignment = copy(
-            mode = mode.trim().uppercase().let { if (it == "SHIFT" || it == "CUSTOM" || it == TrackingConfigurationRepository.MODE_24_7) it else TrackingConfigurationRepository.MODE_24_7 },
+            mode = mode.trim().uppercase().let { if (it == "SHIFT" || it == "CUSTOM" || it == TrackingWindowResolver.MODE_24_7) it else TrackingWindowResolver.MODE_24_7 },
             intervalSeconds = intervalSeconds.coerceIn(15, 3600)
         )
     }
@@ -126,7 +130,7 @@ class TrackingScopeRepository @Inject constructor(
     }
 
     private fun parseAssignment(s: DataSnapshot): Assignment? = if (!s.exists()) null else Assignment(
-        mode = s.child("mode").getValue(String::class.java) ?: TrackingConfigurationRepository.MODE_24_7,
+        mode = s.child("mode").getValue(String::class.java) ?: TrackingWindowResolver.MODE_24_7,
         customStart = s.child("customStart").getValue(String::class.java) ?: "",
         customEnd = s.child("customEnd").getValue(String::class.java) ?: "",
         intervalSeconds = s.child("intervalSeconds").getValue(Int::class.java) ?: 30,
@@ -134,7 +138,7 @@ class TrackingScopeRepository @Inject constructor(
     ).normalized()
 
     private fun parseConfig(s: DataSnapshot) = TrackingConfigurationRepository.Config(
-        mode = s.child("mode").getValue(String::class.java) ?: TrackingConfigurationRepository.MODE_24_7,
+        mode = s.child("mode").getValue(String::class.java) ?: TrackingWindowResolver.MODE_24_7,
         customStart = s.child("customStart").getValue(String::class.java) ?: "",
         customEnd = s.child("customEnd").getValue(String::class.java) ?: "",
         intervalSeconds = s.child("intervalSeconds").getValue(Int::class.java) ?: 30,

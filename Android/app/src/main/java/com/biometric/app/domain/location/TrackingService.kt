@@ -147,51 +147,72 @@ class TrackingService : Service() {
         startAttendancePolicyGuard()
                 startShiftScheduleGuard()
 
-                val window = trackingWindowResolver.resolve()
-                if (!window.allowed) {
+                // TrackingWindowResolver.resolve() reads the employee shift
+                // schedule from Room and is suspendable. Resolve it on the
+                // service coroutine instead of blocking onStartCommand().
+                serviceScope.launch {
+                    val window = trackingWindowResolver.resolve()
+
+                    if (!window.allowed) {
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                            putBoolean("is_service_active_intended", true)
+                            putBoolean("tracking_waiting_for_shift", true)
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            stopTracking(
+                                "OUTSIDE_TRACKING_WINDOW",
+                                keepRecovery = true
+                            )
+                        }
+                        return@launch
+                    }
+
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putBoolean("tracking_waiting_for_shift", false)
+                    }
+
+                    if (!locationUpdatesStarted) {
+                        withContext(Dispatchers.Main) {
+                            startLocationUpdates()
+                        }
+                    }
+
+                    // Publish the GPS session before/alongside the first location.
+                    // Web's GeoLocationService uses this session boundary to accept
+                    // the Android GPS stream and run the exact existing geofence
+                    // attendance state machine. This avoids duplicating attendance
+                    // calculation logic on Android and prevents double punches.
+                    runCatching {
+                        firebaseSync.pushTrackingSessionStarted(
+                            employeeId = sessionStore.employeeId(),
+                            sessionId = sessionStore.gpsSessionId()
+                        )
+                    }.onFailure {
+                        Log.w(
+                            "TrackingService",
+                            "Unable to publish tracking session start",
+                            it
+                        )
+                    }
+
+                    // Firebase is the independent realtime transport. Tracking
+                    // does not require Payroll.Web, Render, or SignalR.
+                    if (!signalRStarted) {
+                        signalRStarted = true
+                        firebaseSync.startSync()
+                    }
+
+                    if (heartbeatJob?.isActive != true) {
+                        startHeartbeatLoop()
+                    }
+
+                    syncManager.schedulePeriodicSync()
+                    scheduleRestartTick()
+
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                         putBoolean("is_service_active_intended", true)
-                        putBoolean("tracking_waiting_for_shift", true)
                     }
-                    serviceScope.launch(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
-                    return START_STICKY
-                }
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                    putBoolean("tracking_waiting_for_shift", false)
-                }
-
-                if (!locationUpdatesStarted) {
-                    startLocationUpdates()
-                }
-
-                // Publish the GPS session before/alongside the first location.
-                // Web's GeoLocationService uses this session boundary to accept
-                // the Android GPS stream and run the exact existing geofence
-                // attendance state machine. This avoids duplicating attendance
-                // calculation logic on Android and prevents double punches.
-                serviceScope.launch {
-                    firebaseSync.pushTrackingSessionStarted(
-                        employeeId = sessionStore.employeeId(),
-                        sessionId = sessionStore.gpsSessionId()
-                    )
-                }
-
-                // Firebase is the independent realtime transport. Tracking
-                // does not require Payroll.Web, Render, or SignalR.
-                if (!signalRStarted) {
-                    signalRStarted = true
-                    firebaseSync.startSync()
-                }
-
-if (heartbeatJob?.isActive != true) {
-                    startHeartbeatLoop()
-                }
-
-                syncManager.schedulePeriodicSync()
-                scheduleRestartTick()
-                
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                    putBoolean("is_service_active_intended", true)
                 }
             }
             ACTION_REFRESH_WINDOW -> {

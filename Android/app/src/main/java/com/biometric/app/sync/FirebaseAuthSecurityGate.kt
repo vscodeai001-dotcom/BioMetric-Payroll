@@ -63,7 +63,7 @@ class FirebaseAuthSecurityGate @Inject constructor(
         }
 
         val employeeId = claims["employee_id"]?.toString()?.toIntOrNull() ?: 0
-        if (role == UserRole.STAFF) {
+        if (role == UserRole.STAFF.name) {
             if (employeeId <= 0) {
                 return Result(false, message = "Employee Firebase account is missing employee_id provisioning.")
             }

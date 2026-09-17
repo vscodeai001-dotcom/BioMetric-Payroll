@@ -12,7 +12,6 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import com.biometric.app.R
-import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.databinding.ActivityReliabilitySetupBinding
 import com.biometric.app.util.BatteryOptimizationHelper
@@ -26,7 +25,6 @@ import javax.inject.Inject
 class ReliabilitySetupActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityReliabilitySetupBinding
-    @Inject lateinit var sessionStore: MobileSessionStore
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()

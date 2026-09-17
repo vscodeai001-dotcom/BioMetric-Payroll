@@ -107,7 +107,7 @@ class LeaveManagementActivity : AppCompatActivity() {
                 if (emp == null || date.text.isNullOrBlank()) { toast("Employee and date are required ⚠️"); return@setPositiveButton }
                 lifecycleScope.launch {
                     try {
-                        val req = CreateAdminLeaveRequest(emp.employeeId, date.text.toString(), type.selectedItem.toString(), half.isChecked, notes.text.toString().ifBlank { null })
+                        val req = CreateAdminLeaveRequest(emp.employeeId.toIntOrNull() ?: 0, date.text.toString(), type.selectedItem.toString(), half.isChecked, notes.text.toString().ifBlank { null })
                         val r = mobileApi.createAdminLeave(apiAuth, req)
                         if (!r.isSuccessful) throw IllegalStateException("Create failed (${r.code()})")
                         toast("Approved leave added ✅")
@@ -116,7 +116,7 @@ class LeaveManagementActivity : AppCompatActivity() {
             }.setNegativeButton("Cancel", null).show()
     }
 
-    private fun allEmployees() = repository.allEmployeesFlow.value.filter { !it.isDeleted }.sortedBy { it.name }
+    private fun allEmployees() = repository.allEmployeesFlow.value.filter { it.isActive }.sortedBy { it.name }
     private fun pickDate(target: EditText) { val c = Calendar.getInstance(); DatePickerDialog(this, { _, y, m, d -> target.setText(String.format(Locale.US, "%04d-%02d-%02d", y, m + 1, d)) }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show() }
     private fun formatDate(v: Long) = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(v))
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
