@@ -29,6 +29,9 @@ class SignalRManager @Inject constructor(
     private var applicationJob: Job? = null
     private var connectionJob: Job? = null
     private var locationListener: ValueEventListener? = null
+    private var employeeListener: ValueEventListener? = null
+    private val ownerEmployeeIds = mutableSetOf<Int>()
+    private var lastOwnerLiveLocations: Map<Int, LiveLocation> = emptyMap()
     @Volatile private var activeOwnerUid: String? = null
 
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 64)
@@ -36,6 +39,18 @@ class SignalRManager @Inject constructor(
 
     private val _liveLocations = MutableStateFlow<Map<Int, LiveLocation>>(emptyMap())
     val liveLocations = _liveLocations.asStateFlow()
+
+    private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
+        val filtered = if (ownerEmployeeIds.isEmpty()) {
+            // Never expose malformed/scaffold live records. A valid employee id
+            // is required before an Admin map marker can be rendered.
+            raw.filterKeys { it > 0 }
+        } else {
+            raw.filterKeys { it > 0 && ownerEmployeeIds.contains(it) }
+        }
+        _liveLocations.value = filtered
+        _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+    }
 
     @Synchronized
     fun start() {
@@ -73,10 +88,29 @@ class SignalRManager @Inject constructor(
             override fun onDataChange(snapshot: DataSnapshot) {
                 val locations = mutableMapOf<Int, LiveLocation>()
 
-                val children = if (snapshot.hasChildren() && snapshot.getValue(FirebaseLiveLocation::class.java) == null) snapshot.children.toList() else listOf(snapshot)
+                val children = if (
+                    snapshot.hasChildren() &&
+                    snapshot.getValue(FirebaseLiveLocation::class.java) == null
+                ) snapshot.children.toList() else listOf(snapshot)
+
                 for (child in children) {
-                    val employeeId = (child.key?.toIntOrNull() ?: child.getValue(FirebaseLiveLocation::class.java)?.EmployeeId) ?: continue
+                    val keyEmployeeId = child.key?.toIntOrNull()
                     val value = child.getValue(FirebaseLiveLocation::class.java) ?: continue
+                    val payloadEmployeeId = value.EmployeeId
+
+                    // tracking/live is keyed by the canonical EmployeeId. Reject
+                    // malformed/scaffold nodes such as Staff #0 and reject any
+                    // payload whose EmployeeId disagrees with its numeric key.
+                    val employeeId = when {
+                        keyEmployeeId != null && keyEmployeeId > 0 -> {
+                            if (payloadEmployeeId > 0 && payloadEmployeeId != keyEmployeeId) continue
+                            keyEmployeeId
+                        }
+                        keyEmployeeId == null && payloadEmployeeId > 0 -> payloadEmployeeId
+                        else -> continue
+                    }
+
+                    if (employeeId <= 0) continue
 
                     locations[employeeId] = LiveLocation(
                         employeeId = employeeId,
@@ -92,8 +126,8 @@ class SignalRManager @Inject constructor(
                     )
                 }
 
-                _liveLocations.value = locations
-                _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+                lastOwnerLiveLocations = locations
+                publishOwnerScopedLocations(locations)
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -107,6 +141,35 @@ class SignalRManager @Inject constructor(
 
         locationListener = listener
         liveRef.addValueEventListener(listener)
+
+        // Authoritative employee binding for the current tenant. Admin maps
+        // must render only employees that actually exist under this owner.
+        val employeesRef = firebaseSync.getGlobalRef()
+            .child("owners")
+            .child(ownerUid)
+            .child("employees")
+        val employeesListener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val ids = mutableSetOf<Int>()
+                snapshot.children.forEach { child ->
+                    val keyId = child.key?.toIntOrNull()
+                    val rowId = child.child("employeeId").value?.toString()?.toIntOrNull()
+                    val id = keyId ?: rowId ?: 0
+                    if (id > 0) ids.add(id)
+                }
+                synchronized(ownerEmployeeIds) {
+                    ownerEmployeeIds.clear()
+                    ownerEmployeeIds.addAll(ids)
+                    publishOwnerScopedLocations(lastOwnerLiveLocations)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("SignalRManager", "Owner employee binding listener cancelled", error.toException())
+            }
+        }
+        employeeListener = employeesListener
+        employeesRef.addValueEventListener(employeesListener)
 
         connectionJob = managerScope.launch {
             firebaseSync.syncStatus.collect { connected ->
@@ -168,6 +231,9 @@ class SignalRManager @Inject constructor(
         } ?: 0L
     }.getOrDefault(0L)
 
+    private fun employeesRefForStop(ownerUid: String): DatabaseReference =
+        firebaseSync.getGlobalRef().child("owners").child(ownerUid).child("employees")
+
     @Synchronized
     fun stop() {
         val ownerUid = activeOwnerUid
@@ -183,9 +249,13 @@ class SignalRManager @Inject constructor(
                     } else ref
                 }
             locationListener?.let { liveRef.removeEventListener(it) }
+            employeeListener?.let { employeesRefForStop(ownerUid).removeEventListener(it) }
         }
 
         locationListener = null
+        employeeListener = null
+        synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
+        lastOwnerLiveLocations = emptyMap()
         applicationJob?.cancel()
         applicationJob = null
         connectionJob?.cancel()

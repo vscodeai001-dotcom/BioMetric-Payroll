@@ -637,7 +637,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             }
 
             locations.forEach { loc ->
+                if (loc.employeeId <= 0) return@forEach
                 val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
+                if (emp == null) {
+                    Log.w("MainActivity", "Ignoring live GPS for unlinked employeeId=${loc.employeeId} owner-scoped employee cache")
+                    return@forEach
+                }
                 val status = getLocStatus(loc)
                 val isFilteredOut = statusFilter != "All" && statusFilter != status
                 if (isFilteredOut) {

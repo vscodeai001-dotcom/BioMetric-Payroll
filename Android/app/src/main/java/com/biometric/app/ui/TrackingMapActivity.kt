@@ -148,14 +148,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                 }
                 else -> {
                     binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(
-                        ColorMatrixColorFilter(floatArrayOf(
-                            0.25f, 0f, 0f, 0f, 0f,
-                            0f, 0.25f, 0f, 0f, 0f,
-                            0f, 0f, 0.25f, 0f, 30f,
-                            0f, 0f, 0f, 1f, 0f
-                        ))
-                    )
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
             }
             binding.mapview.invalidate()
@@ -201,7 +194,6 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
-        binding.mapview.requestLayout()
         binding.mapview.postDelayed({
             binding.mapview.invalidate()
             if (officeLat != 0.0 && officeLon != 0.0) {
@@ -221,24 +213,10 @@ class TrackingMapActivity : MotionBaseActivity() {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+            minZoomLevel = 3.0
+            maxZoomLevel = 20.0
+            overlayManager.tilesOverlay.setColorFilter(null)
             controller.setZoom(16.0)
-            
-            // Map Styling
-            val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
-                overlayManager.tilesOverlay.setColorFilter(
-                    ColorMatrixColorFilter(
-                        floatArrayOf(
-                            0.25f, 0f, 0f, 0f, 0f,
-                            0f, 0.25f, 0f, 0f, 0f,
-                            0f, 0f, 0.25f, 0f, 30f,
-                            0f, 0f, 0f, 1f, 0f
-                        )
-                    )
-                )
-            } else {
-                overlayManager.tilesOverlay.setColorFilter(null)
-            }
         }
     }
 
