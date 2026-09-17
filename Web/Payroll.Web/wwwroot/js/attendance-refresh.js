@@ -84,6 +84,7 @@ window.attendanceRefresh = (function () {
             const liveRef = firebaseDatabase.ref('tracking/live');
             liveRef.on('child_added', onFirebaseLiveLocation);
             liveRef.on('child_changed', onFirebaseLiveLocation);
+            liveRef.on('child_removed', onFirebaseLiveLocationRemoved);
 
             const ownerUid = authResult.ownerUid || authResult.ownerUID || null;
             const realtimeOwnerUid = ownerUid || 'biometricpayroll';
@@ -123,6 +124,26 @@ window.attendanceRefresh = (function () {
             scheduleRetry();
         } finally {
             firebaseStarting = false;
+        }
+    }
+
+    async function onFirebaseLiveLocationRemoved(snapshot) {
+        try {
+            const data = snapshot.val() || {};
+            const employeeId = Number(data.EmployeeId ?? data.employeeId ?? snapshot.key ?? 0);
+            if (!Number.isFinite(employeeId) || employeeId <= 0) return;
+
+            const ended = {
+                EmployeeId: employeeId,
+                SessionId: data.SessionId ?? data.sessionId ?? '',
+                EndedAtUtc: new Date().toISOString(),
+                EndReason: data.EndReason ?? data.endReason ?? 'FIREBASE_LIVE_REMOVED'
+            };
+
+            window.dispatchEvent(new CustomEvent('location-data-removed', { detail: ended }));
+            await notifyListeners('SessionEnded', ended);
+        } catch (error) {
+            console.warn('Firebase live-location removal callback failed.', error);
         }
     }
 

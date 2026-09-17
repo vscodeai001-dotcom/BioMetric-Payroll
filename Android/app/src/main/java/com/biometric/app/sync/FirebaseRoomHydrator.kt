@@ -68,13 +68,22 @@ class FirebaseRoomHydrator @Inject constructor(
     private var hydrationJob: Job? = null
     private val listeners = mutableListOf<Pair<Query, ChildEventListener>>()
     private val valueListeners = mutableListOf<Pair<Query, ValueEventListener>>()
+    @Volatile private var activeOwnerUid: String? = null
 
     @Synchronized
     fun start() {
-        if (hydrationJob?.isActive == true) return
         if (!firebaseSync.isAuthenticated()) return
 
+        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+
+        if (hydrationJob?.isActive == true && activeOwnerUid == ownerUid) return
+
+        if (activeOwnerUid != null && activeOwnerUid != ownerUid) {
+            stop()
+        }
+
         firebaseSync.startSync()
+        activeOwnerUid = ownerUid
 
         hydrationJob = scope.launch {
             // Core employee/self-service tables are hydrated from raw snapshots.
@@ -356,10 +365,18 @@ class FirebaseRoomHydrator @Inject constructor(
     fun stop() {
         hydrationJob?.cancel()
         hydrationJob = null
-        listeners.forEach { (query, listener) -> query.removeEventListener(listener) }
+
+        listeners.forEach { (query, listener) ->
+            query.removeEventListener(listener)
+        }
         listeners.clear()
-        valueListeners.forEach { (query, listener) -> query.removeEventListener(listener) }
+
+        valueListeners.forEach { (query, listener) ->
+            query.removeEventListener(listener)
+        }
         valueListeners.clear()
+
+        activeOwnerUid = null
     }
 
     private fun DataSnapshot.childValue(name: String): Any? {

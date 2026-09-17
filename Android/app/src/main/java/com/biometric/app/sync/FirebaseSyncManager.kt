@@ -88,12 +88,47 @@ class FirebaseSyncManager @Inject constructor(
         return database.child("owners").child(uid)
     }
 
-    private var hasInitializedSync = false
+    @Volatile
+    private var initializedOwnerUid: String? = null
 
+    private fun syncedOwnerTables(ref: DatabaseReference): List<DatabaseReference> = listOf(
+        ref.child("employees"),
+        ref.child("shops"),
+        ref.child("attendance"),
+        ref.child("attendance_punches"),
+        ref.child("advance_payments"),
+        ref.child("employee_history"),
+        ref.child("shop_closed_days"),
+        ref.child("regularizations"),
+        ref.child("leave_requests"),
+        ref.child("resignation_requests"),
+        ref.child("salary_snapshots"),
+        ref.child("audit_logs"),
+        ref.child("daily_summaries"),
+        ref.child("shift_schedules"),
+        ref.child("payroll_history"),
+        ref.child("payroll_previews"),
+        ref.child("payroll_finalization"),
+        ref.child("year_end_summaries"),
+        ref.child("bonus_records"),
+        ref.child("tax_declarations"),
+        ref.child("fbp_components"),
+        ref.child("fbp_declarations"),
+        ref.child("feature_settings"),
+        ref.child("company_settings")
+    )
+
+    @Synchronized
     fun startSync() {
-        if (hasInitializedSync) return
-        val ref = getOwnerRef() ?: return
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+        if (initializedOwnerUid == ownerUid) return
 
+        initializedOwnerUid?.let { previousOwner ->
+            val oldRef = database.child("owners").child(previousOwner)
+            syncedOwnerTables(oldRef).forEach { it.keepSynced(false) }
+        }
+
+        val ref = database.child("owners").child(ownerUid)
         ref.child("employees").keepSynced(true)
         ref.child("shops").keepSynced(true)
         ref.child("attendance").keepSynced(true)
@@ -127,8 +162,7 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("fbp_declarations").keepSynced(true)
         ref.child("feature_settings").keepSynced(true)
         ref.child("company_settings").keepSynced(true)
-
-        hasInitializedSync = true
+        initializedOwnerUid = ownerUid
     }
 
     inline fun <reified T : Any> getDataFlow(table: String): Flow<List<T>> = callbackFlow {
@@ -399,6 +433,17 @@ class FirebaseSyncManager @Inject constructor(
                         "State" to "ENDED",
                         "EndedAtUtc" to Date().toInstant().toString(),
                         "Source" to "ANDROID_FIREBASE"
+                    )
+                ).await()
+
+                // A ended session must not leave a ghost marker in either
+                // compatibility or owner-scoped live tracking. The transaction
+                // above only commits when this session is still the authoritative
+                // session, so this cannot remove a newer session's marker.
+                getGlobalRef().updateChildren(
+                    mapOf(
+                        "tracking/live/$employeeId" to null,
+                        "owners/$ownerUid/tracking/live/$employeeId" to null
                     )
                 ).await()
             }

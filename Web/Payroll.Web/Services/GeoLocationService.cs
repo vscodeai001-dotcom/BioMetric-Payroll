@@ -1003,9 +1003,38 @@ public class GeoLocationService
 
                 await db.SaveChangesAsync();
 
-                // Remove only the session being ended. A newer login/session
-                // can never be removed by an old logout request.
+                // Remove only the ended session from the process-local store.
+                // Before deleting the Firebase live marker, verify that no newer
+                // active session exists for the same employee.
                 LiveLocationStore.Remove(employeeId, sessionId);
+
+                var newerActiveSessionExists = await db.EmployeeGpsSessions
+                    .AsNoTracking()
+                    .AnyAsync(x =>
+                        x.EmployeeId == employeeId &&
+                        x.EndedAtUtc == null &&
+                        x.SessionId != sessionId);
+
+                if (!newerActiveSessionExists)
+                {
+                    try
+                    {
+                        var ownerUid = _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee");
+                        await _firebase.DeleteGlobalRecordAsync($"tracking/live/{employeeId}");
+                        if (!string.IsNullOrWhiteSpace(ownerUid))
+                        {
+                            await _firebase.DeleteGlobalRecordAsync(
+                                $"owners/{ownerUid}/tracking/live/{employeeId}");
+                        }
+                    }
+                    catch (Exception firebaseEx)
+                    {
+                        _logger.LogWarning(
+                            firebaseEx,
+                            "Failed to remove ended GPS live marker for employee {EmployeeId}",
+                            employeeId);
+                    }
+                }
 
                 _logger.LogInformation(
                     "GPS session ended. EmployeeId={EmployeeId}, SessionId={SessionId}, Reason={Reason}",

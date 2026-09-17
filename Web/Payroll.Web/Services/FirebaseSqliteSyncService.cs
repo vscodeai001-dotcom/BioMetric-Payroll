@@ -689,7 +689,28 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         CancellationToken ct)
     {
         var json = await _firebase.GetOwnerTableAsync(ownerUid, firebaseTable, ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object)
+        if (json is null)
+            return false;
+
+        // Firebase REST can serialize numeric-keyed collections as arrays.
+        // Normalize that transport representation to the existing object-shaped
+        // upsert pipeline without changing the database schema.
+        if (json.Value.ValueKind == JsonValueKind.Array)
+        {
+            var normalized = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            var index = 0;
+            foreach (var item in json.Value.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Null)
+                    normalized[index.ToString(CultureInfo.InvariantCulture)] = item.Clone();
+                index++;
+            }
+
+            var normalizedJson = JsonSerializer.SerializeToElement(normalized);
+            return await UpsertTableAsync(entityName, normalizedJson, ct);
+        }
+
+        if (json.Value.ValueKind != JsonValueKind.Object)
             return false;
 
         return await UpsertTableAsync(entityName, json.Value, ct);

@@ -2661,6 +2661,8 @@
 
     private int selectedEmployeeId;
     private int currentOfficeRadius = 100;
+    private double currentOfficeLatitude;
+    private double currentOfficeLongitude;
 
     private List<EmployeeLocationHistory> selectedHistory = new();
     private List<GeoPunchAudit> selectedPunchAudits = new();
@@ -2771,16 +2773,11 @@
                 needsAuthoritativeRefresh = true;
             }
 
-            // Firebase is the realtime source for the incoming GPS fix.
-            // Never block a brand-new live employee on the SQL/compatibility
-            // snapshot. The Firebase packet is already an authoritative live
-            // coordinate and must be rendered immediately.
             if (needsAuthoritativeRefresh)
             {
-                // Keep the packet on-screen immediately. A later application
-                // event/session event can reconcile the authoritative DB state.
-                mapNeedsUpdate = true;
-                await InvokeAsync(StateHasChanged);
+                // Session changes are reconciled from EmployeeGpsSessions so an
+                // old session can never remain on the map or replace a newer one.
+                await RefreshLocations();
             }
             else
             {
@@ -2932,12 +2929,6 @@
             return false;
         }
 
-        if (TryGetJsonInt(json, "AllowedRadiusMeters", out var newRadius) &&
-            newRadius > 0 && newRadius != currentOfficeRadius)
-        {
-            currentOfficeRadius = newRadius;
-        }
-
         if (!TryGetJsonDouble(json, "Latitude", out var latitude) ||
             !TryGetJsonDouble(json, "Longitude", out var longitude) ||
             !double.IsFinite(latitude) ||
@@ -2948,6 +2939,28 @@
         {
             // Never let malformed GPS data reach the map.
             return false;
+        }
+
+        // The Web map must never trust an older cached IsWithinAllowedRadius
+        // flag when a fresh coordinate arrives. Recalculate the presentation
+        // state against the same current office/radius used to draw the circle.
+        // This is display synchronization only. Attendance/geofence business
+        // calculations remain in GeoLocationService.
+        var calculatedDistance = 0d;
+        var calculatedWithin = false;
+        var hasCurrentOffice =
+            double.IsFinite(currentOfficeLatitude) &&
+            double.IsFinite(currentOfficeLongitude) &&
+            currentOfficeLatitude != 0 &&
+            currentOfficeLongitude != 0 &&
+            currentOfficeRadius > 0;
+
+        if (hasCurrentOffice)
+        {
+            calculatedDistance = CalculateDistanceMeters(
+                latitude, longitude,
+                currentOfficeLatitude, currentOfficeLongitude);
+            calculatedWithin = calculatedDistance <= currentOfficeRadius + 1;
         }
 
         var sessionId = Guid.Empty;
@@ -2977,9 +2990,9 @@
                 Latitude = latitude,
                 Longitude = longitude,
                 AccuracyMeters = TryGetJsonDouble(json, "AccuracyMeters", out var accVal) ? accVal : 0,
-                DistanceMeters = TryGetJsonDouble(json, "DistanceMeters", out var distVal) ? distVal : 0,
-                AllowedRadiusMeters = TryGetJsonInt(json, "AllowedRadiusMeters", out var radVal) ? radVal : 0,
-                IsWithinAllowedRadius = TryGetJsonBool(json, "IsWithinAllowedRadius", out var withinVal) ? withinVal : true,
+                DistanceMeters = hasCurrentOffice ? calculatedDistance : (TryGetJsonDouble(json, "DistanceMeters", out var distVal) ? distVal : 0),
+                AllowedRadiusMeters = hasCurrentOffice ? currentOfficeRadius : (TryGetJsonInt(json, "AllowedRadiusMeters", out var radVal) ? radVal : 0),
+                IsWithinAllowedRadius = hasCurrentOffice ? calculatedWithin : (TryGetJsonBool(json, "IsWithinAllowedRadius", out var withinVal) ? withinVal : true),
                 LastUpdatedUtc = payloadAtUtc,
                 SessionStartedUtc = TryGetJsonDateTime(json, "SessionStartedUtc", out var startVal) ? startVal : DateTime.UtcNow,
                 SessionId = sessionId
@@ -3010,26 +3023,11 @@
             existing.SessionId != Guid.Empty &&
             existing.SessionId != sessionId)
         {
-            // A new Firebase GPS session supersedes the previous live session.
-            // Accept it immediately instead of waiting for the compatibility
-            // database snapshot to catch up.
-            var replacement = new LiveEmployeeLocation
-            {
-                EmployeeId = employeeId,
-                Latitude = latitude,
-                Longitude = longitude,
-                AccuracyMeters = TryGetJsonDouble(json, "AccuracyMeters", out var newAcc) ? newAcc : 0,
-                DistanceMeters = TryGetJsonDouble(json, "DistanceMeters", out var newDist) ? newDist : 0,
-                AllowedRadiusMeters = TryGetJsonInt(json, "AllowedRadiusMeters", out var newRadiusVal) ? newRadiusVal : currentOfficeRadius,
-                IsWithinAllowedRadius = TryGetJsonBool(json, "IsWithinAllowedRadius", out var newWithin) ? newWithin : true,
-                LastUpdatedUtc = payloadAtUtc,
-                SessionStartedUtc = TryGetJsonDateTime(json, "SessionStartedUtc", out var newStart) ? newStart : DateTime.UtcNow,
-                SessionId = sessionId
-            };
-
-            locations[existingIndex] = replacement;
-            needsAuthoritativeRefresh = false;
-            return true;
+            // Never decide which session is newer from packet arrival order.
+            // Re-read EmployeeGpsSessions and accept only its newest active
+            // session. This prevents an old/stale marker from reappearing.
+            needsAuthoritativeRefresh = true;
+            return false;
         }
 
         // LiveEmployeeLocation intentionally exposes init-only properties.
@@ -3042,15 +3040,21 @@
             AccuracyMeters = TryGetJsonDouble(json, "AccuracyMeters", out var accuracyVal)
                 ? accuracyVal
                 : existing.AccuracyMeters,
-            DistanceMeters = TryGetJsonDouble(json, "DistanceMeters", out var distanceVal)
-                ? distanceVal
-                : existing.DistanceMeters,
-            AllowedRadiusMeters = TryGetJsonInt(json, "AllowedRadiusMeters", out var radiusVal)
-                ? radiusVal
-                : existing.AllowedRadiusMeters,
-            IsWithinAllowedRadius = TryGetJsonBool(json, "IsWithinAllowedRadius", out var updatedWithinVal)
-                ? updatedWithinVal
-                : existing.IsWithinAllowedRadius,
+            DistanceMeters = hasCurrentOffice
+                ? calculatedDistance
+                : (TryGetJsonDouble(json, "DistanceMeters", out var distanceVal)
+                    ? distanceVal
+                    : existing.DistanceMeters),
+            AllowedRadiusMeters = hasCurrentOffice
+                ? currentOfficeRadius
+                : (TryGetJsonInt(json, "AllowedRadiusMeters", out var radiusVal)
+                    ? radiusVal
+                    : existing.AllowedRadiusMeters),
+            IsWithinAllowedRadius = hasCurrentOffice
+                ? calculatedWithin
+                : (TryGetJsonBool(json, "IsWithinAllowedRadius", out var updatedWithinVal)
+                    ? updatedWithinVal
+                    : existing.IsWithinAllowedRadius),
             LastUpdatedUtc = TryGetJsonDateTime(json, "LastUpdatedUtc", out var updatedTimeVal)
                 ? updatedTimeVal
                 : DateTime.UtcNow,
@@ -3308,6 +3312,11 @@
                 await using var db =
                     await DbFactory.CreateDbContextAsync();
 
+                var office = await GetOfficeLocation();
+                currentOfficeLatitude = office.Latitude;
+                currentOfficeLongitude = office.Longitude;
+                currentOfficeRadius = office.Radius;
+
                 // EmployeeGpsSessions is the authoritative lifecycle source.
                 // Only EndedAtUtc == null sessions are allowed into the live
                 // collection, and only the newest active session per employee
@@ -3368,9 +3377,11 @@
                         Latitude = lat,
                         Longitude = lng,
                         AccuracyMeters = session.LastAccuracyMeters ?? 0,
-                        DistanceMeters = session.LastDistanceFromOfficeMeters ?? 0,
-                        AllowedRadiusMeters = session.LastAllowedRadiusMeters ?? 0,
-                        IsWithinAllowedRadius = session.LastIsWithinAllowedRadius ?? false,
+                        DistanceMeters = CalculateDistanceMeters(
+                            lat, lng, currentOfficeLatitude, currentOfficeLongitude),
+                        AllowedRadiusMeters = currentOfficeRadius,
+                        IsWithinAllowedRadius = CalculateDistanceMeters(
+                            lat, lng, currentOfficeLatitude, currentOfficeLongitude) <= currentOfficeRadius + 1,
                         LastUpdatedUtc = session.LastUpdateAtUtc,
                         SessionStartedUtc = session.StartedAtUtc,
                         SessionId = session.SessionId
@@ -3379,10 +3390,6 @@
 
                 locations.Clear();
                 locations.AddRange(snapshot);
-
-                // Initialize currentOfficeRadius from DB on first load/refresh
-                var office = await GetOfficeLocation();
-                currentOfficeRadius = office.Radius;
 
                 lastRefresh = DateTime.Now;
                 mapNeedsUpdate = true;
@@ -3585,6 +3592,21 @@
         }
     }
 
+
+    private static double CalculateDistanceMeters(
+        double lat1, double lon1,
+        double lat2, double lon2)
+    {
+        const double earthRadiusMeters = 6371000d;
+        var dLat = (lat2 - lat1) * Math.PI / 180d;
+        var dLon = (lon2 - lon1) * Math.PI / 180d;
+        var a =
+            Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+            Math.Cos(lat1 * Math.PI / 180d) *
+            Math.Cos(lat2 * Math.PI / 180d) *
+            Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return earthRadiusMeters * 2d * Math.Atan2(Math.Sqrt(a), Math.Sqrt(Math.Max(0d, 1d - a)));
+    }
 
     private async Task<(double Latitude, double Longitude, int Radius)>
         GetOfficeLocation()

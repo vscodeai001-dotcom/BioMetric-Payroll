@@ -29,6 +29,7 @@ class SignalRManager @Inject constructor(
     private var applicationJob: Job? = null
     private var connectionJob: Job? = null
     private var locationListener: ValueEventListener? = null
+    @Volatile private var activeOwnerUid: String? = null
 
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 64)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
@@ -39,9 +40,13 @@ class SignalRManager @Inject constructor(
     @Synchronized
     fun start() {
         if (!sessionStore.isLoggedIn() && !firebaseSync.isAuthenticated()) return
-        if (applicationJob?.isActive == true) return
+
+        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+        if (applicationJob?.isActive == true && activeOwnerUid == ownerUid) return
+        if (activeOwnerUid != null && activeOwnerUid != ownerUid) stop()
 
         firebaseSync.startSync()
+        activeOwnerUid = ownerUid
 
         applicationJob = managerScope.launch {
             firebaseSync.applicationEventsFlow().collect { event ->
@@ -51,8 +56,6 @@ class SignalRManager @Inject constructor(
             }
         }
 
-        val ownerUid = firebaseSync.getOwnerUid()
-        if (ownerUid.isNullOrBlank()) return
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
         val liveRef = firebaseSync.getGlobalRef()
@@ -165,24 +168,30 @@ class SignalRManager @Inject constructor(
         } ?: 0L
     }.getOrDefault(0L)
 
+    @Synchronized
     fun stop() {
-        val ownerUid = firebaseSync.getOwnerUid()
+        val ownerUid = activeOwnerUid
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
-        val liveRef = ownerUid?.let {
-            firebaseSync.getGlobalRef()
-                .child("owners").child(it).child("tracking").child("live")
-                .let { ref -> if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) ref.child(employeeId.toString()) else ref }
+
+        if (!ownerUid.isNullOrBlank()) {
+            val liveRef = firebaseSync.getGlobalRef()
+                .child("owners").child(ownerUid).child("tracking").child("live")
+                .let { ref ->
+                    if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) {
+                        ref.child(employeeId.toString())
+                    } else ref
+                }
+            locationListener?.let { liveRef.removeEventListener(it) }
         }
 
-        if (liveRef != null) locationListener?.let { liveRef.removeEventListener(it) }
         locationListener = null
-
         applicationJob?.cancel()
         applicationJob = null
-
         connectionJob?.cancel()
         connectionJob = null
+        _liveLocations.value = emptyMap()
+        activeOwnerUid = null
     }
 
     data class SessionEndedEvent(

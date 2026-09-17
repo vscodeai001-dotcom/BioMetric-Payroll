@@ -201,6 +201,7 @@ builder.Services.AddSingleton<
 
 // Background service broadcasting location health for admin dashboards
 builder.Services.AddHostedService<LocationHealthService>();
+builder.Services.AddHostedService<GpsSessionCleanupHostedService>();
 
 
 // ============================================================
@@ -501,12 +502,11 @@ builder.Services.Configure<
 builder.Services.ConfigureApplicationCookie(
     options =>
     {
-        // Session cookie lifetime: very long to avoid prompting users to
-        // reload / re-authenticate during normal usage. Adjust per policy.
-        options.ExpireTimeSpan = TimeSpan.FromDays(3650); // ~10 years
-
-        // Sliding expiration: refresh the cookie timeout
-        // on every request (including API calls from GPS watcher)
+        // Automatic inactivity lifecycle: keep active users signed in while
+        // they are using the application, but do not leave an abandoned admin,
+        // employee, or SuperAdmin browser session alive for years.
+        // Sliding expiration extends an actively used session.
+        options.ExpireTimeSpan = TimeSpan.FromHours(12);
         options.SlidingExpiration = true;
 
         // Cookie security settings

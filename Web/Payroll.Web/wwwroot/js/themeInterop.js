@@ -3163,10 +3163,46 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             const marker =
                 state.markers[employeeId];
 
+            const incomingSession = String(data.SessionId ?? data.sessionId ?? '');
+            const currentSession = String(state.markerSessions?.[employeeId] || '');
+            if (incomingSession && currentSession && incomingSession !== currentSession) {
+                // A session boundary must be reconciled by Blazor against the
+                // authoritative EmployeeGpsSessions table. Never move a marker
+                // using a late packet from an old session.
+                return;
+            }
+
             const target = [
                 latitude,
                 longitude
             ];
+
+            const office = state.office;
+            const radius = Number(state.lastOfficeRadius) || 0;
+            let realtimeWithin = Boolean(data.IsWithinAllowedRadius ?? data.isWithinAllowedRadius);
+            if (Array.isArray(office) && office.length === 2 && radius > 0 &&
+                typeof window.payrollHaversineMeters === 'function') {
+                const liveDistance = window.payrollHaversineMeters(target, office);
+                realtimeWithin = liveDistance <= radius + 1;
+            }
+
+            const metaName = String(marker._adminEmployeeName || 'Employee').trim();
+            const metaParts = metaName.split(/\s+/).filter(Boolean);
+            const metaInitials = metaParts.length === 1
+                ? metaParts[0].slice(0, 1)
+                : (metaParts[0][0] + metaParts[metaParts.length - 1][0]);
+            const realtimeIcon = L.divIcon({
+                className: 'payroll-user-marker',
+                html: '<div class="payroll-map-user payroll-map-user-' +
+                    (realtimeWithin ? 'within' : 'outside') + '">' +
+                    '<span class="payroll-map-user-initials">' +
+                    window.escapeAdminHtml(metaInitials.toUpperCase()) + '</span>' +
+                    '<span class="payroll-map-user-status"></span></div>',
+                iconSize: [46, 54],
+                iconAnchor: [23, 54]
+            });
+            marker.setIcon(realtimeIcon);
+            marker._adminWithinRange = realtimeWithin;
 
             const displayItems =
                 typeof window.payrollBuildAdminMarkerDisplayPositions === 'function'
@@ -3538,7 +3574,10 @@ window.updateAdminLiveStaffMap =
                     roadRouteLines: {},
                     roadRouteCasings: {},
                     journeyStartedAt: {},
-                     realtimeLastAt: {}
+                    realtimeLastAt: {},
+                    markerSessions: {},
+                    office: office.slice(),
+                    lastOfficeRadius: 0
                 };
 
                 window.adminLiveMaps[mapId] =
@@ -3629,9 +3668,12 @@ window.updateAdminLiveStaffMap =
                         delete state.roadRouteCasings[id];
                         delete state.routeStates[id];
                         delete state.journeyStartedAt[id];
+                        delete state.markerSessions[id];
                     }
                 }
             );
+
+            state.office = office.slice();
 
             const staffSignature =
                 liveStaff
@@ -3755,6 +3797,7 @@ window.updateAdminLiveStaffMap =
                         : (nameParts[0][0] + nameParts[nameParts.length - 1][0]);
                     const avatarClass = withinRange ? 'within' : 'outside';
                     const statusDotClass = status === 'stale' ? ' stale' : (status === 'offline' ? ' offline' : '');
+                    state.markerSessions[employeeId] = String(x.sessionId || x.SessionId || '');
 
                     const icon =
                         L.divIcon({
@@ -3915,6 +3958,10 @@ window.updateAdminLiveStaffMap =
                             });
                         }
                     }
+
+                    state.markers[employeeId]._adminEmployeeName = rawName;
+                    state.markers[employeeId]._adminWithinRange = withinRange;
+                    state.markerSessions[employeeId] = String(x.sessionId || x.SessionId || '');
 
                     if (markerCreated) {
                         state.lastLocationAt[employeeId] = Date.now();
@@ -4162,6 +4209,9 @@ window.updateAdminLiveStaffMap =
                     fillOpacity: 0.08
                 });
             }
+
+            state.office = office.slice();
+            state.lastOfficeRadius = effectiveRadius;
 
             state.lastOfficeRadius = effectiveRadius;
 

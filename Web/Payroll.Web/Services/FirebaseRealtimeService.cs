@@ -785,6 +785,13 @@ public sealed class FirebaseRealtimeService
             [$"tracking/history/{employeeId}/{clientEventId}"] = payload
         };
 
+        var ownerUid = ResolveOwnerUid($"employee-{employeeId}", "Employee");
+        if (!string.IsNullOrWhiteSpace(ownerUid))
+        {
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}"] = payload;
+            updates[$"owners/{ownerUid}/tracking/history/{employeeId}/{clientEventId}"] = payload;
+        }
+
         return await UpdateAsync(updates, cancellationToken);
     }
 

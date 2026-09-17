@@ -36,9 +36,18 @@ class FirebaseAuthSecurityGate @Inject constructor(
         val user = auth.currentUser
             ?: return Result(false, message = "Firebase authentication session is missing.")
 
-        val token = runCatching { user.getIdToken(true).await() }.getOrElse {
-            Log.w("FirebaseAuthSecurity", "Unable to refresh Firebase ID token", it)
-            return Result(false, message = "Firebase authentication session could not be refreshed.")
+        // Do not force a network refresh on every app start. Firebase already
+        // persists and refreshes valid sessions automatically. A forced refresh
+        // here made a valid login fail during a temporary network outage.
+        // Only fall back to a forced refresh when the cached token is unavailable.
+        val token = runCatching {
+            user.getIdToken(false).await()
+        }.getOrElse { cachedError ->
+            Log.w("FirebaseAuthSecurity", "Cached Firebase ID token unavailable; forcing refresh.", cachedError)
+            runCatching { user.getIdToken(true).await() }.getOrElse { refreshError ->
+                Log.w("FirebaseAuthSecurity", "Unable to refresh Firebase ID token", refreshError)
+                return Result(false, message = "Firebase authentication session could not be refreshed.")
+            }
         }
 
         val claims = token.claims

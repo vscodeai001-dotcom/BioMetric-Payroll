@@ -25,17 +25,27 @@ import javax.inject.Singleton
  */
 @Singleton
 class AdminRealtimeCoordinator @Inject constructor(
-    private val firebaseSync: FirebaseSyncManager
+    private val firebaseSync: FirebaseSyncManager,
+    private val hydrator: FirebaseRoomHydrator
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var collectJob: Job? = null
     private var pendingRefresh: Job? = null
+    @Volatile private var activeOwnerUid: String? = null
 
     @Synchronized
     fun start(onLocalRefresh: () -> Unit = {}) {
-        if (collectJob?.isActive == true) return
+        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+
+        if (collectJob?.isActive == true && activeOwnerUid == ownerUid) return
+
+        if (activeOwnerUid != null && activeOwnerUid != ownerUid) {
+            stop()
+        }
 
         firebaseSync.startSync()
+        hydrator.start()
+        activeOwnerUid = ownerUid
 
         collectJob = scope.launch {
             firebaseSync.applicationEventsFlow().collectLatest { event ->
@@ -84,5 +94,6 @@ class AdminRealtimeCoordinator @Inject constructor(
         collectJob?.cancel()
         pendingRefresh = null
         collectJob = null
+        activeOwnerUid = null
     }
 }
