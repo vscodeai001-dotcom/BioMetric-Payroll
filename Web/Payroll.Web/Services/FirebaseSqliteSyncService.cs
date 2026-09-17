@@ -208,6 +208,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return;
         }
 
+        // 1200-M: Background tracking lifecycle events are durably queued on
+        // Android when Firebase is temporarily unavailable. Replaying these
+        // events restores the exact GPS session boundary before/after queued
+        // location points are processed, without changing attendance formulas.
+        if (parts.Length >= 3 &&
+            parts[0].Equals("events", StringComparison.OrdinalIgnoreCase))
+        {
+            await ProcessFirebaseTrackingLifecycleEventAsync(eventData.Value, ct);
+            return;
+        }
+
         if (parts.Length >= 2 &&
             parts[0].Equals("live", StringComparison.OrdinalIgnoreCase))
         {
@@ -279,6 +290,64 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             employeeId, sessionId, Math.Round(distance, 1), radius, within);
     }
 
+    private async Task ProcessFirebaseTrackingLifecycleEventAsync(
+        JsonElement eventData,
+        CancellationToken ct)
+    {
+        if (eventData.ValueKind != JsonValueKind.Object)
+            return;
+
+        var nested = eventData.TryGetProperty("event", out var eventNode) &&
+                     eventNode.ValueKind == JsonValueKind.Object
+            ? eventNode
+            : eventData;
+
+        var eventType = GetString(nested, "eventType", "EventType") ?? string.Empty;
+        if (!eventType.Equals("SESSION_STARTED", StringComparison.OrdinalIgnoreCase) &&
+            !eventType.Equals("SESSION_ENDED", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var employeeId = GetInt(eventData, "employeeId", "EmployeeId");
+        if (employeeId <= 0)
+            employeeId = GetInt(nested, "employeeId", "EmployeeId");
+
+        var sessionText = GetString(nested, "sessionId", "SessionId");
+        if (employeeId <= 0 || !Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty)
+            return;
+
+        using var scope = _scopeFactory.CreateScope();
+        var geo = scope.ServiceProvider.GetRequiredService<GeoLocationService>();
+
+        if (eventType.Equals("SESSION_STARTED", StringComparison.OrdinalIgnoreCase))
+        {
+            var started = await geo.StartGpsSessionAsync(employeeId, sessionId);
+            if (started)
+                await _refreshService.NotifyLocationChangedAsync(employeeId);
+
+            _logger.LogDebug(
+                "Processed durable Android tracking session start. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                employeeId, sessionId);
+            return;
+        }
+
+        var message = GetString(nested, "message", "Message") ?? string.Empty;
+        var reason = "OFFLINE_SYNC";
+        const string prefix = "Tracking session end deferred. Reason:";
+        if (message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var parsed = message[prefix.Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(parsed))
+                reason = parsed;
+        }
+
+        await geo.EndGpsSessionAsync(employeeId, sessionId, reason);
+        await _refreshService.NotifyLocationChangedAsync(employeeId);
+
+        _logger.LogDebug(
+            "Processed durable Android tracking session end. EmployeeId={EmployeeId}, SessionId={SessionId}, Reason={Reason}",
+            employeeId, sessionId, reason);
+    }
+
     private async Task ProcessFirebaseTrackingSessionEventAsync(
         string relativePath,
         JsonElement? eventData,
@@ -333,79 +402,126 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         JsonElement? eventData,
         CancellationToken ct)
     {
-        // GeoLocationService is scoped. FirebaseSqliteSyncService is a singleton
-        // hosted service, so resolve the scoped service inside a short-lived scope
-        // for each Firebase event instead of injecting it into the hosted service.
+        // Firebase is the realtime transport/SSOT for Android GPS. Every live
+        // fix must pass through the same authoritative geofence + attendance
+        // engine used by browser/HTTP GPS updates. The live branch must not
+        // merely paint the admin map, otherwise Android GPS would never drive
+        // automatic geofence attendance reconciliation.
         using var geoScope = _scopeFactory.CreateScope();
         var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
 
         if (!eventData.HasValue)
         {
-            var key = (relativePath ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            var key = (relativePath ?? "/")
+                .Trim('/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault();
+
             if (int.TryParse(key, out var removedEmployeeId))
             {
                 var currentSession = LiveLocationStore.GetSessionId(removedEmployeeId);
                 if (currentSession.HasValue)
                     LiveLocationStore.Remove(removedEmployeeId, currentSession.Value);
+
                 await _refreshService.NotifyLocationChangedAsync(removedEmployeeId);
             }
+
             return;
         }
 
-        if (eventData.Value.ValueKind != JsonValueKind.Object) return;
+        if (eventData.Value.ValueKind != JsonValueKind.Object)
+            return;
 
         var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
         if (employeeId <= 0)
         {
-            var key = (relativePath ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            var key = (relativePath ?? "/")
+                .Trim('/')
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault();
+
             employeeId = int.TryParse(key, out var parsed) ? parsed : 0;
         }
-        if (employeeId <= 0) return;
+
+        if (employeeId <= 0)
+            return;
 
         var sessionText = GetString(eventData.Value, "SessionId", "sessionId");
-        if (!Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
+        if (!Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty)
+            return;
 
         var latitude = GetDouble(eventData.Value, "Latitude", "latitude");
         var longitude = GetDouble(eventData.Value, "Longitude", "longitude");
-        var accuracy = GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters");
-        var distance = GetDouble(eventData.Value, "DistanceMeters", "distanceMeters", "DistanceFromOfficeMeters");
-        var radius = GetInt(eventData.Value, "AllowedRadiusMeters", "allowedRadiusMeters");
-        var within = GetBool(eventData.Value, "IsWithinAllowedRadius", "isWithinAllowedRadius");
+        var accuracy = Math.Max(0, GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters"));
         var captured = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
 
-        if (radius <= 0 || distance < 0)
+        if (!double.IsFinite(latitude) || !double.IsFinite(longitude) ||
+            latitude is < -90 or > 90 || longitude is < -180 or > 180)
         {
-            var calculated = await geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
-            if (calculated.Success)
-            {
-                distance = calculated.DistanceMeters;
-                radius = calculated.AllowedRadiusMeters;
-                within = radius > 0 && distance <= radius + 2;
-            }
+            _logger.LogWarning(
+                "Rejected Firebase GPS live event with invalid coordinates. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                employeeId,
+                sessionId);
+            return;
         }
 
-        var accepted = LiveLocationStore.Update(
+        // Never trust client-supplied distance/radius/within values. Recompute
+        // against the current Admin-configured office location and radius.
+        // This also makes a live Admin configuration change effective for the
+        // next Firebase GPS fix without requiring Android to restart tracking.
+        var distanceResult = await geoLocationService.GetDistanceFromOfficeAsync(
+            latitude,
+            longitude);
+
+        if (!distanceResult.Success)
+        {
+            _logger.LogWarning(
+                "Firebase GPS live event could not be geofence-validated. EmployeeId={EmployeeId}, SessionId={SessionId}, Message={Message}",
+                employeeId,
+                sessionId,
+                distanceResult.Message);
+            return;
+        }
+
+        var distance = distanceResult.DistanceMeters;
+        var radius = distanceResult.AllowedRadiusMeters;
+        var within = distanceResult.IsWithinAllowedRadius;
+
+        // 1200-L integration point: use the existing GeoLocationService as
+        // the sole attendance authority. This preserves payroll locks, manual
+        // overrides, automatic geofence reconciliation, GPS session lifecycle,
+        // cross-day attendance rules, and existing refresh behavior.
+        var accepted = await geoLocationService.UpdateGpsSessionAsync(
             employeeId,
+            sessionId,
             latitude,
             longitude,
             accuracy,
-            Math.Max(0, distance),
-            Math.Max(0, radius),
+            distance,
+            radius,
             within,
-            sessionId,
             captured);
 
-        if (!accepted) return;
+        if (!accepted)
+        {
+            _logger.LogDebug(
+                "Firebase GPS live event ignored because the session is inactive or stale. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                employeeId,
+                sessionId);
+            return;
+        }
 
-        // Existing Web map/LiveStaffLocationPanel already listens to this
-        // SignalR notification. Firebase is the source; SignalR is retained
-        // only as the existing browser UI transport, so no layout changes are
-        // required.
+        // UpdateGpsSessionAsync already updates LiveLocationStore only after
+        // validating session ownership/order. Avoid a second competing writer.
         await _refreshService.NotifyLocationChangedAsync(employeeId);
 
         _logger.LogDebug(
-            "Processed Firebase live GPS event. EmployeeId={EmployeeId}, SessionId={SessionId}, Distance={Distance}m, Radius={Radius}, Within={Within}",
-            employeeId, sessionId, Math.Round(distance, 1), radius, within);
+            "Processed Firebase live GPS event through authoritative geofence engine. EmployeeId={EmployeeId}, SessionId={SessionId}, Distance={Distance}m, Radius={Radius}, Within={Within}",
+            employeeId,
+            sessionId,
+            Math.Round(distance, 1),
+            radius,
+            within);
     }
 
     private static string? GetString(JsonElement element, params string[] names)

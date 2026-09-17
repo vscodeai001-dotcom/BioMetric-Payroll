@@ -279,7 +279,8 @@ namespace Payroll.Web.Services
     private async Task RecalculateSingleDayAsync(
         AppDbContext db,
         int employeeId,
-        DateOnly dayOnly)
+        DateOnly dayOnly,
+        bool includePreviousOvernight = true)
     {
         var day = dayOnly.ToDateTime(TimeOnly.MinValue);
 
@@ -339,6 +340,33 @@ namespace Payroll.Web.Services
         summary.IsManualOverride = false;
 
         await db.SaveChangesAsync();
+
+        // 1200-K: an approved/removed punch on the day after an overnight
+        // shift can change the previous ShiftDate's final OUT and OT.
+        if (includePreviousOvernight)
+        {
+            var previousDate = dayOnly.AddDays(-1);
+            var previousSchedule = await db.ShiftSchedules
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s =>
+                    s.EmployeeID == employeeId &&
+                    s.ShiftDate == previousDate);
+
+            var overnight = previousSchedule != null
+                ? previousSchedule.EndTime <= previousSchedule.StartTime
+                : emp.ShiftStartTime.HasValue &&
+                  emp.ShiftEndTime.HasValue &&
+                  emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value;
+
+            if (overnight)
+            {
+                await RecalculateSingleDayAsync(
+                    db,
+                    employeeId,
+                    previousDate,
+                    includePreviousOvernight: false);
+            }
+        }
     }
 
     public class RegularizationFormModel

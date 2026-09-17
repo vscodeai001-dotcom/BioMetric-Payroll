@@ -22,6 +22,7 @@ namespace Payroll.Web.Services
         private readonly AttendanceCalculatorService _attendanceCalculator;
         private readonly AttendanceRefreshService _refreshService;
         private readonly NotificationService _notificationService;
+        private readonly FirebaseAttendanceCalendarMutationService _firebaseCalendar;
 
         public LeaveManagementService(
             IDbContextFactory<AppDbContext> dbFactory,
@@ -31,7 +32,8 @@ namespace Payroll.Web.Services
             UserManager<IdentityUser> userManager,
             AttendanceCalculatorService attendanceCalculator,
             AttendanceRefreshService refreshService,
-            NotificationService notificationService)
+            NotificationService notificationService,
+            FirebaseAttendanceCalendarMutationService firebaseCalendar)
         {
             _dbFactory = dbFactory;
             _auditService = auditService;
@@ -41,6 +43,7 @@ namespace Payroll.Web.Services
             _attendanceCalculator = attendanceCalculator;
             _refreshService = refreshService;
             _notificationService = notificationService;
+            _firebaseCalendar = firebaseCalendar;
         }
 
         // --- 1. LOAD DATA ---
@@ -92,6 +95,8 @@ namespace Payroll.Web.Services
 
             dbContext.LeaveRequests.Add(newRequest);
             await dbContext.SaveChangesAsync();
+
+            await _firebaseCalendar.UpsertLeaveAsync(newRequest);
 
             // IMPORTANT: Keep DailySummary synchronized immediately.
             // This makes an approved admin leave appear in Attendance Log Summary
@@ -147,6 +152,8 @@ namespace Payroll.Web.Services
 
             dbReq.IsApproved = approved;
             await dbContext.SaveChangesAsync();
+
+            await _firebaseCalendar.UpsertLeaveAsync(dbReq);
 
             // IMPORTANT: Recalculate the affected attendance day immediately.
             // Approval -> Leave status in DailySummary.
@@ -217,6 +224,8 @@ namespace Payroll.Web.Services
 
             dbContext.LeaveRequests.Remove(req);
             await dbContext.SaveChangesAsync();
+
+            await _firebaseCalendar.DeleteLeaveAsync(requestId);
 
             // Recalculate after deletion so DailySummary does not keep stale leave status.
             if (affectedDate.HasValue)
@@ -368,6 +377,8 @@ namespace Payroll.Web.Services
             summary.IsManualOverride = false;
 
             await dbContext.SaveChangesAsync();
+
+            await _firebaseCalendar.UpsertDailySummaryAsync(summary);
 
             _logger.LogInformation(
                 "DailySummary synchronized for EmpID {EmployeeId} on {Date}. Status={Status}, Leave={LeaveType}",

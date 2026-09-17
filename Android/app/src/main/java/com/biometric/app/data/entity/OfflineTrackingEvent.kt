@@ -37,5 +37,7 @@ data class OfflineTrackingEvent(
         
         // Event Types
         const val BOUNDARY_BREACH = "BOUNDARY_BREACH"
+        const val SESSION_STARTED = "SESSION_STARTED"
+        const val SESSION_ENDED = "SESSION_ENDED"
     }
 }

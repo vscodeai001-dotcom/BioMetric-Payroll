@@ -20,17 +20,31 @@ import com.biometric.app.ui.selfservice.ResignationActivity
 import com.biometric.app.ui.selfservice.SalaryAdvancesActivity
 import com.biometric.app.ui.selfservice.ShiftScheduleActivity
 import com.biometric.app.ui.selfservice.TaxDeclarationActivity
+import com.biometric.app.data.entity.FeatureSettings
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import com.google.android.material.card.MaterialCardView
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class EmployeeToolsActivity : MotionBaseActivity() {
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_employee_tools)
         findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar)
             .setNavigationOnClickListener { finish() }
 
+        lifecycleScope.launch {
+            val featureSettings = runCatching { selfService.featureSettings() }.getOrDefault(FeatureSettings())
+            buildTools(featureSettings)
+        }
+    }
+
+    private fun buildTools(features: FeatureSettings) {
         val container = findViewById<LinearLayout>(R.id.toolsContainer)
         container.removeAllViews()
 
@@ -41,22 +55,23 @@ class EmployeeToolsActivity : MotionBaseActivity() {
         }
 
         data class Tool(val title: String, val subtitle: String, val icon: String, val action: () -> Unit)
-        val tools = listOf(
-            Tool("Attendance", "Logs & history", "▣") { startActivity(Intent(this, AttendanceLogsActivity::class.java)) },
-            Tool("Apply Leave", "Request leave", "✦") { startActivity(Intent(this, ApplyLeaveActivity::class.java)) },
-            Tool("Payslips", "Payroll history", "▤") { startActivity(Intent(this, PayslipListActivity::class.java)) },
-            Tool("Advances", "Salary advances", "₹") { startActivity(Intent(this, SalaryAdvancesActivity::class.java)) },
-            Tool("Bonuses", "Bonus history", "◆") { startActivity(Intent(this, BonusesActivity::class.java)) },
-            Tool("Correction", "Punch correction", "✎") { startActivity(Intent(this, MyRegularizationsActivity::class.java)) },
-            Tool("Resignation", "Exit request", "↪") { startActivity(Intent(this, ResignationActivity::class.java)) },
-            Tool("Shifts", "Roster", "◷") { startActivity(Intent(this, ShiftScheduleActivity::class.java)) },
-            Tool("Tax Declaration", "IT declaration", "▣") { startActivity(Intent(this, TaxDeclarationActivity::class.java)) },
-            Tool("FBP Declaration", "Flexible benefits", "✦") { startActivity(Intent(this, FbpDeclarationActivity::class.java)) },
-            Tool("Profile", "My details", "●") { startActivity(Intent(this, MyReportsActivity::class.java).putExtra("FRAGMENT_TYPE", "profile")) },
-            Tool("My Reports", "Personal reports", "▥") { startActivity(Intent(this, MyReportsActivity::class.java)) },
-            Tool("Offline GPS", "Map, queue & event log", "🛰") { startActivity(Intent(this, OfflineTrackingActivity::class.java)) },
-            Tool("Leave History", "Requests & balances", "☷") { startActivity(Intent(this, MyLeavesActivity::class.java)) }
-        )
+        val tools = mutableListOf<Tool>()
+        if (features.employeeCanViewAttendance) tools += Tool("Attendance", "Logs & history", "▣") { startActivity(Intent(this, AttendanceLogsActivity::class.java)) }
+        if (features.enableLeaveManagement && features.employeeCanViewLeave) {
+            tools += Tool("Apply Leave", "Request leave", "✦") { startActivity(Intent(this, ApplyLeaveActivity::class.java)) }
+            if (features.employeeCanViewLeaveHistory) tools += Tool("Leave History", "Requests & balances", "☷") { startActivity(Intent(this, MyLeavesActivity::class.java)) }
+        }
+        if (features.enablePayroll && features.employeeCanViewPayslip) tools += Tool("Payslips", "Payroll history", "▤") { startActivity(Intent(this, PayslipListActivity::class.java)) }
+        if (features.enableSalaryAdvance && features.employeeCanViewAdvance) tools += Tool("Advances", "Salary advances", "₹") { startActivity(Intent(this, SalaryAdvancesActivity::class.java)) }
+        if (features.enableBonusManagement && features.employeeCanViewBonus) tools += Tool("Bonuses", "Bonus history", "◆") { startActivity(Intent(this, BonusesActivity::class.java)) }
+        if (features.enablePunchCorrection && features.enableRegularizationRequest) tools += Tool("Correction", "Punch correction", "✎") { startActivity(Intent(this, MyRegularizationsActivity::class.java)) }
+        if (features.enableResignationModule && features.employeeCanViewResignation) tools += Tool("Resignation", "Exit request", "↪") { startActivity(Intent(this, ResignationActivity::class.java)) }
+        if (features.enableShiftScheduling && features.employeeCanViewShifts) tools += Tool("Shifts", "Roster", "◷") { startActivity(Intent(this, ShiftScheduleActivity::class.java)) }
+        if (features.enableTaxDeclarations && features.employeeCanViewTax) tools += Tool("Tax Declaration", "IT declaration", "▣") { startActivity(Intent(this, TaxDeclarationActivity::class.java)) }
+        if (features.enableFlexibleBenefits) tools += Tool("FBP Declaration", "Flexible benefits", "✦") { startActivity(Intent(this, FbpDeclarationActivity::class.java)) }
+        tools += Tool("Profile", "My details", "●") { startActivity(Intent(this, MyReportsActivity::class.java).putExtra("FRAGMENT_TYPE", "profile")) }
+        if (features.enableCustomReporting && features.employeeCanViewReports) tools += Tool("My Reports", "Personal reports", "▥") { startActivity(Intent(this, MyReportsActivity::class.java)) }
+        tools += Tool("Offline GPS", "Map, queue & event log", "🛰") { startActivity(Intent(this, OfflineTrackingActivity::class.java)) }
 
         tools.forEach { tool ->
             val card = MaterialCardView(this).apply {
@@ -97,7 +112,6 @@ class EmployeeToolsActivity : MotionBaseActivity() {
             box.addView(title, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 5 })
             box.addView(subtitle, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 2 })
             card.addView(box)
-
             val params = GridLayout.LayoutParams().apply {
                 width = 0
                 height = GridLayout.LayoutParams.WRAP_CONTENT
@@ -108,4 +122,5 @@ class EmployeeToolsActivity : MotionBaseActivity() {
         }
         container.addView(grid, LinearLayout.LayoutParams(-1, -2))
     }
+
 }

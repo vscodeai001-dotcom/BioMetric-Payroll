@@ -1,4 +1,4 @@
-﻿@using global::Payroll.Shared.Data
+@using global::Payroll.Shared.Data
 @using global::Payroll.Web.Models
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared.Services
@@ -9,6 +9,7 @@
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployeeManagementService
 @inject AttendanceScheduleService ScheduleService
 @inject IToastService toastService
+@inject AttendanceProcessingCoordinator AttendanceProcessingCoordinator
 
 @if (Show && Record != null)
 {
@@ -89,6 +90,14 @@
         
         try
         {
+            var processingKey =
+                $"{Record.EmployeeID}:{Record.Date:yyyy-MM-dd}";
+
+            // Serialize manual corrections with automatic Firebase/SignalR
+            // attendance processing for this exact employee/date.
+            using var processingLease =
+                await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
+
             await using var dbContext = await DbFactory.CreateDbContextAsync();
 
             // Employee profile is read from Firebase SSOT. Schedule, settings and
@@ -152,6 +161,12 @@
                 }
 
                 await dbContext.SaveChangesAsync();
+
+                // The summary state has changed, so the previous automatic
+                // punch fingerprint is no longer authoritative for this key.
+                // The next automatic pass will observe the new manual-override
+                // state and protect the summary accordingly.
+                AttendanceProcessingCoordinator.Invalidate(processingKey);
                 
                 // --- AUDIT LOG: CORRECTION ---
                 await AuditService.LogAsync("UPDATE", "DailySummary", summary.SummaryID.ToString(),

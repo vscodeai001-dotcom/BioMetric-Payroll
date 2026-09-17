@@ -137,7 +137,8 @@ public sealed class FirebaseAttendanceService
                 PunchTime = timestamp.Value,
                 DeviceID = String(item.Value, "deviceId", "DeviceID"),
                 LogType = String(item.Value, "type", "source", "note", "LogType"),
-                IsApproved = !string.Equals(String(item.Value, "status"), "REJECTED", StringComparison.OrdinalIgnoreCase),
+                IsApproved = Bool(item.Value, "isApproved", "IsApproved")
+                    ?? !string.Equals(String(item.Value, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
                 Latitude = Double(item.Value, "latitude", "Latitude"),
                 Longitude = Double(item.Value, "longitude", "Longitude")
             });
@@ -177,7 +178,8 @@ public sealed class FirebaseAttendanceService
                 PunchTime = timestamp.Value,
                 DeviceID = String(item.Value, "deviceId", "DeviceID"),
                 LogType = String(item.Value, "type", "source", "note", "LogType"),
-                IsApproved = !string.Equals(String(item.Value, "status"), "REJECTED", StringComparison.OrdinalIgnoreCase),
+                IsApproved = Bool(item.Value, "isApproved", "IsApproved")
+                    ?? !string.Equals(String(item.Value, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
                 Latitude = Double(item.Value, "latitude", "Latitude"),
                 Longitude = Double(item.Value, "longitude", "Longitude")
             });

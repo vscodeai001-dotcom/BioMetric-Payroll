@@ -1,4 +1,4 @@
-﻿using Payroll.Shared.Data;
+using Payroll.Shared.Data;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -154,7 +154,8 @@ namespace Payroll.Shared.Services
 
         private DateTime? GetOpenPunchEndTime(
             DateTime businessDay,
-            List<AttendanceLog> punches)
+            List<AttendanceLog> punches,
+            ScheduleResult scheduleResult)
         {
             if (punches == null ||
                 punches.Count == 0 ||
@@ -163,42 +164,137 @@ namespace Payroll.Shared.Services
                 return null;
             }
 
-            DateTime today =
-                GetIndiaNow().Date;
+            DateTime currentIndiaTime = GetIndiaNow();
+            DateTime now = new DateTime(
+                currentIndiaTime.Year,
+                currentIndiaTime.Month,
+                currentIndiaTime.Day,
+                currentIndiaTime.Hour,
+                currentIndiaTime.Minute,
+                0,
+                DateTimeKind.Unspecified);
 
-            DateTime requestedDay =
-                businessDay.Date;
-
-            // Only today's open punch can be calculated live.
-            if (requestedDay != today)
-            {
-                return null;
-            }
-
-            DateTime currentIndiaTime =
-    GetIndiaNow();
-
-            DateTime now =
-                new DateTime(
-                    currentIndiaTime.Year,
-                    currentIndiaTime.Month,
-                    currentIndiaTime.Day,
-                    currentIndiaTime.Hour,
-                    currentIndiaTime.Minute,
-                    0,
-                    DateTimeKind.Unspecified);
-
-            DateTime lastPunch =
-                DateTime.SpecifyKind(
-                    punches[^1].PunchTime,
-                    DateTimeKind.Unspecified);
+            DateTime lastPunch = DateTime.SpecifyKind(
+                punches[^1].PunchTime,
+                DateTimeKind.Unspecified);
 
             if (now <= lastPunch)
+                return null;
+
+            // Overnight open punches can remain open after midnight while the
+            // ShiftDate is still the previous calendar date.
+            if (scheduleResult.HasShift &&
+                scheduleResult.ShiftEnd.Date > scheduleResult.ShiftStart.Date)
             {
+                if (now >= scheduleResult.ShiftStart &&
+                    now <= scheduleResult.ShiftEnd)
+                {
+                    return now;
+                }
+
                 return null;
             }
 
+            // Preserve the existing live-open-punch rule for ordinary shifts.
+            if (businessDay.Date != now.Date)
+                return null;
+
             return now;
+        }
+
+        /// <summary>
+        /// For an overnight shift, append next-day punches that belong to the
+        /// previous ShiftDate. Punches through the scheduled end are included.
+        /// If the sequence is still open at the scheduled end, the first OUT
+        /// after that end is included as post-shift overtime; a subsequent IN
+        /// is treated as the next attendance session and is not pulled back.
+        /// </summary>
+        private List<AttendanceLog> LoadCrossDayPunchesForOvernightShift(
+            Employee emp,
+            DateTime businessDay,
+            List<AttendanceLog> punches,
+            ScheduleResult scheduleResult)
+        {
+            if (!scheduleResult.HasShift ||
+                scheduleResult.ShiftEnd.Date <= scheduleResult.ShiftStart.Date)
+            {
+                return punches;
+            }
+
+            DateTime nextDayStart = businessDay.Date.AddDays(1);
+            DateTime nextDayEnd = nextDayStart.AddDays(1);
+
+            using var db = _dbFactory.CreateDbContext();
+
+            var nextDayPunches = db.AttendanceLogs
+                .AsNoTracking()
+                .Where(p =>
+                    p.EmployeeID == emp.EmployeeID &&
+                    p.PunchTime >= nextDayStart &&
+                    p.PunchTime < nextDayEnd)
+                .OrderBy(p => p.PunchTime)
+                .ToList()
+                .Where(p =>
+                    p.LogType != "Correction Request" || p.IsApproved)
+                .ToList();
+
+            if (nextDayPunches.Count == 0)
+                return punches;
+
+            var result = punches.ToList();
+
+            var throughShiftEnd = nextDayPunches
+                .Where(p => p.PunchTime <= scheduleResult.ShiftEnd)
+                .ToList();
+
+            AddDistinctPunches(result, throughShiftEnd);
+
+            // If the overnight sequence is still open at shift end, capture
+            // one OUT immediately after the scheduled end. This supports
+            // legitimate post-shift OT without absorbing the next day's
+            // independent IN/OUT session.
+            var ordered = result
+                .OrderBy(p => p.PunchTime)
+                .ToList();
+
+            if (ordered.Count % 2 != 0)
+            {
+                var firstAfterEnd = nextDayPunches
+                    .Where(p => p.PunchTime > scheduleResult.ShiftEnd)
+                    .OrderBy(p => p.PunchTime)
+                    .FirstOrDefault();
+
+                if (firstAfterEnd != null &&
+                    !string.Equals(firstAfterEnd.LogType, "IN", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddDistinctPunches(result, new[] { firstAfterEnd });
+                }
+            }
+
+            return result
+                .OrderBy(p => p.PunchTime)
+                .ToList();
+        }
+
+        private static void AddDistinctPunches(
+            List<AttendanceLog> target,
+            IEnumerable<AttendanceLog> additions)
+        {
+            foreach (var punch in additions)
+            {
+                if (punch.LogID > 0 &&
+                    target.Any(x => x.LogID == punch.LogID))
+                    continue;
+
+                if (punch.LogID <= 0 &&
+                    target.Any(x =>
+                        x.EmployeeID == punch.EmployeeID &&
+                        x.PunchTime == punch.PunchTime &&
+                        x.LogType == punch.LogType))
+                    continue;
+
+                target.Add(punch);
+            }
         }
 
         // ============================================================
@@ -814,6 +910,49 @@ namespace Payroll.Shared.Services
             day =
                 NormalizeBusinessDate(day);
 
+            // ========================================================
+            // SHIFT RESOLUTION
+            // ========================================================
+            // Resolve the concrete/recurring schedule before processing
+            // punches. 1200-K needs the resolved shift interval so punches
+            // after midnight can still belong to the previous ShiftDate.
+
+            if (schedule == null)
+            {
+                using var dbContext =
+                    _dbFactory.CreateDbContext();
+
+                schedule =
+                    dbContext.ShiftSchedules
+                        .AsNoTracking()
+                        .FirstOrDefault(
+                            s =>
+                                s.EmployeeID ==
+                                    emp.EmployeeID &&
+                                s.IsRecurringPattern &&
+                                s.AppliesToDayOfWeek ==
+                                    day.DayOfWeek);
+            }
+
+            int paidBreakMin =
+                emp.StandardBreakMinutes;
+
+            int startGrace =
+                settings.LateGraceMinutes;
+
+            int endGrace =
+                settings.EndTimeGraceMinutes;
+
+            var scheduleResult =
+                _scheduleService.CalculateSchedule(
+                    emp,
+                    day,
+                    schedule,
+                    settings,
+                    paidBreakMin,
+                    startGrace,
+                    endGrace);
+
             punchesForDay =
                 (punchesForDay ??
                  new List<AttendanceLog>())
@@ -838,6 +977,16 @@ namespace Payroll.Shared.Services
                             p.IsApproved)
                     .ToList();
 
+            // 1200-K: an overnight ShiftDate owns the next calendar day's
+            // punches up to the scheduled shift end. This keeps a 22:00-06:00
+            // shift together instead of splitting it at midnight.
+            punchesForDay =
+                LoadCrossDayPunchesForOvernightShift(
+                    emp,
+                    day,
+                    punchesForDay,
+                    scheduleResult);
+
             var pr =
                 _punchProcessor.ProcessPunches(
                     punchesForDay,
@@ -850,7 +999,8 @@ namespace Payroll.Shared.Services
             DateTime? openPunchEnd =
                 GetOpenPunchEndTime(
                     day,
-                    pr.Ordered);
+                    pr.Ordered,
+                    scheduleResult);
 
             var dayTypeResult =
                 _dayTypeService.DetectDayType(
@@ -859,42 +1009,6 @@ namespace Payroll.Shared.Services
                     pr.Ordered,
                     leaveRecord,
                     holidays);
-
-            int paidBreakMin =
-                emp.StandardBreakMinutes;
-
-            int startGrace =
-                settings.LateGraceMinutes;
-
-            int endGrace =
-                settings.EndTimeGraceMinutes;
-
-            if (schedule == null)
-            {
-                using var dbContext =
-                    _dbFactory.CreateDbContext();
-
-                schedule =
-                    dbContext.ShiftSchedules
-                        .AsNoTracking()
-                        .FirstOrDefault(
-                            s =>
-                                s.EmployeeID ==
-                                    emp.EmployeeID &&
-                                s.IsRecurringPattern &&
-                                s.AppliesToDayOfWeek ==
-                                    day.DayOfWeek);
-            }
-
-            var scheduleResult =
-                _scheduleService.CalculateSchedule(
-                    emp,
-                    day,
-                    schedule,
-                    settings,
-                    paidBreakMin,
-                    startGrace,
-                    endGrace);
 
             string status = "ERROR";
 

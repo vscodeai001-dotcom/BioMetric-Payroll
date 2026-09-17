@@ -19,15 +19,18 @@ public sealed class FirebaseShiftScheduleService
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
     private readonly ILogger<FirebaseShiftScheduleService> _logger;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public FirebaseShiftScheduleService(
         FirebaseRealtimeService firebase,
         IConfiguration configuration,
-        ILogger<FirebaseShiftScheduleService> logger)
+        ILogger<FirebaseShiftScheduleService> logger,
+        IServiceScopeFactory scopeFactory)
     {
         _firebase = firebase;
         _configuration = configuration;
         _logger = logger;
+        _scopeFactory = scopeFactory;
     }
 
     private string OwnerUid =>
@@ -227,6 +230,16 @@ public sealed class FirebaseShiftScheduleService
                 "MODIFIED",
                 schedule.ScheduleID.ToString(CultureInfo.InvariantCulture),
                 cancellationToken);
+
+            // A concrete shift changes the inputs used by DailySummary.
+            // Recalculate immediately from Firebase schedule data so the
+            // attendance result does not wait for the compatibility sync loop.
+            if (!schedule.IsRecurringPattern)
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var impact = scope.ServiceProvider.GetRequiredService<ShiftScheduleAttendanceImpactService>();
+                await impact.RecalculateAsync(schedule.EmployeeID, schedule.ShiftDate, cancellationToken);
+            }
         }
 
         return ok;
@@ -237,6 +250,9 @@ public sealed class FirebaseShiftScheduleService
         CancellationToken cancellationToken = default)
     {
         if (scheduleId <= 0) return false;
+
+        var schedules = await GetSchedulesAsync(0, null, null, cancellationToken);
+        var existing = schedules.FirstOrDefault(x => x.ScheduleID == scheduleId);
 
         var ok = await _firebase.DeleteOwnerRecordAsync(
             OwnerUid,
@@ -252,6 +268,13 @@ public sealed class FirebaseShiftScheduleService
                 "DELETED",
                 scheduleId.ToString(CultureInfo.InvariantCulture),
                 cancellationToken);
+
+            if (existing != null && !existing.IsRecurringPattern)
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var impact = scope.ServiceProvider.GetRequiredService<ShiftScheduleAttendanceImpactService>();
+                await impact.RecalculateAsync(existing.EmployeeID, existing.ShiftDate, cancellationToken);
+            }
         }
 
         return ok;
@@ -290,6 +313,7 @@ public sealed class FirebaseShiftScheduleService
         var maxId = existing.Select(x => x.ScheduleID).DefaultIfEmpty(0).Max();
         var updates = new Dictionary<string, object?>(StringComparer.Ordinal);
         var created = 0;
+        var createdDates = new List<(int EmployeeId, DateOnly Date)>();
 
         for (var date = startDate; date <= endDate; date = date.AddDays(1))
         {
@@ -322,6 +346,7 @@ public sealed class FirebaseShiftScheduleService
 
                 updates[id.ToString(CultureInfo.InvariantCulture)] = row;
                 existingConcrete.Add(uniqueness);
+                createdDates.Add((employee.EmployeeID, date));
                 created++;
             }
         }
@@ -342,7 +367,15 @@ public sealed class FirebaseShiftScheduleService
                 "BULK_MODIFIED",
                 null,
                 cancellationToken);
-            _logger.LogInformation("Firebase shift generation created {Count} daily schedules.", created);
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var impact = scope.ServiceProvider.GetRequiredService<ShiftScheduleAttendanceImpactService>();
+            foreach (var affected in createdDates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await impact.RecalculateAsync(affected.EmployeeId, affected.Date, cancellationToken);
+            }
+
+            _logger.LogInformation("Firebase shift generation created {Count} daily schedules and reconciled attendance.", created);
             return created;
         }
 

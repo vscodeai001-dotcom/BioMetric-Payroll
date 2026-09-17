@@ -13,6 +13,8 @@
 @inject ILogger<ManualPunchCorrection> _logger
 @inject IToastService toastService
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject FirebaseAttendanceMutationService FirebaseAttendanceMutations
+@inject AttendanceProcessingCoordinator AttendanceProcessingCoordinator
 @inject AttendanceRefreshService AttendanceRefreshService
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
@@ -241,6 +243,13 @@ else
 
             await dbContext.SaveChangesAsync();
 
+            var firebaseSummaryOk = await FirebaseAttendanceMutations.UpsertDailySummaryAsync(
+                existingSummary,
+                "MODIFIED");
+
+            if (!firebaseSummaryOk)
+                _logger.LogWarning("Attendance summary saved to SQL but Firebase projection failed for Emp {id} on {day}", employeeId, day.ToShortDateString());
+
             _logger.LogInformation("Recalculation complete for Emp {id} on {day}", employeeId, day.ToShortDateString());
 
         }
@@ -431,8 +440,14 @@ else
                 IsApproved = true // <-- NEW: Set to False
             };
 
+            var processingKey = $"{dayInfo.EmployeeID}:{dayInfo.Date:yyyy-MM-dd}";
+            using var processingLease = await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
+
             dbContext.AttendanceLogs.AddRange(inLog, outLog);
             await dbContext.SaveChangesAsync();
+
+            var firebaseInOk = await FirebaseAttendanceMutations.UpsertPunchAsync(inLog, "CREATED");
+            var firebaseOutOk = await FirebaseAttendanceMutations.UpsertPunchAsync(outLog, "CREATED");
 
             // --- AUDIT LOG: QUICK ADD ---
             await AuditService.LogAsync("CREATE", "AttendanceLog", $"{inLog.LogID},{outLog.LogID}",
@@ -442,6 +457,15 @@ else
 
             await RecalculateAndSaveSummary(dayInfo.EmployeeID, dayInfo.Date);
 
+            AttendanceProcessingCoordinator.Invalidate(processingKey);
+
+            if (!firebaseInOk || !firebaseOutOk)
+                _logger.LogWarning("Manual full-day punches saved to SQL but Firebase projection was incomplete. EmployeeId={EmployeeId}, Date={Date}", dayInfo.EmployeeID, dayInfo.Date.Date);
+
+            await AttendanceRefreshService.NotifyPunchChangedAsync(
+                dayInfo.EmployeeID,
+                DateOnly.FromDateTime(dayInfo.Date.Date),
+                "CREATED");
             await AttendanceRefreshService
                 .NotifyAttendanceChangedAsync(
                     dayInfo.EmployeeID,
@@ -478,17 +502,27 @@ else
         try
         {
             await using var dbContext = await DbFactory.CreateDbContextAsync();
+            var processingKey = $"{dayInfo.EmployeeID}:{dayInfo.Date:yyyy-MM-dd}";
+            using var processingLease = await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
+
             dbContext.AttendanceLogs.Add(newLog);
             await dbContext.SaveChangesAsync();
+
+            var firebasePunchOk = await FirebaseAttendanceMutations.UpsertPunchAsync(newLog, "CREATED");
 
             // --- AUDIT LOG: CREATE ---
             await AuditService.LogAsync("CREATE", "AttendanceLog", newLog.LogID.ToString(),
                 $"Manual punch added at {newLog.PunchTime:HH:mm:ss} for EmpID: {dayInfo.EmployeeID}");
             // -------------------------
 
-            toastService.ShowSuccess("Punch added.");
             dayInfo.NewPunchTime = null;
             await RecalculateAndSaveSummary(dayInfo.EmployeeID, dayInfo.Date);
+            AttendanceProcessingCoordinator.Invalidate(processingKey);
+
+            if (!firebasePunchOk)
+                _logger.LogWarning("Manual punch saved to SQL but Firebase projection failed. EmployeeId={EmployeeId}, LogId={LogId}", dayInfo.EmployeeID, newLog.LogID);
+
+            toastService.ShowSuccess("Punch added.");
 
             await AttendanceRefreshService
                 .NotifyAttendanceChangedAsync(
@@ -519,6 +553,9 @@ else
 
         try
         {
+            var processingKey = $"{logToDelete.EmployeeID ?? 0}:{logToDelete.PunchTime.Date:yyyy-MM-dd}";
+            using var processingLease = await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
+
             await using var dbContext = await DbFactory.CreateDbContextAsync();
             // Re-fetch to attach
             var dbLog = await dbContext.AttendanceLogs.FindAsync(logToDelete.LogID);
@@ -530,13 +567,22 @@ else
                 dbContext.AttendanceLogs.Remove(dbLog);
                 await dbContext.SaveChangesAsync();
 
+                var firebaseDeleteOk = await FirebaseAttendanceMutations.DeletePunchAsync(
+                    logId,
+                    logToDelete.EmployeeID ?? 0);
+
                 // --- AUDIT LOG: DELETE ---
                 await AuditService.LogAsync("DELETE", "AttendanceLog", logId.ToString(),
                     $"Punch deleted at {punchTime:HH:mm:ss} for EmpID: {logToDelete.EmployeeID}");
                 // -------------------------
 
-                toastService.ShowSuccess("Punch deleted.");
                 await RecalculateAndSaveSummary(logToDelete.EmployeeID ?? 0, logToDelete.PunchTime);
+                AttendanceProcessingCoordinator.Invalidate(processingKey);
+
+                if (!firebaseDeleteOk)
+                    _logger.LogWarning("Punch deleted from SQL but Firebase deletion failed. EmployeeId={EmployeeId}, LogId={LogId}", logToDelete.EmployeeID, logId);
+
+                toastService.ShowSuccess("Punch deleted.");
 
                 await AttendanceRefreshService
                     .NotifyAttendanceChangedAsync(
@@ -583,6 +629,8 @@ else
 
         try
         {
+            var processingKey = $"{punchToEdit.EmployeeID ?? 0}:{punchToEdit.PunchTime.Date:yyyy-MM-dd}";
+            using var processingLease = await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
 
             await using var dbContext = await DbFactory.CreateDbContextAsync();
             var logInDb = await dbContext.AttendanceLogs.FindAsync(punchToEdit.LogID);
@@ -603,14 +651,30 @@ else
             logInDb.PunchTime = logInDb.PunchTime.Date.Add(editedPunchTime.Value.ToTimeSpan());
             await dbContext.SaveChangesAsync();
 
+            var firebasePunchOk = await FirebaseAttendanceMutations.UpsertPunchAsync(
+                logInDb,
+                "UPDATED");
+
+            var editedEmployeeId = logInDb.EmployeeID ?? 0;
+            var editedDay = logInDb.PunchTime.Date;
+
+            await RecalculateAndSaveSummary(editedEmployeeId, editedDay);
+            AttendanceProcessingCoordinator.Invalidate(processingKey);
+
+            if (!firebasePunchOk)
+                _logger.LogWarning("Punch updated in SQL but Firebase projection failed. EmployeeId={EmployeeId}, LogId={LogId}", editedEmployeeId, logInDb.LogID);
+
             toastService.ShowSuccess("Punch time updated.");
             CancelEdit();
-            await RecalculateAndSaveSummary(punchToEdit.EmployeeID ?? 0, punchToEdit.PunchTime);
 
+            await AttendanceRefreshService.NotifyPunchChangedAsync(
+                editedEmployeeId,
+                DateOnly.FromDateTime(editedDay),
+                "UPDATED");
             await AttendanceRefreshService
                 .NotifyAttendanceChangedAsync(
-                    punchToEdit.EmployeeID ?? 0,
-                    DateOnly.FromDateTime(punchToEdit.PunchTime.Date));
+                    editedEmployeeId,
+                    DateOnly.FromDateTime(editedDay));
 
             await LoadProblematicDays();
         }

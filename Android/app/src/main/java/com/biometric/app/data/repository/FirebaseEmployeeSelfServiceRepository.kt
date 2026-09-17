@@ -19,6 +19,7 @@ import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.entity.Attendance
 import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.data.entity.Employee
+import com.biometric.app.data.entity.FeatureSettings
 import com.biometric.app.data.entity.LeaveRequest
 import com.biometric.app.data.entity.RegularizationRequest
 import com.biometric.app.data.entity.ResignationRequest
@@ -280,6 +281,18 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         // same employee key enforced by Firebase RTDB rules. Admin screens use
         // their own repositories and are not routed through this self-service class.
         val id = sessionStore.employeeId()
+        when (table) {
+            "payroll_history", "salary_snapshots" -> requireFeatureAllowed("payslip")
+            "attendance", "attendance_punches", "daily_summaries" -> requireFeatureAllowed("attendance")
+            "shift_schedules" -> requireFeatureAllowed("shift")
+            "leave_requests" -> requireFeatureAllowed("leave")
+            "advance_payments" -> requireFeatureAllowed("advance")
+            "bonus_records" -> requireFeatureAllowed("bonus")
+            "regularizations" -> requireFeatureAllowed("regularization")
+            "resignation_requests" -> requireFeatureAllowed("resignation")
+            "tax_declarations" -> requireFeatureAllowed("tax")
+            "fbp_declarations" -> requireFeatureAllowed("fbp")
+        }
         val query = when (table) {
             "payroll_history", "tax_declarations", "fbp_declarations", "bonus_records" ->
                 ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
@@ -345,11 +358,42 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         return default
     }
 
+    suspend fun featureSettings(): FeatureSettings {
+        val snapshot = ownerRef().child("feature_settings").child("1").get().await()
+        return runCatching {
+            com.google.gson.Gson().fromJson(
+                com.google.gson.Gson().toJson(snapshot.value),
+                FeatureSettings::class.java
+            )
+        }.getOrNull() ?: FeatureSettings()
+    }
+
+    private suspend fun requireFeatureAllowed(key: String) {
+        val f = featureSettings()
+        val allowed = when (key) {
+            "attendance" -> f.employeeCanViewAttendance
+            "leave" -> f.enableLeaveManagement && f.employeeCanViewLeave
+            "payslip" -> f.enablePayroll && f.employeeCanViewPayslip
+            "advance" -> f.enableSalaryAdvance && f.employeeCanViewAdvance
+            "bonus" -> f.enableBonusManagement && f.employeeCanViewBonus
+            "regularization" -> f.enablePunchCorrection && f.enableRegularizationRequest
+            "resignation" -> f.enableResignationModule && f.employeeCanViewResignation
+            "shift" -> f.enableShiftScheduling && f.employeeCanViewShifts
+            "tax" -> f.enableTaxDeclarations && f.employeeCanViewTax
+            "fbp" -> f.enableFlexibleBenefits
+            "reports" -> f.enableCustomReporting && f.employeeCanViewReports
+            else -> true
+        }
+        if (!allowed) throw SecurityException("This employee self-service feature is disabled by the administrator")
+    }
+
     suspend fun dashboard(): EmployeeDashboardResponse {
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
-        val latest = payrollHistory().firstOrNull()
         val settings = ownerRef().child("company_settings").child("1").get().await()
         val features = ownerRef().child("feature_settings").child("1").get().await()
+        val canViewPayslip = features.boolAny(true, "employeeCanViewPayslip", "employee_can_view_payslip", "EmployeeCanViewPayslip") &&
+            features.boolAny(true, "enablePayroll", "enable_payroll", "EnablePayroll")
+        val latest = if (canViewPayslip) payrollHistory().firstOrNull() else null
 
         // Firebase is the cross-platform synchronization source. Company and
         // feature settings must be read from the same owner node as the employee
@@ -512,6 +556,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun createLeave(leaveDate: String, leaveType: String, isHalfDay: Boolean, notes: String?) {
+        requireFeatureAllowed("leave")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         val id = UUID.randomUUID().toString()
         val date = LocalDate.parse(leaveDate, dateFormatter).toEpochDay() * 86_400_000L
@@ -539,6 +584,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun createAdvance(amount: Double, reason: String) {
+        requireFeatureAllowed("advance")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         val id = UUID.randomUUID().toString()
         ownerRef().child("advance_payments").child(id).setValue(
@@ -580,6 +626,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             }
 
     suspend fun createRegularization(request: RegularizationCreateRequest) {
+        requireFeatureAllowed("regularization")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         // Keep the Firebase key numeric so the existing Web SQL compatibility
         // projection can materialize the request without introducing a second
@@ -607,6 +654,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             }
 
     suspend fun createResignation(request: ResignationCreateRequest) {
+        requireFeatureAllowed("resignation")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         val id = UUID.randomUUID().toString()
         firebaseSync.pushResignationRequest(
@@ -634,6 +682,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }.maxByOrNull { it.declarationId }
 
     suspend fun saveTax(request: TaxDeclarationRequest): TaxDeclarationDto {
+        requireFeatureAllowed("tax")
         val employeeId = sessionStore.employeeId()
         val declarationId = nextIntId("tax_declaration_id", "tax_declarations", "declarationId")
         ownerRef().child("tax_declarations").child(declarationId.toString()).setValue(
@@ -671,6 +720,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }.sortedByDescending { it.declarationId }
 
     suspend fun saveFbp(request: FbpRequest): FbpDto {
+        requireFeatureAllowed("fbp")
         val employeeId = sessionStore.employeeId()
         val declarationId = nextIntId("fbp_declaration_id", "fbp_declarations", "declarationId")
         val monthly = request.annualAllocatedAmount / 12.0

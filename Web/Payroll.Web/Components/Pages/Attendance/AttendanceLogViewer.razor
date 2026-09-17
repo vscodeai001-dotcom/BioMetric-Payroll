@@ -9,7 +9,6 @@
 @using global::Payroll.Web.Models
 @using global::Payroll.Web.Services
 @using global::Payroll.Shared.Services
-@using System.Collections.Concurrent
 @using System.Security.Cryptography
 @using System.Threading
 @using System.Text.Json
@@ -23,6 +22,7 @@
 @inject IToastService toastService
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject Payroll.Web.Services.FirebaseAttendanceService FirebaseAttendanceService
+@inject Payroll.Web.Services.AttendanceProcessingCoordinator AttendanceProcessingCoordinator
 @inject CsvExportService CsvService
 
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
@@ -254,15 +254,9 @@
     //
     // IMPORTANT:
     // This does NOT change the database design.
-    // It only prevents unnecessary recalculation while the
-    // application process is running.
-    //
-
-    private static readonly ConcurrentDictionary<string, string>
-        ProcessedPunchFingerprints = new();
-
-    private readonly SemaphoreSlim _autoProcessLock =
-        new(1, 1);
+    // The singleton coordinator prevents duplicate employee/date processing
+    // across Web circuits and remembers the last processed punch fingerprint.
+    // Manual-override state is included in the idempotency decision.
 
     // ============================================================
     // INDIA NOW
@@ -305,6 +299,17 @@
 
             employees =
                 await FirebaseEmployees.GetEmployeesAsync();
+
+            // --------------------------------------------------------
+            // Restore the idempotency state from the local compatibility
+            // projection before the first automatic processing pass.
+            // This prevents a page/app restart from recalculating every
+            // unchanged employee/date combination.
+            // --------------------------------------------------------
+
+            await SeedProcessedPunchFingerprintsAsync(
+                DateOnly.FromDateTime(startDate!.Value.Date),
+                DateOnly.FromDateTime(endDate!.Value.Date));
 
             // --------------------------------------------------------
             // IMPORTANT
@@ -1106,8 +1111,6 @@
         DateOnly dEnd,
         DateTime queryEndExclusive)
     {
-        await _autoProcessLock.WaitAsync();
-
         try
         {
             // --------------------------------------------------------
@@ -1222,6 +1225,7 @@
                     .ToList();
 
             bool changed = false;
+            var processedAfterSave = new List<(string Key, string Fingerprint, bool ManualOverride)>();
 
             foreach (var group in groups)
             {
@@ -1247,15 +1251,12 @@
                 // DO NOT run the calculator again.
                 // ----------------------------------------------------
 
-                if (
-                    ProcessedPunchFingerprints.TryGetValue(
-                        cacheKey,
-                        out var previousFingerprint) &&
-                    previousFingerprint ==
-                        fingerprint)
-                {
-                    continue;
-                }
+                // Serialize processing for this exact employee/date key.
+                // Firebase/SignalR can deliver the same change to multiple
+                // Web circuits, so the check is repeated after acquiring the
+                // key lock.
+                using var processingLease =
+                    await AttendanceProcessingCoordinator.AcquireAsync(cacheKey);
 
                 var employee =
                     activeEmployees.FirstOrDefault(
@@ -1293,9 +1294,22 @@
                     existing != null &&
                     existing.IsManualOverride)
                 {
-                    ProcessedPunchFingerprints[cacheKey] =
-                        fingerprint;
+                    AttendanceProcessingCoordinator.MarkProcessed(
+                        cacheKey,
+                        fingerprint,
+                        manualOverride: true);
 
+                    continue;
+                }
+
+                // Re-check after loading the current summary and after taking
+                // the employee/date lock. This closes the duplicate-processing
+                // window between two realtime callbacks.
+                if (AttendanceProcessingCoordinator.IsAlreadyProcessed(
+                        cacheKey,
+                        fingerprint,
+                        existing?.IsManualOverride ?? false))
+                {
                     continue;
                 }
 
@@ -1419,16 +1433,28 @@
                 changed = true;
 
                 // ----------------------------------------------------
-                // Mark this exact punch set as processed.
+                // Do not mark the fingerprint as committed until the EF save
+                // succeeds. Otherwise a failed save could permanently suppress
+                // the next legitimate retry.
                 // ----------------------------------------------------
 
-                ProcessedPunchFingerprints[cacheKey] =
-                    fingerprint;
+               processedAfterSave.Add((
+    cacheKey,
+    fingerprint,
+    ManualOverride: false));
             }
 
             if (changed)
             {
                 await dbContext.SaveChangesAsync();
+
+                foreach (var processed in processedAfterSave)
+                {
+                    AttendanceProcessingCoordinator.MarkProcessed(
+                        processed.Key,
+                        processed.Fingerprint,
+                        processed.ManualOverride);
+                }
             }
         }
         catch (Exception ex)
@@ -1436,10 +1462,6 @@
             _logger.LogError(
                 ex,
                 "Automatic attendance synchronization failed.");
-        }
-        finally
-        {
-            _autoProcessLock.Release();
         }
     }
 
@@ -1474,26 +1496,39 @@
                         p => p.PunchTime)
                     .ToListAsync();
 
+            var summaries =
+                await dbContext.DailySummaries
+                    .AsNoTracking()
+                    .Where(
+                        s =>
+                            s.ShiftDate >= dStart &&
+                            s.ShiftDate <= dEnd)
+                    .ToDictionaryAsync(
+                        s => $"{s.EmployeeID}:{s.ShiftDate:yyyy-MM-dd}");
+
             foreach (
                 var group in
                 punches.GroupBy(
                     p =>
                         new
                         {
-                            EmployeeId =
-                                p.EmployeeID!.Value,
-
-                            Date =
-                                DateOnly.FromDateTime(
-                                    p.PunchTime.Date)
+                            EmployeeId = p.EmployeeID!.Value,
+                            Date = DateOnly.FromDateTime(p.PunchTime.Date)
                         }))
             {
                 var key =
                     $"{group.Key.EmployeeId}:{group.Key.Date:yyyy-MM-dd}";
 
-                ProcessedPunchFingerprints[key] =
-                    CreatePunchFingerprint(
-                        group);
+                // Only seed an idempotency marker when a DailySummary
+                // already exists. A punch set without a summary still needs
+                // the normal automatic calculation on the next pass.
+                if (summaries.TryGetValue(key, out var summary))
+                {
+                    AttendanceProcessingCoordinator.MarkProcessed(
+                        key,
+                        CreatePunchFingerprint(group),
+                        summary.IsManualOverride);
+                }
             }
         }
         catch (Exception ex)
@@ -1523,9 +1558,12 @@
                         p =>
                             $"{p.LogID}|" +
                             $"{p.PunchTime.Ticks}|" +
-                            $"{p.LogType}|" +
-                            $"{p.BiometricID}|" +
-                            $"{p.DeviceID}"));
+                            $"{p.LogType ?? string.Empty}|" +
+                            $"{p.BiometricID ?? string.Empty}|" +
+                            $"{p.DeviceID ?? string.Empty}|" +
+                            $"{p.IsApproved}|" +
+                            $"{p.Latitude?.ToString("R", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}|" +
+                            $"{p.Longitude?.ToString("R", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}"));
 
         var bytes =
             SHA256.HashData(
@@ -1653,6 +1691,14 @@
             {
                 continue;
             }
+
+            var processingKey =
+                $"{leave.EmployeeID}:{leaveDate:yyyy-MM-dd}";
+
+            // Leave-driven attendance updates must serialize with automatic
+            // punch processing and manual corrections for the same day.
+            using var processingLease =
+                await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
 
             var existing =
                 summaries.FirstOrDefault(
@@ -1784,6 +1830,22 @@
         if (changed)
         {
             await dbContext.SaveChangesAsync();
+
+            // Leave changes alter the attendance state. Clear any previous
+            // automatic fingerprint so a later pass can reconcile the new
+            // source state, while the manual/leave override flag still
+            // protects the summary from being overwritten.
+            foreach (var leave in approvedLeaves)
+            {
+                if (!leave.LeaveDate.HasValue)
+                    continue;
+
+                var leaveDate =
+                    DateOnly.FromDateTime(leave.LeaveDate.Value.Date);
+
+                AttendanceProcessingCoordinator.Invalidate(
+                    $"{leave.EmployeeID}:{leaveDate:yyyy-MM-dd}");
+            }
         }
     }
 
@@ -2034,6 +2096,7 @@
                     endDate.Value.Date);
 
             int count = 0;
+            int skippedManualOverrides = 0;
 
             for (
                 var day = dStart;
@@ -2043,6 +2106,9 @@
                 var dayDateTime =
                     day.ToDateTime(
                         TimeOnly.MinValue);
+
+                var dayProcessingLeases =
+                    new List<IDisposable>();
 
                 var nextDayDateTime =
                     dayDateTime.AddDays(1);
@@ -2087,14 +2153,26 @@
                                 l.LeaveRequestID)
                         .ToListAsync();
 
-                foreach (var emp in allEmployees)
+                try
                 {
-                    if (emp.HireDate > day)
+                    foreach (var emp in allEmployees)
                     {
-                        continue;
-                    }
+                        if (emp.HireDate > day)
+                        {
+                            continue;
+                        }
 
-                    var existing =
+                        var processingKey =
+                            $"{emp.EmployeeID}:{day:yyyy-MM-dd}";
+
+                        // Manual reprocessing must serialize with automatic
+                        // punch processing and manual corrections for the
+                        // exact employee/date being recalculated.
+                        dayProcessingLeases.Add(
+                            await AttendanceProcessingCoordinator.AcquireAsync(
+                                processingKey));
+
+                        var existing =
                         await dbContext.DailySummaries
                             .FirstOrDefaultAsync(
                                 s =>
@@ -2103,13 +2181,13 @@
                                     s.ShiftDate ==
                                         day);
 
-                    if (
-                        existing != null &&
-                        existing.IsManualOverride)
-                    {
-                        count++;
-                        continue;
-                    }
+                        if (
+                            existing != null &&
+                            existing.IsManualOverride)
+                        {
+                            skippedManualOverrides++;
+                            continue;
+                        }
 
                     var empPunches =
                         allPunches
@@ -2205,20 +2283,38 @@
                     existing.IsManualOverride =
                         false;
 
-                    count++;
-                }
+                        count++;
+                    }
 
-                await dbContext.SaveChangesAsync();
+                    await dbContext.SaveChangesAsync();
+
+                    // The database save is now committed. Clear the old
+                    // in-memory fingerprints for this date so the next
+                    // automatic pass cannot rely on stale punch state.
+                    foreach (var emp in allEmployees)
+                    {
+                        if (emp.HireDate <= day)
+                        {
+                            AttendanceProcessingCoordinator.Invalidate(
+                                $"{emp.EmployeeID}:{day:yyyy-MM-dd}");
+                        }
+                    }
+                }
+                finally
+                {
+                    foreach (var lease in dayProcessingLeases)
+                        lease.Dispose();
+                }
             }
 
             await AuditService.LogAsync(
                 "UPDATE",
                 "Attendance",
                 $"Range:{dStart}-{dEnd}",
-                $"Mass attendance re-processed {count} daily summaries.");
+                $"Mass attendance re-processed {count} daily summaries. Skipped {skippedManualOverrides} manual overrides.");
 
             toastService.ShowSuccess(
-    $"Successfully re-processed {count} records.");
+                $"Successfully re-processed {count} records. {skippedManualOverrides} manual overrides preserved.");
 
             // ------------------------------------------------------------
             // Refresh the fingerprint cache after manual re-processing.

@@ -168,9 +168,11 @@ builder.Services.AddAuthentication()
 
 builder.Services.AddHttpClient("FirebaseRealtime");
 builder.Services.AddSingleton<FirebaseRealtimeService>();
+builder.Services.AddSingleton<FirebaseAttendanceCalendarMutationService>();
 builder.Services.AddSingleton<FirebaseEmployeeManagementService>();
 builder.Services.AddSingleton<FirebaseEmployeeHistoryService>();
 builder.Services.AddSingleton<FirebaseAttendanceService>();
+builder.Services.AddSingleton<FirebaseAttendanceMutationService>();
 builder.Services.AddSingleton<FirebaseEmployeeDeletionService>();
 builder.Services.AddSingleton<FirebaseShiftScheduleService>();
 builder.Services.AddSingleton<FirebaseAdvanceService>();
@@ -181,6 +183,7 @@ builder.Services.AddSingleton<FirebaseAdminDashboardService>();
 builder.Services.AddScoped<FirebaseUserManagementService>();
 builder.Services.AddSingleton<PayrollFinalizationService>();
 builder.Services.AddSingleton<FirebaseSyncWriteScope>();
+builder.Services.AddSingleton<AttendanceProcessingCoordinator>();
 builder.Services.AddHostedService<FirebaseInitialDataMigrationService>();
 builder.Services.AddHostedService<FirebaseSqliteSyncService>();
 builder.Services.AddHostedService<FirebaseSuperAdminProvisioningService>();
@@ -226,6 +229,12 @@ builder.Services.AddDbContextFactory<AppDbContext>((sp, options) =>
 
 builder.Services.AddScoped<
     AttendanceCalculatorService>();
+
+builder.Services.AddScoped<
+    AttendanceCalendarImpactService>();
+
+builder.Services.AddScoped<
+    ShiftScheduleAttendanceImpactService>();
 
 builder.Services.AddScoped<
     AttendanceBoundsService>();

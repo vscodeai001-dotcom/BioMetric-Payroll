@@ -184,15 +184,22 @@ class TrackingService : Service() {
                     // attendance state machine. This avoids duplicating attendance
                     // calculation logic on Android and prevents double punches.
                     runCatching {
-                        firebaseSync.pushTrackingSessionStarted(
+                        val started = firebaseSync.pushTrackingSessionStarted(
                             employeeId = sessionStore.employeeId(),
                             sessionId = sessionStore.gpsSessionId()
                         )
+                        if (!started) {
+                            queueTrackingLifecycleEvent(
+                                OfflineTrackingEvent.SESSION_STARTED,
+                                sessionStore.gpsSessionId(),
+                                "Tracking session start deferred until Firebase reconnects"
+                            )
+                        }
                     }.onFailure {
-                        Log.w(
-                            "TrackingService",
-                            "Unable to publish tracking session start",
-                            it
+                        queueTrackingLifecycleEvent(
+                            OfflineTrackingEvent.SESSION_STARTED,
+                            sessionStore.gpsSessionId(),
+                            "Tracking session start failed: ${it.message ?: "Firebase unavailable"}"
                         )
                     }
 
@@ -298,10 +305,17 @@ class TrackingService : Service() {
                 withContext(Dispatchers.Main) { startLocationUpdates() }
                 if (!serverSessionStarted) {
                     serverSessionStarted = true
-                    firebaseSync.pushTrackingSessionStarted(
+                    val started = firebaseSync.pushTrackingSessionStarted(
                         employeeId = sessionStore.employeeId(),
                         sessionId = sessionStore.gpsSessionId()
                     )
+                    if (!started) {
+                        queueTrackingLifecycleEvent(
+                            OfflineTrackingEvent.SESSION_STARTED,
+                            sessionStore.gpsSessionId(),
+                            "Tracking session start deferred until Firebase reconnects"
+                        )
+                    }
                 }
             }
         } else if (locationUpdatesStarted) {
@@ -543,6 +557,10 @@ class TrackingService : Service() {
                     )
                     latestLocationChannel.trySend(local)
                     startGpsUploadWorker()
+                    // The foreground uploader is fast, while this durable WorkManager
+                    // path guarantees that background/queued points are also routed
+                    // through Firebase and therefore the server attendance engine.
+                    syncManager.scheduleImmediateSync()
                 }
             }.onFailure { ex ->
                 Log.d("TrackingService", "Local GPS save deferred: ${ex.message}")
@@ -695,6 +713,38 @@ class TrackingService : Service() {
         }
     }
 
+    private fun queueTrackingLifecycleEvent(
+        eventType: String,
+        sessionId: String,
+        message: String
+    ) {
+        if (sessionId.isBlank()) return
+
+        serviceScope.launch {
+            runCatching {
+                eventDao.insert(
+                    OfflineTrackingEvent(
+                        eventId = UUID.randomUUID().toString(),
+                        eventTime = System.currentTimeMillis(),
+                        eventType = eventType,
+                        severity = OfflineTrackingMonitor.WARNING,
+                        message = message.take(500),
+                        sessionId = sessionId,
+                        networkAvailable = offlineMonitor.isOnline(),
+                        queueDepth = locationDao.getPendingCount()
+                    )
+                )
+                OfflineSyncWorker.schedule(this@TrackingService)
+            }.onFailure {
+                Log.w(
+                    "TrackingService",
+                    "Unable to durably queue tracking lifecycle event: $eventType",
+                    it
+                )
+            }
+        }
+    }
+
     private fun stopTracking(endReason: String = "LOGGED_OUT", keepRecovery: Boolean = false) {
         isManualStopping = !keepRecovery
 
@@ -705,11 +755,24 @@ class TrackingService : Service() {
         val activeSessionId = sessionStore.currentGpsSessionId()
         if (activeEmployeeId > 0 && !activeSessionId.isNullOrBlank()) {
             serviceScope.launch {
-                firebaseSync.pushTrackingSessionEnded(
-                    employeeId = activeEmployeeId,
-                    sessionId = activeSessionId,
-                    endReason = endReason
-                )
+                val ended = runCatching {
+                    firebaseSync.pushTrackingSessionEnded(
+                        employeeId = activeEmployeeId,
+                        sessionId = activeSessionId,
+                        endReason = endReason
+                    )
+                }.getOrElse {
+                    Log.w("TrackingService", "Tracking session end publish failed", it)
+                    false
+                }
+
+                if (!ended) {
+                    queueTrackingLifecycleEvent(
+                        OfflineTrackingEvent.SESSION_ENDED,
+                        activeSessionId,
+                        "Tracking session end deferred. Reason: ${endReason.take(100)}"
+                    )
+                }
             }
         }
 
