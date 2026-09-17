@@ -94,6 +94,7 @@
                         <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Timeline integrity" android:textStyle="bold" android:textSize="15sp" android:textColor="?attr/colorOnSurface" />
                         <TextView android:id="@+id/tvLastCapture" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="7dp" android:text="Last capture: —" android:textSize="12sp" android:textColor="?attr/colorOnSurfaceVariant" />
                         <TextView android:id="@+id/tvLastSync" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Last server acknowledgement: —" android:textSize="12sp" android:textColor="?attr/colorOnSurfaceVariant" />
+                        <TextView android:id="@+id/tvRemoteHistory" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Cloud history: not loaded" android:textSize="12sp" android:textColor="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
@@ -113,6 +114,11 @@
                         android:id="@+id/btnSyncNow"
                         android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                         android:text="Sync Pending GPS" />
+                    <Space android:layout_width="8dp" android:layout_height="1dp" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnLoadCloudHistory"
+                        android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                        android:text="Cloud History" />
                     <Space android:layout_width="8dp" android:layout_height="1dp" />
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRefreshOffline"

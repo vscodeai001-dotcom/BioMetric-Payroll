@@ -316,10 +316,59 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }
     }
 
+    private fun DataSnapshot.doubleAny(vararg names: String): Double =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toDouble()
+                else -> value?.toString()?.toDoubleOrNull()
+            }
+        }.firstOrNull() ?: 0.0
+
+    private fun DataSnapshot.intAny(vararg names: String): Int =
+        names.asSequence().mapNotNull { name ->
+            val value = child(name).value
+            when (value) {
+                is Number -> value.toInt()
+                else -> value?.toString()?.toIntOrNull()
+            }
+        }.firstOrNull() ?: 0
+
+    private fun DataSnapshot.boolAny(default: Boolean, vararg names: String): Boolean {
+        names.forEach { name ->
+            if (child(name).exists()) {
+                return when (val value = child(name).value) {
+                    is Boolean -> value
+                    else -> value?.toString()?.toBooleanStrictOrNull() ?: default
+                }
+            }
+        }
+        return default
+    }
+
     suspend fun dashboard(): EmployeeDashboardResponse {
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         val latest = payrollHistory().firstOrNull()
         val settings = ownerRef().child("company_settings").child("1").get().await()
+        val features = ownerRef().child("feature_settings").child("1").get().await()
+
+        // Firebase is the cross-platform synchronization source. Company and
+        // feature settings must be read from the same owner node as the employee
+        // instead of falling back to a separate Web/API database. Support the
+        // canonical camelCase contract plus legacy snake_case keys created by
+        // earlier Web syncs.
+        val officeLatitude = settings.doubleAny("officeLatitude", "office_latitude", "OfficeLatitude")
+        val officeLongitude = settings.doubleAny("officeLongitude", "office_longitude", "OfficeLongitude")
+        val geoRadiusMeters = settings.intAny("geoRadiusMeters", "geo_radius_meters", "GeoRadiusMeters")
+            .takeIf { it > 0 } ?: 1000
+        val enableGeoFencing = features.boolAny(true, "enableGeoFencing", "enable_geo_fencing", "EnableGeoFencing")
+        val enableDualAttendance = features.boolAny(false, "enableDualAttendance", "enable_dual_attendance", "EnableDualAttendance")
+        val enableAutomaticGeofencePunching = features.boolAny(
+            false,
+            "enableAutomaticGeofencePunching",
+            "enable_automatic_geofence_punching",
+            "EnableAutomaticGeofencePunching"
+        )
 
         // Leave balances are part of the canonical Employee Firebase record.
         // Never fabricate a default balance when the employee record is loaded.
@@ -335,9 +384,12 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             paidLeaveBalance = paid,
             sickLeaveBalance = sick,
             latestPayslip = latest,
-            officeLatitude = settings.double("officeLatitude"),
-            officeLongitude = settings.double("officeLongitude"),
-            geoRadiusMeters = settings.int("geoRadiusMeters").takeIf { it > 0 } ?: 1000,
+            officeLatitude = officeLatitude,
+            officeLongitude = officeLongitude,
+            geoRadiusMeters = geoRadiusMeters,
+            enableGeoFencing = enableGeoFencing,
+            enableDualAttendance = enableDualAttendance,
+            enableAutomaticGeofencePunching = enableAutomaticGeofencePunching,
             role = emp.role,
             dob = emp.dob?.let(::formatDate),
             hireDate = emp.hireDate.takeIf { it > 0 }?.let(::formatDate),

@@ -45,6 +45,7 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var firebaseEmployeeSessionManager: com.biometric.app.sync.FirebaseEmployeeSessionManager
+    @Inject lateinit var firebaseEmployeeProvisioningVerifier: com.biometric.app.sync.FirebaseEmployeeProvisioningVerifier
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -97,13 +98,17 @@ class LoginActivity : MotionBaseActivity() {
         binding.btnReset.setOnClickListener {
             // Allow user to logout and switch accounts if they want
             // This button is an explicit account switch/sign-out action.
-            mobileSessionStore.clearLogin()
-            SecurityBaseActivity.clearProcessAuthorization(applicationContext)
-            applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
-                .edit(commit = true) { clear() }
-            applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE)
-                .edit(commit = true) { clear() }
-            setupUI()
+            lifecycleScope.launch {
+                runCatching { firebaseEmployeeSessionManager.release() }
+                runCatching { FirebaseAuth.getInstance().signOut() }
+                mobileSessionStore.clearLogin()
+                SecurityBaseActivity.clearProcessAuthorization(applicationContext)
+                applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                    .edit(commit = true) { clear() }
+                applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE)
+                    .edit(commit = true) { clear() }
+                setupUI()
+            }
         }
     }
 
@@ -326,6 +331,20 @@ class LoginActivity : MotionBaseActivity() {
                     Toast.makeText(
                         this@LoginActivity,
                         "Employee Firebase profile is not provisioned yet. Please ask Admin to provision this employee, then try again.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                val provisioning = firebaseEmployeeProvisioningVerifier.verify(
+                    employeeId = firebaseEmployeeId,
+                    ownerUid = firebaseOwnerUid
+                )
+                if (!provisioning.valid) {
+                    setLoading(false)
+                    Toast.makeText(
+                        this@LoginActivity,
+                        provisioning.message,
                         Toast.LENGTH_LONG
                     ).show()
                     return@launch

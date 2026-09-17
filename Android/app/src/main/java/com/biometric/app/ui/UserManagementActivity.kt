@@ -14,6 +14,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
+import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.UserRepository
 import com.biometric.app.databinding.ActivityUserManagementBinding
 import com.biometric.app.ui.viewmodel.UserViewModel
@@ -32,6 +33,21 @@ class UserManagementActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityUserManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // Web parity: User/Role Management is a SuperAdmin-only governance function.
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+            .getString("user_role", UserRole.STAFF.name)
+            ?.trim()
+            ?.uppercase()
+        if (role != UserRole.SUPER_ADMIN.name) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Access Restricted 🛡️")
+                .setMessage("User and Role Management is available only to SuperAdmin.")
+                .setPositiveButton("OK") { _, _ -> finish() }
+                .setOnDismissListener { if (!isFinishing) finish() }
+                .show()
+            return
+        }
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
@@ -88,9 +104,13 @@ class UserManagementActivity : AppCompatActivity() {
 
             holder.itemView.setOnLongClickListener {
                 MaterialAlertDialogBuilder(this@UserManagementActivity)
-                    .setTitle("Delete User")
-                    .setMessage("Are you sure you want to delete ${user.email}?")
-                    .setPositiveButton("Delete") { _, _ -> viewModel.deleteUser(user.userId) }
+                    .setTitle("Remove User Profile")
+                    .setMessage(
+                        "This removes only the Firebase user_profiles record for ${user.email}. " +
+                            "It does NOT delete the Firebase Authentication account or Web Identity account. " +
+                            "Use the Web Portal for canonical account deletion or role changes."
+                    )
+                    .setPositiveButton("Remove Profile") { _, _ -> viewModel.deleteUser(user.userId) }
                     .setNegativeButton("Cancel", null)
                     .show()
                 true

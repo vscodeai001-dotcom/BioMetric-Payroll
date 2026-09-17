@@ -39,6 +39,13 @@ class RecycleBinActivity : MotionBaseActivity() {
         binding = ActivityRecycleBinBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", "STAFF")
+        if (role != com.biometric.app.data.entity.UserRole.SUPER_ADMIN.name) {
+            Toast.makeText(this, "Recycle Bin is restricted to SuperAdmin 🛡️", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         setupUI()
         observeViewModel()
         
@@ -60,7 +67,6 @@ class RecycleBinActivity : MotionBaseActivity() {
                     .setPositiveButton("Restore") { _, _ ->
                         viewModel.restoreItem(item)
                         MotionManager.playUpdateMorph(binding.animFeedback)
-                        Toast.makeText(this, "Restored Successfully", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Cancel", null)
                     .show()
@@ -119,6 +125,11 @@ class RecycleBinActivity : MotionBaseActivity() {
                 launch {
                     viewModel.canLoadMore.collect { canLoad ->
                         binding.btnLoadMore.visibility = if (canLoad) View.VISIBLE else View.GONE
+                    }
+                }
+                launch {
+                    viewModel.operationMessage.collect { message ->
+                        Toast.makeText(this@RecycleBinActivity, message, Toast.LENGTH_LONG).show()
                     }
                 }
             }

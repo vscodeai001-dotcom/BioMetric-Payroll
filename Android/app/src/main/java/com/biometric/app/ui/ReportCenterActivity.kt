@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.widget.ArrayAdapter
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -17,10 +18,13 @@ import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
 import com.biometric.app.data.entity.ConsolidatedAttendanceRow
 import com.biometric.app.data.entity.FinancialRegisterRow
+import com.biometric.app.data.entity.LocalDailySummary
 import com.biometric.app.data.entity.PayrollVarianceRow
 import com.biometric.app.databinding.ActivityReportCenterBinding
 import com.biometric.app.ui.viewmodel.ReportViewModel
+import com.biometric.app.ui.viewmodel.SharedViewModel
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -32,7 +36,9 @@ class ReportCenterActivity : AppCompatActivity() {
     private var _binding: ActivityReportCenterBinding? = null
     private val binding get() = _binding!!
     private val viewModel: ReportViewModel by viewModels()
+    @Inject lateinit var sharedViewModel: SharedViewModel
     private var selectedReportType = "ATTENDANCE_MONTHLY_SUMMARY"
+    private var selectedEmployeeId: Int? = null
     
     private val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     private var startDate = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
@@ -57,6 +63,16 @@ class ReportCenterActivity : AppCompatActivity() {
         binding.etStartDate.setOnClickListener { showDatePicker { startDate = it; binding.etStartDate.setText(sdf.format(it.time)) } }
         binding.etEndDate.setOnClickListener { showDatePicker { endDate = it; binding.etEndDate.setText(sdf.format(it.time)) } }
 
+        lifecycleScope.launch {
+            sharedViewModel.allEmployees.collectLatest { employees ->
+                val names = listOf("All Employees") + employees.map { "${it.employeeId} • ${it.name}" }
+                binding.spEmployee.setAdapter(ArrayAdapter(this@ReportCenterActivity, android.R.layout.simple_dropdown_item_1line, names))
+                binding.spEmployee.setOnItemClickListener { _, _, position, _ ->
+                    selectedEmployeeId = if (position == 0) null else employees.getOrNull(position - 1)?.employeeId?.toIntOrNull()
+                }
+            }
+        }
+
         setupReportTypeTiles()
 
         binding.btnGenerate.setOnClickListener {
@@ -65,7 +81,8 @@ class ReportCenterActivity : AppCompatActivity() {
                 sdf.format(startDate.time),
                 sdf.format(endDate.time),
                 endDate.get(Calendar.YEAR),
-                endDate.get(Calendar.MONTH) + 1
+                endDate.get(Calendar.MONTH) + 1,
+                selectedEmployeeId
             )
         }
 
@@ -86,6 +103,7 @@ class ReportCenterActivity : AppCompatActivity() {
             
             view.setOnClickListener {
                 selectedReportType = type
+                binding.tilEmployee.visibility = if (type == "ATTENDANCE_MONTHLY_SUMMARY") View.VISIBLE else View.GONE
                 updateTileSelection()
             }
             view.tag = type
@@ -170,6 +188,12 @@ class ReportCenterActivity : AppCompatActivity() {
                     tvDate.text = "💎 Net: ₹${item.netPayable} | ⏱️ Hours: ${item.earnedHours}"
                     tvReason.text = "📉 Deductions: ₹${item.totalDeductions}"
                     tvIcon.text = "💰"
+                }
+                is LocalDailySummary -> {
+                    tvTitle.text = "🗓️ ${item.shiftDate} • ${item.status}"
+                    tvDate.text = "⏱️ Worked: ${String.format(Locale.US, "%.2f", item.earnedStandardHours)}h"
+                    tvReason.text = "🟢 OT: ${item.totalOvertimeMs / 3600000.0}h | ⚠️ Penalty: ${item.totalPenaltyMs / 60000}m"
+                    tvIcon.text = "📅"
                 }
             }
         }

@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface LocalResignationRequestDao {
+    @Query("SELECT * FROM local_resignation_requests")
+        fun getAll(): List<LocalResignationRequest>
     @Query("SELECT * FROM local_resignation_requests ORDER BY submissionDate DESC")
     fun getAllFlow(): Flow<List<LocalResignationRequest>>
 
@@ -17,4 +19,7 @@ interface LocalResignationRequestDao {
 
     @Query("SELECT * FROM local_resignation_requests WHERE syncState = 0")
     fun getUnsynced(): List<LocalResignationRequest>
+    @Query("DELETE FROM local_resignation_requests WHERE requestId = :id")
+    fun deleteById(id: String)
+
 }

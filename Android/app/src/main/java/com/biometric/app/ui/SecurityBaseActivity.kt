@@ -5,6 +5,15 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.entity.UserRole
+import com.biometric.app.sync.FirebaseAuthSecurityGate
+import com.biometric.app.sync.FirebaseEmployeeLifecycleMonitor
+import com.google.firebase.auth.FirebaseAuth
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import androidx.core.content.edit
 
 /**
@@ -18,6 +27,11 @@ import androidx.core.content.edit
  * - This class does not change attendance, GPS, payroll, or business rules.
  */
 abstract class SecurityBaseActivity : AppCompatActivity() {
+
+    @Inject lateinit var firebaseAuthSecurityGate: FirebaseAuthSecurityGate
+    @Inject lateinit var employeeLifecycleMonitor: FirebaseEmployeeLifecycleMonitor
+    @Inject lateinit var sessionStore: MobileSessionStore
+
 
     companion object {
         @Volatile
@@ -85,6 +99,31 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
 
         if (!isSecurityBypass()) {
             checkSession()
+            startEmployeeLifecycleMonitorIfNeeded()
+        }
+    }
+
+    override fun onPause() {
+        employeeLifecycleMonitor.stop()
+        super.onPause()
+    }
+
+    private fun startEmployeeLifecycleMonitorIfNeeded() {
+        val role = getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
+            .getString("user_role", "").orEmpty()
+        if (role != UserRole.STAFF.name || !sessionStore.isLoggedIn()) return
+
+        employeeLifecycleMonitor.start(lifecycleScope) { reason ->
+            runOnUiThread {
+                if (isFinishing || isDestroyed || isSecurityBypass()) return@runOnUiThread
+                sessionStore.clearLogin()
+                getSharedPreferences(AUTH_PREFS, MODE_PRIVATE).edit(commit = true) { clear() }
+                getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) { clear() }
+                clearProcessAuthorization(applicationContext)
+                runCatching { FirebaseAuth.getInstance().signOut() }
+                android.widget.Toast.makeText(this, reason.ifBlank { "Employee session is no longer valid." }, android.widget.Toast.LENGTH_LONG).show()
+                redirectToLogin()
+            }
         }
     }
 

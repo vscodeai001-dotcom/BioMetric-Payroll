@@ -29,6 +29,9 @@ class RecycleBinViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _operationMessage = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val operationMessage: SharedFlow<String> = _operationMessage.asSharedFlow()
+
     val binItems: StateFlow<List<RecycleBinItem>> = combine(
         _limit.flatMapLatest { 
             _isLoading.value = true
@@ -58,21 +61,24 @@ class RecycleBinViewModel @Inject constructor(
 
     fun restoreItem(item: RecycleBinItem) {
         viewModelScope.launch {
-            dataSafety.restoreItem(item)
+            val success = dataSafety.restoreItem(item)
+            _operationMessage.emit(if (success) "${item.itemName} restored successfully ♻️" else "Restore failed. No data was removed from the recycle bin.")
         }
     }
 
     fun permanentlyDeleteItem(item: RecycleBinItem) {
         viewModelScope.launch {
-            repository.firebaseSync.deleteRecycleBinItem(item.id)
+            val success = dataSafety.permanentlyDeleteRecycleBinItem(item)
+            _operationMessage.emit(if (success) "Recycle-bin snapshot permanently deleted." else "Permanent deletion failed.")
         }
     }
 
     fun emptyRecycleBin() {
         viewModelScope.launch {
-            binItems.value.forEach { 
-                repository.firebaseSync.deleteRecycleBinItem(it.id)
-            }
+            val items = binItems.value.toList()
+            var deleted = 0
+            items.forEach { if (dataSafety.permanentlyDeleteRecycleBinItem(it)) deleted++ }
+            _operationMessage.emit("Recycle Bin cleared: $deleted item(s) permanently removed.")
         }
     }
 }

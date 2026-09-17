@@ -18,7 +18,8 @@ class TrackingNotificationReceiver : BroadcastReceiver() {
         Log.i("TrackingNotifReceiver", "Received event: ${intent.action}")
         
         if (intent.action == "ACTION_NOTIFICATION_DISMISSED" || 
-            intent.action == "ACTION_SERVICE_RESTART_TICK") {
+            intent.action == "ACTION_SERVICE_RESTART_TICK" ||
+            intent.action == TrackingService.ACTION_REFRESH_WINDOW) {
             
             val trackingPrefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
             val geoEnabled = trackingPrefs.getBoolean("enable_geo_fencing", true)
@@ -26,7 +27,7 @@ class TrackingNotificationReceiver : BroadcastReceiver() {
             if (sessionStore.isLoggedIn() && geoEnabled) {
                 Log.i("TrackingNotifReceiver", "Aggressively restoring tracking service...")
                 val serviceIntent = Intent(context, TrackingService::class.java).apply {
-                    action = TrackingService.ACTION_START
+                    action = if (intent.action == TrackingService.ACTION_REFRESH_WINDOW) TrackingService.ACTION_REFRESH_WINDOW else TrackingService.ACTION_START
                 }
                 try {
                     ContextCompat.startForegroundService(context, serviceIntent)

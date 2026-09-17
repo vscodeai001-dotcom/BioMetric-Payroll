@@ -16,8 +16,13 @@ interface LocalShopClosedDayDao {
     fun delete(item: LocalShopClosedDay): Int
 
     @Query("SELECT * FROM local_shop_closed_days")
+        fun getAll(): List<LocalShopClosedDay>
+    @Query("SELECT * FROM local_shop_closed_days")
     fun getAllFlow(): Flow<List<LocalShopClosedDay>>
 
     @Query("SELECT * FROM local_shop_closed_days WHERE syncState = 0")
     fun getUnsynced(): List<LocalShopClosedDay>
+    @Query("DELETE FROM local_shop_closed_days WHERE id = :id")
+    fun deleteById(id: String)
+
 }

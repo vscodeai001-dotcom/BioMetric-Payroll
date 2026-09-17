@@ -13,6 +13,9 @@ data class LocalAuditLog(
     val newValue: String?,
     val userDisplayName: String,
     val userId: String,
+    val actorRole: String = "",
+    val ownerUid: String = "",
+    val targetId: String? = null,
     val timestamp: Long,
     val syncState: Int = 0,
     val lastModified: Long = System.currentTimeMillis()

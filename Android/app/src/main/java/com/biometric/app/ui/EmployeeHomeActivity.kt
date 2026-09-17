@@ -48,6 +48,8 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
+import com.biometric.app.domain.attendance.EmployeeAttendanceStateMachine
+import com.biometric.app.domain.attendance.AttendancePolicyRepository
 import com.biometric.app.databinding.ActivityEmployeeHomeBinding
 import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.sync.SignalRManager
@@ -91,6 +93,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
     @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
     @Inject lateinit var repository: MainRepository
+    @Inject lateinit var attendancePolicy: AttendancePolicyRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
@@ -117,6 +120,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var initJob: Job? = null
     private var roadRouteJob: Job? = null
     private var dashboardJob: Job? = null
+    private var policyJob: Job? = null
     private var dashboardRetryJob: Job? = null
     private var dashboardAuthRecoveryInProgress = false
     private var sessionStartTime: Long = 0L
@@ -175,6 +179,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         initJob = lifecycleScope.launch {
             // Start UI/realtime work without artificial startup waits.
             loadDashboard()
+        observeAttendancePolicy()
             checkBatteryOptimizations()
             setupMap()
             setupRealTimeSync()
@@ -198,9 +203,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         val prefs = getSharedPreferences("office_settings", MODE_PRIVATE)
         officeLat = prefs.getFloat("lat", 0f).toDouble()
         officeLon = prefs.getFloat("lon", 0f).toDouble()
-        geoRadius = prefs.getInt("radius", 100)
+        geoRadius = prefs.getInt("radius", 0)
 
-        if (officeLat != 0.0) {
+        if (officeLat != 0.0 && officeLon != 0.0 && geoRadius > 0) {
             updateMapMarkers()
             updateRangeStatus()
         }
@@ -859,13 +864,15 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun updateRangeStatus() {
-        if (currentLat == 0.0) {
+        if (currentLat == 0.0 || currentLon == 0.0) {
             binding.tvRangeStatus.text = "Locating device... 🛰️"
+            binding.btnPunch.isEnabled = false
             return
         }
 
-        if (officeLat == 0.0 || officeLon == 0.0) {
+        if (officeLat == 0.0 || officeLon == 0.0 || geoRadius <= 0) {
             binding.tvRangeStatus.text = "Configuring office... 🏢"
+            binding.btnPunch.isEnabled = false
             return
         }
 
@@ -873,7 +880,20 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         Location.distanceBetween(officeLat, officeLon, currentLat, currentLon, distanceResults)
         val distance = distanceResults[0]
 
-        val withinRange = distance <= (geoRadius + 1)
+        val featureState = EmployeeAttendanceStateMachine.FeatureState(
+            geoFencingEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
+                .getBoolean("enable_geo_fencing", true),
+            dualAttendanceEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
+                .getBoolean("enable_dual_attendance", false),
+            automaticGeofencePunchingEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
+                .getBoolean("enable_auto_punch", false)
+        )
+        val locationState = EmployeeAttendanceStateMachine.LocationState(
+            hasLocation = currentLat != 0.0 && currentLon != 0.0,
+            distanceMeters = distance.toDouble(),
+            allowedRadiusMeters = geoRadius
+        )
+        val withinRange = locationState.withinRadius
 
         binding.tvRangeStatus.text = if (withinRange) "Within allowed range ✅ 💎" else "Outside allowed range ⚠️ ❌"
         binding.tvRangeStatus.setBackgroundColor(if (withinRange) "#2010B981".toColorInt() else "#20EF4444".toColorInt())
@@ -882,7 +902,10 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             if (withinRange) R.drawable.ic_check_circle else R.drawable.ic_cancel, 0, 0, 0
         )
 
-        binding.btnPunch.isEnabled = withinRange
+        binding.btnPunch.isEnabled = EmployeeAttendanceStateMachine.ManualPunchState(
+            feature = featureState,
+            location = locationState
+        ).canPunch
     }
 
     private fun formatDuration(millis: Long): String {
@@ -940,8 +963,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     }
                 } finally {
                     _binding?.let { bInner ->
-                        bInner.btnPunch.isEnabled = true
                         bInner.btnPunch.text = "PUNCH IN / OUT 🏢"
+                        updateRangeStatus()
                     }
                 }
             }
@@ -1021,6 +1044,45 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     b.tvGreeting.text = "Hello, ${sessionStore.employeeName().ifBlank { "Employee" }}! 👋 ✨"
                 }
             }
+        }
+    }
+
+    private fun observeAttendancePolicy() {
+        policyJob?.cancel()
+        policyJob = lifecycleScope.launch {
+            attendancePolicy.observe().collect { policy ->
+                val p = policy.normalized()
+                getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                    putBoolean("enable_geo_fencing", p.geoFencingEnabled)
+                    putBoolean("enable_dual_attendance", p.dualAttendanceEnabled)
+                    putBoolean("enable_auto_punch", p.automaticGeofencePunchingEnabled)
+                }
+                if (p.officeLatitude != 0.0 && p.officeLongitude != 0.0 && p.geoRadiusMeters > 0) {
+                    officeLat = p.officeLatitude
+                    officeLon = p.officeLongitude
+                    geoRadius = p.geoRadiusMeters
+                }
+                val geoOn = p.geoFencingEnabled
+                if (!geoOn) {
+                    stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply { action = TrackingService.ACTION_STOP })
+                }
+                applyAttendancePolicy(p)
+                updateRangeStatus()
+            }
+        }
+    }
+
+    private fun applyAttendancePolicy(policy: AttendancePolicyRepository.Policy) {
+        _binding?.let { b ->
+            val feature = EmployeeAttendanceStateMachine.FeatureState(
+                geoFencingEnabled = policy.geoFencingEnabled,
+                dualAttendanceEnabled = policy.dualAttendanceEnabled,
+                automaticGeofencePunchingEnabled = policy.automaticGeofencePunchingEnabled
+            )
+            // Manual button is a presentation of the exact Web hierarchy.
+            // Automatic geofence punching is intentionally NOT performed here.
+            // The existing Web attendance engine remains authoritative for it.
+            b.btnPunch.visibility = if (feature.manualPunchVisible) View.VISIBLE else View.GONE
         }
     }
 

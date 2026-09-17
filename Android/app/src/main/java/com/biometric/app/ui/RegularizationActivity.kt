@@ -13,6 +13,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
 import com.biometric.app.data.MainRepository
+import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.api.*
 import com.biometric.app.data.entity.RegularizationRequest
 import com.biometric.app.databinding.ActivityRegularizationBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -29,6 +31,8 @@ class RegularizationActivity : AppCompatActivity() {
     private lateinit var binding: ActivityRegularizationBinding
     
     @Inject lateinit var repository: MainRepository
+    @Inject lateinit var mobileApi: MobileApiService
+    @Inject lateinit var sessionStore: MobileSessionStore
 
     private val requests = mutableListOf<RegularizationRequest>()
 
@@ -71,8 +75,13 @@ class RegularizationActivity : AppCompatActivity() {
             .setView(notesInput)
             .setPositiveButton("Confirm") { _, _ ->
                 lifecycleScope.launch {
-                    repository.updateRegularizationStatus(request.id, status, notesInput.text.toString())
-                    Toast.makeText(this@RegularizationActivity, "Request $status", Toast.LENGTH_SHORT).show()
+                    try {
+                        val response = mobileApi.setAdminRegularizationStatus("Bearer ${sessionStore.token().orEmpty()}", request.id, AdminRegularizationStatusRequest(status, notesInput.text.toString()))
+                        if (!response.isSuccessful) throw IllegalStateException("Server rejected action (${response.code()})")
+                        Toast.makeText(this@RegularizationActivity, "Request $status ✅", Toast.LENGTH_SHORT).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(this@RegularizationActivity, "Unable to update request: ${e.message} ⚠️", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)

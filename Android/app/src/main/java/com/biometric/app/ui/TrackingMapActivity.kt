@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -29,6 +30,8 @@ import com.biometric.app.R
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.databinding.ActivityTrackingMapBinding
 import com.biometric.app.sync.SignalRManager
+import com.biometric.app.sync.FirebaseAuthSecurityGate
+import com.biometric.app.domain.attendance.AttendancePolicyRepository
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.PolylineDecoder
 import dagger.hilt.android.AndroidEntryPoint
@@ -58,6 +61,8 @@ class TrackingMapActivity : MotionBaseActivity() {
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var osrmApi: OsrmApiService
+    @Inject lateinit var securityGate: FirebaseAuthSecurityGate
+    @Inject lateinit var attendancePolicy: AttendancePolicyRepository
 
     private val markers = mutableMapOf<Int, Marker>()
     private val roadLines = mutableMapOf<Int, Polyline>()
@@ -66,12 +71,26 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val roadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var statusFilter = "All"
+    private var policyJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         _binding = ActivityTrackingMapBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        lifecycleScope.launch {
+            val result = securityGate.validateCurrentSession()
+            val allowed = result.allowed && (result.role.equals("ADMIN", true) || result.role.equals("SUPER_ADMIN", true))
+            if (!allowed) {
+                Toast.makeText(this@TrackingMapActivity, "Only Admin/SuperAdmin can view live staff tracking.", Toast.LENGTH_LONG).show()
+                finish()
+                return@launch
+            }
+            setupProtectedTrackingScreen()
+        }
+    }
+
+    private fun setupProtectedTrackingScreen() {
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
 
@@ -80,6 +99,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         setupFilters()
         setupPremiumMapControls()
         observeLiveLocations()
+        observeTrackingPolicy()
     }
 
     private fun setupFilters() {
@@ -187,6 +207,21 @@ class TrackingMapActivity : MotionBaseActivity() {
         }
     }
 
+    private fun observeTrackingPolicy() {
+        policyJob?.cancel()
+        policyJob = lifecycleScope.launch {
+            attendancePolicy.observe().collect { policy ->
+                val mode = when {
+                    !policy.geoFencingEnabled -> "Geo-Fencing OFF"
+                    policy.dualAttendanceEnabled -> "Biometric Attendance"
+                    policy.automaticGeofencePunchingEnabled -> "Automatic Geofence Punching"
+                    else -> "Manual Punch"
+                }
+                binding.tvTrackingPolicy.text = "${mode} • Radius ${policy.geoRadiusMeters.coerceAtLeast(0)} m"
+            }
+        }
+    }
+
     @OptIn(FlowPreview::class)
     private fun observeLiveLocations() {
         signalR.start()
@@ -206,10 +241,12 @@ class TrackingMapActivity : MotionBaseActivity() {
         val geoPoints = mutableListOf<GeoPoint>()
 
         val liveCount = locations.count { getLocStatus(it) == "Live" }
+        val staleCount = locations.count { getLocStatus(it) == "Stale" }
+        val offlineCount = locations.count { getLocStatus(it) == "Offline" }
         val outsideCount = locations.count { !it.isWithinAllowedRadius }
         binding.tvLiveCount.text = "$liveCount Live"
         binding.tvOutsideCount.text = "$outsideCount Outside"
-        binding.tvMapSync.text = "Realtime sync • ${locations.size} sessions"
+        binding.tvMapSync.text = "Realtime • ${locations.size} sessions • ${staleCount} stale • ${offlineCount} offline"
 
         val currentIds = locations.map { it.employeeId }
         markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
@@ -331,19 +368,24 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun getLocStatus(loc: SignalRManager.LiveLocation): String {
         val timestamp = loc.timestamp ?: return "Offline"
-        return try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
-            val date = sdf.parse(timestamp)
-            val ageMs = System.currentTimeMillis() - (date?.time ?: 0L)
-            
-            when {
-                ageMs <= 60_000 -> "Live"
-                ageMs <= 300_000 -> "Stale"
-                else -> "Offline"
-            }
-        } catch (_: Exception) {
-            "Offline"
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+            "yyyy-MM-dd'T'HH:mm:ssX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss"
+        )
+        val parsed = patterns.firstNotNullOfOrNull { pattern ->
+            runCatching {
+                val sdf = SimpleDateFormat(pattern, Locale.US)
+                if (!pattern.endsWith("X")) sdf.timeZone = TimeZone.getTimeZone("UTC")
+                sdf.parse(timestamp)
+            }.getOrNull()
+        } ?: return "Offline"
+        val ageMs = (System.currentTimeMillis() - parsed.time).coerceAtLeast(0L)
+        return when {
+            ageMs <= 60_000L -> "Live"
+            ageMs <= 300_000L -> "Stale"
+            else -> "Offline"
         }
     }
 
@@ -444,6 +486,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     }
 
     override fun onDestroy() {
+        policyJob?.cancel()
         roadRouteJobs.values.forEach { it.cancel() }
         roadRouteJobs.clear()
         iconCache.clear()

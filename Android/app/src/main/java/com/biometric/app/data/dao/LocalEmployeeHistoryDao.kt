@@ -15,6 +15,8 @@ interface LocalEmployeeHistoryDao {
     @Delete
     fun delete(item: LocalEmployeeHistory): Int
 
+    @Query("SELECT * FROM local_employee_history")
+        fun getAll(): List<LocalEmployeeHistory>
     @Query("SELECT * FROM local_employee_history WHERE employeeId = :employeeId ORDER BY version ASC")
     fun getHistoryByEmployee(employeeId: String): Flow<List<LocalEmployeeHistory>>
 
@@ -23,4 +25,7 @@ interface LocalEmployeeHistoryDao {
 
     @Query("SELECT * FROM local_employee_history WHERE syncState = 0")
     fun getUnsynced(): List<LocalEmployeeHistory>
+    @Query("DELETE FROM local_employee_history WHERE historyId = :id")
+    fun deleteById(id: String)
+
 }

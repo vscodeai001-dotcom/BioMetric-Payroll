@@ -78,6 +78,12 @@ interface MobileApiService {
     @GET("api/mobile/employee/bonuses")
     suspend fun bonuses(@Header("Authorization") authorization: String): Response<List<MoneyEntryDto>>
 
+    @GET("api/mobile/admin/regularizations")
+    suspend fun adminRegularizations(@Header("Authorization") authorization: String, @Query("status") status: String = "Pending"): Response<List<AdminRegularizationDto>>
+
+    @PUT("api/mobile/admin/regularizations/{id}/status")
+    suspend fun setAdminRegularizationStatus(@Header("Authorization") authorization: String, @Path("id") id: String, @Body request: AdminRegularizationStatusRequest): Response<Unit>
+
     @GET("api/mobile/employee/regularizations")
     suspend fun regularizations(@Header("Authorization") authorization: String): Response<List<RegularizationDto>>
 
@@ -450,6 +456,25 @@ data class AdminAttendanceRow(val employeeID:Int=0, val employeeName:String="", 
 data class AdminCompanyAttendanceResponse(val success:Boolean=false, val summary:AdminCompanyAttendanceSummary?=null, val message:String?=null)
 
 data class AdminCompanyAttendanceSummary(val totalEmployeesProcessed:Int=0, val totalScheduledMinutes:Double=0.0, val totalWorkedHours:Double=0.0, val totalOvertimeMinutes:Double=0.0, val totalPenaltyMinutes:Double=0.0, val totalLatenessMinutes:Double=0.0, val totalBreakPenaltyMinutes:Double=0.0)
+
+data class AdminRegularizationDto(
+    @SerializedName("id") val id: String = "",
+    @SerializedName("employeeId") val employeeId: Int = 0,
+    @SerializedName("employeeName") val employeeName: String = "",
+    @SerializedName("date") val date: String = "",
+    @SerializedName("punchType") val punchType: String = "IN",
+    @SerializedName("requestedTime") val requestedTime: String = "",
+    @SerializedName("reason") val reason: String = "",
+    @SerializedName("status") val status: String = "Pending",
+    @SerializedName("adminRemarks") val adminRemarks: String = "",
+    @SerializedName("submissionDate") val submissionDate: String = ""
+)
+
+data class AdminRegularizationStatusRequest(
+    @SerializedName("status") val status: String,
+    @SerializedName("remarks") val remarks: String? = null,
+    @SerializedName("allowResubmission") val allowResubmission: Boolean = false
+)
 
 data class AdminLeaveDto(
     @SerializedName("id") val id: Int = 0,

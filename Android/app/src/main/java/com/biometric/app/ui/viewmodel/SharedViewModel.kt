@@ -35,6 +35,9 @@ class SharedViewModel @Inject constructor(
     val allAttendancePunches: StateFlow<List<AttendancePunch>> = repository.allAttendancePunchesFlow
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allDailySummaries: StateFlow<List<LocalDailySummary>> = repository.allDailySummariesFlow
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val allAdvances: StateFlow<List<AdvancePayment>> = repository.allAdvancesFlow
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 

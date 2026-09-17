@@ -17,6 +17,11 @@ class TrackingBootReceiver : BroadcastReceiver() {
         val active = sessionPrefs.getBoolean("active", false)
 
         val geoEnabled = trackingPrefs.getBoolean("enable_geo_fencing", true)
+        val trackingMode = trackingPrefs.getString("tracking_mode", TrackingWindowResolver.MODE_24_7)?.uppercase()
+
+        // SHIFT/CUSTOM modes are resumed by TrackingRecoveryWorker, which can
+        // safely resolve the current shift window using Room.
+        if (trackingMode != TrackingWindowResolver.MODE_24_7) return
 
         // Only recover a tracking session that still has a valid local mobile session and Geo-Fencing is allowed.
         if (active && !token.isNullOrBlank() && !activeStaffId.isNullOrBlank() && geoEnabled) {

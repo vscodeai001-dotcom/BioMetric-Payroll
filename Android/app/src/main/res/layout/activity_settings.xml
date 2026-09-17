@@ -74,6 +74,123 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:text="Web Feature &amp; Permission Mirror ⚙️"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PremiumCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="These switches mirror the Web FeatureSettings record. Geo-Fencing is the master switch; child attendance modes are locked when it is OFF."
+                        android:textSize="12sp"
+                        android:alpha="0.75"
+                        android:layout_marginBottom="10dp" />
+                    <LinearLayout
+                        android:id="@+id/featureToggleContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSaveFeatureSettings"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="💾 Save Feature Settings"
+                        android:layout_marginTop="12dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tracking Configuration 🛰️"
+                android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                android:textStyle="bold"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/PremiumCardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switchTrackingEnabled"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Enable Background Tracking" />
+                    <Spinner
+                        android:id="@+id/spinnerTrackingMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="Custom Start (HH:mm)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/editTrackingCustomStart"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="time" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="Custom End (HH:mm)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/editTrackingCustomEnd"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="time" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="Tracking interval (seconds, 15-3600)">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/editTrackingInterval"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView
+                        android:id="@+id/textTrackingConfigSource"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Firebase-authoritative configuration"
+                        android:textSize="11sp"
+                        android:alpha="0.7"
+                        android:layout_marginTop="8dp" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSaveTrackingConfiguration"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="💾 Save Tracking Configuration"
+                        android:layout_marginTop="10dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
                 android:text="Sharing &amp; Feedback"
                 android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                 android:textStyle="bold"

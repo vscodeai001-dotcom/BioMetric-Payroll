@@ -31,7 +31,13 @@ object ApiModule {
     @Singleton
     fun provideRetrofit(@ApplicationContext context: Context): Retrofit {
         val logging = HttpLoggingInterceptor()
-        logging.setLevel(HttpLoggingInterceptor.Level.BODY)
+        // Never log Authorization headers, Firebase ID tokens, passwords, or
+        // employee payloads in release builds. BODY logging is useful during
+        // local development only and can otherwise expose credentials/tokens.
+        logging.setLevel(
+            if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
+            else HttpLoggingInterceptor.Level.NONE
+        )
 
         val client = OkHttpClient.Builder()
             .addInterceptor { chain ->

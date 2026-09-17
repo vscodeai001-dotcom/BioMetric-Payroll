@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit
 class TrackingRecoveryWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val trackingWindowResolver: TrackingWindowResolver
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -29,6 +30,14 @@ class TrackingRecoveryWorker @AssistedInject constructor(
             Log.i("TrackingRecovery", "Geo-Fencing is disabled by policy. Skipping service recovery.")
             return Result.success()
         }
+
+        val window = trackingWindowResolver.resolve()
+        if (!window.allowed) {
+            prefs.edit().putBoolean("tracking_waiting_for_shift", true).apply()
+            scheduleFollowUp(context)
+            return Result.success()
+        }
+        prefs.edit().putBoolean("tracking_waiting_for_shift", false).apply()
 
         if (!isServiceRunning(TrackingService::class.java)) {
             Log.i("TrackingRecovery", "Service not running, restarting aggressively...")

@@ -29,6 +29,8 @@ class MobileSessionStore @Inject constructor(
     fun employeeName(): String = prefs.getString(KEY_NAME, "") ?: ""
     fun updateEmployeeName(name: String) { if (name.isNotBlank()) prefs.edit { putString(KEY_NAME, name) } }
     fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
+    fun userRole(): String = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+        .getString("user_role", "") ?: ""
     fun firebaseOwnerUid(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
     fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_ACTIVE, false) && !token().isNullOrBlank()
@@ -40,6 +42,8 @@ class MobileSessionStore @Inject constructor(
         context.contentResolver,
         android.provider.Settings.Secure.ANDROID_ID
     ) ?: "android-${UUID.nameUUIDFromBytes(android.os.Build.MODEL.toByteArray())}"
+
+    fun currentGpsSessionId(): String? = prefs.getString(KEY_GPS_SESSION, null)?.takeIf { it.isNotBlank() }
 
     fun gpsSessionId(): String {
         val existing = prefs.getString(KEY_GPS_SESSION, null)

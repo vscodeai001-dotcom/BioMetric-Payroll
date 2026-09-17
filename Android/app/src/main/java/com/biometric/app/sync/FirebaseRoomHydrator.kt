@@ -80,16 +80,16 @@ class FirebaseRoomHydrator @Inject constructor(
             // numbers while Android's existing Room/domain models use String.
             // Raw mapping prevents Firebase's strict getValue() mapper from
             // dropping the records and leaving the Admin dashboard empty.
-            observeValue("shops") { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
-            observeValue("employees") { it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) } }
-            observeValue("attendance") { it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) } }
-            observeValue("advance_payments") { it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) } }
-            observeValue("employee_history") { it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) } }
-            observeValue("shop_closed_days") { it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) } }
-            observeValue("regularizations") { it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) } }
-            observeValue("attendance_punches") { it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) } }
-            observeValue("leave_requests") { it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) } }
-            observeValue("resignation_requests") { it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) } }
+            observeValue("shops", existing = { shopDao.getAllRecords().map { it.shopId to it.syncState } }, onDelete = { key -> shopDao.deleteById(key) }) { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
+            observeValue("employees", existing = { employeeDao.getAllRecords().map { it.employeeId to it.syncState } }, onDelete = { key -> employeeDao.deleteById(key) }) { it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) } }
+            observeValue("attendance", existing = { attendanceDao.getAll().map { it.attendanceId to it.syncState } }, onDelete = { key -> attendanceDao.deleteById(key) }) { it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) } }
+            observeValue("advance_payments", existing = { advanceDao.getAll().map { it.advanceId to it.syncState } }, onDelete = { key -> advanceDao.deleteById(key) }) { it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) } }
+            observeValue("employee_history", existing = { historyDao.getAll().map { it.historyId to it.syncState } }, onDelete = { key -> historyDao.deleteById(key) }) { it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) } }
+            observeValue("shop_closed_days", existing = { closedDayDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> closedDayDao.deleteById(key) }) { it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) } }
+            observeValue("regularizations", existing = { regularizationDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> regularizationDao.deleteById(key) }) { it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) } }
+            observeValue("attendance_punches", existing = { punchDao.getAll().map { it.punchId to it.syncState } }, onDelete = { key -> punchDao.deleteById(key) }) { it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) } }
+            observeValue("leave_requests", existing = { leaveDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> leaveDao.deleteById(key) }) { it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) } }
+            observeValue("resignation_requests", existing = { resignationDao.getAll().map { it.requestId to it.syncState } }, onDelete = { key -> resignationDao.deleteById(key) }) { it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) } }
 
             // Admin/SuperAdmin data. These listeners mirror changes and
             // deletions into the existing Room cache, so current UI flows
@@ -124,26 +124,78 @@ class FirebaseRoomHydrator @Inject constructor(
         }
     }
 
-    private fun observeValue(table: String, onUpsert: suspend (DataSnapshot) -> Unit) {
+    private fun observeValue(
+        table: String,
+        existing: suspend () -> List<Pair<String, Int>>,
+        onDelete: suspend (String) -> Unit,
+        onUpsert: suspend (DataSnapshot) -> Unit
+    ) {
         val ref = firebaseSync.getOwnerRef()?.child(table) ?: return
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch { hydrate(table, snapshot, onUpsert) }
+            }
+
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                scope.launch { hydrate(table, snapshot, onUpsert) }
+            }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                val key = snapshot.key ?: return
                 scope.launch {
-                    snapshot.children.forEach { child ->
-                        runCatching { onUpsert(child) }
-                            .onFailure { error ->
-                                android.util.Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${child.key}", error)
-                            }
-                    }
+                    runCatching { onDelete(key) }
+                        .onFailure { error ->
+                            android.util.Log.e("FirebaseRoomHydrator", "Failed to delete Room record $table/$key", error)
+                        }
                 }
             }
+
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
+
             override fun onCancelled(error: DatabaseError) {
                 android.util.Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table", error.toException())
             }
         }
-        ref.addValueEventListener(listener)
-        // Keep the ValueEventListener alive for the application lifetime.
-        valueListeners += ref to listener
+        ref.addChildEventListener(listener)
+        // Reconcile the existing Room cache against the authoritative Firebase
+        // snapshot once after listener registration. ChildEventListener delivers
+        // live adds/changes/removes, but it cannot tell us which stale Room rows
+        // are absent from Firebase. Only rows already marked as synced are
+        // eligible for cleanup. Unsynced local writes are preserved so an
+        // offline write is never silently discarded.
+        ref.addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                scope.launch {
+                    runCatching {
+                        val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                        val staleSynced = existing().asSequence()
+                            .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
+                            .map { it.first }
+                            .toList()
+                        staleSynced.forEach { onDelete(it) }
+                    }.onFailure { error ->
+                        android.util.Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
+                    }
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                android.util.Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
+            }
+        })
+        // Keep the ChildEventListener alive for the application lifetime.
+        listeners += ref to listener
+    }
+
+    private suspend fun hydrate(
+        table: String,
+        snapshot: DataSnapshot,
+        onUpsert: suspend (DataSnapshot) -> Unit
+    ) {
+        runCatching { onUpsert(snapshot) }
+            .onFailure { error ->
+                android.util.Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${snapshot.key}", error)
+            }
     }
 
     private fun DataSnapshot.raw(name: String): Any? {

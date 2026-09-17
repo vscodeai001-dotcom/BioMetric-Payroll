@@ -23,4 +23,7 @@ interface LocalAttendanceDao {
 
     @Query("SELECT * FROM local_attendance WHERE syncState = 0")
     fun getUnsynced(): List<LocalAttendance>
+    @Query("DELETE FROM local_attendance WHERE attendanceId = :id")
+    fun deleteById(id: String)
+
 }

@@ -13,5 +13,8 @@ data class AuditLog(
     var newValue: String? = null,
     var userDisplayName: String = "",
     var userId: String = "",
+    var actorRole: String = "",
+    var ownerUid: String = "",
+    var targetId: String? = null,
     var timestamp: Long = System.currentTimeMillis()
 )

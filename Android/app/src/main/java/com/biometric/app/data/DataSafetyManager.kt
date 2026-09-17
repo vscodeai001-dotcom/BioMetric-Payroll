@@ -92,6 +92,7 @@ class DataSafetyManager @Inject constructor(
 
     suspend fun restoreItem(binItem: RecycleBinItem): Boolean {
         return try {
+            if (binItem.snapshotJson.isBlank() || binItem.recordId.isBlank()) return false
             val json = binItem.snapshotJson
             when (binItem.module) {
                 "STAFF" -> {
@@ -118,6 +119,34 @@ class DataSafetyManager @Inject constructor(
             true
         } catch (e: Exception) {
             Log.e("DataSafetyManager", "Restore failed", e)
+            false
+        }
+    }
+
+    /**
+     * Permanently removes only the recycle-bin snapshot. It never recreates,
+     * deletes, or modifies the underlying business record and never touches
+     * Firebase Authentication.
+     */
+    suspend fun permanentlyDeleteRecycleBinItem(binItem: RecycleBinItem): Boolean {
+        return try {
+            val user = auth.currentUser ?: return false
+            if (binItem.id.isBlank()) return false
+            firebaseSync.deleteRecycleBinItem(binItem.id)
+            val log = AuditLog(
+                shopId = binItem.shopId ?: "Global",
+                action = "RECYCLE_BIN_PURGE",
+                module = "${binItem.module}: ${binItem.itemName}",
+                oldValue = binItem.snapshotJson.take(500),
+                newValue = null,
+                userDisplayName = user.displayName ?: user.email?.substringBefore("@") ?: "Unknown",
+                userId = user.uid,
+                timestamp = System.currentTimeMillis()
+            )
+            firebaseSync.pushAuditLog(log)
+            true
+        } catch (e: Exception) {
+            Log.e("DataSafetyManager", "Recycle-bin purge failed", e)
             false
         }
     }

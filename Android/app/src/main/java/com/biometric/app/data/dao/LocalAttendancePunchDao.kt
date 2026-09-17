@@ -15,9 +15,14 @@ interface LocalAttendancePunchDao {
     @Delete
     fun delete(item: LocalAttendancePunch): Int
 
+    @Query("SELECT * FROM local_attendance_punches")
+        fun getAll(): List<LocalAttendancePunch>
     @Query("SELECT * FROM local_attendance_punches ORDER BY timestamp DESC")
     fun getAllFlow(): Flow<List<LocalAttendancePunch>>
 
     @Query("SELECT * FROM local_attendance_punches WHERE syncState = 0")
     fun getUnsynced(): List<LocalAttendancePunch>
+    @Query("DELETE FROM local_attendance_punches WHERE punchId = :id")
+    fun deleteById(id: String)
+
 }

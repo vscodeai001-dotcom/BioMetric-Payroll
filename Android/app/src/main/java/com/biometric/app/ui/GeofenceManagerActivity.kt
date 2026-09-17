@@ -21,9 +21,11 @@ import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.google.firebase.auth.FirebaseAuth
+import com.biometric.app.data.entity.UserRole
 import com.google.firebase.database.*
 import dagger.hilt.android.AndroidEntryPoint
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.data.MobileSessionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -35,13 +37,18 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
 
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var geofenceDao: GeofenceDao
+    @Inject lateinit var sessionStore: MobileSessionStore
 
     private lateinit var binding: ActivityGeofenceManagerBinding
     private var googleMap: GoogleMap? = null
     private val auth = FirebaseAuth.getInstance()
-    private val dbRef by lazy { 
+    private val dbRef by lazy {
+        val ownerUid = sessionStore.firebaseOwnerUid()
+            ?.takeIf { it.isNotBlank() }
+            ?: auth.currentUser?.uid
+            ?: "unknown"
         FirebaseDatabase.getInstance().getReference("owners")
-            .child(auth.currentUser?.uid ?: "unknown").child("geofences")
+            .child(ownerUid).child("geofences")
     }
 
     private lateinit var adapter: GeofenceAdapter
@@ -51,6 +58,15 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
         super.onCreate(savedInstanceState)
         binding = ActivityGeofenceManagerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+            .getString("user_role", UserRole.STAFF.name).orEmpty()
+        if (!role.equals(UserRole.ADMIN.name, true) && !role.equals(UserRole.SUPER_ADMIN.name, true) &&
+            !role.equals("Admin", true) && !role.equals("SuperAdmin", true)) {
+            Toast.makeText(this, "Only Admin/SuperAdmin can manage geofences.", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
@@ -151,7 +167,7 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
                 val lon = dialogBinding.etLng.text.toString().toDoubleOrNull() ?: 0.0
                 val radius = dialogBinding.etRadius.text.toString().toFloatOrNull() ?: 100f
 
-                if (name.isNotEmpty()) {
+                if (name.isNotEmpty() && lat in -90.0..90.0 && lon in -180.0..180.0 && radius > 0f) {
                     val id = UUID.randomUUID().toString()
                     val newGeofence = GeofenceLocation(id, name, lat, lon, radius)
                     CoroutineScope(Dispatchers.IO).launch { runCatching { firebaseSync.pushGeofenceRaw(id, newGeofence) } }

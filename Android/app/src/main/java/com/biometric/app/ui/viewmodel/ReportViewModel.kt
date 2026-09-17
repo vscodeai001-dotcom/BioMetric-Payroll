@@ -20,13 +20,13 @@ class ReportViewModel @Inject constructor(
     private val _reportData = MutableStateFlow<List<Any>?>(null)
     val reportData = _reportData.asStateFlow()
 
-    fun generateReport(reportType: String, startDate: String, endDate: String, year: Int, month: Int) {
+    fun generateReport(reportType: String, startDate: String, endDate: String, year: Int, month: Int, employeeId: Int? = null) {
         viewModelScope.launch {
             _isLoading.value = true
             _reportData.value = null
             try {
                 _reportData.value = when (reportType) {
-                    "ATTENDANCE_MONTHLY_SUMMARY" -> reportRepository.generateConsolidatedAttendance(startDate, endDate)
+                    "ATTENDANCE_MONTHLY_SUMMARY" -> reportRepository.generateConsolidatedAttendance(startDate, endDate, employeeId)
                     "PAYROLL_VARIANCE" -> reportRepository.generatePayrollVariance(year, month)
                     "FINANCIAL_REGISTER" -> reportRepository.generateFinancialRegister(year, month)
                     else -> emptyList()

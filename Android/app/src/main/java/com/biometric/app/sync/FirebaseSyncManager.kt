@@ -28,6 +28,9 @@ import kotlinx.coroutines.tasks.await
 import java.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.coroutines.suspendCoroutine
 
 @Singleton
 class FirebaseSyncManager @Inject constructor(
@@ -109,6 +112,8 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("tax_declarations").keepSynced(true)
         ref.child("fbp_components").keepSynced(true)
         ref.child("fbp_declarations").keepSynced(true)
+        ref.child("feature_settings").keepSynced(true)
+        ref.child("company_settings").keepSynced(true)
 
         hasInitializedSync = true
     }
@@ -193,9 +198,9 @@ class FirebaseSyncManager @Inject constructor(
         // ChildEventListener replays existing children. Keep a bounded tail so
         // reconnects can recover changes that happened while the device was
         // offline, instead of using a five-second window that could silently
-        // miss events during a longer network outage. Neon remains the
-        // authoritative reconciliation store, so replaying a small tail is
-        // safe and idempotent at the UI/sync layer.
+        // miss events during a longer network outage. Firebase remains the
+        // shared realtime synchronization source; SQL is the Web compatibility
+        // store during the phased migration.
         val ref = database.child("owner_events").child(ownerUid)
             .orderByChild("timestamp")
             .limitToLast(200)
@@ -297,6 +302,117 @@ class FirebaseSyncManager @Inject constructor(
      * multi-location update. Firebase is the independent realtime/tracking source; this path
      * exists so a Render outage cannot stop GPS capture or realtime map updates.
      */
+    /**
+     * Mirrors the Web GeoLocationService GPS-session contract. The Web
+     * compatibility worker consumes tracking/sessions/{employeeId}/{sessionId}
+     * before it accepts tracking history, so Android must publish the session
+     * lifecycle as well as the individual GPS points.
+     */
+    /**
+     * Creates a GPS session once. A late retry after the session has ended must
+     * never resurrect that session. This makes session start idempotent.
+     */
+    suspend fun pushTrackingSessionStarted(employeeId: Int, sessionId: String): Boolean {
+        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
+        val ref = getGlobalRef().child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+        val payload = mapOf(
+            "EmployeeId" to employeeId,
+            "SessionId" to sessionId,
+            "OwnerUid" to ownerUid,
+            "StartedAtUtc" to Date().toInstant().toString(),
+            "State" to "ACTIVE",
+            "Source" to "ANDROID_FIREBASE"
+        )
+        return try {
+            val committed = ref.runTransactionAwait { current ->
+                if (current.value == null) {
+                    current.value = payload
+                    true
+                } else {
+                    val state = current.child("State").getValue(String::class.java).orEmpty()
+                    if (state.equals("ENDED", ignoreCase = true)) false
+                    else {
+                        current.child("State").value = "ACTIVE"
+                        true
+                    }
+                }
+            }
+            // Keep the legacy compatibility path, but only after the owner-scoped
+            // session has accepted the start.
+            if (committed) {
+                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
+            }
+            committed
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "GPS session start write deferred", e)
+            false
+        }
+    }
+
+    suspend fun pushTrackingSessionEnded(
+        employeeId: Int,
+        sessionId: String,
+        endReason: String = "LOGGED_OUT"
+    ): Boolean {
+        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
+        val ref = getGlobalRef().child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+        return try {
+            val committed = ref.runTransactionAwait { current ->
+                val existingEmployee = current.child("EmployeeId").getValue(Int::class.java)
+                val existingSession = current.child("SessionId").getValue(String::class.java)
+                if (existingEmployee != null && existingEmployee != employeeId) return@runTransactionAwait false
+                if (!existingSession.isNullOrBlank() && existingSession != sessionId) return@runTransactionAwait false
+                current.child("EmployeeId").value = employeeId
+                current.child("SessionId").value = sessionId
+                current.child("OwnerUid").value = ownerUid
+                current.child("EndedAtUtc").value = Date().toInstant().toString()
+                current.child("EndReason").value = endReason.take(40)
+                current.child("State").value = "ENDED"
+                current.child("Source").value = "ANDROID_FIREBASE"
+                true
+            }
+            if (committed) {
+                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(
+                    mapOf(
+                        "EmployeeId" to employeeId,
+                        "SessionId" to sessionId,
+                        "OwnerUid" to ownerUid,
+                        "EndReason" to endReason.take(40),
+                        "State" to "ENDED",
+                        "EndedAtUtc" to Date().toInstant().toString(),
+                        "Source" to "ANDROID_FIREBASE"
+                    )
+                ).await()
+            }
+            committed
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "GPS session end write deferred", e)
+            false
+        }
+    }
+
+    private suspend fun DatabaseReference.runTransactionAwait(
+        block: (MutableData) -> Boolean
+    ): Boolean = suspendCoroutine { continuation ->
+        runTransaction(object : Transaction.Handler {
+            override fun doTransaction(currentData: MutableData): Transaction.Result {
+                return if (block(currentData)) Transaction.success(currentData)
+                else Transaction.abort()
+            }
+
+            override fun onComplete(
+                error: DatabaseError?,
+                committed: Boolean,
+                snapshot: DataSnapshot?
+            ) {
+                if (error != null) continuation.resumeWithException(error.toException())
+                else continuation.resume(committed)
+            }
+        })
+    }
+
     suspend fun pushLiveLocation(
         employeeId: Int,
         sessionId: String,
@@ -309,11 +425,15 @@ class FirebaseSyncManager @Inject constructor(
         batteryLevel: Int,
         timestamp: Long
     ): Boolean {
-        if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank()) return false
+        if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank() || sequence <= 0L) return false
+
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
+        if (!isAuthenticated()) return false
 
         val payload = mapOf(
             "EmployeeId" to employeeId,
             "SessionId" to sessionId,
+            "OwnerUid" to ownerUid,
             "Latitude" to latitude,
             "Longitude" to longitude,
             "AccuracyMeters" to accuracy.coerceAtLeast(0.0),
@@ -322,21 +442,36 @@ class FirebaseSyncManager @Inject constructor(
             "Sequence" to sequence,
             "Timestamp" to Date(timestamp).toInstant().toString(),
             "LastUpdatedUtc" to Date().toInstant().toString(),
+            "ClientEventId" to clientEventId,
             "Source" to "ANDROID_FIREBASE"
         )
 
-        if (!isAuthenticated()) {
-            Log.w("FirebaseSyncManager", "GPS Firebase write deferred: Firebase user is not authenticated")
-            return false
-        }
-
         return try {
-            getGlobalRef().updateChildren(
-                mapOf(
-                    "tracking/live/$employeeId" to payload,
-                    "tracking/history/$employeeId/$clientEventId" to payload
-                )
-            ).await()
+            // The immutable history key is the client event ID, so retries are
+            // idempotent. The live marker uses a transaction so an older offline
+            // point cannot overwrite a newer point after reconnect.
+            getGlobalRef().child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                .setValue(payload).await()
+
+            val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
+            val accepted = liveRef.runTransactionAwait { current ->
+                val currentSession = current.child("SessionId").getValue(String::class.java).orEmpty()
+                val currentSequence = current.child("Sequence").getValue(Long::class.java) ?: 0L
+                val currentEnded = current.child("State").getValue(String::class.java).equals("ENDED", true)
+
+                if (currentEnded && currentSession == sessionId) return@runTransactionAwait false
+                if (currentSession == sessionId && currentSequence >= sequence) return@runTransactionAwait false
+
+                current.value = payload
+                current.child("State").value = "ACTIVE"
+                true
+            }
+
+            // Legacy compatibility stream receives the point only when it is the
+            // newest accepted live point. History has already been durably keyed.
+            if (accepted) {
+                getGlobalRef().child("tracking/live/$employeeId").setValue(payload).await()
+            }
             true
         } catch (e: Exception) {
             Log.w("FirebaseSyncManager", "GPS Firebase write deferred", e)
@@ -443,9 +578,19 @@ class FirebaseSyncManager @Inject constructor(
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return false
 
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
         return try {
-            getGlobalRef().child("tracking/events").child(employeeId.toString())
-                .child(event.eventId).setValue(event).await()
+            val payload = mapOf(
+                "event" to event,
+                "ownerUid" to ownerUid,
+                "employeeId" to employeeId
+            )
+            getGlobalRef().updateChildren(
+                mapOf(
+                    "tracking/events/$employeeId/${event.eventId}" to payload,
+                    "owners/$ownerUid/tracking/events/$employeeId/${event.eventId}" to payload
+                )
+            ).await()
             true
         } catch (e: Exception) {
             Log.w("FirebaseSyncManager", "Tracking event write failed", e)

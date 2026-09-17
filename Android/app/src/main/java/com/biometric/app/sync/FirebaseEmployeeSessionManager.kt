@@ -68,6 +68,25 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         }
     }
 
+    suspend fun isCurrentDeviceOwner(employeeId: Int, ownerUid: String): Boolean {
+        val user = auth.currentUser ?: return false
+        if (employeeId <= 0 || ownerUid.isBlank()) return false
+
+        return runCatching {
+            val snapshot = database.getReference("employee_sessions").child(user.uid).get().await()
+            val activeDevice = snapshot.child("deviceId").getValue(String::class.java).orEmpty()
+            val activeEmployeeId = snapshot.child("employeeId").getValue(Int::class.java) ?:
+                snapshot.child("employeeId").getValue(String::class.java)?.toIntOrNull() ?: 0
+            val activeOwnerUid = snapshot.child("ownerUid").getValue(String::class.java).orEmpty()
+            activeDevice == sessionStore.deviceId() &&
+                activeEmployeeId == employeeId &&
+                activeOwnerUid == ownerUid
+        }.getOrElse {
+            Log.w("FirebaseEmployeeSession", "Unable to validate active employee session", it)
+            false
+        }
+    }
+
     suspend fun release(): Boolean {
         val user = auth.currentUser ?: return false
         val deviceId = sessionStore.deviceId()

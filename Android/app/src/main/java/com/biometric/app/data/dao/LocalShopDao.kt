@@ -9,6 +9,8 @@ interface LocalShopDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun upsert(shop: LocalShop): Long
 
+    @Query("SELECT * FROM local_shops")
+        fun getAllRecords(): List<LocalShop>
     @Query("SELECT * FROM local_shops WHERE isActive = 1")
     fun getAllShops(): Flow<List<LocalShop>>
 
@@ -17,4 +19,7 @@ interface LocalShopDao {
 
     @Query("SELECT * FROM local_shops WHERE syncState = 0")
     fun getUnsynced(): List<LocalShop>
+    @Query("DELETE FROM local_shops WHERE shopId = :id")
+    fun deleteById(id: String)
+
 }

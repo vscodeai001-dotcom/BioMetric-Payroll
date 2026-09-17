@@ -109,92 +109,89 @@ class ExitManagementActivity : AppCompatActivity() {
     private fun updateStatus(request: ResignationRequest, status: String, lastDay: Long?, remarks: String) {
         lifecycleScope.launch {
             try {
-                repository.updateResignationStatus(request.requestId, status, remarks)
-                // In a real app, you'd also push lastDay if it's approved.
-                // Assuming repository.updateResignationStatus handles sync to Firebase.
-                Toast.makeText(this@ExitManagementActivity, "Status: $status", Toast.LENGTH_SHORT).show()
+                val token = sessionStore.token()?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("Admin session expired")
+                val requestId = request.requestId.toIntOrNull()
+                    ?: throw IllegalStateException("Invalid resignation request")
+                val approvedDate = if (status == "Approved" && lastDay != null) {
+                    java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(lastDay))
+                } else null
+                val response = mobileApi.updateAdminExit(
+                    "Bearer $token",
+                    requestId,
+                    com.biometric.app.api.ExitStatusRequest(status, approvedDate, remarks)
+                )
+                if (!response.isSuccessful) throw IllegalStateException("Server rejected request (${response.code()})")
+                Toast.makeText(this@ExitManagementActivity, "Status: $status ✅", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
+                Log.e("ExitManagement", "Exit status update failed", e)
                 Toast.makeText(this@ExitManagementActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun showFnFCalculator(request: ResignationRequest) {
+        val requestId = request.requestId.toIntOrNull()
+        if (requestId == null) {
+            Toast.makeText(this, "Invalid resignation request", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         val dialogBinding = DialogFnfCalculatorBinding.inflate(layoutInflater)
         val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Full & Final Settlement 💰")
             .setView(dialogBinding.root)
-            .setPositiveButton("Finalize & Terminate", null) // Set later to override click
+            .setPositiveButton("Finalize & Terminate", null)
             .setNegativeButton("Cancel", null)
             .show()
 
-        // 1. Calculate initial settlement via API
         lifecycleScope.launch {
             try {
-                val token = repository.firebaseSync.isAuthenticated() // Just a check, actually need Bearer token
-                val authHeader = "Bearer ${repository.firebaseSync.getGlobalRef().key}" // Mock, need real token store
-                // Wait, repository doesn't have token. I should use sessionStore or api.
-                // Let's use repository.firebaseSync for now if it has what we need or check MobileSessionStore usage.
-                
-                // Re-reading ExitManagementActivity I see @Inject lateinit var api: MobileApiService
-                // But it's actually 'mobileApi' now.
-                
-                // I need the token from sessionStore.
-                // I'll assume the activity has access to it.
-                // Actually, I saw 'session' injected in AdminAttendanceActivity.
-                
-                // Let's just use repository for logic if possible or inject session.
+                val token = sessionStore.token()?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("Admin session expired")
+                val response = mobileApi.calculateAdminSettlement("Bearer $token", requestId)
+                if (!response.isSuccessful) throw IllegalStateException("Settlement calculation failed (${response.code()})")
+                val calculated = response.body() ?: throw IllegalStateException("Settlement calculation returned no data")
+
+                // The Web ResignationService is authoritative for these calculations.
+                // Display the server result read-only; do not recalculate it independently on Android.
+                dialogBinding.etUnpaidSalary.setText(String.format(Locale.US, "%.2f", calculated.unpaidSalary))
+                dialogBinding.etLeaveEncash.setText(String.format(Locale.US, "%.2f", calculated.leaveEncashment))
+                dialogBinding.etGratuity.setText(String.format(Locale.US, "%.2f", calculated.gratuity))
+                dialogBinding.etBonus.setText(String.format(Locale.US, "%.2f", calculated.bonusPayable))
+                dialogBinding.etNoticeRecovery.setText(String.format(Locale.US, "%.2f", calculated.noticePeriodRecovery))
+                dialogBinding.etAssetRecovery.setText(String.format(Locale.US, "%.2f", calculated.assetRecoveryCost))
+                dialogBinding.etAdvances.setText(String.format(Locale.US, "%.2f", calculated.outstandingAdvances))
+                dialogBinding.tvNetPayable.text = "Net Payable: ${currencyFormat.format(calculated.netPayable)} 💎"
+
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    MaterialAlertDialogBuilder(this@ExitManagementActivity)
+                        .setTitle("FINAL WARNING ⚠️")
+                        .setMessage("This will finalize the Full & Final settlement and terminate the employee. Continue?")
+                        .setPositiveButton("Yes, Finalize") { _, _ -> finalizeSettlement(calculated, dialog) }
+                        .setNegativeButton("No", null)
+                        .show()
+                }
             } catch (e: Exception) {
-                Log.e("ExitManagement", "FnF Calc failed", e)
+                Log.e("ExitManagement", "FnF calculation failed", e)
+                dialog.dismiss()
+                Toast.makeText(this@ExitManagementActivity, "Unable to calculate settlement: ${e.message} ⚠️", Toast.LENGTH_LONG).show()
             }
-        }
-
-        // Mocking calculation for now based on Web logic
-        var fnf = FnFSettlement(employeeId = request.employeeId.toIntOrNull() ?: 0, resignationRequestId = request.requestId.toIntOrNull() ?: 0)
-        
-        val watcher = object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                fnf.unpaidSalary = dialogBinding.etUnpaidSalary.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.leaveEncashment = dialogBinding.etLeaveEncash.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.gratuity = dialogBinding.etGratuity.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.bonusPayable = dialogBinding.etBonus.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.noticePeriodRecovery = dialogBinding.etNoticeRecovery.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.assetRecoveryCost = dialogBinding.etAssetRecovery.text.toString().toDoubleOrNull() ?: 0.0
-                fnf.outstandingAdvances = dialogBinding.etAdvances.text.toString().toDoubleOrNull() ?: 0.0
-                
-                fnf.netPayable = (fnf.unpaidSalary + fnf.leaveEncashment + fnf.gratuity + fnf.bonusPayable) -
-                                (fnf.noticePeriodRecovery + fnf.outstandingAdvances + fnf.assetRecoveryCost)
-                
-                dialogBinding.tvNetPayable.text = "Net Payable: ${currencyFormat.format(fnf.netPayable)}"
-            }
-        }
-
-        dialogBinding.etUnpaidSalary.addTextChangedListener(watcher)
-        dialogBinding.etLeaveEncash.addTextChangedListener(watcher)
-        dialogBinding.etGratuity.addTextChangedListener(watcher)
-        dialogBinding.etBonus.addTextChangedListener(watcher)
-        dialogBinding.etNoticeRecovery.addTextChangedListener(watcher)
-        dialogBinding.etAssetRecovery.addTextChangedListener(watcher)
-
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            MaterialAlertDialogBuilder(this)
-                .setTitle("FINAL WARNING ⚠️")
-                .setMessage("This will Terminate the employee and finalize accounts. This action is irreversible. Continue?")
-                .setPositiveButton("Yes, Finalize") { _, _ -> finalizeSettlement(fnf, dialog) }
-                .setNegativeButton("No", null)
-                .show()
         }
     }
 
     private fun finalizeSettlement(fnf: FnFSettlement, parentDialog: DialogInterface) {
         lifecycleScope.launch {
             try {
-                // Mocking finalization via repo/api
-                Toast.makeText(this@ExitManagementActivity, "Settlement Finalized successfully!", Toast.LENGTH_SHORT).show()
+                val token = sessionStore.token()?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("Admin session expired")
+                val response = mobileApi.finalizeAdminSettlement("Bearer $token", fnf)
+                if (!response.isSuccessful) throw IllegalStateException("Finalization rejected (${response.code()})")
+                Toast.makeText(this@ExitManagementActivity, "Settlement finalized & employee terminated ✅💎", Toast.LENGTH_LONG).show()
                 parentDialog.dismiss()
             } catch (e: Exception) {
-                Toast.makeText(this@ExitManagementActivity, "Finalization failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                Log.e("ExitManagement", "FnF finalization failed", e)
+                Toast.makeText(this@ExitManagementActivity, "Finalization failed: ${e.message} ⚠️", Toast.LENGTH_LONG).show()
             }
         }
     }

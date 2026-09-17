@@ -15,9 +15,9 @@ class ReportRepository @Inject constructor(
     private val summaryDao: LocalDailySummaryDao,
     private val payrollDao: LocalPayrollHistoryDao
 ) {
-    suspend fun generateConsolidatedAttendance(startDate: String, endDate: String): List<ConsolidatedAttendanceRow> = withContext(Dispatchers.IO) {
+    suspend fun generateConsolidatedAttendance(startDate: String, endDate: String, employeeId: Int? = null): List<ConsolidatedAttendanceRow> = withContext(Dispatchers.IO) {
         val summaries = summaryDao.getAllFlow().first()
-            .filter { it.shiftDate in startDate..endDate }
+            .filter { it.shiftDate in startDate..endDate && (employeeId == null || it.employeeId == employeeId) }
         
         val employees = employeeDao.getAll().associateBy { it.employeeId.toInt() }
         
@@ -79,12 +79,12 @@ class ReportRepository @Inject constructor(
             FinancialRegisterRow(
                 employeeId = ph.employeeId,
                 employeeName = emp.name,
-                biometricId = "N/A", // Not in local employee entity yet
-                email = null, 
-                monthlySalary = 0.0, // Not in local employee entity yet
+                biometricId = emp.biometricId.ifBlank { "N/A" },
+                email = emp.email,
+                monthlySalary = if (emp.salaryType.equals("MONTHLY_FIXED", true)) emp.salaryRate else 0.0
                 hourlyRate = ph.hourlyRate,
                 baseSalaryComp = ph.basicComponent,
-                payrollType = "Monthly",
+                payrollType = if (emp.salaryType.equals("MONTHLY_FIXED", true)) "Monthly" else "Hourly",
                 earnedHours = ph.totalHoursWorked,
                 totalOvertimeMs = ph.totalOvertimeMs,
                 totalOvertimePay = ph.overtimePay,

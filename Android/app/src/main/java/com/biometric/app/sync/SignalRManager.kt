@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -50,16 +51,28 @@ class SignalRManager @Inject constructor(
             }
         }
 
+        val ownerUid = firebaseSync.getOwnerUid()
+        if (ownerUid.isNullOrBlank()) return
+        val role = sessionStore.userRole().orEmpty()
+        val employeeId = sessionStore.employeeId()
         val liveRef = firebaseSync.getGlobalRef()
+            .child("owners")
+            .child(ownerUid)
             .child("tracking")
             .child("live")
+            .let { ref ->
+                if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) {
+                    ref.child(employeeId.toString())
+                } else ref
+            }
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val locations = mutableMapOf<Int, LiveLocation>()
 
-                for (child in snapshot.children) {
-                    val employeeId = child.key?.toIntOrNull() ?: continue
+                val children = if (snapshot.hasChildren() && snapshot.getValue(FirebaseLiveLocation::class.java) == null) snapshot.children.toList() else listOf(snapshot)
+                for (child in children) {
+                    val employeeId = (child.key?.toIntOrNull() ?: child.getValue(FirebaseLiveLocation::class.java)?.EmployeeId) ?: continue
                     val value = child.getValue(FirebaseLiveLocation::class.java) ?: continue
 
                     locations[employeeId] = LiveLocation(
@@ -101,12 +114,68 @@ class SignalRManager @Inject constructor(
         }
     }
 
-    fun stop() {
-        val liveRef = firebaseSync.getGlobalRef()
-            .child("tracking")
-            .child("live")
+    /** Loads owner-scoped historical GPS events for one employee.
+     *  The history is read-only here; writes continue through the tracking/offline queue.
+     *  A stable client event key is used for deduplication during reconnect reconciliation.
+     */
+    suspend fun loadTrackingHistory(employeeId: Int, limit: Int = 2000): List<LiveLocation> {
+        if (employeeId <= 0 || !firebaseSync.isAuthenticated()) return emptyList()
+        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return emptyList()
+        return runCatching {
+            val snapshot = firebaseSync.getGlobalRef()
+                .child("owners").child(ownerUid).child("tracking")
+                .child("history").child(employeeId.toString())
+                .orderByChild("Timestamp").limitToLast(limit).get().await()
+            val byKey = linkedMapOf<String, LiveLocation>()
+            snapshot.children.forEach { child ->
+                val map = child.value as? Map<*, *> ?: return@forEach
+                val id = child.key ?: return@forEach
+                val eid = (map["EmployeeId"] as? Number)?.toInt() ?: employeeId
+                if (eid != employeeId) return@forEach
+                val lat = (map["Latitude"] as? Number)?.toDouble() ?: return@forEach
+                val lon = (map["Longitude"] as? Number)?.toDouble() ?: return@forEach
+                val timestamp = map["Timestamp"]?.toString()
+                val dedupeKey = "${id}|${timestamp.orEmpty()}|${lat}|${lon}"
+                byKey[dedupeKey] = LiveLocation(
+                    employeeId = eid, latitude = lat, longitude = lon,
+                    accuracyMeters = (map["AccuracyMeters"] as? Number)?.toDouble() ?: 0.0,
+                    distanceMeters = (map["DistanceMeters"] as? Number)?.toDouble() ?: 0.0,
+                    allowedRadiusMeters = (map["AllowedRadiusMeters"] as? Number)?.toInt() ?: 100,
+                    isWithinAllowedRadius = (map["IsWithinAllowedRadius"] as? Boolean) ?: true,
+                    timestamp = timestamp,
+                    speedMps = (map["SpeedMps"] as? Number)?.toDouble() ?: 0.0,
+                    movementState = map["MovementState"]?.toString() ?: "Stopped"
+                )
+            }
+            byKey.values.toList().sortedBy { parseTrackingTimestamp(it.timestamp) }
+        }.getOrElse {
+            Log.w("SignalRManager", "Historical tracking read failed", it)
+            emptyList()
+        }
+    }
 
-        locationListener?.let { liveRef.removeEventListener(it) }
+    private fun parseTrackingTimestamp(value: String?): Long = runCatching {
+        val patterns = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss")
+        patterns.firstNotNullOfOrNull { pattern ->
+            runCatching {
+                java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                    if (!pattern.endsWith("X")) timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.parse(value ?: "")?.time
+            }.getOrNull()
+        } ?: 0L
+    }.getOrDefault(0L)
+
+    fun stop() {
+        val ownerUid = firebaseSync.getOwnerUid()
+        val role = sessionStore.userRole().orEmpty()
+        val employeeId = sessionStore.employeeId()
+        val liveRef = ownerUid?.let {
+            firebaseSync.getGlobalRef()
+                .child("owners").child(it).child("tracking").child("live")
+                .let { ref -> if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) ref.child(employeeId.toString()) else ref }
+        }
+
+        if (liveRef != null) locationListener?.let { liveRef.removeEventListener(it) }
         locationListener = null
 
         applicationJob?.cancel()

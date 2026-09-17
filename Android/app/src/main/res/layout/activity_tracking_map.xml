@@ -100,6 +100,7 @@
                     <TextView android:id="@+id/tvOutsideCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:text="0 Outside" android:textSize="13sp" android:textStyle="bold" android:textColor="@color/red_700"/>
                 </LinearLayout>
                 <TextView android:id="@+id/tvMapSync" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="Realtime sync" android:textSize="9sp" android:textColor="@color/text_secondary"/>
+                <TextView android:id="@+id/tvTrackingPolicy" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Tracking policy • loading" android:textSize="9sp" android:textStyle="bold" android:textColor="@color/text_secondary"/>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

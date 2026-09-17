@@ -50,6 +50,17 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
         binding = ActivitySuperAdminManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Direct-launch protection: this screen changes another user's feature/branding profile.
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
+            .getString("user_role", com.biometric.app.data.entity.UserRole.STAFF.name)
+            ?.trim()
+            ?.uppercase()
+        if (role != com.biometric.app.data.entity.UserRole.SUPER_ADMIN.name) {
+            Toast.makeText(this, "SuperAdmin Management is restricted to SuperAdmin 🛡️", Toast.LENGTH_LONG).show()
+            finish()
+            return
+        }
+
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "SuperAdmin Management"

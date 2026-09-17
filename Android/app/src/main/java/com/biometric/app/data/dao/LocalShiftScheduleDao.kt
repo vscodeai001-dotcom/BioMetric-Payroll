@@ -17,4 +17,10 @@ interface LocalShiftScheduleDao {
 
     @Query("DELETE FROM shift_schedules WHERE scheduleId = :id")
     fun deleteById(id: Int)
+
+    @Query("SELECT * FROM shift_schedules WHERE employeeId = :employeeId AND shiftDate BETWEEN :fromDate AND :toDate ORDER BY shiftDate ASC, scheduleId ASC")
+    suspend fun getForEmployeeBetween(employeeId: Int, fromDate: String, toDate: String): List<LocalShiftSchedule>
+
+    @Query("SELECT * FROM shift_schedules WHERE employeeId = :employeeId AND shiftDate BETWEEN :fromDate AND :toDate ORDER BY shiftDate ASC, scheduleId ASC")
+    fun observeForEmployeeBetween(employeeId: Int, fromDate: String, toDate: String): Flow<List<LocalShiftSchedule>>
 }

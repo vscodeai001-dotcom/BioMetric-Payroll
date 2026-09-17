@@ -17,6 +17,9 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.domain.attendance.AttendancePolicyRepository
+import com.biometric.app.data.repository.TrackingConfigurationRepository
+import com.google.firebase.database.ValueEventListener
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
@@ -32,6 +35,7 @@ import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
 import com.google.android.gms.location.*
@@ -47,6 +51,9 @@ class TrackingService : Service() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var offlineMonitor: OfflineTrackingMonitor
     @Inject lateinit var geofenceManager: GeofenceManager
+    @Inject lateinit var attendancePolicy: AttendancePolicyRepository
+    @Inject lateinit var trackingWindowResolver: TrackingWindowResolver
+    @Inject lateinit var trackingConfiguration: TrackingConfigurationRepository
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -61,6 +68,8 @@ class TrackingService : Service() {
     private val latestLocationChannel = Channel<LocalLocation>(Channel.CONFLATED)
     private var gpsUploadJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var policyJob: Job? = null
+    private var trackingConfigListener: ValueEventListener? = null
     private var locationHandlerThread: HandlerThread? = null
     private var isForeground = false
     private var locationUpdatesStarted = false
@@ -84,6 +93,8 @@ class TrackingService : Service() {
         private const val KEY_LAST_STATUS = "last_status"
         private const val KEY_SEQUENCE = "gps_sequence"
         private const val KEY_SEQUENCE_SESSION = "gps_sequence_session"
+        const val ACTION_REFRESH_WINDOW = "ACTION_REFRESH_WINDOW"
+        private const val SHIFT_BOUNDARY_REQUEST = 9913
     }
 
     override fun onCreate() {
@@ -132,9 +143,39 @@ class TrackingService : Service() {
                     wakeLock?.acquire()
                 }
                 
+                startTrackingConfigurationGuard()
+        startAttendancePolicyGuard()
+                startShiftScheduleGuard()
+
+                val window = trackingWindowResolver.resolve()
+                if (!window.allowed) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putBoolean("is_service_active_intended", true)
+                        putBoolean("tracking_waiting_for_shift", true)
+                    }
+                    serviceScope.launch(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
+                    return START_STICKY
+                }
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                    putBoolean("tracking_waiting_for_shift", false)
+                }
+
                 if (!locationUpdatesStarted) {
                     startLocationUpdates()
                 }
+
+                // Publish the GPS session before/alongside the first location.
+                // Web's GeoLocationService uses this session boundary to accept
+                // the Android GPS stream and run the exact existing geofence
+                // attendance state machine. This avoids duplicating attendance
+                // calculation logic on Android and prevents double punches.
+                serviceScope.launch {
+                    firebaseSync.pushTrackingSessionStarted(
+                        employeeId = sessionStore.employeeId(),
+                        sessionId = sessionStore.gpsSessionId()
+                    )
+                }
+
                 // Firebase is the independent realtime transport. Tracking
                 // does not require Payroll.Web, Render, or SignalR.
                 if (!signalRStarted) {
@@ -153,6 +194,9 @@ if (heartbeatJob?.isActive != true) {
                     putBoolean("is_service_active_intended", true)
                 }
             }
+            ACTION_REFRESH_WINDOW -> {
+                serviceScope.launch { refreshTrackingWindow() }
+            }
             ACTION_STOP -> {
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                     putBoolean("is_service_active_intended", false)
@@ -162,6 +206,108 @@ if (heartbeatJob?.isActive != true) {
             }
         }
         return START_STICKY
+    }
+
+    private fun startTrackingConfigurationGuard() {
+        trackingConfigListener = trackingConfiguration.startRealtimeListener { config -> applyTrackingConfiguration(config) }
+        serviceScope.launch {
+            val config = trackingConfiguration.load()
+            applyTrackingConfiguration(config)
+        }
+    }
+
+    private fun applyTrackingConfiguration(config: TrackingConfigurationRepository.Config) {
+        currentInterval = config.intervalSeconds.coerceIn(15, 3600) * 1000L
+        if (!config.enabled) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit { putBoolean("is_service_active_intended", false) }
+            serviceScope.launch { withContext(Dispatchers.Main) { stopTracking("TRACKING_DISABLED", keepRecovery = false) } }
+            return
+        }
+        serviceScope.launch { refreshTrackingWindow() }
+    }
+
+    private fun startAttendancePolicyGuard() {
+        policyJob?.cancel()
+        policyJob = serviceScope.launch {
+            attendancePolicy.observe().collect { policy ->
+                val normalized = policy.normalized()
+                if (!normalized.geoFencingEnabled) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putBoolean("is_service_active_intended", false)
+                    }
+                    withContext(Dispatchers.Main) { stopTracking("GEO_FENCING_DISABLED", keepRecovery = false) }
+                    return@collect
+                }
+                val window = trackingWindowResolver.resolve()
+                if (!window.allowed && locationUpdatesStarted) {
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putBoolean("is_service_active_intended", true)
+                        putBoolean("tracking_waiting_for_shift", true)
+                    }
+                    scheduleShiftBoundary(window.start)
+                    withContext(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
+                } else if (window.allowed) {
+                    scheduleShiftBoundary(window.end)
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                        putBoolean("tracking_waiting_for_shift", false)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun startShiftScheduleGuard() {
+        serviceScope.launch {
+            trackingWindowResolver.observeShiftChanges().collectLatest {
+                refreshTrackingWindow()
+            }
+        }
+    }
+
+    private suspend fun refreshTrackingWindow() {
+        if (!sessionStore.isLoggedIn()) return
+        val window = trackingWindowResolver.resolve()
+        if (window.allowed) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                putBoolean("is_service_active_intended", true)
+                putBoolean("tracking_waiting_for_shift", false)
+            }
+            scheduleShiftBoundary(window.end)
+            if (!locationUpdatesStarted) {
+                withContext(Dispatchers.Main) { startLocationUpdates() }
+                if (!serverSessionStarted) {
+                    serverSessionStarted = true
+                    firebaseSync.pushTrackingSessionStarted(
+                        employeeId = sessionStore.employeeId(),
+                        sessionId = sessionStore.gpsSessionId()
+                    )
+                }
+            }
+        } else if (locationUpdatesStarted) {
+            scheduleShiftBoundary(window.start)
+            withContext(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
+        } else {
+            scheduleShiftBoundary(window.start)
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                putBoolean("is_service_active_intended", true)
+                putBoolean("tracking_waiting_for_shift", true)
+            }
+        }
+    }
+
+    private fun scheduleShiftBoundary(at: java.time.LocalDateTime?) {
+        if (at == null) return
+        val millis = at.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        if (millis <= System.currentTimeMillis()) return
+        val intent = Intent(this, TrackingNotificationReceiver::class.java).apply {
+            action = ACTION_REFRESH_WINDOW
+        }
+        val pending = PendingIntent.getBroadcast(
+            this, SHIFT_BOUNDARY_REQUEST, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarm = getSystemService(ALARM_SERVICE) as AlarmManager
+        alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, millis, pending)
     }
 
     private fun scheduleRestartTick() {
@@ -183,6 +329,12 @@ if (heartbeatJob?.isActive != true) {
             val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
             alarmManager.cancel(pendingIntent)
         }
+    }
+
+    private fun cancelShiftBoundary() {
+        val intent = Intent(this, TrackingNotificationReceiver::class.java).apply { action = ACTION_REFRESH_WINDOW }
+        val pending = PendingIntent.getBroadcast(this, SHIFT_BOUNDARY_REQUEST, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)
+        if (pending != null) (getSystemService(ALARM_SERVICE) as AlarmManager).cancel(pending)
     }
 
     private fun createNotificationChannel() {
@@ -224,7 +376,7 @@ if (heartbeatJob?.isActive != true) {
             .setSmallIcon(R.drawable.ic_logs) 
             .setContentTitle("BioMetric: Sync Active 🛰️")
             .setContentText("Authoritative background synchronization is active.")
-            .setSubText("24/7 Connectivity")
+            .setSubText("Tracking schedule controlled by policy")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT) 
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) 
@@ -265,6 +417,7 @@ if (heartbeatJob?.isActive != true) {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        currentInterval = trackingConfiguration.cached().intervalSeconds.coerceIn(15, 3600) * 1000L
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return
         }
@@ -412,8 +565,40 @@ if (heartbeatJob?.isActive != true) {
         }
     }
 
+    private suspend fun ensureFirebaseGpsSessionStarted(sessionId: String): Boolean {
+        val employeeId = sessionStore.employeeId()
+        if (employeeId <= 0 || sessionId.isBlank()) return false
+
+        // Do not allow a GPS history/live event to outrun its Firebase session
+        // lifecycle. The Web compatibility worker uses the session boundary
+        // before accepting the GPS stream into GeoLocationService.
+        return firebaseSync.pushTrackingSessionStarted(
+            employeeId = employeeId,
+            sessionId = sessionId
+        )
+    }
+
     private suspend fun uploadLocationToServer(location: LocalLocation) {
         try {
+            if (!ensureFirebaseGpsSessionStarted(location.sessionId)) {
+                locationDao.markAttempt(
+                    location.id,
+                    LocalLocation.SYNC_FAILED,
+                    location.attemptCount + 1,
+                    System.currentTimeMillis(),
+                    "GPS_SESSION_START_DEFERRED"
+                )
+                offlineMonitor.record(
+                    OfflineTrackingMonitor.UPLOAD_FAILED,
+                    OfflineTrackingMonitor.WARNING,
+                    "GPS session lifecycle is not confirmed; location retained for retry",
+                    sessionId = location.sessionId,
+                    correlationId = location.clientEventId
+                )
+                return
+            }
+
+
             locationDao.markAttempt(
                 location.id,
                 LocalLocation.SYNC_IN_FLIGHT,
@@ -489,12 +674,33 @@ if (heartbeatJob?.isActive != true) {
         }
     }
 
-    private fun stopTracking() {
-        isManualStopping = true
+    private fun stopTracking(endReason: String = "LOGGED_OUT", keepRecovery: Boolean = false) {
+        isManualStopping = !keepRecovery
+
+        // End the exact active session in Firebase before clearing its local
+        // identifier. Web will then close the compatibility GPS session and
+        // remove only this session from its live-location state.
+        val activeEmployeeId = sessionStore.employeeId()
+        val activeSessionId = sessionStore.currentGpsSessionId()
+        if (activeEmployeeId > 0 && !activeSessionId.isNullOrBlank()) {
+            serviceScope.launch {
+                firebaseSync.pushTrackingSessionEnded(
+                    employeeId = activeEmployeeId,
+                    sessionId = activeSessionId,
+                    endReason = endReason
+                )
+            }
+        }
+
         sessionStore.clearGpsSession()
 
         getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-            putBoolean("is_service_active_intended", false)
+            putBoolean("is_service_active_intended", keepRecovery)
+            putBoolean("tracking_waiting_for_shift", keepRecovery)
+        }
+        if (!keepRecovery) {
+            cancelRestartTick()
+            cancelShiftBoundary()
         }
 
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -519,6 +725,9 @@ if (heartbeatJob?.isActive != true) {
     }
 
     override fun onDestroy() {
+        trackingConfiguration.removeRealtimeListener(trackingConfigListener)
+        trackingConfigListener = null
+        policyJob?.cancel()
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }

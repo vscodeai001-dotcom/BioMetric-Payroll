@@ -40,6 +40,7 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
     private lateinit var binding: ActivityAdminManualPunchCorrectionBinding
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var attendanceSafety: com.biometric.app.data.repository.FirebaseAdminAttendanceRepository
     
     private var startDate: Calendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
     private var endDate: Calendar = Calendar.getInstance()
@@ -253,6 +254,10 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
 
     private fun quickAddDay(day: ProblemDayInfo) {
         lifecycleScope.launch {
+            if (attendanceSafety.isPayrollLocked(day.employee.employeeId.toIntOrNull() ?: 0, day.date)) {
+                Toast.makeText(this@AdminManualPunchCorrectionActivity, "Payroll is finalized for this month. Cannot modify punches. 🔒", Toast.LENGTH_LONG).show()
+                return@launch
+            }
             val startStr = day.employee.shiftStart.ifBlank { "09:00" }
             val endStr = day.employee.shiftEnd.ifBlank { "18:00" }
             
@@ -307,6 +312,10 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
         )
         
         lifecycleScope.launch {
+            if (attendanceSafety.isPayrollLocked(day.employee.employeeId.toIntOrNull() ?: 0, day.date)) {
+                Toast.makeText(this@AdminManualPunchCorrectionActivity, "Payroll is finalized for this month. Cannot modify punches. 🔒", Toast.LENGTH_LONG).show()
+                return@launch
+            }
             sharedViewModel.insertPunch(newPunch)
             day.punches.add(newPunch)
             day.punches.sortBy { it.timestamp }
@@ -325,6 +334,10 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
             }
             
             lifecycleScope.launch {
+                if (attendanceSafety.isPayrollLocked(day.employee.employeeId.toIntOrNull() ?: 0, day.date)) {
+                    Toast.makeText(this@AdminManualPunchCorrectionActivity, "Payroll is finalized for this month. Cannot modify punches. 🔒", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
                 val updated = punch.copy(timestamp = dateCal.timeInMillis)
                 sharedViewModel.insertPunch(updated)
                 
@@ -342,6 +355,10 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
             .setMessage("Remove this punch record?")
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
+                    if (attendanceSafety.isPayrollLocked(day.employee.employeeId.toIntOrNull() ?: 0, day.date)) {
+                        Toast.makeText(this@AdminManualPunchCorrectionActivity, "Payroll is finalized for this month. Cannot modify punches. 🔒", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
                     sharedViewModel.deletePunch(punch)
                     day.punches.remove(punch)
                     adapter.notifyDataSetChanged()

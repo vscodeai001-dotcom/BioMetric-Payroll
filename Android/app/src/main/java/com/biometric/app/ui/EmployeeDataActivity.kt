@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.*
+import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.data.MobileSessionStore
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
@@ -23,7 +24,7 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class EmployeeDataActivity : AppCompatActivity() {
-    @Inject lateinit var api: MobileApiService
+    @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
     @Inject lateinit var session: MobileSessionStore
     private lateinit var status: TextView
     private lateinit var content: LinearLayout
@@ -37,26 +38,26 @@ class EmployeeDataActivity : AppCompatActivity() {
         load(intent.getStringExtra(EXTRA_SCREEN) ?: "attendance")
     }
 
-    private fun auth() = session.token()?.let { "Bearer $it" }
     private fun load(key: String) {
         findViewById<MaterialToolbar>(R.id.toolbar).title = titleFor(key)
-        val token = auth(); if (token == null) { finish(); return }
-        status.text = "Loading…"
+        if (!session.isLoggedIn()) { finish(); return }
+        status.text = "Loading… 🔄"
         lifecycleScope.launch {
             runCatching {
                 when (key) {
-                    "attendance" -> showAttendance(api.attendance(token, LocalDate.now().withDayOfMonth(1).toString(), LocalDate.now().toString()).body().orEmpty())
-                    "payslips" -> showPayslips(api.payslips(token).body().orEmpty())
-                    "leaves" -> showLeaves(api.leaves(token).body().orEmpty())
-                    "advances" -> showMoney("Salary Advances", api.advances(token).body().orEmpty())
-                    "bonuses" -> showMoney("Bonuses", api.bonuses(token).body().orEmpty())
-                    "regularizations" -> showRegularizations(api.regularizations(token).body().orEmpty())
-                    "resignation" -> showResignation(api.resignation(token).body())
-                    "tax" -> showTax(api.tax(token, financialYear()).body())
-                    "fbp" -> showFbp(api.fbp(token, financialYear()).body().orEmpty())
-                    "shifts" -> showShifts(api.shifts(token, YearMonth.now().toString()).body().orEmpty())
+                    "attendance" -> showAttendance(selfService.attendance(LocalDate.now().withDayOfMonth(1).toString(), LocalDate.now().toString()))
+                    "payslips" -> showPayslips(selfService.payslips())
+                    "leaves" -> showLeaves(selfService.leaves())
+                    "advances" -> showMoney("Salary Advances", selfService.advances())
+                    "bonuses" -> showMoney("Bonuses", selfService.bonuses())
+                    "regularizations" -> showRegularizations(selfService.regularizations())
+                    "resignation" -> showResignation(selfService.resignation())
+                    "tax" -> showTax(selfService.tax(financialYear()))
+                    "fbp" -> showFbp(selfService.fbp(financialYear()))
+                    "shifts" -> showShifts(selfService.shifts(YearMonth.now().toString()))
+                    else -> card("This employee module is not available. ⚠️")
                 }
-            }.onFailure { status.text = "Unable to load data. ${it.message ?: "Please try again."}" }
+            }.onFailure { status.text = "Unable to load data. ${it.message ?: "Please try again."} ⚠️" }
         }
     }
 
@@ -80,11 +81,11 @@ class EmployeeDataActivity : AppCompatActivity() {
     private fun addButton(label:String, click:()->Unit){content.addView(MaterialButton(this).apply{text=label;setOnClickListener{click()}},LinearLayout.LayoutParams(-1,56).apply{bottomMargin=10})}
     private fun edit(hint:String):TextInputEditText=TextInputEditText(this).apply{this.hint=hint;setPadding(16,12,16,12)}
     private fun input(parent:LinearLayout,hint:String):TextInputEditText{val box=TextInputLayout(this);box.hint=hint;val e=edit(hint);box.addView(e);parent.addView(box,LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=10});return e}
-    private fun showLeaveForm(){clear();val date=input(content,"Leave date (YYYY-MM-DD)");val type=input(content,"Leave type (Sick / Vacation)");val notes=input(content,"Notes");val half=CheckBox(this).apply{text="Half day"};content.addView(half);addButton("Submit Leave"){val t=auth()?:return@addButton;lifecycleScope.launch{val r=api.createLeave(t,LeaveCreateRequest(date.text.toString(),type.text.toString(),half.isChecked,notes.text?.toString()));if(r.isSuccessful){Toast.makeText(this@EmployeeDataActivity,"Leave submitted",Toast.LENGTH_SHORT).show();load("leaves")}else status.text="Unable to submit leave (${r.code()})"}}}
-    private fun showRegularizationForm(){clear();val date=input(content,"Punch date (YYYY-MM-DD)");val time=input(content,"Correct time (HH:MM)");val reason=input(content,"Reason");val inPunch=RadioButton(this).apply{text="Correct IN punch";isChecked=true};val outPunch=RadioButton(this).apply{text="Correct OUT punch"};content.addView(inPunch);content.addView(outPunch);addButton("Submit Correction"){val t=auth()?:return@addButton;lifecycleScope.launch{val r=api.createRegularization(t,RegularizationCreateRequest(date.text.toString(),inPunch.isChecked,time.text.toString(),reason.text.toString()));if(r.isSuccessful){Toast.makeText(this@EmployeeDataActivity,"Correction submitted",Toast.LENGTH_SHORT).show();load("regularizations")}else status.text="Unable to submit (${r.code()})"}}}
-    private fun showResignationForm(){clear();val date=input(content,"Desired last working day (YYYY-MM-DD)");val reason=input(content,"Reason");addButton("Submit Resignation"){val t=auth()?:return@addButton;lifecycleScope.launch{val r=api.createResignation(t,ResignationCreateRequest(date.text.toString(),reason.text.toString()));if(r.isSuccessful){Toast.makeText(this@EmployeeDataActivity,"Resignation submitted",Toast.LENGTH_SHORT).show();load("resignation")}else status.text="Unable to submit (${r.code()})"}}}
-    private fun showTaxForm(existing:TaxDeclarationDto?){clear();val regime=input(content,"Regime (Old / New)");regime.setText(existing?.regime?:"New");val c=input(content,"Section 80C");c.setText(existing?.section80C?.toString() ?:  "0");val d=input(content,"Section 80D");d.setText(existing?.section80D?.toString() ?:  "0");val h=input(content,"HRA rent paid");h.setText(existing?.hraRentPaid?.toString() ?:  "0");val o=input(content,"Other exemptions");o.setText(existing?.otherExemptions?.toString() ?:  "0");addButton("Save Tax Declaration"){val t=auth()?:return@addButton;lifecycleScope.launch{val r=api.saveTax(t,TaxDeclarationRequest(financialYear(),regime.text.toString(),c.number(),d.number(),h.number(),o.number()));if(r.isSuccessful){Toast.makeText(this@EmployeeDataActivity,"Tax declaration saved",Toast.LENGTH_SHORT).show();load("tax")}else status.text="Unable to save (${r.code()})"}}}
-    private fun showFbpForm(){clear();val name=input(content,"Component name");val annual=input(content,"Annual amount");addButton("Save FBP"){val t=auth()?:return@addButton;lifecycleScope.launch{val r=api.saveFbp(t,FbpRequest(financialYear(),name.text.toString(),annual.number()));if(r.isSuccessful){Toast.makeText(this@EmployeeDataActivity,"FBP saved",Toast.LENGTH_SHORT).show();load("fbp")}else status.text="Unable to save (${r.code()})"}}}
+    private fun showLeaveForm(){clear();val date=input(content,"Leave date (YYYY-MM-DD)");val type=input(content,"Leave type (Sick / Vacation)");val notes=input(content,"Notes");val half=CheckBox(this).apply{text="Half day"};content.addView(half);addButton("Submit Leave"){lifecycleScope.launch{runCatching{selfService.createLeave(date.text.toString(),type.text.toString(),half.isChecked,notes.text?.toString())}.onSuccess{Toast.makeText(this@EmployeeDataActivity,"Leave submitted successfully ✅",Toast.LENGTH_SHORT).show();load("leaves")}.onFailure{status.text="Unable to submit leave: ${it.message ?: "Please try again."} ⚠️"}}}}
+    private fun showRegularizationForm(){clear();val date=input(content,"Punch date (YYYY-MM-DD)");val time=input(content,"Correct time (HH:MM)");val reason=input(content,"Reason");val inPunch=RadioButton(this).apply{text="Correct IN punch";isChecked=true};val outPunch=RadioButton(this).apply{text="Correct OUT punch"};content.addView(inPunch);content.addView(outPunch);addButton("Submit Correction"){lifecycleScope.launch{runCatching{selfService.createRegularization(RegularizationCreateRequest(date.text.toString(),inPunch.isChecked,time.text.toString(),reason.text.toString()))}.onSuccess{Toast.makeText(this@EmployeeDataActivity,"Correction submitted successfully ✅",Toast.LENGTH_SHORT).show();load("regularizations")}.onFailure{status.text="Unable to submit: ${it.message ?: "Please try again."} ⚠️"}}}}
+    private fun showResignationForm(){clear();val date=input(content,"Desired last working day (YYYY-MM-DD)");val reason=input(content,"Reason");addButton("Submit Resignation"){lifecycleScope.launch{runCatching{selfService.createResignation(ResignationCreateRequest(date.text.toString(),reason.text.toString()))}.onSuccess{Toast.makeText(this@EmployeeDataActivity,"Resignation submitted successfully ✅",Toast.LENGTH_SHORT).show();load("resignation")}.onFailure{status.text="Unable to submit: ${it.message ?: "Please try again."} ⚠️"}}}}
+    private fun showTaxForm(existing:TaxDeclarationDto?){clear();val regime=input(content,"Regime (Old / New)");regime.setText(existing?.regime?:"New");val c=input(content,"Section 80C");c.setText(existing?.section80C?.toString() ?:  "0");val d=input(content,"Section 80D");d.setText(existing?.section80D?.toString() ?:  "0");val h=input(content,"HRA rent paid");h.setText(existing?.hraRentPaid?.toString() ?:  "0");val o=input(content,"Other exemptions");o.setText(existing?.otherExemptions?.toString() ?:  "0");addButton("Save Tax Declaration"){lifecycleScope.launch{runCatching{selfService.saveTax(TaxDeclarationRequest(financialYear(),regime.text.toString(),c.number(),d.number(),h.number(),o.number()))}.onSuccess{Toast.makeText(this@EmployeeDataActivity,"Tax declaration saved successfully ✅",Toast.LENGTH_SHORT).show();load("tax")}.onFailure{status.text="Unable to save: ${it.message ?: "Please try again."} ⚠️"}}}}
+    private fun showFbpForm(){clear();val name=input(content,"Component name");val annual=input(content,"Annual amount");addButton("Save FBP"){lifecycleScope.launch{runCatching{selfService.saveFbp(FbpRequest(financialYear(),name.text.toString(),annual.number()))}.onSuccess{Toast.makeText(this@EmployeeDataActivity,"FBP saved successfully ✅",Toast.LENGTH_SHORT).show();load("fbp")}.onFailure{status.text="Unable to save: ${it.message ?: "Please try again."} ⚠️"}}}}
     private fun TextInputEditText.number()=text?.toString()?.toDoubleOrNull()?:0.0
     private fun monthName(m:Int)=java.time.Month.of(m).name.lowercase().replaceFirstChar{it.uppercase()}
     companion object{const val EXTRA_SCREEN="employee_screen"}

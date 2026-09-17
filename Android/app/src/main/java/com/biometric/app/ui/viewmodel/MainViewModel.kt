@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.biometric.app.api.AdminFeatureSettingsDto
 import com.biometric.app.api.CompanySettingsResponse
-import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.*
@@ -62,7 +61,6 @@ private data class DashboardDataBundle(
 class MainViewModel @Inject constructor(
     private val repository: MainRepository,
     private val sharedViewModel: SharedViewModel,
-    private val mobileApi: MobileApiService,
     private val sessionStore: MobileSessionStore,
     private val firebaseSync: FirebaseSyncManager
 ) : ViewModel() {
@@ -149,31 +147,16 @@ class MainViewModel @Inject constructor(
                             geoRadiusMeters = radius ?: 1000
                         )
                     } else {
-                        loadCompanySettingsFromApi()
+                        Log.w("MainViewModel", "Firebase company settings unavailable; retaining current settings")
                     }
                 }
 
                 override fun onCancelled(error: DatabaseError) {
                     Log.w("MainViewModel", "Firebase company settings read cancelled: ${error.message}")
-                    loadCompanySettingsFromApi()
                 }
             })
         } else {
-            loadCompanySettingsFromApi()
-        }
-    }
-
-    private fun loadCompanySettingsFromApi() {
-        val token = sessionStore.token() ?: return
-        viewModelScope.launch {
-            try {
-                val response = mobileApi.getCompanySettings("Bearer $token")
-                if (response.isSuccessful) {
-                    _companySettings.value = response.body()
-                }
-            } catch (e: Exception) {
-                Log.e("MainViewModel", "Failed to load company settings", e)
-            }
+            Log.w("MainViewModel", "Firebase owner reference unavailable; retaining current settings")
         }
     }
 
@@ -199,17 +182,23 @@ class MainViewModel @Inject constructor(
         }.firstOrNull()
 
     private fun loadFeatureSettings() {
-        val token = sessionStore.token() ?: return
-        viewModelScope.launch {
-            try {
-                val response = mobileApi.getAdminFeatureSettings("Bearer $token")
-                if (response.isSuccessful) {
-                    _featureSettings.value = response.body()
+        val ownerRef = firebaseSync.getOwnerRef() ?: return
+        ownerRef.child("feature_settings").child("1")
+            .addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    if (!snapshot.exists()) return
+                    runCatching {
+                        val json = Gson().toJson(snapshot.value)
+                        _featureSettings.value = Gson().fromJson(json, AdminFeatureSettingsDto::class.java)
+                    }.onFailure {
+                        Log.e("MainViewModel", "Failed to decode Firebase feature settings", it)
+                    }
                 }
-            } catch (e: Exception) {
-                Log.e("MainViewModel", "Failed to load feature settings", e)
-            }
-        }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w("MainViewModel", "Firebase feature settings read cancelled: ${error.message}")
+                }
+            })
     }
 
     private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {

@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
 import com.biometric.app.api.*
 import com.biometric.app.data.MainRepository
+import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.ActivityAdminFinanceBinding
 import com.biometric.app.databinding.DialogAdminMoneyEntryBinding
@@ -39,6 +40,7 @@ class AdminFinanceActivity : AppCompatActivity() {
     
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
+    @Inject lateinit var firebaseFinance: FirebaseAdminFinanceRepository
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     
@@ -95,31 +97,23 @@ class AdminFinanceActivity : AppCompatActivity() {
     }
 
     private fun loadFinanceData() {
-        val token = "Bearer ${sessionStore.token()}"
         lifecycleScope.launch {
             try {
-                val advRes = mobileApi.adminAdvances(token, false)
-                if (advRes.isSuccessful) {
-                    advances.clear()
-                    advances.addAll(advRes.body() ?: emptyList())
-                }
-
-                val bonRes = mobileApi.adminBonuses(token)
-                if (bonRes.isSuccessful) {
-                    bonuses.clear()
-                    bonuses.addAll(bonRes.body() ?: emptyList())
-                }
-
+                // Finance records are now read from the shared Firebase source.
+                // Tax approval still uses the Web TaxDeclarationService because
+                // approval has payroll-lock/business side effects that must not be
+                // duplicated in Android until independently verified.
+                advances.clear()
+                advances.addAll(firebaseFinance.advances(false))
+                bonuses.clear()
+                bonuses.addAll(firebaseFinance.bonuses())
                 val year = Calendar.getInstance().get(Calendar.YEAR)
-                val taxRes = mobileApi.adminTaxDeclarations(token, year)
-                if (taxRes.isSuccessful) {
-                    taxDeclarations.clear()
-                    taxDeclarations.addAll(taxRes.body() ?: emptyList())
-                }
-
+                taxDeclarations.clear()
+                taxDeclarations.addAll(firebaseFinance.taxDeclarations(year))
                 updateList()
             } catch (e: Exception) {
-                Log.e("AdminFinance", "Load failed", e)
+                Log.e("AdminFinance", "Firebase load failed", e)
+                Toast.makeText(this@AdminFinanceActivity, e.message ?: "Unable to load finance data", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -169,12 +163,9 @@ class AdminFinanceActivity : AppCompatActivity() {
     private fun submitAdvance(empId: Int, amount: Double, type: String, date: String) {
         lifecycleScope.launch {
             try {
-                val token = "Bearer ${sessionStore.token()}"
-                val response = mobileApi.createAdminAdvance(token, AdminAdvanceRequest(empId, amount, type, date))
-                if (response.isSuccessful) {
-                    Toast.makeText(this@AdminFinanceActivity, "Advance recorded ✅", Toast.LENGTH_SHORT).show()
-                    loadFinanceData()
-                }
+                firebaseFinance.createAdvance(empId, amount, type, date)
+                Toast.makeText(this@AdminFinanceActivity, "Advance recorded ✅", Toast.LENGTH_SHORT).show()
+                loadFinanceData()
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -184,12 +175,9 @@ class AdminFinanceActivity : AppCompatActivity() {
     private fun submitBonus(empId: Int, amount: Double, desc: String, date: String) {
         lifecycleScope.launch {
             try {
-                val token = "Bearer ${sessionStore.token()}"
-                val response = mobileApi.createAdminBonus(token, AdminBonusRequest(empId, amount, desc, date))
-                if (response.isSuccessful) {
-                    Toast.makeText(this@AdminFinanceActivity, "Bonus recorded ✅", Toast.LENGTH_SHORT).show()
-                    loadFinanceData()
-                }
+                firebaseFinance.createBonus(empId, amount, desc, date)
+                Toast.makeText(this@AdminFinanceActivity, "Bonus recorded ✅", Toast.LENGTH_SHORT).show()
+                loadFinanceData()
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }

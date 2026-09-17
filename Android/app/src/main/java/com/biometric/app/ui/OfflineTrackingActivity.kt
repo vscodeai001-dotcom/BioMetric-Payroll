@@ -17,6 +17,7 @@ import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.OfflineTrackingEventDao
 import com.biometric.app.domain.location.OfflineSyncWorker
+import com.biometric.app.sync.SignalRManager
 import com.biometric.app.domain.location.OfflineTrackingMonitor
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
@@ -46,6 +47,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
     @Inject lateinit var eventDao: OfflineTrackingEventDao
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var monitor: OfflineTrackingMonitor
+    @Inject lateinit var signalR: SignalRManager
 
     private lateinit var mapView: MapView
     private lateinit var tvConnectivity: TextView
@@ -54,6 +56,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
     private lateinit var tvLastCapture: TextView
     private lateinit var tvLastSync: TextView
     private lateinit var tvSession: TextView
+    private lateinit var tvRemoteHistory: TextView
     private lateinit var eventAdapter: OfflineEventAdapter
     private var refreshJob: Job? = null
 
@@ -69,6 +72,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
         tvLastCapture = findViewById(R.id.tvLastCapture)
         tvLastSync = findViewById(R.id.tvLastSync)
         tvSession = findViewById(R.id.tvSession)
+        tvRemoteHistory = findViewById(R.id.tvRemoteHistory)
         mapView = findViewById(R.id.offlineMapView)
 
         setupMap()
@@ -82,6 +86,10 @@ class OfflineTrackingActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.btnRefreshOffline).setOnClickListener {
             refreshOnce()
+        }
+
+        findViewById<MaterialButton>(R.id.btnLoadCloudHistory).setOnClickListener {
+            loadCloudHistory()
         }
     }
 
@@ -164,6 +172,70 @@ class OfflineTrackingActivity : AppCompatActivity() {
                 drawLocalRoute(recent)
             }
         }
+    }
+
+    private fun loadCloudHistory() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val role = sessionStore.userRole().orEmpty()
+            val employeeId = if (role.equals("ADMIN", true) || role.equals("SUPER_ADMIN", true)) {
+                intent.getIntExtra("employeeId", 0)
+            } else {
+                sessionStore.employeeId()
+            }
+            if (employeeId <= 0) {
+                withContext(Dispatchers.Main) {
+                    tvRemoteHistory.text = "Cloud history: Employee identity unavailable"
+                }
+                return@launch
+            }
+            val history = signalR.loadTrackingHistory(employeeId, 2000)
+            withContext(Dispatchers.Main) {
+                tvRemoteHistory.text = if (history.isEmpty()) {
+                    "Cloud history: No Firebase history available"
+                } else {
+                    val first = history.first().timestamp ?: "—"
+                    val last = history.last().timestamp ?: "—"
+                    "Cloud history: ${history.size} unique points • $first → $last"
+                }
+                if (history.isNotEmpty()) drawRemoteRoute(history)
+            }
+        }
+    }
+
+    private fun drawRemoteRoute(points: List<SignalRManager.LiveLocation>) {
+        val ordered = points.sortedBy { parseTrackingTimestamp(it.timestamp) }
+        if (ordered.isEmpty()) return
+        mapView.overlays.clear()
+        val geo = ordered.map { GeoPoint(it.latitude, it.longitude) }
+        val line = Polyline(mapView).apply {
+            setPoints(geo)
+            outlinePaint.strokeWidth = 8f
+        }
+        mapView.overlays.add(line)
+        mapView.overlays.add(Marker(mapView).apply {
+            position = geo.first()
+            title = "Cloud history start"
+            snippet = ordered.first().timestamp ?: "—"
+        })
+        mapView.overlays.add(Marker(mapView).apply {
+            position = geo.last()
+            title = "Cloud history latest"
+            snippet = ordered.last().timestamp ?: "—"
+        })
+        if (geo.size > 1) mapView.zoomToBoundingBox(BoundingBox.fromGeoPoints(geo), true, 80)
+        else mapView.controller.setCenter(geo.first())
+        mapView.invalidate()
+    }
+
+    private fun parseTrackingTimestamp(value: String?): Long {
+        val patterns = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss")
+        return patterns.firstNotNullOfOrNull { pattern ->
+            runCatching {
+                SimpleDateFormat(pattern, Locale.US).apply {
+                    if (!pattern.endsWith("X")) timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(value ?: "")?.time
+            }.getOrNull()
+        } ?: 0L
     }
 
     private fun drawLocalRoute(points: List<LocalLocation>) {

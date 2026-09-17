@@ -13,6 +13,8 @@ interface LocalEmployeeDao {
     fun delete(employee: LocalEmployee): Int
 
     @Query("SELECT * FROM local_employees")
+        fun getAllRecords(): List<LocalEmployee>
+    @Query("SELECT * FROM local_employees")
     fun getAll(): List<LocalEmployee>
 
     @Query("SELECT * FROM local_employees")
@@ -23,4 +25,7 @@ interface LocalEmployeeDao {
 
     @Query("SELECT * FROM local_employees WHERE syncState = 0")
     fun getUnsynced(): List<LocalEmployee>
+    @Query("DELETE FROM local_employees WHERE employeeId = :id")
+    fun deleteById(id: String)
+
 }
