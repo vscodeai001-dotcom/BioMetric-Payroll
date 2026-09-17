@@ -184,24 +184,191 @@ public sealed class FirebaseAdvanceService
     }
 
     private static string? String(JsonElement row, string name)
-        => row.TryGetProperty(name, out var p) ? p.ToString() : row.TryGetProperty(char.ToUpperInvariant(name[0]) + name[1..], out p) ? p.ToString() : null;
-    private static int? Int(JsonElement row, string name) => TryGet(row, name, out var p) && (p.ValueKind == JsonValueKind.Number ? p.TryGetInt32(out var n) ? n : null : int.TryParse(p.ToString(), out var v) ? v : null);
-    private static int? IntFromKey(string key) => int.TryParse(key, out var v) ? v : null;
-    private static decimal? Decimal(JsonElement row, string name) => TryGet(row, name, out var p) && decimal.TryParse(p.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : null;
-    private static bool? Bool(JsonElement row, string name) => TryGet(row, name, out var p) ? p.ValueKind == JsonValueKind.True ? true : p.ValueKind == JsonValueKind.False ? false : bool.TryParse(p.ToString(), out var v) ? v : null : null;
-    private static DateTime? Date(JsonElement row, string name)
     {
-        if (!TryGet(row, name, out var p)) return null;
-        if (p.ValueKind == JsonValueKind.Number && p.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
-        if (DateTime.TryParse(p.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt)) return dt;
-        if (long.TryParse(p.ToString(), out ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
+        if (!TryGet(row, name, out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.Null ||
+            value.ValueKind == JsonValueKind.Undefined)
+            return null;
+
+        return value.ToString();
+    }
+
+    private static int? Int(JsonElement row, string name)
+    {
+        if (!TryGet(row, name, out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            if (value.TryGetInt32(out var number))
+                return number;
+
+            return null;
+        }
+
+        var text = value.ToString();
+
+        if (int.TryParse(
+                text,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            return parsed;
+        }
+
         return null;
     }
-    private static int StableInt(string value) => value.GetHashCode() & int.MaxValue;
-    private static bool TryGet(JsonElement row, string name, out JsonElement value)
+
+    private static int? IntFromKey(string key)
     {
-        if (row.TryGetProperty(name, out value)) return true;
-        var pascal = char.ToUpperInvariant(name[0]) + name[1..];
+        if (int.TryParse(
+                key,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private static decimal? Decimal(JsonElement row, string name)
+    {
+        if (!TryGet(row, name, out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.Number &&
+            value.TryGetDecimal(out var number))
+        {
+            return number;
+        }
+
+        var text = value.ToString();
+
+        if (decimal.TryParse(
+                text,
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var parsed))
+        {
+            return parsed;
+        }
+
+        return null;
+    }
+
+    private static bool? Bool(JsonElement row, string name)
+    {
+        if (!TryGet(row, name, out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.True)
+            return true;
+
+        if (value.ValueKind == JsonValueKind.False)
+            return false;
+
+        var text = value.ToString();
+
+        if (bool.TryParse(text, out var parsed))
+            return parsed;
+
+        return null;
+    }
+
+    private static DateTime? Date(JsonElement row, string name)
+    {
+        if (!TryGet(row, name, out var value))
+            return null;
+
+        if (value.ValueKind == JsonValueKind.Number)
+        {
+            if (value.TryGetInt64(out var milliseconds))
+            {
+                try
+                {
+                    return DateTimeOffset
+                        .FromUnixTimeMilliseconds(milliseconds)
+                        .LocalDateTime;
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    return null;
+                }
+            }
+
+            return null;
+        }
+
+        var text = value.ToString();
+
+        if (DateTime.TryParse(
+                text,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeLocal,
+                out var dateTime))
+        {
+            return dateTime;
+        }
+
+        if (long.TryParse(
+                text,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var millisecondsFromText))
+        {
+            try
+            {
+                return DateTimeOffset
+                    .FromUnixTimeMilliseconds(millisecondsFromText)
+                    .LocalDateTime;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private static int StableInt(string value)
+    {
+        unchecked
+        {
+            var hash = 23;
+
+            foreach (var character in value)
+                hash = hash * 31 + character;
+
+            hash &= int.MaxValue;
+
+            return hash == 0 ? 1 : hash;
+        }
+    }
+
+    private static bool TryGet(
+        JsonElement row,
+        string name,
+        out JsonElement value)
+    {
+        if (row.TryGetProperty(name, out value))
+            return true;
+
+        if (string.IsNullOrEmpty(name))
+        {
+            value = default;
+            return false;
+        }
+
+        var pascal =
+            char.ToUpperInvariant(name[0]) +
+            name[1..];
+
         return row.TryGetProperty(pascal, out value);
     }
 }

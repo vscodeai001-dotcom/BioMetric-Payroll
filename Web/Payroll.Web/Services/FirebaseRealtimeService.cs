@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -1018,23 +1019,7 @@ public sealed class FirebaseRealtimeService
                 Put("totalShiftAllowance", Value("TotalShiftAllowance"));
                 break;
 
-            case "PayrollHistory":
-                Put("payrollId", Get("payrollid")); Put("employeeId", Get("employeeid"));
-                Put("payMonth", Get("paymonth")); Put("payYear", Get("payyear"));
-                Put("baseSalary", Get("basesalary")); Put("totalHoursWorked", Get("totalhoursworked"));
-                Put("overtimePay", Get("overtimepay")); Put("deductionsHours", Get("deductions_hours"));
-                Put("deductionsAdvance", Get("deductions_advance")); Put("bonus", Get("bonus"));
-                Put("netSalary", Get("netsalary")); Put("manualLeaveDays", Get("manualleavedays"));
-                Put("absentDays", Get("absentdays"));
-                Put("totalPenaltyMs", TimeSpanToMilliseconds(Get("totalpenaltyduration")));
-                Put("totalOvertimeMs", TimeSpanToMilliseconds(Get("totalovertimeduration")));
-                Put("hourlyRate", Get("hourlyrate")); Put("basicComponent", Get("basic_salary_component"));
-                Put("pfDeduction", Get("pf_deduction")); Put("esiDeduction", Get("esi_deduction"));
-                Put("employerPfContribution", Get("employer_pf_contribution"));
-                Put("employerEsiContribution", Get("employer_esi_contribution"));
-                Put("ptDeduction", Get("pt_deduction")); Put("tdsDeduction", Get("tds_deduction"));
-                Put("totalShiftAllowance", Get("totalshiftallowance"));
-                break;
+
             case "SalaryAdvance":
                 Put("advanceId", StringValue("AdvanceID"));
                 Put("employeeId", StringValue("EmployeeID"));
