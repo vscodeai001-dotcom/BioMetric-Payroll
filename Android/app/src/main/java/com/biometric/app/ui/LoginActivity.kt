@@ -167,6 +167,8 @@ class LoginActivity : MotionBaseActivity() {
         forceReplace: Boolean = false
     ) {
         lifecycleScope.launch {
+            binding.tilUserId.error = null
+            binding.tilDynamic.error = null
             setLoading(true)
 
             // Firebase is the primary Android authentication path.
@@ -200,6 +202,17 @@ class LoginActivity : MotionBaseActivity() {
                 )
 
                 setLoading(false)
+
+                val userMessage = when (code) {
+                    "ERROR_INVALID_EMAIL" -> "Please enter a valid Firebase email address."
+                    "ERROR_USER_NOT_FOUND" -> "Firebase account was not found. Ask Admin to provision this account."
+                    "ERROR_WRONG_PASSWORD" -> "Firebase password is incorrect."
+                    "ERROR_USER_DISABLED" -> "This Firebase account is disabled."
+                    "ERROR_TOO_MANY_REQUESTS" -> "Too many login attempts. Please wait and try again."
+                    "ERROR_NETWORK_REQUEST_FAILED" -> "Network connection failed. Check internet and try again."
+                    else -> "Firebase login failed: $code"
+                }
+                binding.tilDynamic.error = userMessage
 
                 // Canonical SuperAdmin is Firebase-only.
                 // Never fall back to Employee/Web compatibility login.
@@ -405,9 +418,19 @@ class LoginActivity : MotionBaseActivity() {
                             .show()
                         return@launch
                     }
+
+                    setLoading(false)
+                    Toast.makeText(
+                        this@LoginActivity,
+                        sessionResult.message.ifBlank { "Employee session could not be created. Please try again." },
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
                 }
 
-                return@launch
+                // Employee authentication has been fully handled above.
+                // Do not return here for Admin/SuperAdmin: they must continue
+                // through the shared Firebase session initialization below.
 
             // Admin/SuperAdmin require a valid Firebase ID token.
             if (tokenResult?.token.isNullOrBlank()) {
@@ -425,7 +448,22 @@ class LoginActivity : MotionBaseActivity() {
             val ownerUid = claims["owner_uid"]
                 ?.toString()
                 ?.takeIf { it.isNotBlank() }
-                ?: firebaseUser.uid
+                ?: if (isCanonicalSuperAdmin) "biometricpayroll" else ""
+
+            if (ownerUid.isBlank()) {
+                setLoading(false)
+                Toast.makeText(
+                    this@LoginActivity,
+                    "Firebase account is missing owner_uid provisioning. Please ask Admin to synchronize this account, then sign in again.",
+                    Toast.LENGTH_LONG
+                ).show()
+                Log.e(
+                    "LoginActivity",
+                    "Authenticated Firebase user ${firebaseUser.uid} has no owner_uid claim. email=${firebaseUser.email}"
+                )
+                runCatching { FirebaseAuth.getInstance().signOut() }
+                return@launch
+            }
 
             val employeeId = when (val value = claims["employee_id"]) {
                 is Number ->

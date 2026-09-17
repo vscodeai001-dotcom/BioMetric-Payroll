@@ -75,12 +75,11 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
                 "Firebase Admin SDK is not initialized. Configure Firebase:ServiceAccountPath, GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_SERVICE_ACCOUNT_JSON, or Application Default Credentials.");
         }
 
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            throw new InvalidOperationException(
-                "Firebase SuperAdmin password is not configured. Set Firebase:SuperAdminPassword or SUPERADMIN_PASSWORD in the Web application's environment.");
-        }
-
+        // An existing Firebase Auth account does not require the Web application's
+        // password setting just to synchronize its role/tenant claims. This is
+        // important when the canonical SuperAdmin password was already set in
+        // Firebase Console. A password is required only when creating the account,
+        // or when an explicit configured password is supplied for synchronization.
         UserRecord? user = null;
         try { user = await auth.GetUserByEmailAsync(email, ct); }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
@@ -101,9 +100,9 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
         }
         if (user != null)
         {
-            // The canonical SuperAdmin uses one credential on Web and Android.
-            // When SUPERADMIN_PASSWORD is supplied, synchronize the Firebase
-            // password as well as the role claims. Never log the password.
+            // The canonical SuperAdmin uses one Firebase credential on Web and
+            // Android. If an explicit Web password is configured, synchronize it.
+            // Otherwise preserve the password already stored in Firebase.
             if (!string.IsNullOrWhiteSpace(password))
             {
                 await auth.UpdateUserAsync(

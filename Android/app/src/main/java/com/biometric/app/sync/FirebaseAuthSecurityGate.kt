@@ -56,7 +56,7 @@ class FirebaseAuthSecurityGate @Inject constructor(
         }
 
         val ownerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
-            ?: if (role == UserRole.SUPER_ADMIN.name && isCanonicalSuperAdmin) user.uid else ""
+            ?: if (role == UserRole.SUPER_ADMIN.name && isCanonicalSuperAdmin) "biometricpayroll" else ""
 
         if (ownerUid.isBlank()) {
             return Result(false, message = "Firebase account is missing the required owner_uid claim.")
