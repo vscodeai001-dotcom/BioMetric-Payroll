@@ -27,9 +27,9 @@ public sealed class LocationHistoryService
             .AsNoTracking()
             .Where(x =>
                 x.EmployeeId == employeeId &&
-                x.RecordedAtUtc >= start &&
-                x.RecordedAtUtc < end)
-            .OrderBy(x => x.RecordedAtUtc)
+                x.CapturedAtUtc >= start &&
+                x.CapturedAtUtc < end)
+            .OrderBy(x => x.CapturedAtUtc)
             .ToListAsync();
     }
 
@@ -87,9 +87,9 @@ public sealed class LocationHistoryService
             .AsNoTracking()
             .Where(x =>
                 x.EmployeeId == employeeId &&
-                x.RecordedAtUtc >= start &&
-                x.RecordedAtUtc < end)
-            .OrderBy(x => x.RecordedAtUtc)
+                x.CapturedAtUtc >= start &&
+                x.CapturedAtUtc < end)
+            .OrderBy(x => x.CapturedAtUtc)
             .ToListAsync();
     }
 

@@ -214,6 +214,21 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun setupRealTimeSync() {
         signalR.start()
+        
+        // Single-Device Lock: Observe if another device logs in and take 
+        // authoritative action to invalidate the current local session.
+        lifecycleScope.launch {
+            firebaseEmployeeSessionManager.observeSessionActive().collectLatest { active ->
+                if (!active && sessionStore.isLoggedIn()) {
+                    Log.w("EmployeeHome", "Authoritative device session mismatch: another device has taken ownership of this employee account. Logging out.")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(this@EmployeeHomeActivity, "Session expired: logged in on another device.", Toast.LENGTH_LONG).show()
+                        logout()
+                    }
+                }
+            }
+        }
+
         lifecycleScope.launch {
             selfService.changesFlow().collectLatest {
                 if (_binding != null) loadDashboard()

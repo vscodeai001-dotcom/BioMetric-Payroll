@@ -99,8 +99,23 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                         }
 
                         if (changed)
+                        {
                             await _refreshService.NotifyApplicationDataChangedAsync(
                                 new[] { target.Value.EntityName });
+
+                            // MIRROR: If company settings changed, notify live maps to update the geofence circle.
+                            if (target.Value.EntityName.Equals("CompanySetting", StringComparison.Ordinal))
+                            {
+                                var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
+                                if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
+                                {
+                                    var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
+                                    var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
+                                    var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
+                                    await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
+                                }
+                            }
+                        }
                     },
                     stoppingToken);
             }
@@ -163,45 +178,102 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (parts.Length == 0)
         {
             if (eventData.Value.TryGetProperty("live", out var live) &&
-                live.ValueKind == JsonValueKind.Object)
+                (live.ValueKind == JsonValueKind.Object || live.ValueKind == JsonValueKind.Array))
             {
-                foreach (var employeeNode in live.EnumerateObject())
+                if (live.ValueKind == JsonValueKind.Object)
                 {
-                    if (employeeNode.Value.ValueKind == JsonValueKind.Object)
-                        await ProcessFirebaseLiveLocationAsync(
-                            $"/live/{employeeNode.Name}",
-                            employeeNode.Value.Clone(), ct);
+                    foreach (var employeeNode in live.EnumerateObject())
+                    {
+                        if (employeeNode.Value.ValueKind == JsonValueKind.Object)
+                            await ProcessFirebaseLiveLocationAsync(
+                                $"/live/{employeeNode.Name}",
+                                employeeNode.Value.Clone(), ct);
+                    }
+                }
+                else
+                {
+                    var index = 0;
+                    foreach (var node in live.EnumerateArray())
+                    {
+                        if (node.ValueKind == JsonValueKind.Object)
+                            await ProcessFirebaseLiveLocationAsync(
+                                $"/live/{index}",
+                                node.Clone(), ct);
+                        index++;
+                    }
                 }
             }
 
             if (eventData.Value.TryGetProperty("sessions", out var sessions) &&
-                sessions.ValueKind == JsonValueKind.Object)
+                (sessions.ValueKind == JsonValueKind.Object || sessions.ValueKind == JsonValueKind.Array))
             {
-                foreach (var employeeNode in sessions.EnumerateObject())
+                if (sessions.ValueKind == JsonValueKind.Object)
                 {
-                    if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
-                    foreach (var sessionNode in employeeNode.Value.EnumerateObject())
+                    foreach (var employeeNode in sessions.EnumerateObject())
                     {
-                        if (sessionNode.Value.ValueKind == JsonValueKind.Object)
-                            await ProcessFirebaseTrackingSessionEventAsync(
-                                $"/sessions/{employeeNode.Name}/{sessionNode.Name}",
-                                sessionNode.Value.Clone(), ct);
+                        if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
+                        foreach (var sessionNode in employeeNode.Value.EnumerateObject())
+                        {
+                            if (sessionNode.Value.ValueKind == JsonValueKind.Object)
+                                await ProcessFirebaseTrackingSessionEventAsync(
+                                    $"/sessions/{employeeNode.Name}/{sessionNode.Name}",
+                                    sessionNode.Value.Clone(), ct);
+                        }
+                    }
+                }
+                else
+                {
+                    var index = 0;
+                    foreach (var employeeNode in sessions.EnumerateArray())
+                    {
+                        if (employeeNode.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var sessionNode in employeeNode.EnumerateObject())
+                            {
+                                if (sessionNode.Value.ValueKind == JsonValueKind.Object)
+                                    await ProcessFirebaseTrackingSessionEventAsync(
+                                        $"/sessions/{index}/{sessionNode.Name}",
+                                        sessionNode.Value.Clone(), ct);
+                            }
+                        }
+                        index++;
                     }
                 }
             }
 
             if (eventData.Value.TryGetProperty("history", out var history) &&
-                history.ValueKind == JsonValueKind.Object)
+                (history.ValueKind == JsonValueKind.Object || history.ValueKind == JsonValueKind.Array))
             {
-                foreach (var employeeNode in history.EnumerateObject())
+                if (history.ValueKind == JsonValueKind.Object)
                 {
-                    if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
-                    foreach (var eventNode in employeeNode.Value.EnumerateObject())
+                    foreach (var employeeNode in history.EnumerateObject())
                     {
-                        if (eventNode.Value.ValueKind == JsonValueKind.Object)
-                            await ProcessFirebaseTrackingEventAsync(
-                                $"/history/{employeeNode.Name}/{eventNode.Name}",
-                                eventNode.Value.Clone(), ct, evaluateAttendance: false);
+                        if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
+                        foreach (var eventNode in employeeNode.Value.EnumerateObject())
+                        {
+                            if (eventNode.Value.ValueKind == JsonValueKind.Object)
+                                await ProcessFirebaseTrackingEventAsync(
+                                    $"/history/{employeeNode.Name}/{eventNode.Name}",
+                                    eventNode.Value.Clone(), ct, evaluateAttendance: false);
+                        }
+                    }
+                }
+                else
+                {
+                    var index = 0;
+                    foreach (var employeeNode in history.EnumerateArray())
+                    {
+                        if (employeeNode.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var eventNode in employeeNode.EnumerateObject())
+                            {
+                                if (eventNode.Value.ValueKind == JsonValueKind.Object)
+                                    await ProcessFirebaseTrackingEventAsync(
+                                        $"/history/{index}/{eventNode.Name}",
+                                        eventNode.Value.Clone(), ct, evaluateAttendance: false);
+                            }
+                        }
+                        index++;
                     }
                 }
             }
@@ -688,6 +760,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         string ownerUid,
         CancellationToken ct)
     {
+        if (entityName == "EmployeeLocationHistory")
+            return await SyncTrackingHistoryAsync(ownerUid, ct);
+
         var json = await _firebase.GetOwnerTableAsync(ownerUid, firebaseTable, ct);
         if (json is null)
             return false;
@@ -714,6 +789,41 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return false;
 
         return await UpsertTableAsync(entityName, json.Value, ct);
+    }
+
+    private async Task<bool> SyncTrackingHistoryAsync(string ownerUid, CancellationToken ct)
+    {
+        var json = await _firebase.GetOwnerTableAsync(ownerUid, "tracking/history", ct);
+        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return false;
+
+        var changed = false;
+        foreach (var employeeNode in json.Value.EnumerateObject())
+        {
+            if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var entityType = db.Model.GetEntityTypes().First(x => x.ClrType.Name == "EmployeeLocationHistory");
+            var keys = entityType.FindPrimaryKey()?.Properties;
+
+            foreach (var eventNode in employeeNode.Value.EnumerateObject())
+            {
+                if (eventNode.Value.ValueKind != JsonValueKind.Object) continue;
+                try
+                {
+                    changed |= await UpsertRecordAsync(db, entityType, keys!, eventNode.Name, eventNode.Value, ct);
+                }
+                catch { }
+            }
+
+            if (changed)
+            {
+                using var syncScope = _firebaseSyncWriteScope.Enter();
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        return changed;
     }
 
     private readonly record struct FirebasePathTarget(string EntityName, string? RecordKey);

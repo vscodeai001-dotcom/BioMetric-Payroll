@@ -3390,7 +3390,7 @@
             {
                 locations.Clear();
             }
-            else if (root.ValueKind == JsonValueKind.Object)
+            else if (root.ValueKind == JsonValueKind.Object || root.ValueKind == JsonValueKind.Array)
             {
                 var validEmployeeIds = employees
                     .Select(e => e.EmployeeID)
@@ -3398,20 +3398,49 @@
 
                 var next = new List<LiveEmployeeLocation>();
 
-                foreach (var node in root.EnumerateObject())
+                if (root.ValueKind == JsonValueKind.Object)
                 {
-                    if (!int.TryParse(node.Name, out var employeeId) ||
-                        employeeId <= 0 ||
-                        !validEmployeeIds.Contains(employeeId) ||
-                        node.Value.ValueKind != JsonValueKind.Object)
-                        continue;
-
-                    if (TryParseLiveEmployeeLocation(
-                        employeeId,
-                        node.Value,
-                        out var location))
+                    foreach (var node in root.EnumerateObject())
                     {
-                        next.Add(location);
+                        if (!int.TryParse(node.Name, out var employeeId) ||
+                            employeeId <= 0 ||
+                            !validEmployeeIds.Contains(employeeId) ||
+                            node.Value.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        if (TryParseLiveEmployeeLocation(
+                            employeeId,
+                            node.Value,
+                            out var location))
+                        {
+                            next.Add(location);
+                        }
+                    }
+                }
+                else
+                {
+                    var index = 0;
+                    foreach (var node in root.EnumerateArray())
+                    {
+                        var fallbackId = index;
+                        index++;
+
+                        if (node.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        var employeeId = GetJsonInt(node, "EmployeeId", "employeeId");
+                        if (employeeId <= 0) employeeId = fallbackId;
+
+                        if (employeeId <= 0 || !validEmployeeIds.Contains(employeeId))
+                            continue;
+
+                        if (TryParseLiveEmployeeLocation(
+                            employeeId,
+                            node,
+                            out var location))
+                        {
+                            next.Add(location);
+                        }
                     }
                 }
 

@@ -8,6 +8,10 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.MutableData
 import com.google.firebase.database.Transaction
+import com.google.firebase.database.ValueEventListener
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import java.util.concurrent.atomic.AtomicBoolean
@@ -104,6 +108,41 @@ class FirebaseEmployeeSessionManager @Inject constructor(
             Log.w("FirebaseEmployeeSession", "Unable to release employee session", it)
             false
         }
+    }
+
+    /**
+     * Observes the active session for the current authenticated user.
+     * Emits true if this device is still the owner, false if another device logged in.
+     */
+    fun observeSessionActive(): Flow<Boolean> = callbackFlow {
+        val user = auth.currentUser
+        if (user == null) {
+            trySend(false)
+            close()
+            return@callbackFlow
+        }
+
+        val deviceId = sessionStore.deviceId()
+        val ref = database.getReference("employee_sessions").child(user.uid)
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (!snapshot.exists()) {
+                    // Session was explicitly cleared/deleted
+                    trySend(false)
+                    return
+                }
+                val activeDevice = snapshot.child("deviceId").getValue(String::class.java).orEmpty()
+                trySend(activeDevice == deviceId)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                close(error.toException())
+            }
+        }
+
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
     }
 
     private suspend fun runTransaction(

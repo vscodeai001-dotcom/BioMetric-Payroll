@@ -96,7 +96,7 @@ public sealed class FirebaseUserManagementService
                 employee?.EmployeeID ?? 0,
                 displayName ?? employee?.Name ?? email,
                 existingUid: null,
-                updatePasswordIfExisting: false,
+                updatePasswordIfExisting: true, // MIRROR: Ensure Firebase password matches Web/SQL password
                 cancellationToken: ct);
 
             if (string.IsNullOrWhiteSpace(firebaseUid))

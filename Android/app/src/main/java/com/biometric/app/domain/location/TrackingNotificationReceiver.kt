@@ -19,7 +19,9 @@ class TrackingNotificationReceiver : BroadcastReceiver() {
         
         if (intent.action == "ACTION_NOTIFICATION_DISMISSED" || 
             intent.action == "ACTION_SERVICE_RESTART_TICK" ||
-            intent.action == TrackingService.ACTION_REFRESH_WINDOW) {
+            intent.action == TrackingService.ACTION_REFRESH_WINDOW ||
+            intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             
             val trackingPrefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
             val geoEnabled = trackingPrefs.getBoolean("enable_geo_fencing", true)
