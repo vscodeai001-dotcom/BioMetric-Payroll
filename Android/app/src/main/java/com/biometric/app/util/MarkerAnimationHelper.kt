@@ -1,0 +1,63 @@
+package com.biometric.app.util
+
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import kotlin.math.abs
+
+/**
+ * Handles smooth movement and rotation animations for map markers,
+ * inspired by high-end delivery apps like Zomato/Swiggy.
+ */
+object MarkerAnimationHelper {
+
+    private val activeAnimators = mutableMapOf<Int, ValueAnimator>()
+
+    fun animateMarker(
+        marker: Marker,
+        toPosition: GeoPoint,
+        toBearing: Float,
+        empId: Int,
+        onUpdate: (GeoPoint) -> Unit
+    ) {
+        activeAnimators[empId]?.cancel()
+
+        val startPos = marker.position
+        val startRotation = marker.rotation
+
+        // Normalize rotation for shortest path
+        var targetRotation = toBearing
+        if (abs(targetRotation - startRotation) > 180) {
+            if (targetRotation > startRotation) targetRotation -= 360 else targetRotation += 360
+        }
+
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 2000L // 2 second transition for extreme smoothness
+            interpolator = LinearInterpolator()
+            addUpdateListener { anim ->
+                val t = anim.animatedValue as Float
+                
+                // Smooth Position
+                val lat = startPos.latitude + (toPosition.latitude - startPos.latitude) * t
+                val lon = startPos.longitude + (toPosition.longitude - startPos.longitude) * t
+                val currentPoint = GeoPoint(lat, lon)
+                marker.position = currentPoint
+                
+                // Smooth Rotation (Bearing)
+                marker.rotation = startRotation + (targetRotation - startRotation) * t
+                
+                onUpdate(currentPoint)
+            }
+        }
+        
+        activeAnimators[empId] = animator
+        animator.start()
+    }
+
+    fun cancel(empId: Int) {
+        activeAnimators[empId]?.cancel()
+        activeAnimators.remove(empId)
+    }
+}

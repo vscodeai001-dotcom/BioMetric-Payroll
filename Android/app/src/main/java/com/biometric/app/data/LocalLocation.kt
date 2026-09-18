@@ -26,6 +26,7 @@ data class LocalLocation(
     val longitude: Double,
     val accuracy: Float,
     val speed: Float,
+    @ColumnInfo(defaultValue = "0.0") val bearing: Float = 0f,
     val batteryLevel: Int,
     /** Original device GPS timestamp. Never replace this with upload time. */
     val timestamp: Long,

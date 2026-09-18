@@ -60,6 +60,7 @@ import com.biometric.app.util.BatteryOptimizationHelper
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
+import com.biometric.app.util.MarkerAnimationHelper
 import com.google.firebase.auth.FirebaseAuth
 import dagger.hilt.android.AndroidEntryPoint
 import org.osmdroid.tileprovider.cachemanager.CacheManager
@@ -77,6 +78,7 @@ import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
@@ -102,7 +104,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var rangeCircle: Polygon? = null
     private var routePolyline: Polyline? = null
     private var routeCasing: Polyline? = null
-    private var userMarkerAnimator: ValueAnimator? = null
+    private var isAutoFocusEnabled = true
     private val iconCache = mutableMapOf<String, Drawable>()
     private var lastRoadRouteUpdate: Long = 0L
 
@@ -483,52 +485,65 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun setupEmployeeMapControls() {
         binding.btnEmployeeMapRoute.setOnClickListener {
+            isAutoFocusEnabled = true
             if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
                 val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
                 createBoundingBox(points)?.let { binding.mapview.zoomToBoundingBox(it, true, 120) }
             }
         }
         binding.btnEmployeeMapOffice.setOnClickListener {
+            isAutoFocusEnabled = false
             if (officeLat != 0.0 && officeLon != 0.0) {
                 binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 binding.mapview.controller.setZoom(16.0)
             }
         }
-        _binding?.btnEmployeeMapLayers?.setOnClickListener {
-            val next = ((_binding?.mapview?.tag as? Int ?: 0) + 1) % 3
-            _binding?.mapview?.tag = next
-
+        binding.btnEmployeeMapLayers.setOnClickListener {
+            val next = ((binding.mapview.tag as? Int ?: 0) + 1) % 4
+            binding.mapview.tag = next
             when (next) {
                 0 -> {
-                    _binding?.mapview?.setTileSource(employeeOpenStreetMapSource())
-                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(null)
+                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 1 -> {
-                    _binding?.mapview?.setTileSource(TileSourceFactory.USGS_SAT)
-                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(null)
+                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+                2 -> {
+                    binding.mapview.setTileSource(TileSourceFactory.OpenTopo)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 else -> {
-                    _binding?.mapview?.setTileSource(employeeOpenStreetMapSource())
-                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(ColorMatrixColorFilter(floatArrayOf(
-                        0.25f, 0f, 0f, 0f, 0f,
-                        0f, 0.25f, 0f, 0f, 0f,
-                        0f, 0f, 0.25f, 0f, 30f,
-                        0f, 0f, 0f, 1f, 0f
-                    )))
+                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    applyDarkThemeFilter(binding.mapview)
                 }
             }
-            _binding?.mapview?.invalidate()
+            binding.mapview.invalidate()
         }
         binding.btnEmployeeMapFullscreen.setOnClickListener {
             val intent = Intent(this, TrackingMapActivity::class.java)
             intent.putExtra("EMPLOYEE_ID", sessionStore.employeeId())
             startActivity(intent)
         }
-        _binding?.mapview?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            _binding?.mapview?.post {
-                _binding?.mapview?.invalidate()
+        binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            binding.mapview.post {
+                binding.mapview.invalidate()
             }
         }
+    }
+
+    private fun applyDarkThemeFilter(mapView: MapView) {
+        mapView.overlayManager.tilesOverlay.setColorFilter(
+            ColorMatrixColorFilter(
+                floatArrayOf(
+                    0.25f, 0f, 0f, 0f, 0f,
+                    0f, 0.25f, 0f, 0f, 0f,
+                    0f, 0f, 0.25f, 0f, 30f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
     }
 
     private fun updateMapMarkers() {
@@ -686,30 +701,36 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun animateMarkerMovement(marker: Marker, toPosition: GeoPoint) {
-        userMarkerAnimator?.cancel()
-
-        val startPosition = marker.position
-        if (startPosition.latitude == 0.0) {
-            marker.position = toPosition
-            return
+        val bearing = getSharedPreferences("tracking_prefs", MODE_PRIVATE).getFloat("last_bearing", 0f)
+        MarkerAnimationHelper.animateMarker(
+            marker, 
+            toPosition, 
+            bearing, 
+            sessionStore.employeeId()
+        ) { animatedPoint ->
+            if (isAutoFocusEnabled) {
+                binding.mapview.controller.setCenter(animatedPoint)
+            }
+            
+            // Sync polyline starting point with animated marker
+            runCatching {
+                routePolyline?.let { line ->
+                    val pts = line.actualPoints.toMutableList()
+                    if (pts.size >= 2) {
+                        pts[0] = animatedPoint
+                        line.setPoints(pts)
+                    }
+                }
+                routeCasing?.let { line ->
+                    val pts = line.actualPoints.toMutableList()
+                    if (pts.size >= 2) {
+                        pts[0] = animatedPoint
+                        line.setPoints(pts)
+                    }
+                }
+            }
+            binding.mapview.invalidate()
         }
-
-        val animator = ValueAnimator.ofFloat(0f, 1f)
-        animator.duration = 1500L // 1.5s smooth glide
-        animator.interpolator = AccelerateDecelerateInterpolator()
-
-        animator.addUpdateListener { animation ->
-            val t = animation.animatedValue as Float
-
-            val lat = t * toPosition.latitude + (1 - t) * startPosition.latitude
-            val lng = t * toPosition.longitude + (1 - t) * startPosition.longitude
-
-            marker.position = GeoPoint(lat, lng)
-            _binding?.mapview?.invalidate()
-        }
-
-        userMarkerAnimator = animator
-        animator.start()
     }
 
     private fun updateRoadRoute(office: GeoPoint, user: GeoPoint) {
@@ -1203,8 +1224,6 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         roadRouteJob?.cancel()
         dashboardJob?.cancel()
         dashboardRetryJob?.cancel()
-        userMarkerAnimator?.cancel()
-        userMarkerAnimator = null
         iconCache.clear()
 
         _binding?.mapview?.onDetach()

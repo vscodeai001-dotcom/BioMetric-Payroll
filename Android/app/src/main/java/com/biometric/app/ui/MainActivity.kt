@@ -90,6 +90,7 @@ import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.OemBackgroundHelper
 import com.biometric.app.util.PolylineDecoder
+import com.biometric.app.util.MarkerAnimationHelper
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.osmdroid.views.overlay.Polyline
@@ -136,6 +137,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var activeHubName: String = "DASHBOARD"
     private var adminMapLayerIndex = 0
     private var adminZoneVisible = true
+    private var isAdminAutoFocusEnabled = false
+    private var adminFollowingEmployeeId: Int? = null
+    
     private val approvalFilter = MutableStateFlow("All")
     private val workforceSearchQuery = MutableStateFlow("")
 
@@ -388,34 +392,43 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun setupAdminDashboardMapControls() {
         binding.btnRefreshMap.setOnClickListener {
+            isAdminAutoFocusEnabled = !isAdminAutoFocusEnabled
+            adminFollowingEmployeeId = null
+            
+            if (isAdminAutoFocusEnabled) {
+                Toast.makeText(this, "Auto-focus enabled 🛰️", Toast.LENGTH_SHORT).show()
+                binding.btnRefreshMap.alpha = 1.0f
+            } else {
+                Toast.makeText(this, "Auto-focus disabled 📍", Toast.LENGTH_SHORT).show()
+                binding.btnRefreshMap.alpha = 0.6f
+            }
+
             val points = signalR.liveLocations.value.values
                 .map { GeoPoint(it.latitude, it.longitude) }
             val map = binding.adminMapView
-            if (points.isEmpty()) {
-                viewModel.companySettings.value?.let { settings ->
-                    if (settings.officeLatitude != 0.0) {
-                        map.controller.setCenter(GeoPoint(settings.officeLatitude, settings.officeLongitude))
-                        map.controller.setZoom(16.0)
-                    }
-                }
-            } else {
+            if (points.isNotEmpty()) {
                 createBoundingBox(points)?.let { map.zoomToBoundingBox(it, true, 120) }
             }
         }
 
         binding.btnAdminMapLayer.setOnClickListener {
-            adminMapLayerIndex = (adminMapLayerIndex + 1) % 3
+            adminMapLayerIndex = (adminMapLayerIndex + 1) % 4
+            val map = binding.adminMapView
             val filter = when (adminMapLayerIndex) {
                 0 -> {
-                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
+                    map.setTileSource(TileSourceFactory.MAPNIK)
                     null
                 }
                 1 -> {
-                    binding.adminMapView.setTileSource(TileSourceFactory.USGS_SAT)
+                    map.setTileSource(TileSourceFactory.USGS_SAT)
+                    null
+                }
+                2 -> {
+                    map.setTileSource(TileSourceFactory.OpenTopo)
                     null
                 }
                 else -> {
-                    binding.adminMapView.setTileSource(TileSourceFactory.MAPNIK)
+                    map.setTileSource(TileSourceFactory.MAPNIK)
                     ColorMatrixColorFilter(floatArrayOf(
                         0.25f, 0f, 0f, 0f, 0f,
                         0f, 0.25f, 0f, 0f, 0f,
@@ -424,8 +437,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     ))
                 }
             }
-            binding.adminMapView.overlayManager.tilesOverlay.setColorFilter(filter)
-            binding.adminMapView.invalidate()
+            map.overlayManager.tilesOverlay.setColorFilter(filter)
+            map.invalidate()
         }
 
         binding.btnAdminMapZone.setOnClickListener {
@@ -699,14 +712,54 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 val point = GeoPoint(loc.latitude, loc.longitude)
                 val m1 = markers.getOrPut(loc.employeeId) {
                     Marker(dashboardMap).apply {
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                         dashboardMap.overlays.add(this)
+                        
+                        setOnMarkerClickListener { clicked, map ->
+                            adminFollowingEmployeeId = loc.employeeId
+                            isAdminAutoFocusEnabled = true
+                            map.controller.animateTo(clicked.position)
+                            clicked.showInfoWindow()
+                            true
+                        }
                     }
                 }
                 
                 m1.alpha = 1f
                 m1.title = employeeName
-                m1.position = point
+
+                MarkerAnimationHelper.animateMarker(
+                    m1, 
+                    point, 
+                    loc.bearing.toFloat(), 
+                    loc.employeeId
+                ) { animatedPoint ->
+                    // Update road lines synchronously with marker movement
+                    runCatching {
+                        roadLines[loc.employeeId]?.let { l ->
+                            val pts = l.actualPoints.toMutableList()
+                            if (pts.size >= 2) {
+                                pts[0] = animatedPoint
+                                l.setPoints(pts)
+                            }
+                        }
+                        roadCasings[loc.employeeId]?.let { c ->
+                            val pts = c.actualPoints.toMutableList()
+                            if (pts.size >= 2) {
+                                pts[0] = animatedPoint
+                                c.setPoints(pts)
+                            }
+                        }
+                    }
+                    
+                    // Auto-focus logic
+                    if (isAdminAutoFocusEnabled) {
+                        if (adminFollowingEmployeeId == null || adminFollowingEmployeeId == loc.employeeId) {
+                            dashboardMap.controller.setCenter(animatedPoint)
+                            if (isTrackingHubActive) commandMap.controller.setCenter(animatedPoint)
+                        }
+                    }
+                }
 
                 val office = officeMarker?.position
                 val liveDistanceMeters = if (office != null) {

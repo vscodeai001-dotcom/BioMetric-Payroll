@@ -630,6 +630,7 @@ class FirebaseSyncManager @Inject constructor(
         longitude: Double,
         accuracy: Double,
         speed: Double,
+        bearing: Double = 0.0,
         batteryLevel: Int,
         timestamp: Long
     ): Boolean {
@@ -646,6 +647,7 @@ class FirebaseSyncManager @Inject constructor(
             "Longitude" to longitude,
             "AccuracyMeters" to accuracy.coerceAtLeast(0.0),
             "SpeedMps" to speed.coerceAtLeast(0.0),
+            "Bearing" to bearing,
             "BatteryLevel" to batteryLevel,
             "Sequence" to sequence,
             "Timestamp" to Date(timestamp).toInstant().toString(),

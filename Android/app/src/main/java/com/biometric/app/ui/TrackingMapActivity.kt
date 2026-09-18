@@ -39,6 +39,7 @@ import com.biometric.app.domain.attendance.AttendancePolicyRepository
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.util.PolylineDecoder
+import com.biometric.app.util.MarkerAnimationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -80,6 +81,9 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val roadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var statusFilter = "All"
+    private var isAutoFocusEnabled = true
+    private var followingEmployeeId: Int? = null
+    
     private var policyJob: Job? = null
     private var officeMarker: Marker? = null
     private var officeCircle: Polygon? = null
@@ -137,10 +141,13 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun setupPremiumMapControls() {
         binding.btnMapFit.setOnClickListener {
+            isAutoFocusEnabled = true
+            followingEmployeeId = null
             fitAllVisibleStaff()
+            Toast.makeText(this, "Auto-focusing all staff", Toast.LENGTH_SHORT).show()
         }
         binding.btnMapLayer.setOnClickListener {
-            mapLayerIndex = (mapLayerIndex + 1) % 3
+            mapLayerIndex = (mapLayerIndex + 1) % 4
             when (mapLayerIndex) {
                 0 -> {
                     binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
@@ -150,14 +157,31 @@ class TrackingMapActivity : MotionBaseActivity() {
                     binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
                     binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
+                2 -> {
+                    binding.mapview.setTileSource(TileSourceFactory.OpenTopo)
+                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                }
                 else -> {
                     binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    applyDarkThemeFilter(binding.mapview)
                 }
             }
             binding.mapview.invalidate()
         }
         binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
+    }
+
+    private fun applyDarkThemeFilter(mapView: MapView) {
+        mapView.overlayManager.tilesOverlay.setColorFilter(
+            ColorMatrixColorFilter(
+                floatArrayOf(
+                    0.25f, 0f, 0f, 0f, 0f,
+                    0f, 0.25f, 0f, 0f, 0f,
+                    0f, 0f, 0.25f, 0f, 30f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
     }
 
     private fun fitAllVisibleStaff() {
@@ -340,6 +364,20 @@ class TrackingMapActivity : MotionBaseActivity() {
     @OptIn(FlowPreview::class)
     private fun observeLiveLocations() {
         signalR.start()
+        
+        // Initial history load to fill gaps
+        lifecycleScope.launch {
+            val employeeId = sessionStore.employeeId()
+            if (employeeId > 0) {
+                val history = signalR.loadTrackingHistory(employeeId, limit = 100)
+                if (history.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        updateMapMarkers(history)
+                    }
+                }
+            }
+        }
+
         lifecycleScope.launch {
             signalR.liveLocations
                 .debounce(100L) // Throttled updates to prevent UI saturation
@@ -424,11 +462,13 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             val marker = markers.getOrPut(loc.employeeId) {
                 Marker(mapView).apply {
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER) // Center anchor for rotation
                     title = emp?.name ?: "Staff #${loc.employeeId}"
                     mapView.overlays.add(this)
 
                     setOnMarkerClickListener { clicked, map ->
+                        followingEmployeeId = loc.employeeId
+                        isAutoFocusEnabled = true
                         map.controller.animateTo(clicked.position)
                         clicked.showInfoWindow()
                         true
@@ -437,7 +477,38 @@ class TrackingMapActivity : MotionBaseActivity() {
             }
 
             marker.alpha = 1f
-            animateMarker(marker, point, loc.employeeId)
+            
+            MarkerAnimationHelper.animateMarker(
+                marker, 
+                point, 
+                loc.bearing.toFloat(), 
+                loc.employeeId
+            ) { animatedPoint ->
+                // Update road lines synchronously with marker movement
+                runCatching {
+                    roadLines[loc.employeeId]?.let { l ->
+                        val pts = l.actualPoints.toMutableList()
+                        if (pts.size >= 2) {
+                            pts[0] = animatedPoint
+                            l.setPoints(pts)
+                        }
+                    }
+                    roadCasings[loc.employeeId]?.let { c ->
+                        val pts = c.actualPoints.toMutableList()
+                        if (pts.size >= 2) {
+                            pts[0] = animatedPoint
+                            c.setPoints(pts)
+                        }
+                    }
+                }
+                
+                // Auto-focus if enabled
+                if (isAutoFocusEnabled && followingEmployeeId == loc.employeeId) {
+                    mapView.controller.setCenter(animatedPoint)
+                }
+                
+                mapView.invalidate()
+            }
 
             val initials = getInitials(emp?.name ?: "E")
             val cacheKey = "${initials}_${withinCurrentRadius}_$status"
@@ -575,60 +646,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     }
 
     private fun animateMarker(marker: Marker, toPosition: GeoPoint, empId: Int? = null) {
-        if (empId == null) {
-            marker.position = toPosition
-            return
-        }
-
-        // Cancel existing animation for this staff to prevent concurrent map invalidations
-        markerAnimations[empId]?.cancel()
-
-        val startPosition = marker.position
-        if (startPosition.latitude == 0.0) {
-            marker.position = toPosition
-            return
-        }
-
-        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1500L
-            interpolator = AccelerateDecelerateInterpolator()
-            addUpdateListener { animation ->
-                if (_binding == null) {
-                    animation.cancel()
-                    return@addUpdateListener
-                }
-
-                val t = animation.animatedValue as Float
-                val lat = t * toPosition.latitude + (1 - t) * startPosition.latitude
-                val lng = t * toPosition.longitude + (1 - t) * startPosition.longitude
-                val point = GeoPoint(lat, lng)
-
-                marker.position = point
-
-                // Safely update road lines during animation
-                runCatching {
-                    roadLines[empId]?.let { l ->
-                        val pts = l.actualPoints.toMutableList()
-                        if (pts.size >= 2) {
-                            pts[0] = point
-                            l.setPoints(pts)
-                        }
-                    }
-                    roadCasings[empId]?.let { c ->
-                        val pts = c.actualPoints.toMutableList()
-                        if (pts.size >= 2) {
-                            pts[0] = point
-                            c.setPoints(pts)
-                        }
-                    }
-                }
-                
-                binding.mapview.invalidate()
-            }
-        }
-
-        markerAnimations[empId] = animator
-        animator.start()
+        // Deprecated: replaced by util/MarkerAnimationHelper
     }
 
     private fun getInitials(name: String): String {

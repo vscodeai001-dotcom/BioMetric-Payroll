@@ -90,6 +90,7 @@ class OfflineSyncWorker @AssistedInject constructor(
                     longitude = loc.longitude,
                     accuracy = loc.accuracy.toDouble(),
                     speed = loc.speed.toDouble(),
+                    bearing = loc.bearing.toDouble(),
                     batteryLevel = loc.batteryLevel,
                     timestamp = loc.timestamp
                 )

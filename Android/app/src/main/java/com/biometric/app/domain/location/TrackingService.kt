@@ -528,6 +528,7 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
             putFloat(KEY_LAST_LAT, location.latitude.toFloat())
             putFloat(KEY_LAST_LON, location.longitude.toFloat())
             putFloat("last_speed", location.speed)
+            putFloat("last_bearing", location.bearing)
         }
         
         saveLocationToLocalQueue(location)
@@ -564,6 +565,7 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                     longitude = location.longitude,
                     accuracy = location.accuracy,
                     speed = location.speed,
+                    bearing = location.bearing,
                     batteryLevel = battery,
                     // Preserve the GPS event time, not the upload time.
                     timestamp = location.time,
@@ -682,6 +684,7 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                 longitude = location.longitude,
                 accuracy = location.accuracy.toDouble(),
                 speed = location.speed.toDouble(),
+                bearing = location.bearing.toDouble(),
                 batteryLevel = location.batteryLevel,
                 timestamp = location.timestamp
             )

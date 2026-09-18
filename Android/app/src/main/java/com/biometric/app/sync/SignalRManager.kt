@@ -266,6 +266,7 @@ class SignalRManager @Inject constructor(
                     isWithinAllowedRadius = (map["IsWithinAllowedRadius"] as? Boolean) ?: true,
                     timestamp = timestamp,
                     speedMps = (map["SpeedMps"] as? Number)?.toDouble() ?: 0.0,
+                    bearing = (map["Bearing"] as? Number)?.toDouble() ?: 0.0,
                     movementState = map["MovementState"]?.toString() ?: "Stopped"
                 )
             }
@@ -314,6 +315,7 @@ class SignalRManager @Inject constructor(
             IsWithinAllowedRadius = bool("IsWithinAllowedRadius", "isWithinAllowedRadius"),
             Timestamp = string("Timestamp", "timestamp"),
             SpeedMps = double("SpeedMps", "speedMps"),
+            Bearing = double("Bearing", "bearing"),
             MovementState = string("MovementState", "movementState")
         )
     }
@@ -415,6 +417,7 @@ class SignalRManager @Inject constructor(
         @SerializedName("isWithinAllowedRadius") val isWithinAllowedRadius: Boolean,
         @SerializedName("timestamp") val timestamp: String? = null,
         @SerializedName("speedMps") val speedMps: Double = 0.0,
+        @SerializedName("bearing") val bearing: Double = 0.0,
         @SerializedName("movementState") val movementState: String = "Stopped"
     )
 
@@ -425,6 +428,7 @@ class SignalRManager @Inject constructor(
         val Longitude: Double = 0.0,
         val AccuracyMeters: Double = 0.0,
         val SpeedMps: Double = 0.0,
+        val Bearing: Double = 0.0,
         val BatteryLevel: Int = 0,
         val Sequence: Long = 0L,
         val Timestamp: String? = null,
