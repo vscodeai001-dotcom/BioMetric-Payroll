@@ -34,7 +34,7 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @AndroidEntryPoint
-class ReportCenterActivity : AppCompatActivity() {
+class ReportCenterActivity : MotionBaseActivity() {
 
     private var _binding: ActivityReportCenterBinding? = null
     private val binding get() = _binding!!
@@ -51,6 +51,8 @@ class ReportCenterActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         _binding = ActivityReportCenterBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clReportCenterRoot, binding.appBar)
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }

@@ -27,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.updateLayoutParams
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
@@ -170,17 +171,19 @@ class TrackingMapActivity : MotionBaseActivity() {
     private fun toggleMapFullscreen() {
         isMapFullscreen = !isMapFullscreen
         val controller = WindowInsetsControllerCompat(window, binding.main)
-        val mapParams = binding.mapview.layoutParams as ConstraintLayout.LayoutParams
+        
         if (isMapFullscreen) {
             binding.appBar.visibility = View.GONE
             binding.filterScroll.visibility = View.GONE
             binding.cardLegend.visibility = View.GONE
             binding.cardLiveStats.visibility = View.GONE
 
-            mapParams.topToTop = ConstraintLayout.LayoutParams.PARENT_ID
-            mapParams.topToBottom = ConstraintLayout.LayoutParams.UNSET
-            mapParams.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-            binding.mapview.layoutParams = mapParams
+            // Extend map to cover the entire screen
+            binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+                topToBottom = ConstraintLayout.LayoutParams.UNSET
+            }
 
             controller.hide(WindowInsetsCompat.Type.systemBars())
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -190,19 +193,19 @@ class TrackingMapActivity : MotionBaseActivity() {
             binding.cardLegend.visibility = View.VISIBLE
             binding.cardLiveStats.visibility = View.VISIBLE
 
-            mapParams.topToTop = ConstraintLayout.LayoutParams.UNSET
-            mapParams.topToBottom = binding.filterScroll.id
-            mapParams.bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-            binding.mapview.layoutParams = mapParams
+            // Restore map to its bounded position
+            binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
+                topToTop = ConstraintLayout.LayoutParams.UNSET
+                topToBottom = binding.filterScroll.id
+                bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
+            }
 
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
+        
         binding.mapview.postDelayed({
             binding.mapview.invalidate()
-            if (officeLat != 0.0 && officeLon != 0.0) {
-                binding.mapview.controller.setCenter(GeoPoint(officeLat, officeLon))
-            }
-        }, 220)
+        }, 300)
     }
 
     private fun setupMap() {
@@ -218,8 +221,26 @@ class TrackingMapActivity : MotionBaseActivity() {
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             minZoomLevel = 3.0
             maxZoomLevel = 20.0
-            overlayManager.tilesOverlay.setColorFilter(null)
             controller.setZoom(16.0)
+            applyCurrentThemeToMap(this)
+        }
+    }
+
+    private fun applyCurrentThemeToMap(mapView: MapView) {
+        val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        if (isNight) {
+            mapView.overlayManager.tilesOverlay.setColorFilter(
+                ColorMatrixColorFilter(
+                    floatArrayOf(
+                        0.25f, 0f, 0f, 0f, 0f,
+                        0f, 0.25f, 0f, 0f, 0f,
+                        0f, 0f, 0.25f, 0f, 30f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
+            )
+        } else {
+            mapView.overlayManager.tilesOverlay.setColorFilter(null)
         }
     }
 

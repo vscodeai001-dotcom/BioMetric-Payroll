@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/window_background">
- <com.google.android.material.appbar.AppBarLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="?attr/colorSurface"><com.google.android.material.appbar.MaterialToolbar android:id="@+id/toolbar" style="@style/Widget.App.Toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" app:title="Payroll Generation" app:navigationIcon="@drawable/ic_back"/></com.google.android.material.appbar.AppBarLayout>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/clAdminPayrollRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background">
+ <com.google.android.material.appbar.AppBarLayout
+     android:id="@+id/appBar"
+     android:layout_width="match_parent"
+     android:layout_height="wrap_content"
+     android:background="?attr/colorSurface">
+     <com.google.android.material.appbar.MaterialToolbar
+         android:id="@+id/toolbar"
+         style="@style/Widget.App.Toolbar"
+         android:layout_width="match_parent"
+         android:layout_height="?attr/actionBarSize"
+         app:title="Payroll Generation"
+         app:navigationIcon="@drawable/ic_back"/>
+ </com.google.android.material.appbar.AppBarLayout>
  <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="16dp" app:layout_behavior="@string/appbar_scrolling_view_behavior">
   <com.google.android.material.card.MaterialCardView style="@style/PremiumCardView" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="14dp">
    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal"><com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Month" style="@style/Widget.Material3.TextInputLayout.OutlinedBox"><Spinner android:id="@+id/spMonth" android:layout_width="match_parent" android:layout_height="55dp"/></com.google.android.material.textfield.TextInputLayout><Space android:layout_width="8dp" android:layout_height="1dp"/><com.google.android.material.textfield.TextInputLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:hint="Year" style="@style/Widget.Material3.TextInputLayout.OutlinedBox"><Spinner android:id="@+id/spYear" android:layout_width="match_parent" android:layout_height="55dp"/></com.google.android.material.textfield.TextInputLayout></LinearLayout>

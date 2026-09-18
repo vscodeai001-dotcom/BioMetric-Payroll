@@ -774,6 +774,17 @@ public sealed class FirebaseEmployeeManagementService
             NightShiftAllowance = DecimalValue("nightShiftAllowance"),
             TdsRatePercent = DecimalValue("tdsRatePercent"),
             IsDeleted = !BoolValue("isActive", true),
+
+            // --- NEW: ANDROID SYNCHRONIZATION ---
+            PhoneNumber = StringValue("phone"),
+            SalaryType = StringValue("salaryType") ?? "MONTHLY_FIXED",
+            DailyAllowance = DecimalValue("dailyAllowance"),
+            IsBonusEligible = BoolValue("isBonusEligibleRule", true),
+            IsPaidLeaveEligible = BoolValue("isPaidLeaveEligibleRule", true),
+            PaidLeaveOnWeekdays = BoolValue("paidLeaveOnWeekdays", true),
+            PaidLeaveOnWeekends = BoolValue("paidLeaveOnWeekends", false),
+            // ------------------------------------
+
             BankAccountNumber = StringValue("bankAccountNumber"),
             BankIfscCode = StringValue("bankIfscCode"),
             BankName = StringValue("bankName"),
@@ -806,8 +817,14 @@ public sealed class FirebaseEmployeeManagementService
             ["email"] = employee.Email,
             ["biometricId"] = employee.BiometricID,
             ["role"] = employee.Role ?? "Staff",
-            ["salaryType"] = employee.PayrollTypeOverride ?? "MONTHLY_FIXED",
+            ["salaryType"] = employee.SalaryType ?? employee.PayrollTypeOverride ?? "MONTHLY_FIXED",
             ["salaryRate"] = employee.MonthlySalary,
+            ["phone"] = employee.PhoneNumber,
+            ["dailyAllowance"] = employee.DailyAllowance,
+            ["isBonusEligibleRule"] = employee.IsBonusEligible,
+            ["isPaidLeaveEligibleRule"] = employee.IsPaidLeaveEligible,
+            ["paidLeaveOnWeekdays"] = employee.PaidLeaveOnWeekdays,
+            ["paidLeaveOnWeekends"] = employee.PaidLeaveOnWeekends,
             ["basicSalaryComponent"] = employee.BasicSalaryComponent,
             ["hraComponent"] = employee.HraComponent,
             ["daComponent"] = employee.DaComponent,

@@ -30,6 +30,7 @@ import dagger.hilt.components.SingletonComponent
 import com.google.android.material.appbar.AppBarLayout
 
 import androidx.core.view.WindowInsetsControllerCompat
+import dagger.hilt.InstallIn
 
 /**
  * Base activity providing standard motion transitions and Edge-to-Edge support.
@@ -74,42 +75,50 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
      * Standardized inset application. Call this in onCreate after setContentView.
      * Ensures top content (like Toolbar) and bottom content (like Navigation) respect safe areas.
      */
-    protected fun applyWindowInsets(rootView: View, appBarLayout: AppBarLayout? = null) {
+    protected fun applyWindowInsets(
+        rootView: View,
+        appBarLayout: AppBarLayout? = null,
+        scrollContainer: View? = null
+    ) {
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             
-            // If AppBarLayout is provided, apply top padding to it for a clean header look
-            if (appBarLayout != null) {
-                appBarLayout.updatePadding(top = systemBars.top)
+            appBarLayout?.updatePadding(top = systemBars.top)
 
-                // Fixed bottom navigation consumes the navigation inset itself.
-                // Do not apply the same inset to the whole root, otherwise
-                // edge-to-edge screens get a duplicate bottom gap/overlap.
-                val bottomNavigation = v.findViewById<View?>(R.id.bottomNavigation)
-                if (bottomNavigation != null) {
-                    val baseBottomPadding =
-                        (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)
-                            ?: bottomNavigation.paddingBottom.also {
-                                bottomNavigation.setTag(
-                                    R.id.bottom_inset_base_padding,
-                                    it
-                                )
-                            }
-
-                    bottomNavigation.updatePadding(
-                        bottom = baseBottomPadding + systemBars.bottom
-                    )
-                    v.updatePadding(bottom = 0)
-                } else {
-                    v.updatePadding(bottom = systemBars.bottom)
-                }
+            // If a specific scrolling container is provided, apply the bottom navigation
+            // inset to its padding instead of the root view. This ensures content 
+            // is visible "under" the taskbar but can be fully scrolled into view.
+            val targetScroll = scrollContainer ?: v.findViewById(R.id.swipeRefresh)
+            
+            if (targetScroll != null) {
+                targetScroll.updatePadding(bottom = navBars.bottom)
+                v.updatePadding(bottom = 0)
             } else {
-                // Fallback: apply both top and bottom to the root view.
-                v.updatePadding(
-                    top = systemBars.top,
-                    bottom = systemBars.bottom
+                v.updatePadding(bottom = navBars.bottom)
+            }
+
+            val bottomNavigation = v.findViewById<View?>(R.id.bottomNavigation)
+            if (bottomNavigation != null) {
+                val baseBottomPadding =
+                    (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)
+                        ?: bottomNavigation.paddingBottom.also {
+                            bottomNavigation.setTag(
+                                R.id.bottom_inset_base_padding,
+                                it
+                            )
+                        }
+
+                bottomNavigation.updatePadding(
+                    bottom = baseBottomPadding + navBars.bottom
                 )
             }
+            
+            // Only apply top padding to root if AppBarLayout is not handling it
+            if (appBarLayout == null) {
+                v.updatePadding(top = systemBars.top)
+            }
+
             insets
         }
     }
@@ -199,7 +208,7 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
     }
 
     @EntryPoint
-    @dagger.hilt.InstallIn(SingletonComponent::class)
+    @InstallIn(SingletonComponent::class)
     interface ThemeEntryPoint {
         val themePreferenceSync: ThemePreferenceSync
     }

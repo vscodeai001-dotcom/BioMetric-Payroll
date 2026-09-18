@@ -1,0 +1,6 @@
+- [x] Update `FirebaseSyncManager.kt` for robust `AuditLog` decoding
+- [x] Fix session sync logic in `LoginActivity.kt`
+- [x] Safe-guard `binding` access in `EmployeeHomeActivity.kt` map callbacks
+- [x] Refine `MotionBaseActivity.kt` inset handling for scrolling containers
+- [x] Update `activity_main.xml` to remove hardcoded scroll padding
+- [x] Polish `bg_premium_card.xml` aesthetics

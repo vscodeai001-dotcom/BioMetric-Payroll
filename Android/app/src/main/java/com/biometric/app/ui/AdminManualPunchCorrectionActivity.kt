@@ -52,6 +52,8 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityAdminManualPunchCorrectionBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clManualPunchCorrectionRoot, binding.appBar)
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }

@@ -81,7 +81,7 @@ class ReliabilitySetupActivity : MotionBaseActivity() {
         binding.btnFinish.setOnClickListener {
             HapticUtil.vibrateSuccess(it)
             sessionStore.setReliabilitySetupDone(true)
-            Toast.makeText(this, getString(R.string.msg_setup_complete), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.msg_setup_complete) + " ✨ 🚀", Toast.LENGTH_SHORT).show()
             
             val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", UserRole.STAFF.name)
             val destination = if (role == UserRole.STAFF.name) EmployeeHomeActivity::class.java else MainActivity::class.java

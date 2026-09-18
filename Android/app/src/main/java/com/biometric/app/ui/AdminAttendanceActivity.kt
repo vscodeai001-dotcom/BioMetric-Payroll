@@ -28,7 +28,7 @@ import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class AdminAttendanceActivity : AppCompatActivity() {
+class AdminAttendanceActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
 
@@ -45,6 +45,9 @@ class AdminAttendanceActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_admin_attendance)
+        
+        applyWindowInsets(findViewById(R.id.clAdminAttendanceRoot))
+        
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
         tvFrom = findViewById(R.id.tvFrom)
         tvTo = findViewById(R.id.tvTo)
@@ -129,8 +132,12 @@ class AdminAttendanceActivity : AppCompatActivity() {
         val worked = company.sumOf { it.earnedStandardHours }
         val ot = company.sumOf { it.totalOvertimeMs } / 60000.0
         val penalty = company.sumOf { it.totalPenaltyMs } / 60000.0
+        val lateness = company.sumOf { it.totalLatenessMs } / 60000.0
+        val breakPenalty = company.sumOf { it.totalBreakPenaltyMs } / 60000.0
+
         summary.text = if (company.isEmpty()) "" else
-            "$employeesProcessed employees  •  Worked ${String.format(Locale.US, "%.2f", worked)}h  •  OT ${minutes(ot)}  •  Penalty ${minutes(penalty)}"
+            "👥 $employeesProcessed employees  •  ⏱️ Worked ${String.format(Locale.US, "%.2f", worked)}h  •  📅 Sch ${String.format(Locale.US, "%.1f", scheduled / 60)}h\n" +
+            "🚀 OT ${minutes(ot)}  •  ⚠️ Pen ${minutes(penalty)}  •  ⏰ Late ${minutes(lateness)}  •  🥪 Break ${minutes(breakPenalty)}"
     }
 
     private fun minutes(v: Double) = String.format(Locale.US, "%dh %02dm", (v / 60).toInt(), (v % 60).toInt())

@@ -76,7 +76,7 @@ class StaffActivity : MotionBaseActivity() {
         _binding = ActivityStaffBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
-        applyWindowInsets(binding.main, binding.appBar)
+        applyWindowInsets(binding.clStaffRoot, binding.appBar)
 
         val intentShopId = intent.getStringExtra("SHOP_ID")
         val intentShopName = intent.getStringExtra("SHOP_NAME")
@@ -172,13 +172,13 @@ class StaffActivity : MotionBaseActivity() {
             },
             onDeleteClick = { employee ->
                 AlertDialog.Builder(this)
-                    .setTitle("Delete Staff?")
-                    .setMessage("Are you sure you want to delete ${employee.name}?")
-                    .setPositiveButton("Delete") { _, _ ->
+                    .setTitle("🗑️ Delete Staff?")
+                    .setMessage("Are you sure you want to delete ${employee.name}? This action is permanent.")
+                    .setPositiveButton("Delete 🚩") { _, _ ->
                         viewModel.deleteEmployee(employee)
                         HapticUtil.vibrateDeletion(binding.root)
                     }
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton("Cancel ✕", null)
                     .show()
             },
             onEditHistoryClick = { history ->
@@ -186,12 +186,12 @@ class StaffActivity : MotionBaseActivity() {
             },
             onDeleteHistoryClick = { history ->
                 AlertDialog.Builder(this)
-                    .setTitle("Delete Change Record?")
+                    .setTitle("🗑️ Delete Change Record?")
                     .setMessage("This will remove this record from history. This might affect salary calculations for the specified period.")
-                    .setPositiveButton("Delete") { _, _ ->
+                    .setPositiveButton("Delete 🚩") { _, _ ->
                         viewModel.deleteEmployeeHistory(history)
                     }
-                    .setNegativeButton("Cancel", null)
+                    .setNegativeButton("Cancel ✕", null)
                     .show()
             },
             onOverrideToggle = { employee, monthKey, type, isIncluded ->

@@ -49,6 +49,8 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
         
         binding = ActivitySuperAdminManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clSuperAdminManagementRoot, binding.appBar)
 
         // Direct-launch protection: this screen changes another user's feature/branding profile.
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)

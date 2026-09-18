@@ -52,6 +52,8 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityShopClosedDaysBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clShopClosedDaysRoot, binding.appBar)
 
         shopId = intent.getStringExtra("SHOP_ID")
         shopId?.let { viewModel.setShop(it) }

@@ -367,6 +367,9 @@ public sealed class MobileAdminPunchController : ControllerBase
         s.IsManualOverride = false;
         await db.SaveChangesAsync(HttpContext.RequestAborted);
 
+        // REQUIREMENT: Synchronize the recalculated DailySummary to Firebase SSOT.
+        await _firebaseAttendanceMutations.UpsertDailySummaryAsync(s, "MODIFIED", HttpContext.RequestAborted);
+
         // 1200-K: a punch just after midnight can close the previous
         // calendar day's overnight shift. Recalculate that ShiftDate too,
         // but only when its effective shift actually crosses midnight.

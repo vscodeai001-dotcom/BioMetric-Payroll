@@ -39,6 +39,7 @@ import kotlinx.coroutines.FlowPreview
 
 import androidx.paging.PagingDataAdapter
 import androidx.recyclerview.widget.DiffUtil
+import com.biometric.app.ui.adapter.HorizontalFilterAdapter
 import com.biometric.app.ui.viewmodel.AuditTrailState
 import com.biometric.app.util.PickerHelper
 
@@ -57,14 +58,16 @@ class AuditTrailActivity : MotionBaseActivity() {
     private var shopName: String = ""
     private var auditSearch: String = ""
     private lateinit var auditAdapter: AuditLogAdapter
-    private lateinit var filterAdapter: com.biometric.app.ui.adapter.HorizontalFilterAdapter
+    private lateinit var filterAdapter: HorizontalFilterAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (isFinishing) return
-        
+
         binding = ActivityAuditTrailBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        applyWindowInsets(binding.clAuditTrailRoot, binding.appBar)
 
         val initialShopName = intent.getStringExtra("SHOP_NAME") ?: "Financial Audit"
         shopId = intent.getStringExtra("SHOP_ID")
@@ -80,7 +83,7 @@ class AuditTrailActivity : MotionBaseActivity() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         binding.toolbar.setNavigationOnClickListener { finish() }
-        
+
         binding.toolbar.setOnClickListener {
             showShopSelectionDialog()
         }
@@ -165,7 +168,7 @@ class AuditTrailActivity : MotionBaseActivity() {
 
     private fun showAuditDetailsDialog(log: AuditLog) {
         val detailsBinding = com.biometric.app.databinding.DialogAuditDetailsBinding.inflate(layoutInflater)
-        
+
         detailsBinding.tvUser.text = log.userDisplayName
         detailsBinding.tvModule.text = log.module.uppercase()
         detailsBinding.tvAction.text = log.action
@@ -236,11 +239,11 @@ class AuditTrailActivity : MotionBaseActivity() {
                         auditAdapter.loadStateFlow
                     ) { state: AuditTrailState, loadStates: CombinedLoadStates ->
                         val refreshLoading = loadStates.refresh is androidx.paging.LoadState.Loading
-                        
+
                         // ATOMIC LOADING: Hide only when EVERYTHING is ready
                         val isSummaryLoading = state.isLoading
                         val isLogsLoading = refreshLoading && auditAdapter.itemCount == 0
-                        
+
                         isSummaryLoading || isLogsLoading
                     }
                     .distinctUntilChanged()
@@ -272,7 +275,7 @@ class AuditTrailActivity : MotionBaseActivity() {
                     auditAdapter.loadStateFlow.collectLatest { loadStates ->
                         val refreshState = loadStates.refresh
                         val isError = refreshState is androidx.paging.LoadState.Error
-                        
+
                         if (isError) {
                             val error = refreshState.error
                             android.util.Log.e("AuditTrail", "Paging error: ${error.message}")
@@ -281,14 +284,14 @@ class AuditTrailActivity : MotionBaseActivity() {
                         // Empty State Logic
                         val isInitialLoading = refreshState is androidx.paging.LoadState.Loading
                         val isEmpty = !isError && !isInitialLoading && auditAdapter.itemCount == 0
-                        
+
                         if (isEmpty) {
                             binding.llEmptyState.visibility = View.VISIBLE
                             binding.rvAuditLogs.visibility = View.GONE
                         } else {
                             binding.llEmptyState.visibility = View.GONE
                             binding.rvAuditLogs.visibility = View.VISIBLE
-                            
+
                             if (refreshState is androidx.paging.LoadState.NotLoading && loadStates.prepend.endOfPaginationReached) {
                                 binding.rvAuditLogs.scrollToPosition(0)
                             }
@@ -311,11 +314,11 @@ class AuditTrailActivity : MotionBaseActivity() {
             val log = getItem(position) ?: return
             val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
             val dayFormat = SimpleDateFormat("dd MMM", Locale.getDefault())
-            
+
             holder.binding.tvLogUser.text = log.userDisplayName
             holder.binding.tvLogModule.text = log.module.uppercase()
             holder.binding.tvLogTime.text = String.format(Locale.getDefault(), "%s\n%s", dayFormat.format(Date(log.timestamp)), timeFormat.format(Date(log.timestamp)))
-            
+
             val (icon, actionText) = when(log.action) {
                 "ADD" -> "➕" to "Added new ${log.module}"
                 "UPDATE" -> "✏️" to "Updated ${log.module}"
@@ -323,10 +326,10 @@ class AuditTrailActivity : MotionBaseActivity() {
                 "RESTORE" -> "♻️" to "Restored ${log.module} record"
                 else -> "📝" to "Action on ${log.module}"
             }
-            
+
             holder.binding.tvActionIcon.text = icon
             holder.binding.tvLogActionText.text = actionText
-            
+
             if ((log.oldValue != null) || (log.newValue != null)) {
                 holder.binding.llValueChange.visibility = View.VISIBLE
                 holder.binding.tvOldValue.text = log.oldValue?.take(30) ?: "None"

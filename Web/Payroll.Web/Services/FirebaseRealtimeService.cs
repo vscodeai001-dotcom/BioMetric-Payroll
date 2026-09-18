@@ -886,6 +886,14 @@ public sealed class FirebaseRealtimeService
             "FBPComponent" => "fbp_components",
             "FlexibleBenefitDeclaration" => "fbp_declarations",
             "GeoPunchAudit" => "geo_punch_audits",
+            "Shop" => "shops",
+            "EmployeePresence" => "presence",
+            "EmployeeHistory" => "employee_history",
+            "SalarySnapshot" => "salary_snapshots",
+            "PayrollPreview" => "payroll_previews",
+            "PayrollFinalization" => "payroll_finalization",
+            "EmployeeGpsSession" => "tracking/sessions",
+            "EmployeeLocationHistory" => "tracking/history",
             _ => null
         };
 
@@ -896,7 +904,9 @@ public sealed class FirebaseRealtimeService
         "DailySummary", "FeatureSettings", "ProfessionalTaxSlab", "BonusRecord",
         "YearEndSummary", "TaxDeclaration", "ResignationRequest", "FnFSettlement",
         "ReportDefinition", "AttendanceRegularization", "FBPComponent",
-        "FlexibleBenefitDeclaration", "GeoPunchAudit"
+        "FlexibleBenefitDeclaration", "GeoPunchAudit", "Shop", "EmployeePresence",
+        "EmployeeHistory", "SalarySnapshot", "PayrollPreview", "PayrollFinalization",
+        "EmployeeGpsSession", "EmployeeLocationHistory"
     };
 
     private static bool IsRealtimeEntity(string entityName) => RealtimeEntities.Contains(entityName);
@@ -1086,6 +1096,89 @@ public sealed class FirebaseRealtimeService
                 Put("paySalary", true);
                 Put("reason", Value("HolidayName"));
                 Put("affectedEmployeeIds", Array.Empty<string>());
+                break;
+
+            case "DailySummary":
+                Put("summaryId", Value("SummaryID"));
+                Put("employeeId", Value("EmployeeID"));
+                Put("staffId", Value("EmployeeID"));
+                Put("shiftDate", Value("ShiftDate"));
+                Put("date", Value("ShiftDate"));
+                Put("status", Value("Status"));
+                Put("earnedStandardHours", Value("EarnedStandardHours"));
+                Put("totalOvertimeMs", TimeSpanToMilliseconds(Raw("TotalOvertimeDuration")));
+                Put("totalPenaltyMs", TimeSpanToMilliseconds(Raw("TotalPenaltyDuration")));
+                Put("totalLatenessMs", TimeSpanToMilliseconds(Raw("TotalLateness")));
+                Put("totalBreakPenaltyMs", TimeSpanToMilliseconds(Raw("TotalBreakPenalty")));
+                Put("scheduledShiftDurationMs", TimeSpanToMilliseconds(Raw("ScheduledShiftDuration")));
+                Put("shiftAllowanceEarned", Value("ShiftAllowanceEarned"));
+                Put("isManualOverride", Value("IsManualOverride"));
+                break;
+
+            case "BonusRecord":
+                Put("bonusId", Value("BonusID"));
+                Put("employeeId", Value("EmployeeID"));
+                Put("amount", Value("Amount"));
+                Put("date", ToUnixMilliseconds(Raw("BonusDate")));
+                Put("bonusDate", ToUnixMilliseconds(Raw("BonusDate")));
+                Put("description", Value("Description"));
+                Put("payrollIdPaid", Value("PayrollID_Paid"));
+                break;
+
+            case "FBPComponent":
+                Put("componentId", Value("ComponentId"));
+                Put("name", Value("Name"));
+                Put("maxAnnualLimit", Value("MaxAnnualLimit"));
+                Put("isActive", Value("IsActive"));
+                Put("isTaxExempt", Value("IsTaxExempt"));
+                break;
+
+            case "FlexibleBenefitDeclaration":
+                Put("declarationId", Value("DeclarationId"));
+                Put("employeeId", Value("EmployeeId"));
+                Put("financialYear", Value("FinancialYear"));
+                Put("componentName", Value("ComponentName"));
+                Put("annualAllocatedAmount", Value("AnnualAllocatedAmount"));
+                Put("monthlyAllocatedAmount", Value("MonthlyAllocatedAmount"));
+                Put("status", Value("Status"));
+                Put("submissionDate", ToUnixMilliseconds(Raw("SubmissionDate")));
+                Put("isActive", Value("IsActive"));
+                Put("adminRemarks", Value("AdminRemarks"));
+                break;
+
+            case "EmployeeGpsSession":
+                Put("employeeId", Value("EmployeeId"));
+                Put("sessionId", StringValue("SessionId"));
+                Put("startedAtUtc", Value("StartedAtUtc"));
+                Put("lastUpdateAtUtc", Value("LastUpdateAtUtc"));
+                Put("endedAtUtc", Value("EndedAtUtc"));
+                Put("endReason", Value("EndReason"));
+                Put("totalPoints", Value("TotalPoints"));
+                Put("totalDistanceMeters", Value("TotalDistanceMeters"));
+                break;
+
+            case "EmployeeLocationHistory":
+                Put("employeeId", Value("EmployeeId"));
+                Put("sessionId", StringValue("SessionId"));
+                Put("latitude", Value("Latitude"));
+                Put("longitude", Value("Longitude"));
+                Put("accuracyMeters", Value("AccuracyMeters"));
+                Put("distanceFromOfficeMeters", Value("DistanceFromOfficeMeters"));
+                Put("allowedRadiusMeters", Value("AllowedRadiusMeters"));
+                Put("isWithinAllowedRadius", Value("IsWithinAllowedRadius"));
+                Put("recordedAtUtc", Value("RecordedAtUtc"));
+                Put("captureSource", Value("CaptureSource"));
+                Put("capturedAtUtc", Value("CapturedAtUtc"));
+                break;
+
+            case "EmployeePresence":
+                Put("employeeId", Value("EmployeeId"));
+                Put("authUid", Value("AuthUid"));
+                Put("email", Value("Email"));
+                Put("platform", Value("Platform"));
+                Put("deviceId", Value("DeviceId"));
+                Put("active", Value("Active"));
+                Put("lastSeenAt", Value("LastSeenAt"));
                 break;
 
             default:

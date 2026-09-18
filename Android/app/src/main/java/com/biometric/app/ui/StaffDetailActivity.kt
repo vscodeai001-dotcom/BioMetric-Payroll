@@ -77,6 +77,8 @@ class StaffDetailActivity : MotionBaseActivity() {
         super.onCreate(savedInstanceState)
         _binding = ActivityStaffDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clStaffDetailRoot, findViewById(R.id.appBar))
 
         binding.nsvData.visibility = View.INVISIBLE
 

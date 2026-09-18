@@ -26,13 +26,12 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class RegularizationActivity : AppCompatActivity() {
+class RegularizationActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityRegularizationBinding
     
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
 
     private val requests = mutableListOf<RegularizationRequest>()
 
@@ -40,6 +39,8 @@ class RegularizationActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityRegularizationBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clRegularizationRoot, findViewById(R.id.appBar))
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }

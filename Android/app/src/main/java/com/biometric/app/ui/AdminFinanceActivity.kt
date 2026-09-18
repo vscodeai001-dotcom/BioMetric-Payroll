@@ -34,14 +34,13 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class AdminFinanceActivity : AppCompatActivity() {
+class AdminFinanceActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityAdminFinanceBinding
     
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var firebaseFinance: FirebaseAdminFinanceRepository
-    @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     
     private val advances = mutableListOf<MoneyEntryDto>()
@@ -55,6 +54,8 @@ class AdminFinanceActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityAdminFinanceBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clAdminFinanceRoot, binding.appBar)
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
@@ -185,13 +186,13 @@ class AdminFinanceActivity : AppCompatActivity() {
     }
 
     private fun handleTaxAction(tax: TaxDeclarationDto) {
-        val remarks = EditText(this).apply { hint = "Admin Remarks" }
+        val remarks = EditText(this).apply { hint = "Admin Remarks 📝" }
         MaterialAlertDialogBuilder(this)
-            .setTitle("Review Tax Declaration")
+            .setTitle("Review Tax Declaration 🏛️")
             .setMessage("Employee: ${tax.employeeId}\nYear: ${tax.financialYear}\nAmount: ${currencyFormat.format(tax.totalInvestmentAmount)}")
             .setView(remarks)
-            .setPositiveButton("Approve") { _, _ -> updateTaxStatus(tax.declarationId, true, remarks.text.toString()) }
-            .setNegativeButton("Reject") { _, _ -> updateTaxStatus(tax.declarationId, false, remarks.text.toString()) }
+            .setPositiveButton("Approve ✅") { _, _ -> updateTaxStatus(tax.declarationId, true, remarks.text.toString()) }
+            .setNegativeButton("Reject ❌") { _, _ -> updateTaxStatus(tax.declarationId, false, remarks.text.toString()) }
             .show()
     }
 

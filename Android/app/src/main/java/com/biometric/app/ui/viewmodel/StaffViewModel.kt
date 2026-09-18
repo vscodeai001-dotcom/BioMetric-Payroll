@@ -187,6 +187,7 @@ class StaffViewModel @Inject constructor(
     fun addEmployeeDetailed(
         name: String, bioId: String, role: String, email: String, phone: String,
         salaryRate: Double, type: String, calcMethod: String,
+        basic: Double = 0.0, hra: Double = 0.0, da: Double = 0.0,
         start: String, end: String, breakHours: Double,
         otRule: String, otFlatRate: Double, compOff: Int?,
         hireDate: Long, dob: Long?,
@@ -207,6 +208,7 @@ class StaffViewModel @Inject constructor(
                 val newEmployee = Employee(
                     employeeId = empId, shopId = sId, name = name, biometricId = bioId, role = role, email = email, phone = phone,
                     salaryType = type, salaryRate = salaryRate, salaryCalculationMethod = calcMethod,
+                    basicSalaryComponent = basic, hraComponent = hra, daComponent = da,
                     shiftStart = start, shiftEnd = end, breakHours = breakHours,
                     otRule = otRule, otFlatRate = otFlatRate, compOffDayOfWeek = compOff,
                     hireDate = hireDate, dob = dob,
@@ -240,6 +242,7 @@ class StaffViewModel @Inject constructor(
     fun updateEmployeeDetailed(
         empId: String, name: String, bioId: String, role: String, email: String, phone: String,
         salaryRate: Double, type: String, calcMethod: String,
+        basic: Double = 0.0, hra: Double = 0.0, da: Double = 0.0,
         start: String, end: String, breakHours: Double,
         otRule: String, otFlatRate: Double, compOff: Int?,
         hireDate: Long, dob: Long?, terminateDate: Long?,
@@ -257,6 +260,7 @@ class StaffViewModel @Inject constructor(
                 val updated = old.copy(
                     name = name, biometricId = bioId, role = role, email = email, phone = phone,
                     salaryType = type, salaryRate = salaryRate, salaryCalculationMethod = calcMethod,
+                    basicSalaryComponent = basic, hraComponent = hra, daComponent = da,
                     shiftStart = start, shiftEnd = end, breakHours = breakHours,
                     otRule = otRule, otFlatRate = otFlatRate, compOffDayOfWeek = compOff,
                     hireDate = hireDate, dob = dob, terminateDate = terminateDate, isActive = terminateDate == null,

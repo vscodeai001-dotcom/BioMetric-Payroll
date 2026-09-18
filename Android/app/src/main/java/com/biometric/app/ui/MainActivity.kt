@@ -230,8 +230,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         binding.hubReports.visibility = if (hub == "REPORTS") View.VISIBLE else View.GONE
 
         // Initialize the hidden command-center map only when Tracking is opened.
-        // Keeping two tile renderers active during Admin startup can cause CPU/GPU
-        // contention and input-dispatch ANRs on constrained devices.
         if (hub == "TRACKING") ensureCommandCenterMapReady()
 
         val activeHub = when (hub) {
@@ -250,7 +248,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             "TRACKING" -> "Live Operations 🛰️ 📍"
             "REPORTS" -> "Business Intelligence 📈 💎"
             else -> "Organization Dashboard 🛡️ ✨"
-        }, "Organization Dashboard 🛡️")
+        }, "Premium Organization Dashboard 🛡️")
         return true
     }
 

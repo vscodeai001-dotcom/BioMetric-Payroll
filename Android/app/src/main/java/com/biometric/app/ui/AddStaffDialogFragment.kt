@@ -6,6 +6,7 @@ import android.app.TimePickerDialog
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -20,6 +21,7 @@ import com.biometric.app.R
 import com.biometric.app.data.entity.SalaryRules
 import com.biometric.app.databinding.DialogAddStaffBinding
 import com.biometric.app.ui.viewmodel.StaffViewModel
+import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.util.HapticUtil
 import com.biometric.app.util.MotionManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -39,6 +41,7 @@ class AddStaffDialogFragment : DialogFragment() {
     private val binding get() = _binding!!
 
     private val viewModel: StaffViewModel by viewModels({ requireActivity() })
+    private val mainViewModel: MainViewModel by viewModels({ requireActivity() })
     private var employeeId: String? = null
 
     private var hireDate: Long = System.currentTimeMillis()
@@ -149,6 +152,14 @@ class AddStaffDialogFragment : DialogFragment() {
     }
 
     private fun observeData() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                mainViewModel.featureSettings.collectLatest { features ->
+                    binding.layoutSalaryComponents.visibility = if (features?.enableSalaryStructuring == true) View.VISIBLE else View.GONE
+                }
+            }
+        }
+
         if (employeeId != null) {
             binding.tilEffectiveDate.visibility = View.VISIBLE
             viewModel.loadEmployee(employeeId!!)
@@ -164,6 +175,9 @@ class AddStaffDialogFragment : DialogFragment() {
                                 binding.etStaffPhone.setText(it.phone)
                                 
                                 binding.etSalaryRate.setText(String.format(Locale.getDefault(), "%.2f", it.salaryRate))
+                                binding.etBasicSalary.setText(String.format(Locale.getDefault(), "%.2f", it.basicSalaryComponent))
+                                binding.etHraComponent.setText(String.format(Locale.getDefault(), "%.2f", it.hraComponent))
+                                binding.etDaComponent.setText(String.format(Locale.getDefault(), "%.2f", it.daComponent))
                                 binding.etCalcMethod.setText(it.salaryCalculationMethod, false)
                                 binding.etDailyAllowance.setText(String.format(Locale.getDefault(), "%.2f", it.dailyAllowance))
                                 binding.etNightAllowance.setText(String.format(Locale.getDefault(), "%.2f", it.nightShiftAllowance))
@@ -274,6 +288,14 @@ class AddStaffDialogFragment : DialogFragment() {
         val rate = rateText.toDoubleOrNull() ?: 0.0
         if (rate <= 0) { binding.tilSalaryRate.error = "Invalid rate"; isValid = false }
 
+        // Salary Component Validation (Matching Web Rule)
+        val basic = binding.etBasicSalary.text.toString().toDoubleOrNull() ?: 0.0
+        val hra = binding.etHraComponent.text.toString().toDoubleOrNull() ?: 0.0
+        val da = binding.etDaComponent.text.toString().toDoubleOrNull() ?: 0.0
+        if (rate > 0 && (basic + hra + da) > rate) {
+            Toast.makeText(context, "Warning: Sum of Basic, HRA, and DA exceeds Gross Salary", Toast.LENGTH_LONG).show()
+        }
+
         if (isValid) {
             val type = if (binding.toggleSalaryType.checkedButtonId == R.id.btnHourly) "PER_HOUR" else "MONTHLY_FIXED"
             val compOffVal = when(binding.etCompOff.text.toString()) {
@@ -292,6 +314,9 @@ class AddStaffDialogFragment : DialogFragment() {
                     val success = viewModel.addEmployeeDetailed(
                         name = name, bioId = bioId, role = binding.etRole.text.toString(), email = binding.etStaffEmail.text.toString(),
                         phone = phone, salaryRate = rate, type = type, calcMethod = calcMethod,
+                        basic = binding.etBasicSalary.text.toString().toDoubleOrNull() ?: 0.0,
+                        hra = binding.etHraComponent.text.toString().toDoubleOrNull() ?: 0.0,
+                        da = binding.etDaComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         start = start, end = end, breakHours = breakMins / 60.0,
                         otRule = otRule, otFlatRate = otFlatRate, compOff = compOffVal,
                         hireDate = hireDate, dob = dob,
@@ -314,6 +339,9 @@ class AddStaffDialogFragment : DialogFragment() {
                     viewModel.updateEmployeeDetailed(
                         empId = employeeId!!, name = name, bioId = bioId, role = binding.etRole.text.toString(), email = binding.etStaffEmail.text.toString(),
                         phone = phone, salaryRate = rate, type = type, calcMethod = calcMethod,
+                        basic = binding.etBasicSalary.text.toString().toDoubleOrNull() ?: 0.0,
+                        hra = binding.etHraComponent.text.toString().toDoubleOrNull() ?: 0.0,
+                        da = binding.etDaComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         start = start, end = end, breakHours = breakMins / 60.0,
                         otRule = otRule, otFlatRate = otFlatRate, compOff = compOffVal,
                         hireDate = hireDate, dob = dob, terminateDate = terminateDate,

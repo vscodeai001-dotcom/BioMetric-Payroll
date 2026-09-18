@@ -135,7 +135,21 @@ class LoginActivity : MotionBaseActivity() {
         
         applyWindowInsets(binding.main)
 
-        val loggedIn = mobileSessionStore.isLoggedIn()
+        // Verify Firebase session status matches local storage.
+        // If Firebase session is lost but app thinks it is logged in,
+        // we must reset the local session to prevent "session missing" errors.
+        val firebaseUser = FirebaseAuth.getInstance().currentUser
+        val loggedIn = mobileSessionStore.isLoggedIn() && firebaseUser != null
+        
+        if (mobileSessionStore.isLoggedIn() && firebaseUser == null) {
+            mobileSessionStore.clearLogin()
+            clearProcessAuthorization(applicationContext)
+            applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
+                .edit(commit = true) { clear() }
+            // Recursively call setupUI to refresh state with loggedIn=false
+            setupUI()
+            return
+        }
 
         // VISIBILITY RULES:
         // If logged in -> show "Unlock" mode. If not -> show "Login" mode.
@@ -147,17 +161,17 @@ class LoginActivity : MotionBaseActivity() {
         binding.btnReset.visibility = if (loggedIn) View.VISIBLE else View.GONE
         
         if (loggedIn) {
-            binding.tvWelcome.text = "Unlock BioMetric 🔓"
-            binding.btnReset.text = "Switch Account / Sign Out"
+            binding.tvWelcome.text = "Unlock BioMetric 🔒 🔓"
+            binding.btnReset.text = "Switch Account / Sign Out 👤"
         } else {
-            binding.tvWelcome.text = "Welcome Back! 👋"
-            binding.tilUserId.hint = "Email Address"
+            binding.tvWelcome.text = "Welcome Back! 👋 ✨"
+            binding.tilUserId.hint = "Email Address 📧"
             binding.etUserId.inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             
-            binding.tilDynamic.hint = "Password"
+            binding.tilDynamic.hint = "Password 🔑"
             binding.etDynamic.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             
-            binding.btnLoginAction.text = "Log in"
+            binding.btnLoginAction.text = "Log in 🚀"
         }
     }
 

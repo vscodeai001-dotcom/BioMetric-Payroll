@@ -173,7 +173,7 @@ object GlobalSwitcherDelegate {
     fun handleShopSwitch(activity: AppCompatActivity, sharedViewModel: SharedViewModel) {
         val shops = sharedViewModel.allShops.value
         if (shops.isEmpty()) {
-            Toast.makeText(activity, "Loading shops...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, "Loading workplaces... ⏳", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -186,7 +186,7 @@ object GlobalSwitcherDelegate {
                 shops.find { it.shopId != currentShop.shopId } ?: shops.first()
             }
             sharedViewModel.setSelectedShop(nextShop)
-            Toast.makeText(activity, "Switched to ${nextShop.name} 🏪", Toast.LENGTH_SHORT).show()
+            Toast.makeText(activity, "Switched to ${nextShop.name} 🏢", Toast.LENGTH_SHORT).show()
         } else {
             // Show selection dialog
             showShopSelectionDialog(activity, sharedViewModel)

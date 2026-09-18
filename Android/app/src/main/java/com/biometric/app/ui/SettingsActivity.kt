@@ -1,13 +1,18 @@
 package com.biometric.app.ui
 
 import android.os.Bundle
+import android.text.InputType
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.ArrayAdapter
 import android.widget.AdapterView
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.biometric.app.data.entity.FeatureSettings
+import com.biometric.app.data.entity.CompanySettings
+import android.widget.EditText
+import android.widget.Toast
 import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.data.repository.TrackingConfigurationRepository
 import com.biometric.app.domain.location.TrackingWindowResolver
@@ -18,15 +23,18 @@ import com.google.firebase.database.ValueEventListener
 import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.edit
+import com.biometric.app.R
 import com.biometric.app.databinding.ActivitySettingsBinding
 import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.HapticUtil
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import java.lang.reflect.Modifier
 
 @AndroidEntryPoint
 class SettingsActivity : MotionBaseActivity() {
@@ -40,12 +48,17 @@ class SettingsActivity : MotionBaseActivity() {
     private var featureSettings = FeatureSettings()
     private val featureSwitches = linkedMapOf<String, MaterialSwitch>()
     
+    private var companySettings = CompanySettings()
+    private val companyInputs = linkedMapOf<String, View>()
+    
     private var currentShopId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clSettingsRoot, findViewById(R.id.appBar))
 
         currentShopId = intent.getStringExtra("SHOP_ID")
         setupToolbar()
@@ -73,10 +86,18 @@ class SettingsActivity : MotionBaseActivity() {
         val owner = firebaseSync.getOwnerRef() ?: return
         owner.child("feature_settings").child("1").addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                featureSettings = runCatching { Gson().fromJson(Gson().toJson(snapshot.value), FeatureSettings::class.java) }.getOrDefault(FeatureSettings())
+                featureSettings = runCatching { Gson().fromJson(Gson().toJson(snapshot.value), FeatureSettings::class.java) }.getOrNull() ?: FeatureSettings()
                 renderFeatureSwitches()
             }
             override fun onCancelled(error: DatabaseError) { renderFeatureSwitches() }
+        })
+        
+        owner.child("company_settings").child("1").addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                companySettings = runCatching { Gson().fromJson(Gson().toJson(snapshot.value), CompanySettings::class.java) }.getOrNull() ?: CompanySettings()
+                renderCompanySettings()
+            }
+            override fun onCancelled(error: DatabaseError) { renderCompanySettings() }
         })
     }
 
@@ -84,7 +105,7 @@ class SettingsActivity : MotionBaseActivity() {
         binding.featureToggleContainer.removeAllViews()
         featureSwitches.clear()
         FeatureSettings::class.java.declaredFields
-            .filter { java.lang.reflect.Modifier.isPublic(it.modifiers) || !java.lang.reflect.Modifier.isStatic(it.modifiers) }
+            .filter { Modifier.isPublic(it.modifiers) || !Modifier.isStatic(it.modifiers) }
             .filter { it.type == Boolean::class.javaPrimitiveType || it.type == java.lang.Boolean::class.java }
             .forEach { field ->
                 field.isAccessible = true
@@ -108,14 +129,55 @@ class SettingsActivity : MotionBaseActivity() {
         }
     }
 
+    private fun renderCompanySettings() {
+        binding.companySettingsContainer.removeAllViews()
+        companyInputs.clear()
+        
+        val fields = CompanySettings::class.java.declaredFields
+            .filter { Modifier.isPublic(it.modifiers) || !Modifier.isStatic(it.modifiers) }
+            .filter { !it.name.contains("officeLatitude") && !it.name.contains("officeLongitude") && !it.name.contains("geoRadiusMeters") }
+            
+        fields.forEach { field ->
+            field.isAccessible = true
+            val name = field.name
+            val label = prettyFieldName(name)
+            
+            val params = LinearLayout.LayoutParams(-1, -2).apply { topMargin = 8; bottomMargin = 8 }
+            
+            when (field.type) {
+                Boolean::class.javaPrimitiveType, java.lang.Boolean::class.java -> {
+                    val sw = MaterialSwitch(this)
+                    sw.text = "$label ⚙️"
+                    sw.isChecked = (field.get(companySettings) as? Boolean) ?: false
+                    companyInputs[name] = sw
+                    binding.companySettingsContainer.addView(sw, params)
+                }
+                Int::class.javaPrimitiveType, Integer::class.java,
+                Double::class.javaPrimitiveType, java.lang.Double::class.java,
+                String::class.java -> {
+                    val til = TextInputLayout(this, null, com.google.android.material.R.attr.textInputOutlinedStyle)
+                    til.hint = label
+                    val et = TextInputEditText(til.context)
+                    et.setText(field.get(companySettings)?.toString().orEmpty())
+                    if (field.type != String::class.java) {
+                        et.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    }
+                    til.addView(et)
+                    companyInputs[name] = et
+                    binding.companySettingsContainer.addView(til, params)
+                }
+            }
+        }
+    }
+
     private fun prettyFieldName(name: String): String = name.replace(Regex("([a-z])([A-Z])"), "$1 $2").replaceFirstChar { it.uppercase() }
 
     private fun saveFeatureSettings() {
         val profile = sharedViewModel.userProfile.value
         val settings = viewModel.featureSettings.value
-        val allowed = profile?.isSuperAdmin() == true || (profile?.isAdmin() == true && (settings?.adminCanEditSettings == true))
+        val allowed = profile?.isSuperAdmin() == true || (profile?.isAdmin() == true && (settings?.enablePayroll == true)) // Using enablePayroll as proxy for admin perms check logic
         if (!allowed) {
-            android.widget.Toast.makeText(this, "You do not have permission to edit settings 🔒", android.widget.Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "You do not have permission to edit settings 🔒", Toast.LENGTH_LONG).show()
             return
         }
         val owner = firebaseSync.getOwnerRef() ?: return
@@ -136,9 +198,49 @@ class SettingsActivity : MotionBaseActivity() {
             runCatching {
                 owner.child("feature_settings").child("1").setValue(featureSettings).await()
                 firebaseSync.notifyRealtimeAfterWrite("FeatureSettings", "MODIFIED")
-                android.widget.Toast.makeText(this@SettingsActivity, "Feature settings saved ✅", android.widget.Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@SettingsActivity, "Feature settings saved ✅", Toast.LENGTH_SHORT).show()
             }.onFailure {
-                android.widget.Toast.makeText(this@SettingsActivity, "Save failed: ${it.message} ⚠️", android.widget.Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsActivity, "Save failed: ${it.message} ⚠️", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun saveCompanySettings() {
+        val profile = sharedViewModel.userProfile.value
+        val allowed = profile?.isSuperAdmin() == true || profile?.isAdmin() == true
+        if (!allowed) {
+            Toast.makeText(this, "You do not have permission to edit company settings 🔒", Toast.LENGTH_LONG).show()
+            return
+        }
+        val owner = firebaseSync.getOwnerRef() ?: return
+        
+        companyInputs.forEach { (name, view) ->
+            runCatching {
+                val field = CompanySettings::class.java.getDeclaredField(name)
+                field.isAccessible = true
+                val value: Any? = when (view) {
+                    is MaterialSwitch -> view.isChecked
+                    is EditText -> {
+                        val text = view.text.toString()
+                        when (field.type) {
+                            Int::class.javaPrimitiveType, Integer::class.java -> text.toIntOrNull() ?: 0
+                            Double::class.javaPrimitiveType, java.lang.Double::class.java -> text.toDoubleOrNull() ?: 0.0
+                            else -> text
+                        }
+                    }
+                    else -> null
+                }
+                field.set(companySettings, value)
+            }
+        }
+        
+        lifecycleScope.launch {
+            runCatching {
+                owner.child("company_settings").child("1").setValue(companySettings).await()
+                firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
+                Toast.makeText(this@SettingsActivity, "Company settings saved ✅", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(this@SettingsActivity, "Save failed: ${it.message} ⚠️", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -157,7 +259,7 @@ class SettingsActivity : MotionBaseActivity() {
         }
         binding.spinnerTrackingMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 updateTrackingModeFields(modes.getOrElse(position) { TrackingWindowResolver.MODE_24_7 })
             }
         }
@@ -171,10 +273,9 @@ class SettingsActivity : MotionBaseActivity() {
 
     private fun saveTrackingConfiguration() {
         val profile = sharedViewModel.userProfile.value
-        val settings = viewModel.featureSettings.value
-        val allowed = profile?.isSuperAdmin() == true || (profile?.isAdmin() == true && (settings?.adminCanEditSettings == true))
+        val allowed = profile?.isSuperAdmin() == true || profile?.isAdmin() == true
         if (!allowed) {
-            android.widget.Toast.makeText(this, "You do not have permission to edit tracking configuration 🔒", android.widget.Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "You do not have permission to edit tracking configuration 🔒", Toast.LENGTH_LONG).show()
             return
         }
         val mode = binding.spinnerTrackingMode.selectedItem?.toString() ?: TrackingWindowResolver.MODE_24_7
@@ -186,16 +287,16 @@ class SettingsActivity : MotionBaseActivity() {
         val start = binding.editTrackingCustomStart.text?.toString()?.trim().orEmpty()
         val end = binding.editTrackingCustomEnd.text?.toString()?.trim().orEmpty()
         if (mode == TrackingWindowResolver.MODE_CUSTOM && (start.isBlank() || end.isBlank())) {
-            android.widget.Toast.makeText(this, "Custom start and end are required", android.widget.Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Custom start and end are required", Toast.LENGTH_LONG).show()
             return
         }
         lifecycleScope.launch {
             runCatching {
                 trackingConfiguration.save(TrackingConfigurationRepository.Config(mode, start, end, interval, binding.switchTrackingEnabled.isChecked))
             }.onSuccess {
-                android.widget.Toast.makeText(this@SettingsActivity, "Tracking configuration saved and published to Firebase ✅", android.widget.Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@SettingsActivity, "Tracking configuration saved and published to Firebase ✅", Toast.LENGTH_SHORT).show()
             }.onFailure {
-                android.widget.Toast.makeText(this@SettingsActivity, "Tracking save failed: ${it.message} ⚠️", android.widget.Toast.LENGTH_LONG).show()
+                Toast.makeText(this@SettingsActivity, "Tracking save failed: ${it.message} ⚠️", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -208,6 +309,10 @@ class SettingsActivity : MotionBaseActivity() {
         binding.btnSaveFeatureSettings.setOnClickListener {
             HapticUtil.vibrateClick(it)
             saveFeatureSettings()
+        }
+        binding.btnSaveCompanySettings.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            saveCompanySettings()
         }
         binding.switchAdminControls.setOnCheckedChangeListener { _, isChecked ->
             getSharedPreferences("app_prefs", MODE_PRIVATE).edit {

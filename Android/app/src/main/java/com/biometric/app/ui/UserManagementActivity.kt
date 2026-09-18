@@ -24,7 +24,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class UserManagementActivity : AppCompatActivity() {
+class UserManagementActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityUserManagementBinding
     private val viewModel: UserViewModel by viewModels()
@@ -33,6 +33,8 @@ class UserManagementActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityUserManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clUserManagementRoot, binding.appBar)
 
         // Web parity: User/Role Management is a SuperAdmin-only governance function.
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)

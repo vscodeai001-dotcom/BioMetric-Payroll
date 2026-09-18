@@ -124,6 +124,29 @@ namespace Payroll.Shared.Data
         [Column("is_deleted")]
         public bool IsDeleted { get; set; } = false;
 
+        // --- NEW: ANDROID SYNCHRONIZATION FIELDS ---
+        [NotMapped]
+        public string? PhoneNumber { get; set; }
+
+        [NotMapped]
+        public string SalaryType { get; set; } = "MONTHLY_FIXED";
+
+        [NotMapped]
+        public decimal DailyAllowance { get; set; } = 0;
+
+        [NotMapped]
+        public bool IsBonusEligible { get; set; } = true;
+
+        [NotMapped]
+        public bool IsPaidLeaveEligible { get; set; } = true;
+
+        [NotMapped]
+        public bool PaidLeaveOnWeekdays { get; set; } = true;
+
+        [NotMapped]
+        public bool PaidLeaveOnWeekends { get; set; } = false;
+        // ------------------------------------------
+
         // --- BANKING DETAILS ---
         [StringLength(50)]
         [Column("bank_account_number")]

@@ -21,7 +21,7 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class AdminPayrollActivity : AppCompatActivity() {
+class AdminPayrollActivity : MotionBaseActivity() {
     @Inject lateinit var api: MobileApiService
     private lateinit var session: MobileSessionStore
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
@@ -38,6 +38,9 @@ class AdminPayrollActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_admin_payroll)
+        
+        applyWindowInsets(findViewById(R.id.clAdminPayrollRoot), findViewById(R.id.appBar))
+        
         session = MobileSessionStore(this)
         findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
         month = findViewById(R.id.spMonth); year = findViewById(R.id.spYear); status = findViewById(R.id.tvStatus)
@@ -109,10 +112,42 @@ class AdminPayrollActivity : AppCompatActivity() {
         )
     }
 
-    private fun renderPreview(){ var sum=0.0; list.removeAllViews(); preview.forEach { row -> sum+=row.netPayable; addRow("👤 ${row.employeeName}", "Gross ${currency.format(row.earnedPay+row.overtimePay+row.bonus+row.totalShiftAllowance)}  •  Net ${currency.format(row.netPayable)}", "⏱ ${"%.1f".format(row.earnedStandardHours)}h  •  OT ${"%.1f".format(row.overtimeMinutes/60)}h  •  Absent ${row.absentDays}") }; total.text="Total Net Payable  ${currency.format(sum)}" }
-    private fun renderHistory(rows: List<AdminPayrollHistoryRowDto>){ var sum=0.0; rows.forEach { row -> sum+=row.netSalary ?: 0.0; addRow("👤 ${row.employeeName}", "Net ${currency.format(row.netSalary ?: 0.0)}  •  Base ${currency.format(row.baseSalary ?: 0.0)}", "⏱ ${"%.1f".format(row.totalHoursWorked)}h  •  OT ${"%.1f".format(row.totalOvertimeMinutes/60)}h  •  Absent ${row.absentDays}") }; total.text="History Net  ${currency.format(sum)}" }
+    private fun renderPreview(){
+        var sum=0.0
+        list.removeAllViews()
+        preview.forEach { row ->
+            sum+=row.netPayable
+            val detailLine = StringBuilder()
+            detailLine.append("Gross ${currency.format(row.earnedPay + row.overtimePay + row.bonus + row.totalShiftAllowance)}")
+            if (row.pfDeduction > 0 || row.esiDeduction > 0 || row.ptDeduction > 0 || row.tdsDeduction > 0) {
+                detailLine.append("  •  Ded ${currency.format(row.pfDeduction + row.esiDeduction + row.ptDeduction + row.tdsDeduction + row.advanceDeduction)}")
+            }
+            detailLine.append("  •  Net ${currency.format(row.netPayable)}")
+            
+            val metaLine = "⏱ ${"%.1f".format(row.earnedStandardHours)}h  •  OT ${"%.1f".format(row.overtimeMinutes/60)}h  •  Abs ${row.absentDays}"
+            addRow("👤 ${row.employeeName}", detailLine.toString(), metaLine)
+        }
+        total.text="Total Net Payable  ${currency.format(sum)}"
+    }
+    
+    private fun renderHistory(rows: List<AdminPayrollHistoryRowDto>){
+        var sum=0.0
+        list.removeAllViews()
+        rows.forEach { row ->
+            val net = row.netSalary ?: 0.0
+            sum += net
+            val detailLine = StringBuilder()
+            detailLine.append("Net ${currency.format(net)}")
+            detailLine.append("  •  Base ${currency.format(row.baseSalary ?: 0.0)}")
+            if (row.deductionsAdvance > 0) detailLine.append("  •  Adv Ded ${currency.format(row.deductionsAdvance)}")
+            
+            val metaLine = "⏱ ${"%.1f".format(row.totalHoursWorked)}h  •  OT ${"%.1f".format(row.totalOvertimeMinutes/60)}h  •  Abs ${row.absentDays}"
+            addRow("👤 ${row.employeeName}", detailLine.toString(), metaLine)
+        }
+        total.text="History Net  ${currency.format(sum)}"
+    }
     private fun addRow(title:String, line:String, meta:String){ val v=layoutInflater.inflate(R.layout.item_admin_payroll_row,list,false); v.findViewById<TextView>(R.id.tvTitle).text=title; v.findViewById<TextView>(R.id.tvLine).text=line; v.findViewById<TextView>(R.id.tvMeta).text=meta; list.addView(v) }
-    private fun confirmFinalize(){ if(preview.isEmpty()){toast("Generate a preview first.");return}; AlertDialog.Builder(this).setTitle("Finalize Payroll").setMessage("Save ${preview.size} payroll entries? This follows the Web payroll finalization logic.").setNegativeButton("Cancel",null).setPositiveButton("Finalize"){_,_-> finalizePayroll()}.show() }
+    private fun confirmFinalize(){ if(preview.isEmpty()){toast("Generate a preview first.");return}; AlertDialog.Builder(this).setTitle("Finalize Payroll 💰").setMessage("Save ${preview.size} payroll entries? This follows the Web payroll finalization logic.").setNegativeButton("Cancel ❌",null).setPositiveButton("Finalize ✅"){_,_-> finalizePayroll()}.show() }
     private fun finalizePayroll()=lifecycleScope.launch { busy(true); status.text="Saving to database…"; try{ val(y,m)=period(); val r=api.adminPayrollFinalize(auth(),AdminPayrollFinalizeRequest(y,m,preview)); if(!r.isSuccessful||r.body()?.success!=true)throw Exception(r.body()?.message?:"Finalization failed"); toast("Payroll finalized successfully"); loadHistory() }catch(e:Exception){status.text="Finalization failed";toast(e.message?:"Request failed")}finally{busy(false)} }
     private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_LONG).show()
 }

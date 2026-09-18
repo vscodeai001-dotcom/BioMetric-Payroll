@@ -47,6 +47,8 @@ class StaffPermissionActivity : MotionBaseActivity() {
         
         binding = ActivityStaffPermissionBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clStaffPermissionRoot, binding.appBar)
 
         setupToolbar()
         setupUI()

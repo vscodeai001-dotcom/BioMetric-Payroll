@@ -10,6 +10,7 @@ namespace Payroll.AttendanceService
         private readonly IServiceProvider _serviceProvider;
         private readonly IZkDevice _zkem;
         private readonly IConfiguration _configuration;
+        private readonly FirebaseWorkerSyncService _firebaseSync;
 
         // Configurable fields are now initialized dynamically inside ExecuteAsync
         private string _deviceIP = string.Empty;
@@ -26,11 +27,13 @@ namespace Payroll.AttendanceService
         public Worker(
             ILogger<Worker> logger,
             IConfiguration config,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            FirebaseWorkerSyncService firebaseSync)
         {
             _logger = logger;
             _serviceProvider = serviceProvider;
             _configuration = config;
+            _firebaseSync = firebaseSync;
             // Use fallback implementation when COM interop is not available at build time.
             _zkem = new ZkDeviceFallback();
 
@@ -109,6 +112,11 @@ namespace Payroll.AttendanceService
                 var initDb = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await initDb.Database.EnsureCreatedAsync(stoppingToken);
                 _logger.LogInformation("Local SQLite compatibility database is ready.");
+
+                // REQUIREMENT: Hydrate the local operational cache from Firebase before
+                // the first poll loop. This ensures the worker has the latest employee
+                // and device configuration even on a fresh process start.
+                await _firebaseSync.HydrateOperationalCacheAsync(initDb, stoppingToken);
             }
             catch (Exception ex)
             {
@@ -132,6 +140,21 @@ namespace Payroll.AttendanceService
                         TimeSpan.FromSeconds(_pollInterval),
                         stoppingToken);
                     continue;
+                }
+
+                // REQUIREMENT: Periodically synchronize the local operational cache
+                // from the shared Firebase SSOT. This ensures the worker picks up
+                // Admin configuration changes (e.g. Device IP, attendance mode)
+                // without requiring a process restart.
+                try
+                {
+                    using var loopScope = _serviceProvider.CreateScope();
+                    var loopDb = loopScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                    await _firebaseSync.HydrateOperationalCacheAsync(loopDb, stoppingToken);
+                }
+                catch (Exception syncEx)
+                {
+                    _logger.LogWarning(syncEx, "Firebase -> Worker synchronization deferred; using local cache.");
                 }
 
                 // Check if device settings are loaded and valid on every loop
@@ -339,9 +362,19 @@ namespace Payroll.AttendanceService
 
                     _logger.LogInformation("Successfully saved {count} new attendance logs.", newLogCount);
 
-                    // Notify the running Web application only after the
-                    // existing biometric database save has succeeded.
-                    await NotifyWebApplicationAsync();
+                    // Notify the running Web application and synchronize the new
+                    // biometric logs to the shared Firebase SSOT. Android and Web
+                    // dashboards observe these SSOT updates immediately without
+                    // requiring a manual refresh.
+                    try
+                    {
+                        await _firebaseSync.PublishAttendanceLogsAsync(newBiometricLogs, stoppingToken);
+                        await NotifyWebApplicationAsync();
+                    }
+                    catch (Exception syncEx)
+                    {
+                        _logger.LogWarning(syncEx, "Attendance logs saved locally but Firebase/Web synchronization failed.");
+                    }
                 }
                 else
                 {

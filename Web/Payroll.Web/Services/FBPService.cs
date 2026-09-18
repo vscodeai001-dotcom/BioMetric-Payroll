@@ -12,12 +12,18 @@ namespace Payroll.Web.Services
         private readonly IDbContextFactory<AppDbContext> _dbFactory;
         private readonly NotificationService _notificationService;
         private readonly FirebaseEmployeeManagementService _firebaseEmployees;
+        private readonly FirebaseRealtimeService _firebase;
 
-        public FBPService(IDbContextFactory<AppDbContext> dbFactory, NotificationService notificationService, FirebaseEmployeeManagementService firebaseEmployees)
+        public FBPService(
+            IDbContextFactory<AppDbContext> dbFactory,
+            NotificationService notificationService,
+            FirebaseEmployeeManagementService firebaseEmployees,
+            FirebaseRealtimeService firebase)
         {
             _dbFactory = dbFactory;
             _notificationService = notificationService;
             _firebaseEmployees = firebaseEmployees;
+            _firebase = firebase;
         }
 
         // --- ADMIN: MANAGE COMPONENTS ---
@@ -40,6 +46,21 @@ namespace Payroll.Web.Services
                 db.FBPComponents.Update(component);
             }
             await db.SaveChangesAsync();
+
+            // REQUIREMENT: Synchronize FBP components to Firebase SSOT so the
+            // Android application has a real-time list of available benefits.
+            try
+            {
+                var ownerUid = _firebaseEmployees.OwnerUid;
+                await _firebase.SetOwnerRecordAsync(
+                    ownerUid,
+                    "fbp_components",
+                    component.ComponentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    component);
+
+                await _firebase.PublishLocalApplicationChangeAsync(ownerUid, "FBPComponent", "MODIFIED");
+            }
+            catch { /* Best effort only; SQL remains calculation authority. */ }
         }
 
         // --- EMPLOYEE: DECLARATION LOGIC ---
@@ -82,7 +103,27 @@ namespace Payroll.Web.Services
             }
             await db.SaveChangesAsync();
 
-            // Employee identity/name is a Firebase SSOT projection. The FBP
+            // REQUIREMENT: Synchronize FBP declarations to Firebase SSOT.
+            // This ensures the Android employee dashboard reflects the
+            // latest submitted benefits immediately.
+            try
+            {
+                var ownerUid = _firebaseEmployees.OwnerUid;
+                var updates = declarations
+                    .Where(d => d.DeclarationId > 0)
+                    .ToDictionary(
+                        d => d.DeclarationId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        d => (object?)d);
+
+                if (updates.Count > 0)
+                {
+                    await _firebase.SetOwnerRecordsAsync(ownerUid, "fbp_declarations", updates);
+                    await _firebase.PublishLocalApplicationChangeAsync(ownerUid, "FlexibleBenefitDeclaration", "MODIFIED");
+                }
+            }
+            catch { /* Best effort */ }
+
+            // Employee identity/name is a Firebase SSOT projection.
             // declaration calculation and persistence above remain SQL-backed.
             var employee = await _firebaseEmployees.GetEmployeeAsync(employeeId);
             if (employee != null)

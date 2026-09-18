@@ -497,6 +497,14 @@ private DotNetObjectReference<EmployeeList>? employeeCacheRef;
             RotationGroup = emp.RotationGroup,
             ShiftRotationPattern = emp.ShiftRotationPattern,
             CurrentShiftIndex = emp.CurrentShiftIndex,
+            // --- NEW: ANDROID SYNCHRONIZATION ---
+            PhoneNumber = emp.PhoneNumber,
+            SalaryType = emp.SalaryType,
+            DailyAllowance = emp.DailyAllowance,
+            IsBonusEligible = emp.IsBonusEligible,
+            IsPaidLeaveEligible = emp.IsPaidLeaveEligible,
+            PaidLeaveOnWeekdays = emp.PaidLeaveOnWeekdays,
+            PaidLeaveOnWeekends = emp.PaidLeaveOnWeekends,
         };
         ResetHelpers();
         showForm = true;

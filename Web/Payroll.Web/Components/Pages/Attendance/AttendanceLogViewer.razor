@@ -178,6 +178,8 @@
     OnClose="CloseDrawer"
     OnSaved="@(() => LoadLogs(autoProcessNewPunches: true))" />
 
+<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+
 @code
 {
     // ============================================================
@@ -2345,6 +2347,19 @@
 
             await InvokeAsync(
                 StateHasChanged);
+        }
+    }
+
+    private async Task HandleRealtimeRefresh()
+    {
+        try
+        {
+            await LoadLogs(autoProcessNewPunches: true);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Realtime refresh failed for attendance log viewer.");
         }
     }
 }

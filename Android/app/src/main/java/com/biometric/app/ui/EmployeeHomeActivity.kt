@@ -152,7 +152,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         _binding = ActivityEmployeeHomeBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        applyWindowInsets(binding.main, binding.appBar)
+        applyWindowInsets(binding.clEmployeeHomeRoot, binding.appBar)
 
         if (!sessionStore.isLoggedIn()) {
             goToLogin()
@@ -331,22 +331,22 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun preCacheMapTiles() {
-        val mapView = binding.mapview
+        val mapView = _binding?.mapview ?: return
         val cacheManager = CacheManager(mapView)
         val boundingBox = BoundingBox(officeLat + 0.02, officeLon + 0.02, officeLat - 0.02, officeLon - 0.02)
 
-        // Cache zoom levels 15 to 18 (the most common for workforce detail)
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                cacheManager.downloadAreaAsync(this@EmployeeHomeActivity, boundingBox, 15, 18)
-            } catch (e: Exception) {
-                Log.e("EmployeeHome", "Map pre-cache failed: ${e.message}")
-            }
+        // Requirement: Silently pre-download and cache map tiles for the office zone.
+        // CacheManager must be invoked on a thread with a Looper for internal Handler.
+        // We use the main thread for the initial call, and it handles its own workers.
+        try {
+            cacheManager.downloadAreaAsync(this@EmployeeHomeActivity, boundingBox, 15, 18)
+        } catch (e: Exception) {
+            Log.e("EmployeeHome", "Map pre-cache failed: ${e.message}")
         }
     }
 
     private fun applyCurrentThemeToMap() {
-        val mapView = binding.mapview
+        val mapView = _binding?.mapview ?: return
         val nightModeFlags = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         if (nightModeFlags == Configuration.UI_MODE_NIGHT_YES) {
             // Refined Night Mode Filter: Inverted, slightly blue-tinted, lower contrast for premium feel
@@ -494,21 +494,22 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 binding.mapview.controller.setZoom(16.0)
             }
         }
-        binding.btnEmployeeMapLayers.setOnClickListener {
-            val next = ((binding.mapview.tag as? Int ?: 0) + 1) % 3
-            binding.mapview.tag = next
+        _binding?.btnEmployeeMapLayers?.setOnClickListener {
+            val next = ((_binding?.mapview?.tag as? Int ?: 0) + 1) % 3
+            _binding?.mapview?.tag = next
+
             when (next) {
                 0 -> {
-                    binding.mapview.setTileSource(employeeOpenStreetMapSource())
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    _binding?.mapview?.setTileSource(employeeOpenStreetMapSource())
+                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(null)
                 }
                 1 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    _binding?.mapview?.setTileSource(TileSourceFactory.USGS_SAT)
+                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(null)
                 }
                 else -> {
-                    binding.mapview.setTileSource(employeeOpenStreetMapSource())
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(floatArrayOf(
+                    _binding?.mapview?.setTileSource(employeeOpenStreetMapSource())
+                    _binding?.mapview?.overlayManager?.tilesOverlay?.setColorFilter(ColorMatrixColorFilter(floatArrayOf(
                         0.25f, 0f, 0f, 0f, 0f,
                         0f, 0.25f, 0f, 0f, 0f,
                         0f, 0f, 0.25f, 0f, 30f,
@@ -516,14 +517,14 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     )))
                 }
             }
-            binding.mapview.invalidate()
+            _binding?.mapview?.invalidate()
         }
         binding.btnEmployeeMapFullscreen.setOnClickListener {
             val intent = Intent(this, TrackingMapActivity::class.java)
             intent.putExtra("EMPLOYEE_ID", sessionStore.employeeId())
             startActivity(intent)
         }
-        binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+        _binding?.mapview?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             _binding?.mapview?.post {
                 _binding?.mapview?.invalidate()
             }
@@ -1127,7 +1128,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun animateDashboard() {
-        val root = binding.tvGreeting.parent as ViewGroup
+        val root = _binding?.tvGreeting?.parent as? ViewGroup ?: return
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
             child.alpha = 0f

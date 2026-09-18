@@ -35,6 +35,9 @@ class EmployeeToolsActivity : MotionBaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_employee_tools)
+        
+        applyWindowInsets(findViewById(R.id.clEmployeeToolsRoot), findViewById(R.id.appBar))
+        
         findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar)
             .setNavigationOnClickListener { finish() }
 

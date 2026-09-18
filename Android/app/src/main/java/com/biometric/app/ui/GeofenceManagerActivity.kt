@@ -33,11 +33,10 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
+class GeofenceManagerActivity : MotionBaseActivity(), OnMapReadyCallback {
 
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var geofenceDao: GeofenceDao
-    @Inject lateinit var sessionStore: MobileSessionStore
 
     private lateinit var binding: ActivityGeofenceManagerBinding
     private var googleMap: GoogleMap? = null
@@ -58,6 +57,8 @@ class GeofenceManagerActivity : AppCompatActivity(), OnMapReadyCallback {
         super.onCreate(savedInstanceState)
         binding = ActivityGeofenceManagerBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clGeofenceManagerRoot, binding.appBar)
 
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
             .getString("user_role", UserRole.STAFF.name).orEmpty()

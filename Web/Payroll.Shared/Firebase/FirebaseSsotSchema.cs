@@ -42,7 +42,9 @@ public static class FirebaseSsotSchema
             ["FnFSettlement"] = "fnf_settlements",
             ["ReportDefinition"] = "report_definitions",
             ["GeoPunchAudit"] = "geo_punch_audits",
-            ["EmployeePresence"] = "presence"
+            ["EmployeePresence"] = "presence",
+            ["EmployeeGpsSession"] = "tracking/sessions",
+            ["EmployeeLocationHistory"] = "tracking/history"
         };
 
     /// <summary>Firebase owner-scoped path for a table.</summary>

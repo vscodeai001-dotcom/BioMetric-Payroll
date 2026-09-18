@@ -35,13 +35,12 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class ExitManagementActivity : AppCompatActivity() {
+class ExitManagementActivity : MotionBaseActivity() {
 
     private lateinit var binding: ActivityExitManagementBinding
     
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
     private val requests = mutableListOf<ResignationRequest>()
     private val currencyFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
 
@@ -49,6 +48,8 @@ class ExitManagementActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityExitManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clExitManagementRoot)
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }

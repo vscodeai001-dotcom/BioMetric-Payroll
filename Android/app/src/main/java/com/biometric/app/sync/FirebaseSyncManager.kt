@@ -18,6 +18,7 @@ import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.data.MobileSessionStore
+import com.google.gson.Gson
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
@@ -38,6 +39,7 @@ class FirebaseSyncManager @Inject constructor(
     private val sessionStore: MobileSessionStore
 ) {
 
+    private val gson = Gson()
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val auth = FirebaseAuth.getInstance()
@@ -145,12 +147,7 @@ class FirebaseSyncManager @Inject constructor(
                     for (childSnapshot in snapshot.children) {
                         try {
                             if (childSnapshot.hasChildren()) {
-                                if (T::class.java == com.biometric.app.data.entity.AuditLog::class.java) {
-                                    @Suppress("UNCHECKED_CAST")
-                                    decodeAuditLog(childSnapshot)?.let { list.add(it as T) }
-                                } else {
-                                    tolerantFirebaseValue<T>(childSnapshot)?.let { list.add(it) }
-                                }
+                                tolerantFirebaseValue<T>(childSnapshot)?.let { list.add(it) }
                             }
                         } catch (e: Exception) {
                             // One legacy/malformed row must never flood logcat or
@@ -174,11 +171,12 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     fun decodeAuditLog(snapshot: DataSnapshot): com.biometric.app.data.entity.AuditLog? {
-        fun string(name: String): String? {
+        fun stringify(name: String): String? {
             val v = snapshot.child(name).value ?: return null
             return when (v) {
-                is String, is Number, is Boolean -> v.toString()
-                else -> null
+                is String -> v
+                is Number, is Boolean -> v.toString()
+                else -> try { gson.toJson(v) } catch (e: Exception) { null }
             }
         }
         fun long(name: String): Long {
@@ -189,17 +187,17 @@ class FirebaseSyncManager @Inject constructor(
             }
         }
         return com.biometric.app.data.entity.AuditLog(
-            logId = string("logId") ?: string("LogID") ?: snapshot.key.orEmpty(),
-            shopId = string("shopId") ?: string("ShopId").orEmpty(),
-            action = string("action") ?: string("Action").orEmpty(),
-            module = string("module") ?: string("Module").orEmpty(),
-            oldValue = string("oldValue") ?: string("OldValue"),
-            newValue = string("newValue") ?: string("NewValue"),
-            userDisplayName = string("userDisplayName") ?: string("UserDisplayName").orEmpty(),
-            userId = string("userId") ?: string("UserId").orEmpty(),
-            actorRole = string("actorRole") ?: string("ActorRole").orEmpty(),
-            ownerUid = string("ownerUid") ?: string("OwnerUid").orEmpty(),
-            targetId = string("targetId") ?: string("TargetId"),
+            logId = stringify("logId") ?: stringify("LogID") ?: snapshot.key.orEmpty(),
+            shopId = stringify("shopId") ?: stringify("ShopId").orEmpty(),
+            action = stringify("action") ?: stringify("Action").orEmpty(),
+            module = stringify("module") ?: stringify("Module").orEmpty(),
+            oldValue = stringify("oldValue") ?: stringify("OldValue"),
+            newValue = stringify("newValue") ?: stringify("NewValue"),
+            userDisplayName = stringify("userDisplayName") ?: stringify("UserDisplayName").orEmpty(),
+            userId = stringify("userId") ?: stringify("UserId").orEmpty(),
+            actorRole = stringify("actorRole") ?: stringify("ActorRole").orEmpty(),
+            ownerUid = stringify("ownerUid") ?: stringify("OwnerUid").orEmpty(),
+            targetId = stringify("targetId") ?: stringify("TargetId"),
             timestamp = long("timestamp").let { if (it != 0L) it else long("Timestamp") }
         )
     }
@@ -323,6 +321,9 @@ class FirebaseSyncManager @Inject constructor(
                 )
                 @Suppress("UNCHECKED_CAST")
                 a as T
+            } else if (T::class.java == AuditLog::class.java) {
+                @Suppress("UNCHECKED_CAST")
+                decodeAuditLog(snapshot) as? T
             } else {
                 snapshot.getValue(T::class.java)
             }

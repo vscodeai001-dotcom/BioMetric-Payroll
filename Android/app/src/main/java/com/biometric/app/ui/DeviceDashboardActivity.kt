@@ -15,7 +15,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class DeviceDashboardActivity : AppCompatActivity() {
+class DeviceDashboardActivity : MotionBaseActivity() {
 
     @Inject lateinit var firebaseSync: FirebaseSyncManager
 
@@ -29,6 +29,8 @@ class DeviceDashboardActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityDeviceDashboardBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clDeviceDashboardRoot, binding.appBar)
 
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }

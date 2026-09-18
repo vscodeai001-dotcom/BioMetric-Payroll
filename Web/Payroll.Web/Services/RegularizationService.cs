@@ -22,13 +22,14 @@ namespace Payroll.Web.Services
         private readonly NotificationService _notificationService;
         private readonly AttendanceCalculatorService _calculator;
         private readonly FirebaseRegularizationService _firebaseRegularization;
+        private readonly FirebaseAttendanceMutationService _firebaseAttendanceMutations;
         private readonly FirebaseRealtimeService _firebase;
         private readonly IConfiguration _configuration;
 
 
 
         public RegularizationService(
-            IDbContextFactory<AppDbContext> dbFactory,
+            IDbContextFactory<AppDbContext> _dbFactory,
             IHttpContextAccessor httpContextAccessor,
             IEmailSender emailSender,
             UserManager<IdentityUser> userManager,
@@ -36,10 +37,11 @@ namespace Payroll.Web.Services
             NotificationService notificationService,
             AttendanceCalculatorService calculator,
             FirebaseRegularizationService firebaseRegularization,
+            FirebaseAttendanceMutationService firebaseAttendanceMutations,
             FirebaseRealtimeService firebase,
             IConfiguration configuration)
         {
-            _dbFactory = dbFactory;
+            this._dbFactory = _dbFactory;
             _httpContextAccessor = httpContextAccessor;
             _emailSender = emailSender;
             _userManager = userManager;
@@ -47,6 +49,7 @@ namespace Payroll.Web.Services
             _notificationService = notificationService;
             _calculator = calculator;
             _firebaseRegularization = firebaseRegularization;
+            _firebaseAttendanceMutations = firebaseAttendanceMutations;
             _firebase = firebase;
             _configuration = configuration;
         }
@@ -227,6 +230,10 @@ namespace Payroll.Web.Services
                 };
 
                 db.AttendanceLogs.Add(newPunch);
+
+                // REQUIREMENT: Synchronize the injected regularization punch to the
+                // Firebase SSOT attendance_punches node.
+                _ = _firebaseAttendanceMutations.UpsertPunchAsync(newPunch, "CREATED");
             }
 
             await db.SaveChangesAsync();
@@ -340,6 +347,11 @@ namespace Payroll.Web.Services
         summary.IsManualOverride = false;
 
         await db.SaveChangesAsync();
+
+        // REQUIREMENT: Synchronize the recalculated DailySummary to Firebase SSOT.
+        // This ensures the Android dashboard reflects the new attendance status
+        // (e.g. Present instead of Missing Punch) immediately.
+        await _firebaseAttendanceMutations.UpsertDailySummaryAsync(summary);
 
         // 1200-K: an approved/removed punch on the day after an overnight
         // shift can change the previous ShiftDate's final OUT and OT.

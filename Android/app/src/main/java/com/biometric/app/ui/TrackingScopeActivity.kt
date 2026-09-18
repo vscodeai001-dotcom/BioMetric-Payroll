@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class TrackingScopeActivity : AppCompatActivity() {
+class TrackingScopeActivity : MotionBaseActivity() {
     private lateinit var binding: ActivityTrackingScopeBinding
     @Inject lateinit var securityGate: FirebaseAuthSecurityGate
     @Inject lateinit var scopeRepository: TrackingScopeRepository
@@ -41,6 +41,8 @@ class TrackingScopeActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityTrackingScopeBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clTrackingScopeRoot, binding.appBar)
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.spinnerScopeType.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, scopeTypes)

@@ -33,9 +33,39 @@ data class EmployeeDashboardResponse(
 
 data class CompanySettingsResponse(
     @SerializedName("companyName") val companyName: String = "",
+    @SerializedName("addressLine1") val addressLine1: String = "",
+    @SerializedName("cityStatePincode") val cityStatePincode: String = "",
+    @SerializedName("salaryCalculationMethod") val salaryCalculationMethod: String = "Days in Month",
     @SerializedName("officeLatitude") val officeLatitude: Double = 0.0,
     @SerializedName("officeLongitude") val officeLongitude: Double = 0.0,
-    @SerializedName("geoRadiusMeters") val geoRadiusMeters: Int = 1000
+    @SerializedName("geoRadiusMeters") val geoRadiusMeters: Int = 1000,
+    @SerializedName("zktecoIP") val zktecoIP: String? = null,
+    @SerializedName("zktecoPort") val zktecoPort: Int = 4370,
+    @SerializedName("zktecoMachineNumber") val zktecoMachineNumber: Int = 1,
+    @SerializedName("workDayCutoffHour") val workDayCutoffHour: Int = 22,
+    @SerializedName("endTimeGraceMinutes") val endTimeGraceMinutes: Int = 0,
+    @SerializedName("lateGraceMinutes") val lateGraceMinutes: Int = 0,
+    @SerializedName("enablePfEsiSystem") val enablePfEsiSystem: Boolean = false,
+    @SerializedName("esiWageLimit") val esiWageLimit: Double = 21000.0,
+    @SerializedName("basicSalaryPercentage") val basicSalaryPercentage: Double = 40.0,
+    @SerializedName("employeePfPercentage") val employeePfPercentage: Double = 12.0,
+    @SerializedName("employeeEsiPercentage") val employeeEsiPercentage: Double = 0.75,
+    @SerializedName("employerPfPercentage") val employerPfPercentage: Double = 13.0,
+    @SerializedName("employerEsiPercentage") val employerEsiPercentage: Double = 3.25,
+    @SerializedName("enableProfessionalTax") val enableProfessionalTax: Boolean = false,
+    @SerializedName("enableEmailNotifications") val enableEmailNotifications: Boolean = false,
+    @SerializedName("smtpHost") val smtpHost: String? = null,
+    @SerializedName("smtpPort") val smtpPort: Int = 587,
+    @SerializedName("smtpUser") val smtpUser: String? = null,
+    @SerializedName("smtpPass") val smtpPass: String? = null,
+    @SerializedName("smtpFromEmail") val smtpFromEmail: String? = null,
+    @SerializedName("enableSsl") val enableSsl: Boolean = true,
+    @SerializedName("enableShiftAllowance") val enableShiftAllowance: Boolean = false,
+    @SerializedName("enableLeaveAccrual") val enableLeaveAccrual: Boolean = false,
+    @SerializedName("leaveAccrualRate") val leaveAccrualRate: Double = 1.5,
+    @SerializedName("enableSandwichRule") val enableSandwichRule: Boolean = false,
+    @SerializedName("enableLeaveManagement") val enableLeaveManagement: Boolean = false,
+    @SerializedName("enableTdsDeduction") val enableTdsDeduction: Boolean = false
 )
 
 data class AttendanceDayDto(

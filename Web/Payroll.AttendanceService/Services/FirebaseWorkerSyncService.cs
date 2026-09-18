@@ -100,17 +100,27 @@ public sealed class FirebaseWorkerSyncService
             var payload = new Dictionary<string, object?>
             {
                 ["attendanceId"] = log.LogID.ToString(CultureInfo.InvariantCulture),
+                ["punchId"] = log.LogID.ToString(CultureInfo.InvariantCulture),
                 ["employeeId"] = log.EmployeeID?.ToString(CultureInfo.InvariantCulture),
+                ["staffId"] = log.EmployeeID?.ToString(CultureInfo.InvariantCulture),
                 ["biometricId"] = log.BiometricID,
+                ["date"] = log.PunchTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 ["checkInTime"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
+                ["timestamp"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
                 ["createdAt"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
                 ["note"] = log.LogType ?? "Punch",
+                ["type"] = log.LogType ?? "Punch",
                 ["synced"] = true,
                 ["source"] = "ZKTECO_WORKER",
+                ["deviceId"] = log.DeviceID ?? "ZKTECO",
+                ["status"] = "APPROVED",
                 ["updatedAtUtc"] = DateTime.UtcNow.ToString("O")
             };
 
-            updates[$"owners/{ownerUid}/attendance/{EscapeKey(log.LogID.ToString(CultureInfo.InvariantCulture))}"] = payload;
+            var recordId = EscapeKey(log.LogID.ToString(CultureInfo.InvariantCulture));
+            updates[$"owners/{ownerUid}/attendance/{recordId}"] = payload;
+            updates[$"owners/{ownerUid}/attendance_punches/{recordId}"] = payload;
+
             var eventId = Guid.NewGuid().ToString("N");
             updates[$"owner_events/{ownerUid}/{eventId}"] = new
             {

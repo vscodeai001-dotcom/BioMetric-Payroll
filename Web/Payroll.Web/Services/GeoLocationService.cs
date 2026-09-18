@@ -15,6 +15,7 @@ public class GeoLocationService
     private readonly AttendanceRefreshService _refreshService;
     private readonly IHubContext<AttendanceRefreshHub> _hubContext;
     private readonly FirebaseRealtimeService _firebase;
+    private readonly FirebaseAttendanceMutationService _firebaseAttendanceMutations;
     private readonly IConfiguration _configuration;
 
     // Dual Attendance treats the configured geofence as a reconciliation
@@ -35,6 +36,7 @@ public class GeoLocationService
         AttendanceRefreshService refreshService,
         IHubContext<AttendanceRefreshHub> hubContext,
         FirebaseRealtimeService firebase,
+        FirebaseAttendanceMutationService firebaseAttendanceMutations,
         IConfiguration configuration)
     {
         _dbFactory = dbFactory;
@@ -42,6 +44,7 @@ public class GeoLocationService
         _refreshService = refreshService;
         _hubContext = hubContext;
         _firebase = firebase;
+        _firebaseAttendanceMutations = firebaseAttendanceMutations;
         _configuration = configuration;
     }
 
@@ -773,6 +776,11 @@ public class GeoLocationService
 
             db.AttendanceLogs.Add(log);
             await db.SaveChangesAsync();
+
+            // REQUIREMENT: Synchronize the new automatic punch to the Firebase SSOT
+            // attendance_punches node. This ensures the Android app observes the
+            // state change immediately without waiting for a background sync.
+            _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
 
             var result =
                 new GeoPunchResult
@@ -1639,6 +1647,10 @@ public class GeoLocationService
         }
 
         await db.SaveChangesAsync();
+
+        // REQUIREMENT: Synchronize the new mobile punch to the Firebase SSOT
+        // attendance_punches node.
+        _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
 
         var success = new GeoPunchResult
         {

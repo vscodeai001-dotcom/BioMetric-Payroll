@@ -82,7 +82,15 @@ public sealed class FirebaseAttendanceMutationService
         };
 
         var ok = await ExecuteWithRetryAsync(
-            token => _firebase.SetOwnerRecordAsync(OwnerUid, PunchTable, key, row, token),
+            async token =>
+            {
+                // REQUIREMENT: Synchronize the raw punch to BOTH 'attendance' and
+                // 'attendance_punches' nodes. This ensures the Web compatibility
+                // bridge and the Android attendance history screen see the same SSOT.
+                var p1 = await _firebase.SetOwnerRecordAsync(OwnerUid, "attendance_punches", key, row, token);
+                var p2 = await _firebase.SetOwnerRecordAsync(OwnerUid, "attendance", key, row, token);
+                return p1 && p2;
+            },
             $"publish attendance punch {key}",
             ct);
 

@@ -25,11 +25,10 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class LeaveManagementActivity : AppCompatActivity() {
+class LeaveManagementActivity : MotionBaseActivity() {
     private lateinit var binding: ActivityLeaveManagementBinding
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
-    @Inject lateinit var sessionStore: MobileSessionStore
     private val allRequests = mutableListOf<LeaveRequest>()
     private val filteredRequests = mutableListOf<LeaveRequest>()
     private var currentTab = "Pending"
@@ -39,6 +38,8 @@ class LeaveManagementActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityLeaveManagementBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
+        applyWindowInsets(binding.clLeaveManagementRoot, findViewById(R.id.appBar))
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.rvLeaveRequests.layoutManager = LinearLayoutManager(this)

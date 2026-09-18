@@ -23,9 +23,8 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class EmployeeDataActivity : AppCompatActivity() {
+class EmployeeDataActivity : MotionBaseActivity() {
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
-    @Inject lateinit var session: MobileSessionStore
     private lateinit var status: TextView
     private lateinit var content: LinearLayout
     private val currency = NumberFormat.getCurrencyInstance(Locale.US)
@@ -33,6 +32,9 @@ class EmployeeDataActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_employee_data)
+        
+        applyWindowInsets(findViewById(R.id.clEmployeeDataRoot), findViewById(R.id.appBar))
+        
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
         status = findViewById(R.id.tvStatus); content = findViewById(R.id.contentContainer)
         load(intent.getStringExtra(EXTRA_SCREEN) ?: "attendance")
@@ -40,7 +42,7 @@ class EmployeeDataActivity : AppCompatActivity() {
 
     private fun load(key: String) {
         findViewById<MaterialToolbar>(R.id.toolbar).title = titleFor(key)
-        if (!session.isLoggedIn()) { finish(); return }
+        if (!sessionStore.isLoggedIn()) { finish(); return }
         status.text = "Loading… 🔄"
         lifecycleScope.launch {
             runCatching {

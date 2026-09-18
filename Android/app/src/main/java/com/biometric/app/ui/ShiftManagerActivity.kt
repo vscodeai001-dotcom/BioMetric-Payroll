@@ -25,7 +25,7 @@ import java.util.*
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class ShiftManagerActivity : AppCompatActivity() {
+class ShiftManagerActivity : MotionBaseActivity() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var repository: MainRepository
     private lateinit var binding: ActivityShiftManagerBinding
@@ -34,7 +34,10 @@ class ShiftManagerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityShiftManagerBinding.inflate(layoutInflater); setContentView(binding.root)
+        binding = ActivityShiftManagerBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        
+        applyWindowInsets(binding.clShiftManagerRoot, binding.appBar)
         setSupportActionBar(binding.toolbar); binding.toolbar.setNavigationOnClickListener { finish() }
         binding.rvShifts.layoutManager = LinearLayoutManager(this); binding.rvShifts.adapter = ShiftAdapter()
         binding.fabAdd.setOnClickListener { showAddShiftDialog() }
