@@ -119,7 +119,7 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="110dp"
-                            app:cardBackgroundColor="#1A4F46E5">
+                            app:cardBackgroundColor="#264F46E5">
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
@@ -136,7 +136,7 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="110dp"
-                            app:cardBackgroundColor="#1A047857">
+                            app:cardBackgroundColor="#26047857">
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
@@ -153,7 +153,7 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="110dp"
-                            app:cardBackgroundColor="#1AF59E0B">
+                            app:cardBackgroundColor="#26F59E0B">
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
@@ -170,7 +170,7 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="110dp"
-                            app:cardBackgroundColor="#1AEF4444">
+                            app:cardBackgroundColor="#26EF4444">
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
@@ -374,7 +374,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginEnd="6dp"
                                     android:background="@drawable/bg_pill_small"
-                                    android:backgroundTint="#F8F9FA"
+                                    android:backgroundTint="@color/staff_metrics_bg"
                                     android:padding="12dp"
                                     android:gravity="center"
                                     android:orientation="vertical">
@@ -399,7 +399,7 @@
                                     android:layout_weight="1"
                                     android:layout_marginStart="6dp"
                                     android:background="@drawable/bg_pill_small"
-                                    android:backgroundTint="#F8F9FA"
+                                    android:backgroundTint="@color/staff_metrics_bg"
                                     android:padding="12dp"
                                     android:gravity="center"
                                     android:orientation="vertical">
@@ -672,6 +672,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:nestedScrollingEnabled="false"
+                        android:clipToPadding="false"
                         tools:listitem="@layout/item_history_row"/>
                 </LinearLayout>
 
