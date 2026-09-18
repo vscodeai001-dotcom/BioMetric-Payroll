@@ -171,6 +171,7 @@ builder.Services.AddHttpClient("FirebaseRealtime");
 builder.Services.AddSingleton<FirebaseRealtimeService>();
 builder.Services.AddSingleton<FirebaseAttendanceCalendarMutationService>();
 builder.Services.AddSingleton<FirebaseEmployeeManagementService>();
+builder.Services.AddSingleton<FirebaseEmployeePresenceService>();
 builder.Services.AddSingleton<FirebaseEmployeeHistoryService>();
 builder.Services.AddSingleton<FirebaseAttendanceService>();
 builder.Services.AddSingleton<FirebaseAttendanceMutationService>();
