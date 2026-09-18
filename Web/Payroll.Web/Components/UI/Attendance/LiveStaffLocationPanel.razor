@@ -9,6 +9,7 @@
 @inject LocationHistoryService LocationHistoryService
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FirebaseEmployeeManagementService FirebaseEmployees
+@inject FirebaseRealtimeService FirebaseRealtime
 
 <div class="live-staff-card card border-0 shadow-sm mb-4 @(isPlaybackFullscreen ? "replay-fullscreen" : "")">
 
@@ -2650,6 +2651,8 @@
     private readonly List<LiveEmployeeLocation> locations = new();
 
     private CancellationTokenSource? refreshCts;
+    private CancellationTokenSource? firebaseLiveCts;
+    private Task? firebaseLiveStreamTask;
     private DotNetObjectReference<LiveStaffLocationPanel>? liveLocationSignalRReference;
 
     private bool disposed;
@@ -3248,26 +3251,67 @@
         await LoadEmployees();
 
         /*
-         * Initial snapshot only.
-         *
-         * After this, GPS updates arrive through SignalR.
+         * Firebase is the shared live-location wire for both Web and Android.
+         * Keep the initial snapshot and the realtime stream on the same
+         * owner-scoped tracking/live branch. SQL EmployeeGpsSessions remains
+         * the compatibility/calculation store, but it is no longer the source
+         * used to decide which employee marker the Web Admin map displays.
          */
         await RefreshLocations();
 
-        /*
-         * Keep the existing timer only for:
-         *
-         * 1. Playback state
-         * 2. LIVE → STALE → OFFLINE UI aging
-         *
-         * It MUST NOT call RefreshLocations().
-         */
-        refreshCts =
-            new CancellationTokenSource();
+        firebaseLiveCts = new CancellationTokenSource();
+        var ownerUid = FirebaseEmployees.OwnerUid;
 
-        _ =
-            AutoRefresh(
-                refreshCts.Token);
+        firebaseLiveStreamTask = StreamFirebaseLiveLocationsAsync(
+            ownerUid,
+            firebaseLiveCts.Token);
+
+        /*
+         * Keep the existing timer for presentation aging/playback only.
+         */
+        refreshCts = new CancellationTokenSource();
+        _ = AutoRefresh(refreshCts.Token);
+    }
+
+    private async Task StreamFirebaseLiveLocationsAsync(
+        string ownerUid,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return;
+
+        try
+        {
+            await FirebaseRealtime.StreamGlobalChangesAsync(
+                $"owners/{ownerUid.Trim()}/tracking",
+                async (_, _, ct) =>
+                {
+                    if (disposed || ct.IsCancellationRequested)
+                        return;
+
+                    try
+                    {
+                        await RefreshLocations();
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine(
+                            $"Firebase live-location refresh failed: {ex}");
+                    }
+                },
+                token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Firebase owner live-location stream ended: {ex}");
+        }
     }
 
 
@@ -3309,87 +3353,144 @@
             {
                 refreshQueued = false;
 
-                await using var db =
-                    await DbFactory.CreateDbContextAsync();
-
                 var office = await GetOfficeLocation();
                 currentOfficeLatitude = office.Latitude;
                 currentOfficeLongitude = office.Longitude;
                 currentOfficeRadius = office.Radius;
 
-                // EmployeeGpsSessions is the authoritative lifecycle source.
-                // Only EndedAtUtc == null sessions are allowed into the live
-                // collection, and only the newest active session per employee
-                // can appear. This prevents stale SignalR packets from creating
-                // phantom Live entries such as 3 Live / 2 employees.
-                var employeeIds = employees
-                    .Select(e => e.EmployeeID)
-                    .ToList();
-
-                // A GPS session is live only when it belongs to a current
-                // employee and the session itself is still active in the
-                // authoritative database. Device locks are intentionally NOT
-                // required here: web-browser employees have a valid GPS
-                // session even when their device-lock lifecycle is different
-                // from the mobile bearer lifecycle. Abandoned mobile sessions
-                // are closed by the dedicated mobile lease cleanup service.
-                var activeSessions = await db.EmployeeGpsSessions.AsNoTracking()
-                    .Where(session => employeeIds.Contains(session.EmployeeId)
-                                      && !session.EndedAtUtc.HasValue
-                                      && session.LastLatitude.HasValue
-                                      && session.LastLongitude.HasValue)
-                    .OrderBy(session => session.EmployeeId)
-                    .ThenByDescending(session => session.StartedAtUtc)
-                    .ToListAsync();
+                /*
+                 * Firebase is the single live-location wire shared by Web and
+                 * Android. Only owner-scoped tracking/live records are read.
+                 *
+                 * An employee marker exists ONLY when:
+                 *   1. the employee belongs to this owner, and
+                 *   2. an active Firebase live record exists for that EmployeeID.
+                 *
+                 * This prevents an old SQL GPS session or unrelated employee
+                 * from appearing on the Web Admin map.
+                 */
+                var liveSnapshot =
+                    await FirebaseRealtime.GetOwnerTrackingLiveAsync(
+                        FirebaseEmployees.OwnerUid);
 
                 var snapshot = new List<LiveEmployeeLocation>();
-                var seenEmployees = new HashSet<int>();
+                var validEmployeeIds =
+                    employees.Select(e => e.EmployeeID).ToHashSet();
 
-                foreach (var session in activeSessions)
+                if (liveSnapshot.HasValue &&
+                    liveSnapshot.Value.ValueKind == JsonValueKind.Object)
                 {
-                    if (!seenEmployees.Add(session.EmployeeId))
-                        continue;
-
-                    var lat = session.LastLatitude!.Value;
-                    var lng = session.LastLongitude!.Value;
-
-                    // The map is fail-safe: never render malformed coordinates
-                    // or an active session whose last GPS fix is no longer
-                    // current. The session itself remains untouched.
-                    if (!double.IsFinite(lat) || !double.IsFinite(lng) ||
-                        lat < -90 || lat > 90 || lng < -180 || lng > 180 ||
-                        (lat == 0 && lng == 0))
-                        continue;
-
-                    var locationAge = DateTime.UtcNow - session.LastUpdateAtUtc;
-                    if (locationAge < TimeSpan.Zero)
-                        locationAge = TimeSpan.Zero;
-
-                    // Do not display stale DB coordinates as current live
-                    // positions. SignalR will repopulate the marker on the
-                    // next genuine GPS fix.
-                    if (locationAge > TimeSpan.FromSeconds(120))
-                        continue;
-
-                    snapshot.Add(new LiveEmployeeLocation
+                    foreach (var employeeNode in liveSnapshot.Value.EnumerateObject())
                     {
-                        EmployeeId = session.EmployeeId,
-                        Latitude = lat,
-                        Longitude = lng,
-                        AccuracyMeters = session.LastAccuracyMeters ?? 0,
-                        DistanceMeters = CalculateDistanceMeters(
-                            lat, lng, currentOfficeLatitude, currentOfficeLongitude),
-                        AllowedRadiusMeters = currentOfficeRadius,
-                        IsWithinAllowedRadius = CalculateDistanceMeters(
-                            lat, lng, currentOfficeLatitude, currentOfficeLongitude) <= currentOfficeRadius + 1,
-                        LastUpdatedUtc = session.LastUpdateAtUtc,
-                        SessionStartedUtc = session.StartedAtUtc,
-                        SessionId = session.SessionId
-                    });
+                        var employeeId =
+                            int.TryParse(employeeNode.Name, out var keyId)
+                                ? keyId
+                                : GetJsonInt(employeeNode.Value, "EmployeeId", "employeeId");
+
+                        if (employeeId <= 0 ||
+                            !validEmployeeIds.Contains(employeeId) ||
+                            employeeNode.Value.ValueKind != JsonValueKind.Object)
+                            continue;
+
+                        var json = employeeNode.Value;
+
+                        var payloadEmployeeId =
+                            GetJsonInt(json, "EmployeeId", "employeeId");
+
+                        if (payloadEmployeeId > 0 &&
+                            payloadEmployeeId != employeeId)
+                            continue;
+
+                        var state =
+                            GetJsonStringValue(json, "State", "state");
+
+                        /*
+                         * New Web/Android writers publish ACTIVE. For backward
+                         * compatibility, an older live record without State is
+                         * accepted, but ENDED records are never rendered.
+                         */
+                        if (state.Equals("ENDED", StringComparison.OrdinalIgnoreCase) ||
+                            state.Equals("OFFLINE", StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        if (!TryGetJsonDouble(json, "Latitude", out var lat) ||
+                            !TryGetJsonDouble(json, "Longitude", out var lng) ||
+                            !double.IsFinite(lat) ||
+                            !double.IsFinite(lng) ||
+                            lat < -90 || lat > 90 ||
+                            lng < -180 || lng > 180 ||
+                            (lat == 0 && lng == 0))
+                            continue;
+
+                        var accuracy =
+                            TryGetJsonDouble(json, "AccuracyMeters", out var acc)
+                                ? Math.Max(0, acc)
+                                : 0;
+
+                        var timestamp =
+                            TryGetJsonDateTime(json, "LastUpdatedUtc", out var updated)
+                                ? updated.ToUniversalTime()
+                                : TryGetJsonDateTime(json, "Timestamp", out var captured)
+                                    ? captured.ToUniversalTime()
+                                    : DateTime.UtcNow;
+
+                        var sessionStarted =
+                            TryGetJsonDateTime(json, "SessionStartedUtc", out var started)
+                                ? started.ToUniversalTime()
+                                : timestamp;
+
+                        var sessionId = Guid.Empty;
+                        if (TryGetJsonString(json, "SessionId", out var sessionText))
+                            Guid.TryParse(sessionText, out sessionId);
+
+                        /*
+                         * Do not render an abandoned/very old Firebase marker.
+                         * The live node is normally removed at session end, and
+                         * this age guard protects the map if a delete is delayed.
+                         */
+                        var age = DateTime.UtcNow - timestamp;
+                        if (age < TimeSpan.Zero)
+                            age = TimeSpan.Zero;
+
+                        if (age > TimeSpan.FromSeconds(120))
+                            continue;
+
+                        var distance = CalculateDistanceMeters(
+                            lat,
+                            lng,
+                            currentOfficeLatitude,
+                            currentOfficeLongitude);
+
+                        snapshot.Add(new LiveEmployeeLocation
+                        {
+                            EmployeeId = employeeId,
+                            Latitude = lat,
+                            Longitude = lng,
+                            AccuracyMeters = accuracy,
+                            DistanceMeters = distance,
+                            AllowedRadiusMeters = currentOfficeRadius,
+                            IsWithinAllowedRadius =
+                                currentOfficeRadius > 0 &&
+                                distance <= currentOfficeRadius + 1,
+                            LastUpdatedUtc = timestamp,
+                            SessionStartedUtc = sessionStarted,
+                            SessionId = sessionId
+                        });
+                    }
                 }
 
+                /*
+                 * Replace the complete live collection atomically from the
+                 * owner-scoped Firebase snapshot. This removes stale SQL-only
+                 * employees and guarantees Web map membership matches Android.
+                 */
                 locations.Clear();
-                locations.AddRange(snapshot);
+                locations.AddRange(
+                    snapshot
+                        .GroupBy(x => x.EmployeeId)
+                        .Select(g => g
+                            .OrderByDescending(x => x.LastUpdatedUtc)
+                            .First()));
 
                 lastRefresh = DateTime.Now;
                 mapNeedsUpdate = true;
@@ -3398,16 +3499,59 @@
             }
             while (refreshQueued && !disposed);
         }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"Live location refresh failed: {ex}");
+                $"Live location Firebase refresh failed: {ex}");
         }
         finally
         {
             isRefreshing = false;
         }
     }
+
+
+    private static int GetJsonInt(
+        JsonElement json,
+        params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!json.TryGetProperty(name, out var property))
+                continue;
+
+            if (property.ValueKind == JsonValueKind.Number &&
+                property.TryGetInt32(out var number))
+                return number;
+
+            if (property.ValueKind == JsonValueKind.String &&
+                int.TryParse(property.GetString(), out number))
+                return number;
+        }
+
+        return 0;
+    }
+
+
+    private static string GetJsonStringValue(
+        JsonElement json,
+        params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!json.TryGetProperty(name, out var property))
+                continue;
+
+            if (property.ValueKind == JsonValueKind.String)
+                return property.GetString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
 
     // ============================================================
     // GPS SESSION ENDED
@@ -4710,6 +4854,22 @@
             indiaTimeZone);
     }
 
+
+
+    private void StopFirebaseLiveStream()
+    {
+        try
+        {
+            firebaseLiveCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        firebaseLiveCts?.Dispose();
+        firebaseLiveCts = null;
+        firebaseLiveStreamTask = null;
+    }
 
 
     public async ValueTask DisposeAsync()

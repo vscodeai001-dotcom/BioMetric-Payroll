@@ -760,6 +760,9 @@ public sealed class FirebaseRealtimeService
         double accuracyMeters,
         double speedMps,
         long capturedAtUnixMs,
+        int allowedRadiusMeters = 0,
+        bool isWithinAllowedRadius = false,
+        DateTime? sessionStartedUtc = null,
         CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0 || sessionId == Guid.Empty || string.IsNullOrWhiteSpace(clientEventId))
@@ -776,7 +779,11 @@ public sealed class FirebaseRealtimeService
             ["Sequence"] = sequence,
             ["Timestamp"] = DateTimeOffset.FromUnixTimeMilliseconds(capturedAtUnixMs).UtcDateTime.ToString("O"),
             ["LastUpdatedUtc"] = DateTime.UtcNow.ToString("O"),
-            ["Source"] = "ANDROID_FIREBASE"
+            ["AllowedRadiusMeters"] = Math.Max(0, allowedRadiusMeters),
+            ["IsWithinAllowedRadius"] = isWithinAllowedRadius,
+            ["State"] = "ACTIVE",
+            ["SessionStartedUtc"] = (sessionStartedUtc ?? DateTime.UtcNow).ToUniversalTime().ToString("O"),
+            ["Source"] = "FIREBASE_WEB"
         };
 
         var updates = new Dictionary<string, object?>

@@ -509,6 +509,40 @@ public class GeoLocationService
 
                 await db.SaveChangesAsync();
 
+                /*
+                 * Firebase is the shared realtime wire for Web + Android.
+                 * Publish only after the authoritative GPS session update has
+                 * committed. A Firebase outage must never break the existing
+                 * Web attendance/GPS business flow.
+                 */
+                try
+                {
+                    var clientEventId =
+                        $"web-{sessionId:N}-{session.TotalPoints}";
+
+                    await _firebase.PublishLiveLocationAsync(
+                        employeeId,
+                        sessionId,
+                        clientEventId,
+                        session.TotalPoints,
+                        latitude,
+                        longitude,
+                        safeAccuracy,
+                        0,
+                        new DateTimeOffset(captureTime).ToUnixTimeMilliseconds(),
+                        allowedRadiusMeters,
+                        session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,
+                        session.StartedAtUtc);
+                }
+                catch (Exception firebaseEx)
+                {
+                    _logger.LogWarning(
+                        firebaseEx,
+                        "Firebase live-location publish failed after committed GPS update. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                        employeeId,
+                        sessionId);
+                }
+
                 try
                 {
                     // Broadcast the same authoritative live-store snapshot that

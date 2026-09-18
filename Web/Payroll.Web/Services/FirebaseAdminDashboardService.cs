@@ -131,36 +131,94 @@ public sealed class FirebaseAdminDashboardService
 
     private static IEnumerable<JsonElement> Items(JsonElement? json)
     {
-        if (json is not { } root || root.ValueKind != JsonValueKind.Object)
+        if (json is not { } root)
             return Enumerable.Empty<JsonElement>();
-        return root.EnumerateObject()
-            .Where(x => x.Value.ValueKind == JsonValueKind.Object)
-            .Select(x => x.Value);
+
+        // Realtime Database REST can represent numeric-keyed collections as
+        // either objects or arrays. Treat both forms as records.
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            return root.EnumerateObject()
+                .Where(x => x.Value.ValueKind == JsonValueKind.Object)
+                .Select(x => x.Value);
+        }
+
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            return root.EnumerateArray()
+                .Where(x => x.ValueKind == JsonValueKind.Object);
+        }
+
+        return Enumerable.Empty<JsonElement>();
+    }
+
+    private static bool TryGetProperty(
+        JsonElement e,
+        string name,
+        out JsonElement property)
+    {
+        if (e.TryGetProperty(name, out property))
+            return true;
+
+        var alternate = char.IsUpper(name[0])
+            ? char.ToLowerInvariant(name[0]) + name[1..]
+            : char.ToUpperInvariant(name[0]) + name[1..];
+
+        return e.TryGetProperty(alternate, out property);
     }
 
     private static string? String(JsonElement e, string name)
-        => e.TryGetProperty(name, out var p) && p.ValueKind != JsonValueKind.Null ? p.ToString() : null;
+        => TryGetProperty(e, name, out var p) &&
+           p.ValueKind != JsonValueKind.Null
+            ? p.ToString()
+            : null;
 
     private static bool HasValue(JsonElement e, string name)
-        => e.TryGetProperty(name, out var p) && p.ValueKind != JsonValueKind.Null && p.ToString() != "";
+        => TryGetProperty(e, name, out var p) &&
+           p.ValueKind != JsonValueKind.Null &&
+           p.ToString() != "";
 
     private static int? Int(JsonElement e, string name)
     {
-        if (!e.TryGetProperty(name, out var p) || p.ValueKind == JsonValueKind.Null) return null;
-        if (p.TryGetInt32(out var i)) return i;
-        return int.TryParse(p.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out i) ? i : null;
+        if (!TryGetProperty(e, name, out var p) ||
+            p.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (p.TryGetInt32(out var i))
+            return i;
+
+        return int.TryParse(
+            p.ToString(),
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
+            out i)
+            ? i
+            : null;
     }
 
     private static decimal Decimal(JsonElement e, string name)
     {
-        if (!e.TryGetProperty(name, out var p) || p.ValueKind == JsonValueKind.Null) return 0m;
-        if (p.TryGetDecimal(out var d)) return d;
-        return decimal.TryParse(p.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? d : 0m;
+        if (!TryGetProperty(e, name, out var p) ||
+            p.ValueKind == JsonValueKind.Null)
+            return 0m;
+
+        if (p.TryGetDecimal(out var d))
+            return d;
+
+        return decimal.TryParse(
+            p.ToString(),
+            NumberStyles.Any,
+            CultureInfo.InvariantCulture,
+            out d)
+            ? d
+            : 0m;
     }
 
     private static bool Bool(JsonElement e, string name, bool fallback)
     {
-        if (!e.TryGetProperty(name, out var p) || p.ValueKind == JsonValueKind.Null) return fallback;
+        if (!TryGetProperty(e, name, out var p) ||
+            p.ValueKind == JsonValueKind.Null)
+            return fallback;
         if (p.ValueKind == JsonValueKind.True) return true;
         if (p.ValueKind == JsonValueKind.False) return false;
         return bool.TryParse(p.ToString(), out var b) ? b : fallback;
@@ -168,7 +226,7 @@ public sealed class FirebaseAdminDashboardService
 
     private static DateTime? UnixDateTime(JsonElement e, string name)
     {
-        if (!e.TryGetProperty(name, out var p) || p.ValueKind == JsonValueKind.Null) return null;
+        if (!TryGetProperty(e, name, out var p) || p.ValueKind == JsonValueKind.Null) return null;
         if (p.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
         if (long.TryParse(p.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out ms))
             return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
@@ -187,7 +245,7 @@ public sealed class FirebaseAdminDashboardService
     {
         foreach (var name in names)
         {
-            if (!e.TryGetProperty(name, out var p) || p.ValueKind == JsonValueKind.Null) continue;
+            if (!TryGetProperty(e, name, out var p) || p.ValueKind == JsonValueKind.Null) continue;
             if (p.TryGetInt64(out var ms)) return ms;
             if (p.TryGetDouble(out var numeric)) return (long)numeric;
             if (TimeSpan.TryParse(p.ToString(), CultureInfo.InvariantCulture, out var ts)) return (long)ts.TotalMilliseconds;

@@ -485,6 +485,22 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
             }
         }
+
+        /*
+         * Live GPS can arrive before the Firebase employee cache finishes
+         * hydrating. updateAdminMarkers intentionally rejects an unknown
+         * EmployeeID, so re-render whenever the owner employee master changes.
+         * This removes the startup race where the dashboard shows the correct
+         * workforce count but the already-received live employee marker is lost.
+         */
+        lifecycleScope.launch {
+            sharedViewModel.allEmployees.collectLatest {
+                delay(50L)
+                _binding?.let {
+                    updateAdminMarkers(signalR.liveLocations.value.values.toList())
+                }
+            }
+        }
     }
 
     private fun updateOfficeOnMap(lat: Double, lon: Double, radius: Int) {
