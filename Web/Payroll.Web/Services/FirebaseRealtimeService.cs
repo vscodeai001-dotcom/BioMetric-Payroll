@@ -360,6 +360,9 @@ public sealed class FirebaseRealtimeService
         var client = _httpClientFactory.CreateClient("FirebaseRealtime");
         client.Timeout = Timeout.InfiniteTimeSpan;
 
+        // This legacy helper remains available to callers that explicitly use it,
+        // but must never be used for a tenant dashboard. Owner-scoped callers should
+        // use StreamGlobalChangesAsync with owners/{ownerUid}/tracking.
         var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/tracking.json");
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         request.Headers.Authorization = new AuthenticationHeaderValue(

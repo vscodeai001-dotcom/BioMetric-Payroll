@@ -119,6 +119,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private val roadCasings2 = mutableMapOf<Int, Polyline>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
+    private var lastRenderedLiveSignature: String? = null
     private val adminRoadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var officeMarker: Marker? = null
@@ -501,6 +502,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
             }
         }
+        lifecycleScope.launch {
+            signalR.ownerEmployees.collectLatest {
+                _binding?.let {
+                    updateAdminMarkers(signalR.liveLocations.value.values.toList())
+                }
+            }
+        }
     }
 
     private fun updateOfficeOnMap(lat: Double, lon: Double, radius: Int) {
@@ -629,6 +637,25 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val dashboardMap = b.adminMapView
             val commandMap = b.commandCenterMapView
             val employeeData = sharedViewModel.allEmployees.value
+            val firebaseEmployeeData = signalR.ownerEmployees.value
+
+            // Firebase can repeat the same parent snapshot. Avoid rebuilding
+            // marker windows/routes and invalidating both OSMDroid surfaces when
+            // the visible state has not changed.
+            val renderSignature = buildString {
+                append(statusFilter).append('|').append(currentGeofenceRadiusMeters).append('|')
+                locations.sortedBy { it.employeeId }.forEach { loc ->
+                    val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
+                    val fEmp = firebaseEmployeeData[loc.employeeId]
+                    append(loc.employeeId).append(':')
+                        .append("%.5f".format(Locale.US, loc.latitude)).append(',')
+                        .append("%.5f".format(Locale.US, loc.longitude)).append(':')
+                        .append(getLocStatus(loc)).append(':')
+                        .append(emp?.name ?: fEmp?.name ?: "").append(';')
+                }
+            }
+            if (renderSignature == lastRenderedLiveSignature) return@let
+            lastRenderedLiveSignature = renderSignature
             val officeForCount = officeMarker?.position
             val geoPoints = mutableListOf<GeoPoint>()
             val currentIds = locations.map { it.employeeId }
@@ -655,10 +682,20 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             locations.forEach { loc ->
                 if (loc.employeeId <= 0) return@forEach
                 val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
-                if (emp == null) {
-                    Log.w("MainActivity", "Ignoring live GPS for unlinked employeeId=${loc.employeeId} owner-scoped employee cache")
+                val firebaseEmp = firebaseEmployeeData[loc.employeeId]
+
+                // Firebase owner employee master is the fallback when the Room
+                // cache is rebuilding. This keeps a real logged-in employee
+                // visible instead of losing the marker because Room was recreated
+                // or temporarily unavailable.
+                if (emp == null && firebaseEmp == null) {
+                    Log.w(
+                        "MainActivity",
+                        "Ignoring live GPS for unlinked employeeId=${loc.employeeId}; no owner-scoped employee master record"
+                    )
                     return@forEach
                 }
+                val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
                 val status = getLocStatus(loc)
                 val isFilteredOut = statusFilter != "All" && statusFilter != status
                 if (isFilteredOut) {
@@ -690,17 +727,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     }
                 }
 
-                m1.alpha = 1f; m2.alpha = 1f; m1.title = emp?.name; m2.title = emp?.name
+                m1.alpha = 1f; m2.alpha = 1f; m1.title = employeeName; m2.title = employeeName
 
-                // Optimization: Only animate if the position changed significantly (> 0.5m)
-                val prevPos = m1.position
-                val dist = distanceBetween(prevPos, point)
-                if (dist > 0.5) {
-                    animateMarker(m1, m2, point, loc.employeeId)
-                } else {
-                    m1.position = point
-                    m2.position = point
-                }
+                // Apply each GPS fix once. A 1.2-second ValueAnimator on every
+                // update was continuously invalidating two OSMDroid maps and
+                // contributed to the MainActivity ANR seen in logcat.
+                m1.position = point
+                m2.position = point
 
                 val office = officeMarker?.position
                 val liveDistanceMeters = if (office != null) {
@@ -711,7 +744,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 val withinCurrentRadius = currentGeofenceRadiusMeters > 0 &&
                     liveDistanceMeters <= currentGeofenceRadiusMeters.toDouble()
 
-                val initials = getInitials(emp?.name ?: "E")
+                val initials = getInitials(employeeName)
                 val cacheKey = "${initials}_${withinCurrentRadius}_$status"
                 val icon = iconCache.getOrPut(cacheKey) {
                     createPremiumMarkerIcon(initials, withinCurrentRadius, status)
@@ -721,8 +754,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     "Dist: ${formatDistance(liveDistanceMeters)} • Radius: ${currentGeofenceRadiusMeters}m • " +
                     if (withinCurrentRadius) "Within range" else "Outside range"
                 m1.snippet = snippet; m2.snippet = snippet
-                val info1 = createAdminMarkerInfoWindow(dashboardMap, loc, emp?.name ?: "Employee", status)
-                val info2 = createAdminMarkerInfoWindow(commandMap, loc, emp?.name ?: "Employee", status)
+                val info1 = createAdminMarkerInfoWindow(dashboardMap, loc, employeeName, status)
+                val info2 = createAdminMarkerInfoWindow(commandMap, loc, employeeName, status)
                 m1.setInfoWindow(info1)
                 m2.setInfoWindow(info2)
                 updateAdminRoadRoute(loc.employeeId, point)
@@ -776,10 +809,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun updateAdminRoadRoute(empId: Int, userPoint: GeoPoint) {
+        val now = System.currentTimeMillis()
         val last = lastRouteUpdate[empId] ?: 0L
-        if (System.currentTimeMillis() - last < 30000L) return
+        if (now - last < 30000L) return
+        if (adminRoadRouteJobs[empId]?.isActive == true) return
 
-        adminRoadRouteJobs[empId]?.cancel()
+        // Mark request time before starting it. A fast GPS stream must not
+        // repeatedly cancel/restart the same OSRM request.
+        lastRouteUpdate[empId] = now
         adminRoadRouteJobs[empId] = lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val settings = viewModel.companySettings.value ?: return@launch
@@ -789,9 +826,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     response.body()?.routes?.firstOrNull()?.geometry?.let { encoded ->
                         val decoded = PolylineDecoder.decode(encoded)
                         withContext(Dispatchers.Main) {
-                            _binding?.let {
+                            if (!isFinishing && !isDestroyed) {
                                 drawAdminRoute(empId, decoded)
-                                lastRouteUpdate[empId] = System.currentTimeMillis()
                             }
                         }
                     }
@@ -833,13 +869,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                 }
                             }
                             is SignalRManager.SyncEvent.LocationChanged -> {
-                                // LocationChanged is the low-latency trigger. The
-                                // SignalR payload is intentionally lightweight, so
-                                // immediately hydrate the authoritative snapshot to
-                                // obtain the complete location/speed/state details.
-                                lifecycleScope.launch {
-                                    hydrateLiveLocationsOnce()
-                                }
+                                // liveLocations is already the authoritative Firebase
+                                // realtime stream. The Flow collector coalesces GPS
+                                // bursts, so do not render a second time here.
                             }
                             is SignalRManager.SyncEvent.SessionStarted -> {
                                 Log.d("MainActivity", "New session detected: ${event.employeeId}. Pulling fresh data. 🛰️")
@@ -881,21 +913,18 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun getLocStatus(loc: SignalRManager.LiveLocation): String {
-        // Ported from Web: LiveLocationStore.cs
-        // Requirement: Status remains "Live" for 10 years to prevent dashboard flicker on backgrounding
-        val timestamp = loc.timestamp ?: return "Live"
+        val timestamp = loc.timestamp ?: return "Offline"
         return try {
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
-            val serverTime = sdf.parse(timestamp)?.time ?: 0L
-            val ageMs = Math.abs(System.currentTimeMillis() - serverTime)
-
-            // Web: LiveTimeoutSeconds = 315360000 (10 years)
-            val liveTimeoutMs = 10L * 365 * 24 * 60 * 60 * 1000
+            val parsed = java.time.Instant.parse(timestamp)
+            val ageMs = (System.currentTimeMillis() - parsed.toEpochMilli()).coerceAtLeast(0L)
             when {
-                ageMs <= liveTimeoutMs -> "Live"
+                ageMs <= 120_000L -> "Live"
+                ageMs <= 300_000L -> "Stale"
                 else -> "Offline"
             }
-        } catch (_: Exception) { "Live" }
+        } catch (_: Exception) {
+            "Offline"
+        }
     }
 
     private fun formatSpeed(mps: Double): String {

@@ -61,6 +61,12 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         private readonly AttendanceEventMonitorService
             _attendanceMonitor;
 
+        private readonly FirebaseEmployeeManagementService
+            _firebaseEmployees;
+
+        private readonly FirebaseEmployeePresenceService
+            _firebasePresence;
+
 
         // ============================================================
         // CONSTRUCTOR
@@ -73,7 +79,9 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             ILogger<LoginModel> logger,
             NotificationService notificationService,
             GeoLocationService geoLocationService,
-            AttendanceEventMonitorService attendanceMonitor)
+            AttendanceEventMonitorService attendanceMonitor,
+            FirebaseEmployeeManagementService firebaseEmployees,
+            FirebaseEmployeePresenceService firebasePresence)
         {
             _signInManager = signInManager;
             _userManager = userManager;
@@ -82,6 +90,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             _notificationService = notificationService;
             _geoLocationService = geoLocationService;
             _attendanceMonitor = attendanceMonitor;
+            _firebaseEmployees = firebaseEmployees;
+            _firebasePresence = firebasePresence;
         }
 
 
@@ -300,6 +310,34 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 user.Id,
                 hasKnownRole);
 
+            // Resolve the canonical employee from Firebase when the legacy Web
+            // Identity row has not yet been linked. A unique email match is safe
+            // because Firebase employees are the application SSOT.
+            var firebaseEmployee = isEmployee
+                ? await _firebaseEmployees.GetEmployeeByEmailAsync(email)
+                : null;
+
+            if (isEmployee && firebaseEmployee == null)
+            {
+                AddInvalidLoginError();
+                _logger.LogWarning(
+                    "Employee login rejected because no saved Firebase Employee record is linked to {Email}.",
+                    email);
+                return Page();
+            }
+
+            // Successful Web authentication is the bridge that keeps Web and
+            // Android credentials/claims identical. The password is used only
+            // for this Firebase Auth synchronization and is never stored.
+            string? firebaseUid = null;
+            if (isEmployee && firebaseEmployee != null)
+            {
+                firebaseUid = await _firebaseEmployeesReconcileLoginAsync(
+                    firebaseEmployee,
+                    email,
+                    Input.Password,
+                    ct: HttpContext.RequestAborted);
+            }
 
             // ========================================================
             // SINGLE SESSION FOR ALL ROLES
@@ -500,6 +538,16 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             if (string.IsNullOrWhiteSpace(userAgent))
                 userAgent = "Unavailable";
 
+            if (isEmployee && firebaseEmployee != null && !string.IsNullOrWhiteSpace(firebaseUid))
+            {
+                await _firebasePresence.SetWebPresenceAsync(
+                    firebaseEmployee.EmployeeID,
+                    deviceId,
+                    firebaseUid,
+                    email,
+                    HttpContext.RequestAborted);
+            }
+
             try
             {
                 await _notificationService.NotifyAdminsEmployeeLoginAsync(
@@ -551,6 +599,30 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             return LocalRedirect("/employee-home");
         }
 
+
+        private async Task<string?> _firebaseEmployeesReconcileLoginAsync(
+            Employee employee,
+            string email,
+            string password,
+            CancellationToken ct)
+        {
+            try
+            {
+                return await _firebaseEmployees.EnsureLoginAuthBindingAsync(
+                    employee,
+                    email,
+                    password,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Firebase employee identity reconciliation failed during Web login. EmployeeId={EmployeeId}",
+                    employee.EmployeeID);
+                return null;
+            }
+        }
 
         private string? GetCurrentDeviceId()
         {

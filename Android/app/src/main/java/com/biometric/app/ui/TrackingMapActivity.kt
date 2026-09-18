@@ -527,24 +527,16 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun getLocStatus(loc: SignalRManager.LiveLocation): String {
         val timestamp = loc.timestamp ?: return "Offline"
-        val patterns = listOf(
-            "yyyy-MM-dd'T'HH:mm:ss.SSSX",
-            "yyyy-MM-dd'T'HH:mm:ssX",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss"
-        )
-        val parsed = patterns.firstNotNullOfOrNull { pattern ->
-            runCatching {
-                val sdf = SimpleDateFormat(pattern, Locale.US)
-                if (!pattern.endsWith("X")) sdf.timeZone = TimeZone.getTimeZone("UTC")
-                sdf.parse(timestamp)
-            }.getOrNull()
-        } ?: return "Offline"
-        val ageMs = (System.currentTimeMillis() - parsed.time).coerceAtLeast(0L)
-        return when {
-            ageMs <= 60_000L -> "Live"
-            ageMs <= 300_000L -> "Stale"
-            else -> "Offline"
+        return try {
+            val parsed = java.time.Instant.parse(timestamp)
+            val ageMs = (System.currentTimeMillis() - parsed.toEpochMilli()).coerceAtLeast(0L)
+            when {
+                ageMs <= 120_000L -> "Live"
+                ageMs <= 300_000L -> "Stale"
+                else -> "Offline"
+            }
+        } catch (_: Exception) {
+            "Offline"
         }
     }
 

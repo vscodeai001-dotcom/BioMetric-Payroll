@@ -150,8 +150,6 @@
 else
 {
     <AttendanceRefreshListener OnAttendanceChanged="HandleLiveAttendanceChanged"
-                               OnLocationChanged="HandleLiveLocationChanged"
-                               OnSessionStarted="HandleLiveLocationChanged"
                                OnRegularizationChanged="HandleLiveRegularizationChanged" />
     <div class="dashboard-container">
         <div class="welcome-banner d-flex justify-content-between align-items-center">
@@ -499,53 +497,36 @@ else
     private Task? _dashboardTrackingStream;
 
     private Task StartFirebaseDashboardStreamsAsync(string actorUid)
-{
-    _dashboardCts?.Cancel();
-    _dashboardCts?.Dispose();
-
-    _dashboardCts = new CancellationTokenSource();
-
-    var ct = _dashboardCts.Token;
-    var ownerUid = FirebaseDashboardOwnerUid(actorUid);
-
-    _dashboardOwnerStream = Task.Run(async () =>
     {
-        try
-        {
-            await FirebaseDashboardStream(ownerUid, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Expected when the dashboard is disposed or restarted.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Firebase dashboard owner stream ended");
-        }
-    }, ct);
+        _dashboardCts?.Cancel();
+        _dashboardCts?.Dispose();
 
-    _dashboardTrackingStream = Task.Run(async () =>
-    {
-        try
-        {
-            await FirebaseDashboardTrackingStream(ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Expected when the dashboard is disposed or restarted.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Firebase dashboard tracking stream ended");
-        }
-    }, ct);
+        _dashboardCts = new CancellationTokenSource();
+        var ct = _dashboardCts.Token;
+        var ownerUid = FirebaseDashboardOwnerUid(actorUid);
 
-    return Task.CompletedTask;
-}
+        // CRUD/settings changes can refresh the KPI snapshot. GPS changes are
+        // intentionally NOT wired to LoadAdminDashboard. LiveStaffLocationPanel
+        // owns the high-frequency map stream. Reloading all employees, attendance,
+        // payroll and advances for every GPS point creates a request/render loop.
+        _dashboardOwnerStream = Task.Run(async () =>
+        {
+            try
+            {
+                await FirebaseDashboardStream(ownerUid, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Firebase dashboard owner stream ended");
+            }
+        }, ct);
+
+        _dashboardTrackingStream = null;
+        return Task.CompletedTask;
+    }
 
     private string FirebaseDashboardOwnerUid(string actorUid)
         => FirebaseDashboardOwnerService.ResolveOwnerUid(actorUid, "Admin");
@@ -556,24 +537,6 @@ else
         {
             if (IsDashboardPath(path))
                 await InvokeAsync(LoadAdminDashboard);
-        }, ct);
-    }
-
-    private async Task FirebaseDashboardTrackingStream(CancellationToken ct)
-    {
-        await FirebaseDashboardOwnerService.StreamTrackingChangesAsync(async (_, _, token) =>
-        {
-            if (ct.IsCancellationRequested)
-                return;
-
-            // Tracking changes affect the Firebase-backed dashboard snapshot
-            // as well as the map. Reload the aggregate so LiveTrackingCount
-            // and the visible KPI state stay synchronized with Firebase.
-            await InvokeAsync(async () =>
-            {
-                await LoadAdminDashboard();
-                StateHasChanged();
-            });
         }, ct);
     }
 

@@ -41,7 +41,8 @@ public static class FirebaseSsotSchema
             ["YearEndSummary"] = "year_end_summaries",
             ["FnFSettlement"] = "fnf_settlements",
             ["ReportDefinition"] = "report_definitions",
-            ["GeoPunchAudit"] = "geo_punch_audits"
+            ["GeoPunchAudit"] = "geo_punch_audits",
+            ["EmployeePresence"] = "presence"
         };
 
     /// <summary>Firebase owner-scoped path for a table.</summary>

@@ -28,7 +28,7 @@ import com.biometric.app.data.entity.*
         LocalFbpDeclaration::class,
         LocalFbpComponent::class
     ],
-    version = 10,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

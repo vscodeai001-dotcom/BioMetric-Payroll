@@ -39,6 +39,12 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         private readonly AttendanceEventMonitorService
             _attendanceMonitor;
 
+        private readonly FirebaseEmployeeManagementService
+            _firebaseEmployees;
+
+        private readonly FirebaseEmployeePresenceService
+            _firebasePresence;
+
 
         public LogoutModel(
             SignInManager<IdentityUser> signInManager,
@@ -46,7 +52,9 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             IDbContextFactory<AppDbContext> dbFactory,
             GeoLocationService geoLocationService,
             ILogger<LogoutModel> logger,
-            AttendanceEventMonitorService attendanceMonitor)
+            AttendanceEventMonitorService attendanceMonitor,
+            FirebaseEmployeeManagementService firebaseEmployees,
+            FirebaseEmployeePresenceService firebasePresence)
         {
             _signInManager = signInManager;
             _userManager = userManager;
@@ -54,6 +62,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             _geoLocationService = geoLocationService;
             _logger = logger;
             _attendanceMonitor = attendanceMonitor;
+            _firebaseEmployees = firebaseEmployees;
+            _firebasePresence = firebasePresence;
         }
 
 
@@ -97,6 +107,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 if (user != null)
                 {
                     await EndEmployeeGpsSessionAsync(user);
+
+                    await RemoveEmployeePresenceAsync(user);
 
                     await ReleaseEmployeeDeviceLockAsync(
                         user);
@@ -157,6 +169,43 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         // ============================================================
         // END EMPLOYEE GPS SESSION ON REAL LOGOUT
         // ============================================================
+
+        private async Task RemoveEmployeePresenceAsync(IdentityUser user)
+        {
+            try
+            {
+                if (!await _userManager.IsInRoleAsync(user, "Employee"))
+                    return;
+
+                var employee = await _firebaseEmployees.GetEmployeeByEmailAsync(user.Email);
+                if (employee == null)
+                    return;
+
+                var deviceId = User.FindFirstValue(DeviceClaimType);
+                if (string.IsNullOrWhiteSpace(deviceId))
+                    Request.Cookies.TryGetValue(DeviceCookieName, out deviceId);
+
+                if (string.IsNullOrWhiteSpace(deviceId))
+                    return;
+
+                var firebaseUid = (await _firebaseEmployees.GetFirebaseAuthUidByEmailAsync(
+                    user.Email ?? string.Empty,
+                    HttpContext.RequestAborted)) ?? string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    await _firebasePresence.RemoveAsync(
+                        employee.EmployeeID,
+                        deviceId,
+                        firebaseUid,
+                        HttpContext.RequestAborted);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Employee Firebase presence cleanup failed during Web logout. UserId={UserId}", user.Id);
+            }
+        }
 
         private async Task EndEmployeeGpsSessionAsync(
             IdentityUser user)

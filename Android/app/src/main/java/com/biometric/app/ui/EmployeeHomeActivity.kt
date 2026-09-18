@@ -524,7 +524,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             startActivity(intent)
         }
         binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            binding.mapview.post { binding.mapview.invalidate() }
+            _binding?.mapview?.post {
+                _binding?.mapview?.invalidate()
+            }
         }
     }
 
@@ -702,7 +704,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             val lng = t * toPosition.longitude + (1 - t) * startPosition.longitude
 
             marker.position = GeoPoint(lat, lng)
-            binding.mapview.invalidate()
+            _binding?.mapview?.invalidate()
         }
 
         userMarkerAnimator = animator

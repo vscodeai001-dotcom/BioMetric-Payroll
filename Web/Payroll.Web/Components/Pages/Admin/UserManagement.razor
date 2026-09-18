@@ -18,6 +18,7 @@
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject FirebaseRealtimeService FirebaseRealtime
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject Payroll.Web.Services.FirebaseUserManagementService FirebaseUsers
 
 @attribute [Authorize(Roles = "SuperAdmin")]
 
@@ -140,7 +141,16 @@ else
 
                 var linked = isCanonicalSuperAdmin
                     ? null
-                    : allEmployees.FirstOrDefault(e => e.AspNetUserId == u.Id);
+                    : allEmployees.FirstOrDefault(e => e.AspNetUserId == u.Id)
+                      ?? allEmployees.FirstOrDefault(e =>
+                          !string.IsNullOrWhiteSpace(e.Email) &&
+                          string.Equals(e.Email.Trim(), u.Email?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                // User list is an application identity view, not a raw Firebase
+                // Auth dump. Employee users are shown only when linked to a saved
+                // Employee record. Admin and the canonical SuperAdmin remain visible.
+                if (role == "Employee" && linked == null)
+                    continue;
 
                 userList.Add(new UserRoleViewModel
                 {
@@ -149,33 +159,10 @@ else
                     UserName = u.UserName ?? u.Email ?? string.Empty,
                     CurrentRole = role,
                     EmployeeId = linked?.EmployeeID,
-                    EmployeeName = linked?.Name ?? "Unlinked",
+                    EmployeeName = linked?.Name ?? (role == "Admin" ? "Administrator" : "SuperAdmin"),
                 });
             }
 
-            // Existing Firebase Auth users that were manually added in the
-            // Firebase Console do not automatically receive the application
-            // role/employee/owner claims. Synchronize claims for those users
-            // without touching their Firebase password. This is intentionally
-            // best-effort and does not block the User Management screen.
-            foreach (var item in userList.Where(x => !string.IsNullOrWhiteSpace(x.Email)))
-            {
-                try
-                {
-                    await FirebaseRealtime.EnsureFirebaseUserAsync(
-                        item.Email,
-                        string.Empty,
-                        item.CurrentRole,
-                        item.EmployeeId ?? 0,
-                        item.EmployeeName,
-                        existingUid: null,
-                        updatePasswordIfExisting: false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Firebase claim synchronization skipped for {Email}", item.Email);
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -191,59 +178,42 @@ else
     private async Task CreateNewUser()
     {
         isSaving = true;
-        await using var dbContext = await DbFactory.CreateDbContextAsync();
-
         try
         {
-            var newUser = new IdentityUser { Email = newUserForm.Email, UserName = newUserForm.Email };
-            var result = await UserManager.CreateAsync(newUser, newUserForm.Password);
-
-            if (!result.Succeeded)
+            if (newUserForm.InitialRole.Equals("Employee", StringComparison.OrdinalIgnoreCase) &&
+                !newUserForm.EmployeeId.HasValue)
             {
-                toastService.ShowError(string.Join(", ", result.Errors.Select(e => e.Description)));
+                toastService.ShowError("Select a saved Employee before creating an Employee account.");
                 return;
             }
 
-            await UserManager.AddToRoleAsync(newUser, newUserForm.InitialRole);
-
-            var linkedEmployeeId = 0;
-            if (newUserForm.EmployeeId.HasValue)
-            {
-                var emp = await dbContext.Employees.FindAsync(newUserForm.EmployeeId.Value);
-                if (emp != null)
-                {
-                    emp.Email = newUser.Email;
-                    emp.AspNetUserId = newUser.Id;
-                    linkedEmployeeId = emp.EmployeeID;
-                    dbContext.Update(emp);
-                    await dbContext.SaveChangesAsync();
-                }
-            }
-
-            // Provision the same account in Firebase so the native Android app
-            // can authenticate directly without Payroll.Web being online.
-            var firebaseUid = await FirebaseRealtime.EnsureFirebaseUserAsync(
-                newUser.Email ?? newUser.UserName ?? string.Empty,
+            var result = await FirebaseUsers.CreateAsync(
+                newUserForm.Email,
                 newUserForm.Password,
                 newUserForm.InitialRole,
-                linkedEmployeeId,
-                newUser.UserName);
+                newUserForm.EmployeeId ?? 0,
+                newUserForm.Email,
+                CancellationToken.None);
 
-            if (string.IsNullOrWhiteSpace(firebaseUid))
+            if (!result.Success)
             {
-                // Local Identity creation remains intact, but report the
-                // Firebase provisioning failure instead of silently claiming
-                // that the account is ready for standalone Android login.
-                toastService.ShowWarning("User created locally, but Firebase account provisioning failed.");
+                toastService.ShowError(result.Message);
+                return;
             }
 
             await AttendanceRefresh.NotifyGlobalRefreshAsync("USER_CREATED");
-            toastService.ShowSuccess("User created.");
+            toastService.ShowSuccess("User created and synchronized.");
             newUserForm = new();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating synchronized user.");
+            toastService.ShowError(ex.Message);
         }
         finally
         {
-            await LoadUsersAndRoles(dbContext);
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await LoadUsersAndRoles(db);
             isSaving = false;
         }
     }

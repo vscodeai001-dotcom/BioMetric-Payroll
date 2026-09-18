@@ -51,6 +51,11 @@ public sealed class FirebaseUserManagementService
         if (role == "Admin" && employeeId > 0)
             return Fail("Admin accounts cannot be linked to an Employee record.");
 
+        // Employee accounts must always correspond to a saved Employee master
+        // record. Do not create empty/unlinked Employee users.
+        if (role == "Employee" && employeeId <= 0)
+            return Fail("Employee accounts must be linked to a saved Employee record.");
+
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var existingIdentity = await _users.FindByEmailAsync(email);
         if (existingIdentity != null)

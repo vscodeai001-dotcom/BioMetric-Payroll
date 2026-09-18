@@ -298,6 +298,82 @@ public sealed class FirebaseEmployeeManagementService
     }
 
 
+    public async Task<string?> GetFirebaseAuthUidByEmailAsync(
+        string email,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return null;
+
+        var auth = await _firebase.GetFirebaseAuthAsync(ct);
+        if (auth == null)
+            return null;
+
+        try
+        {
+            var user = await auth.GetUserByEmailAsync(email.Trim(), ct);
+            return user.Uid;
+        }
+        catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
+        {
+            return null;
+        }
+    }
+
+    public async Task<string?> EnsureLoginAuthBindingAsync(
+        Employee employee,
+        string email,
+        string password,
+        CancellationToken ct = default)
+    {
+        if (employee.EmployeeID <= 0 || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            return null;
+
+        // Reuse the existing provisioning path so Web and Android share the
+        // same Firebase Auth UID, employee_id, role and owner_uid contract.
+        var result = await ReconcileAuthAsync(employee, ct);
+        if (!result.Success)
+            return null;
+
+        var auth = await _firebase.GetFirebaseAuthAsync(ct);
+        if (auth == null)
+            return null;
+
+        try
+        {
+            var user = await auth.GetUserByEmailAsync(email.Trim(), ct);
+            await auth.UpdateUserAsync(
+                new UserRecordArgs
+                {
+                    Uid = user.Uid,
+                    Password = password,
+                    DisplayName = employee.Name,
+                    Disabled = employee.IsDeleted
+                },
+                ct);
+
+            await auth.SetCustomUserClaimsAsync(
+                user.Uid,
+                new Dictionary<string, object>
+                {
+                    ["role"] = "Employee",
+                    ["employee_id"] = employee.EmployeeID,
+                    ["owner_uid"] = OwnerUid
+                },
+                ct);
+
+            return user.Uid;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Unable to synchronize Firebase Auth password/claims during Web login for EmployeeId={EmployeeId}",
+                employee.EmployeeID);
+            return null;
+        }
+    }
+
     public async Task<(bool Success, string Message)> ReconcileAuthAsync(
         Employee employee,
         CancellationToken ct = default)

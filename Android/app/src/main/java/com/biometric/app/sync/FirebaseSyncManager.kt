@@ -72,16 +72,8 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { connectedRef.removeEventListener(listener) }
     }
 
-    fun getOwnerUid(): String? {
-        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let { return it }
-
-        // This installation is a single-owner payroll workspace. Firebase Auth
-        // users may be created manually before their custom owner_uid claim is
-        // refreshed. Use the canonical owner namespace as the data target;
-        // Realtime Database rules still decide whether the authenticated user
-        // is authorized to read/write it.
-        return if (auth.currentUser != null) "biometricpayroll" else null
-    }
+    fun getOwnerUid(): String? =
+        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
 
     fun getOwnerRef(): DatabaseReference? {
         val uid = getOwnerUid() ?: return null
@@ -140,7 +132,6 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("leave_requests").keepSynced(true)
         ref.child("resignation_requests").keepSynced(true)
         ref.child("salary_snapshots").keepSynced(true)
-        ref.child("audit_logs").keepSynced(true)
         ref.child("daily_summaries").keepSynced(true)
         if (sessionStore.userRole().trim().uppercase() in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")) {
             ref.child("shift_schedules").keepSynced(true)
@@ -181,10 +172,20 @@ class FirebaseSyncManager @Inject constructor(
                     for (childSnapshot in snapshot.children) {
                         try {
                             if (childSnapshot.hasChildren()) {
-                                childSnapshot.getValue(T::class.java)?.let { list.add(it) }
+                                if (T::class.java == com.biometric.app.data.entity.AuditLog::class.java) {
+                                    @Suppress("UNCHECKED_CAST")
+                                    decodeAuditLog(childSnapshot)?.let { list.add(it as T) }
+                                } else {
+                                    childSnapshot.getValue(T::class.java)?.let { list.add(it) }
+                                }
                             }
                         } catch (e: Exception) {
-                            Log.e("FirebaseSyncManager", "Failed to convert to ${T::class.java.name} in table '$table'", e)
+                            // One legacy/malformed row must never flood logcat or
+                            // abort the whole collection. Continue with valid rows.
+                            Log.w(
+                                "FirebaseSyncManager",
+                                "Skipping malformed row in '$table' key=${childSnapshot.key}: ${e.message}"
+                            )
                         }
                     }
                     trySend(list)
@@ -197,6 +198,37 @@ class FirebaseSyncManager @Inject constructor(
         }
         ref.addValueEventListener(listener)
         awaitClose { ref.removeEventListener(listener) }
+    }
+
+    fun decodeAuditLog(snapshot: DataSnapshot): com.biometric.app.data.entity.AuditLog? {
+        fun string(name: String): String? {
+            val v = snapshot.child(name).value ?: return null
+            return when (v) {
+                is String, is Number, is Boolean -> v.toString()
+                else -> null
+            }
+        }
+        fun long(name: String): Long {
+            val v = snapshot.child(name).value
+            return when (v) {
+                is Number -> v.toLong()
+                else -> v?.toString()?.toLongOrNull() ?: 0L
+            }
+        }
+        return com.biometric.app.data.entity.AuditLog(
+            logId = string("logId") ?: string("LogID") ?: snapshot.key.orEmpty(),
+            shopId = string("shopId") ?: string("ShopId").orEmpty(),
+            action = string("action") ?: string("Action").orEmpty(),
+            module = string("module") ?: string("Module").orEmpty(),
+            oldValue = string("oldValue") ?: string("OldValue"),
+            newValue = string("newValue") ?: string("NewValue"),
+            userDisplayName = string("userDisplayName") ?: string("UserDisplayName").orEmpty(),
+            userId = string("userId") ?: string("UserId").orEmpty(),
+            actorRole = string("actorRole") ?: string("ActorRole").orEmpty(),
+            ownerUid = string("ownerUid") ?: string("OwnerUid").orEmpty(),
+            targetId = string("targetId") ?: string("TargetId"),
+            timestamp = long("timestamp").let { if (it != 0L) it else long("Timestamp") }
+        )
     }
 
     inline fun <reified T : Any> getQueryFlow(query: Query): Flow<List<T>> = callbackFlow {

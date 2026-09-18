@@ -64,6 +64,15 @@ class BiometricApplication : Application(), Configuration.Provider {
             override fun onActivityDestroyed(activity: Activity) = Unit
         })
 
+        // Firebase disk persistence MUST be configured before any FirebaseDatabase
+        // reference/listener is touched. Hilt/realtime coordinators can touch
+        // Firebase very early during startup, so configure it before starting them.
+        runCatching {
+            val firebaseDatabase = FirebaseDatabase.getInstance()
+            firebaseDatabase.setPersistenceEnabled(true)
+            firebaseDatabase.setPersistenceCacheSizeBytes(100 * 1024 * 1024)
+        }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
+
         // Start only when a persisted authenticated session exists. Login/logout
         // continue to own authentication state; this is realtime infrastructure only.
         if (sessionStore.isLoggedIn()) {
@@ -71,13 +80,6 @@ class BiometricApplication : Application(), Configuration.Provider {
             runCatching { firebaseReconnectCoordinator.start() }
                 .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
         }
-
-        // Keep application startup resilient. A failure in an optional background
-        // subsystem must never crash the app before the first screen is shown.
-        runCatching {
-            FirebaseDatabase.getInstance().setPersistenceEnabled(true)
-            FirebaseDatabase.getInstance().setPersistenceCacheSizeBytes(100 * 1024 * 1024)
-        }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
 
         // OSMDroid must be initialized BEFORE any Activity creates a MapView.
         // The previous asynchronous initialization could race MainActivity and
