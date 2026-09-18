@@ -1,5 +1,6 @@
 package com.biometric.app.ui
 
+import android.animation.ValueAnimator
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -15,6 +16,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -72,6 +74,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val markers = mutableMapOf<Int, Marker>()
     private val roadLines = mutableMapOf<Int, Polyline>()
     private val roadCasings = mutableMapOf<Int, Polyline>()
+    private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val roadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
@@ -551,40 +554,60 @@ class TrackingMapActivity : MotionBaseActivity() {
     }
 
     private fun animateMarker(marker: Marker, toPosition: GeoPoint, empId: Int? = null) {
+        if (empId == null) {
+            marker.position = toPosition
+            return
+        }
+
+        // Cancel existing animation for this staff to prevent concurrent map invalidations
+        markerAnimations[empId]?.cancel()
+
         val startPosition = marker.position
         if (startPosition.latitude == 0.0) {
             marker.position = toPosition
             return
         }
-        val startTime = SystemClock.uptimeMillis()
-        val duration = 1500L
-        val handler = Handler(Looper.getMainLooper())
 
-        handler.post(object : Runnable {
-            override fun run() {
-                val elapsed = SystemClock.uptimeMillis() - startTime
-                val t = (elapsed.toFloat() / duration).coerceAtMost(1.0f)
+        val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1500L
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { animation ->
+                if (_binding == null) {
+                    animation.cancel()
+                    return@addUpdateListener
+                }
+
+                val t = animation.animatedValue as Float
                 val lat = t * toPosition.latitude + (1 - t) * startPosition.latitude
                 val lng = t * toPosition.longitude + (1 - t) * startPosition.longitude
                 val point = GeoPoint(lat, lng)
-                
+
                 marker.position = point
-                
-                empId?.let { id ->
-                    roadLines[id]?.let { l ->
+
+                // Safely update road lines during animation
+                runCatching {
+                    roadLines[empId]?.let { l ->
                         val pts = l.actualPoints.toMutableList()
-                        if (pts.size >= 2) { pts[0] = point; l.setPoints(pts) }
+                        if (pts.size >= 2) {
+                            pts[0] = point
+                            l.setPoints(pts)
+                        }
                     }
-                    roadCasings[id]?.let { c ->
+                    roadCasings[empId]?.let { c ->
                         val pts = c.actualPoints.toMutableList()
-                        if (pts.size >= 2) { pts[0] = point; c.setPoints(pts) }
+                        if (pts.size >= 2) {
+                            pts[0] = point
+                            c.setPoints(pts)
+                        }
                     }
                 }
                 
                 binding.mapview.invalidate()
-                if (t < 1.0) handler.postDelayed(this, 16)
             }
-        })
+        }
+
+        markerAnimations[empId] = animator
+        animator.start()
     }
 
     private fun getInitials(name: String): String {
@@ -641,6 +664,8 @@ class TrackingMapActivity : MotionBaseActivity() {
         officeSettingsJob?.cancel()
         roadRouteJobs.values.forEach { it.cancel() }
         roadRouteJobs.clear()
+        markerAnimations.values.forEach { it.cancel() }
+        markerAnimations.clear()
         iconCache.clear()
         
         _binding?.mapview?.onDetach()

@@ -1,0 +1,10 @@
+1016 Theme / User Preference Final Parity
+
+STATUS: IMPLEMENTED
+
+Firebase RTDB user_profiles/{firebaseUid}/theme is the cross-device source of truth.
+Android ThemePreferenceSync uses Firebase directly and no longer consumes the legacy MobileApiService theme endpoints.
+Web ThemeService uses Firebase, with one-time SQL fallback/import for legacy users.
+Existing UI/layout/business calculations remain unchanged.
+
+Full Gradle/.NET build was not verified because the environment cannot resolve configured external build dependencies.

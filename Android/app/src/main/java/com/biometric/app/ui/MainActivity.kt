@@ -132,7 +132,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var statusFilter = "All"
     private var adminMapAutoCentered = false
         private var commandCenterMapReady = false
-private var adminInfoWindow: InfoWindow? = null
+    private var adminInfoWindow: InfoWindow? = null
+    private var activeHubName: String = "DASHBOARD"
     private var adminMapLayerIndex = 0
     private var adminZoneVisible = true
     private val approvalFilter = MutableStateFlow("All")
@@ -177,12 +178,12 @@ private var adminInfoWindow: InfoWindow? = null
 
         lifecycleScope.launch {
             // High-priority UI components first
-            delay(300)
+            delay(500) // Increased stagger for better layout settling
             viewModel.startRealtimeSync()
             applyRolePermissions()
 
             // Map and Search (Heavier) next
-            delay(800)
+            delay(1200) // Increased to allow bulk sync to settle before heavy Map setup
             setupRealTimeSync()
             setupAdminMap()
             setupAdminFilters()
@@ -190,7 +191,7 @@ private var adminInfoWindow: InfoWindow? = null
             setupApprovalFilters()
 
             // Firebase realtime source: listeners remain active without manual refresh.
-            delay(1200)
+            delay(2000) // Increased delay for non-critical refresh
             viewModel.triggerRefresh()
 
             // Low-priority animations last
@@ -221,6 +222,7 @@ private var adminInfoWindow: InfoWindow? = null
     }
 
     private fun showHub(hub: String): Boolean {
+        activeHubName = hub
         binding.hubDashboard.visibility = if (hub == "DASHBOARD") View.VISIBLE else View.GONE
         binding.hubWorkforce.visibility = if (hub == "WORKFORCE") View.VISIBLE else View.GONE
         binding.hubApprovals.visibility = if (hub == "APPROVALS") View.VISIBLE else View.GONE
@@ -645,6 +647,8 @@ private var adminInfoWindow: InfoWindow? = null
             val employeeData = sharedViewModel.allEmployees.value
             val firebaseEmployeeData = signalR.ownerEmployees.value
 
+            val isTrackingHubActive = activeHubName == "TRACKING"
+
             // Firebase can repeat the same parent snapshot. Avoid rebuilding
             // marker windows/routes and invalidating both OSMDroid surfaces when
             // the visible state has not changed.
@@ -662,20 +666,10 @@ private var adminInfoWindow: InfoWindow? = null
             }
             if (renderSignature == lastRenderedLiveSignature) return@let
             lastRenderedLiveSignature = renderSignature
-            val officeForCount = officeMarker?.position
             val geoPoints = mutableListOf<GeoPoint>()
             val currentIds = locations.map { it.employeeId }
-            val outsideCount = if (officeForCount != null && currentGeofenceRadiusMeters > 0) {
-                locations.count { loc ->
-                    distanceBetween(
-                        officeForCount,
-                        GeoPoint(loc.latitude, loc.longitude)
-                    ) > currentGeofenceRadiusMeters.toDouble()
-                }
-            } else {
-                0
-            }
 
+            // Cleanup removed markers
             markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
                 dashboardMap.overlays.remove(markers[id]); markers.remove(id)
                 dashboardMap.overlays.remove(roadLines[id]); roadLines.remove(id)
@@ -683,6 +677,7 @@ private var adminInfoWindow: InfoWindow? = null
             }
             markers2.keys.filter { !currentIds.contains(it) }.forEach { id ->
                 commandMap.overlays.remove(markers2[id]); markers2.remove(id)
+                roadLines2.remove(id); roadCasings2.remove(id)
             }
 
             locations.forEach { loc ->
@@ -690,20 +685,12 @@ private var adminInfoWindow: InfoWindow? = null
                 val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
                 val firebaseEmp = firebaseEmployeeData[loc.employeeId]
 
-                // Firebase owner employee master is the fallback when the Room
-                // cache is rebuilding. This keeps a real logged-in employee
-                // visible instead of losing the marker because Room was recreated
-                // or temporarily unavailable.
-                if (emp == null && firebaseEmp == null) {
-                    Log.w(
-                        "MainActivity",
-                        "Ignoring live GPS for unlinked employeeId=${loc.employeeId}; no owner-scoped employee master record"
-                    )
-                    return@forEach
-                }
+                if (emp == null && firebaseEmp == null) return@forEach
+                
                 val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
                 val status = getLocStatus(loc)
                 val isFilteredOut = statusFilter != "All" && statusFilter != status
+                
                 if (isFilteredOut) {
                     markers[loc.employeeId]?.alpha = 0f; markers2[loc.employeeId]?.alpha = 0f
                     roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
@@ -715,31 +702,13 @@ private var adminInfoWindow: InfoWindow? = null
                 val m1 = markers.getOrPut(loc.employeeId) {
                     Marker(dashboardMap).apply {
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { marker, _ ->
-                            marker.showInfoWindow()
-                            true
-                        }
                         dashboardMap.overlays.add(this)
                     }
                 }
-                val m2 = markers2.getOrPut(loc.employeeId) {
-                    Marker(commandMap).apply {
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { marker, _ ->
-                            marker.showInfoWindow()
-                            true
-                        }
-                        commandMap.overlays.add(this)
-                    }
-                }
-
-                m1.alpha = 1f; m2.alpha = 1f; m1.title = employeeName; m2.title = employeeName
-
-                // Apply each GPS fix once. A 1.2-second ValueAnimator on every
-                // update was continuously invalidating two OSMDroid maps and
-                // contributed to the MainActivity ANR seen in logcat.
+                
+                m1.alpha = 1f
+                m1.title = employeeName
                 m1.position = point
-                m2.position = point
 
                 val office = officeMarker?.position
                 val liveDistanceMeters = if (office != null) {
@@ -755,62 +724,42 @@ private var adminInfoWindow: InfoWindow? = null
                 val icon = iconCache.getOrPut(cacheKey) {
                     createPremiumMarkerIcon(initials, withinCurrentRadius, status)
                 }
-                m1.icon = icon; m2.icon = icon
-                val snippet = "Status: $status | Speed: ${formatSpeed(loc.speedMps)}\n" +
-                    "Dist: ${formatDistance(liveDistanceMeters)} • Radius: ${currentGeofenceRadiusMeters}m • " +
-                    if (withinCurrentRadius) "Within range" else "Outside range"
-                m1.snippet = snippet; m2.snippet = snippet
-                val info1 = createAdminMarkerInfoWindow(dashboardMap, loc, employeeName, status)
-                val info2 = createAdminMarkerInfoWindow(commandMap, loc, employeeName, status)
-                m1.setInfoWindow(info1)
-                m2.setInfoWindow(info2)
+                m1.icon = icon
+                
+                m1.snippet = "Status: $status | Dist: ${formatDistance(liveDistanceMeters)}\nRadius: ${currentGeofenceRadiusMeters}m"
+
+                // ONLY update the second map if the tracking hub is actually active.
+                // This significantly reduces graphics pressure and layout contention.
+                if (isTrackingHubActive) {
+                    val m2 = markers2.getOrPut(loc.employeeId) {
+                        Marker(commandMap).apply {
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            commandMap.overlays.add(this)
+                        }
+                    }
+                    m2.alpha = 1f
+                    m2.title = employeeName
+                    m2.position = point
+                    m2.icon = icon
+                    m2.snippet = m1.snippet
+                }
+
                 updateAdminRoadRoute(loc.employeeId, point)
                 geoPoints.add(point)
             }
-            // Initial camera fit only. Never recenter on every GPS fix, otherwise
-            // the admin cannot pan/inspect the map while an employee is moving.
+            
+            // Initial camera fit only.
             if (!adminMapAutoCentered && geoPoints.isNotEmpty()) {
-                if (geoPoints.size == 1) {
-                    dashboardMap.controller.setCenter(geoPoints.first())
-                    commandMap.controller.setCenter(geoPoints.first())
-                    dashboardMap.controller.setZoom(16.0)
-                    commandMap.controller.setZoom(16.0)
-                } else {
-                    createBoundingBox(geoPoints)?.let { box ->
-                        dashboardMap.zoomToBoundingBox(box, true, 100)
-                        commandMap.zoomToBoundingBox(box, true, 100)
-                    }
+                createBoundingBox(geoPoints)?.let { box ->
+                    dashboardMap.zoomToBoundingBox(box, true, 100)
+                    if (isTrackingHubActive) commandMap.zoomToBoundingBox(box, true, 100)
                 }
                 adminMapAutoCentered = true
             }
 
             b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, locations.count { getLocStatus(it) == "Live" })
-            dashboardMap.invalidate(); commandMap.invalidate()
-        }
-    }
-
-    private fun createAdminMarkerInfoWindow(
-        mapView: org.osmdroid.views.MapView,
-        loc: SignalRManager.LiveLocation,
-        employeeName: String,
-        status: String
-    ): InfoWindow {
-        return object : InfoWindow(android.R.layout.simple_list_item_2, mapView) {
-            override fun onOpen(item: Any?) {
-                val root = mView as? android.widget.TextView ?: return
-                root.text = "$employeeName\n$status  •  ${formatSpeed(loc.speedMps)}\n" +
-                        "Distance: ${formatDistance(loc.distanceMeters)}  •  Accuracy: ±${loc.accuracyMeters.toInt()} m\n" +
-                        "Radius: ${loc.allowedRadiusMeters} m  •  ${if (loc.isWithinAllowedRadius) "Within range" else "Outside range"}"
-                root.setPadding(24, 16, 24, 16)
-                root.setTextSize(12f)
-                root.setTextColor(Color.DKGRAY)
-                root.background = GradientDrawable().apply {
-                    cornerRadius = 28f
-                    setColor(Color.WHITE)
-                    setStroke(2, 0x33000000)
-                }
-            }
-            override fun onClose() {}
+            dashboardMap.invalidate()
+            if (isTrackingHubActive) commandMap.invalidate()
         }
     }
 

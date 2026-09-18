@@ -1,0 +1,29 @@
+Entity,FirebaseTable,WebCurrentBoundary,AndroidCurrentBoundary,TargetBoundary,Realtime,Offline,MigrationStatus
+Employee,employees,EF/SQLite plus Firebase provisioning,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+Shop,shops,EF/SQLite plus Firebase,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+AttendanceLog,attendance,EF/SQLite plus Firebase attendance services,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+AttendancePunch,attendance_punches,EF/SQLite plus Firebase,Firebase+Room,Firebase,Firebase listeners,Room queue,FOUNDATION
+SalaryAdvance,advance_payments,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+EmployeeHistory,employee_history,EF/SQLite plus Firebase,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+CompanyHoliday,shop_closed_days,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+AttendanceRegularization,regularizations,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+LeaveRequest,leave_requests,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+ResignationRequest,resignation_requests,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+SalarySnapshot,salary_snapshots,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+AuditLog,audit_logs,EF/SQLite plus Firebase,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+DailySummary,daily_summaries,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+ShiftSchedule,shift_schedules,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+PayrollHistory,payroll_history,EF/SQLite plus Firebase,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+PayrollPreview,payroll_previews,Firebase service/Firebase,Firebase,Firebase,Firebase listeners,Session/cache,FOUNDATION
+PayrollFinalization,payroll_finalization,Firebase service/Firebase,Firebase,Firebase,Firebase listeners,Session/cache,FOUNDATION
+BonusRecord,bonus_records,EF/SQLite plus Firebase service,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+TaxDeclaration,tax_declarations,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+FBPComponent,fbp_components,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+FlexibleBenefitDeclaration,fbp_declarations,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+FeatureSettings,feature_settings,EF/SQLite,Firebase,Firebase,Firebase listeners,Local cache,FOUNDATION
+CompanySetting,company_settings,EF/SQLite,Firebase,Firebase,Firebase listeners,Local cache,FOUNDATION
+ProfessionalTaxSlab,professional_tax_slabs,EF/SQLite,No dedicated Room entity yet,Firebase,Firebase listeners,Pending,FOUNDATION
+YearEndSummary,year_end_summaries,EF/SQLite,Firebase+Room,Firebase,Firebase listeners,Room cache,FOUNDATION
+FnFSettlement,fnf_settlements,EF/SQLite,No dedicated Room entity yet,Firebase,Firebase listeners,Pending,FOUNDATION
+ReportDefinition,report_definitions,EF/SQLite,No dedicated Room entity yet,Firebase,Firebase listeners,Pending,FOUNDATION
+GeoPunchAudit,geo_punch_audits,EF/SQLite,Firebase-only path pending Room parity,Firebase,Firebase listeners,Pending,FOUNDATION

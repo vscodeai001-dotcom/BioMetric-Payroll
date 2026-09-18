@@ -21,6 +21,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.FlowPreview
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.milliseconds
 import java.io.Serializable
@@ -201,6 +202,7 @@ class MainViewModel @Inject constructor(
             })
     }
 
+    @OptIn(FlowPreview::class)
     private fun recalculateWorkforce(shops: List<Shop>, period: String, date: Long, endDate: Long?) {
         workforceRecalcJob?.cancel()
         
@@ -290,7 +292,7 @@ class MainViewModel @Inject constructor(
                         recentAdvances = recentAdvancesList
                     )
                     
-                    // Critical: Update states and hide loader immediately upon first successful calculation
+                    // Critical: Update stats and hide loader immediately upon first successful calculation
                     _globalStats.value = stats
                     saveStatsCache(stats)
 
@@ -311,7 +313,8 @@ class MainViewModel @Inject constructor(
                             pendingRegularizations = pendingRegs
                         )
                     }
-                }.collect { states ->
+                }.debounce(1200.milliseconds) // Throttle UI updates during bulk Firebase sync
+                .collect { states ->
                     _shopsWorkforceState.value = states
                     _isLoading.value = false
                 }

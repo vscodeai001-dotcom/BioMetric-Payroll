@@ -117,38 +117,15 @@ class FirebaseSyncManager @Inject constructor(
         }
 
         val ref = database.child("owners").child(ownerUid)
-        ref.child("employees").keepSynced(true)
         ref.child("shops").keepSynced(true)
-        ref.child("attendance").keepSynced(true)
-        ref.child("attendance_punches").keepSynced(true)
-        ref.child("advance_payments").keepSynced(true)
-        ref.child("employee_history").keepSynced(true)
-        ref.child("shop_closed_days").keepSynced(true)
-        ref.child("regularizations").keepSynced(true)
-        ref.child("leave_requests").keepSynced(true)
-        ref.child("resignation_requests").keepSynced(true)
-        ref.child("salary_snapshots").keepSynced(true)
-        ref.child("daily_summaries").keepSynced(true)
-        if (sessionStore.userRole().trim().uppercase() in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")) {
-            ref.child("shift_schedules").keepSynced(true)
-        } else {
-            val employeeId = sessionStore.employeeId()
-            if (employeeId > 0) {
-                ref.child("shift_schedules").orderByChild("employeeId").equalTo(employeeId.toDouble()).keepSynced(true)
-            }
-        }
-        ref.child("payroll_history").keepSynced(true)
-        if (sessionStore.userRole().trim().uppercase() in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")) {
-            ref.child("payroll_previews").keepSynced(true)
-            ref.child("payroll_finalization").keepSynced(true)
-            ref.child("year_end_summaries").keepSynced(true)
-        }
-        ref.child("bonus_records").keepSynced(true)
-        ref.child("tax_declarations").keepSynced(true)
-        ref.child("fbp_components").keepSynced(true)
-        ref.child("fbp_declarations").keepSynced(true)
         ref.child("feature_settings").keepSynced(true)
         ref.child("company_settings").keepSynced(true)
+        
+        // Transactional and large tables (Attendance, Punches, Audit Logs, etc.) 
+        // are NO LONGER kept synced in the background. This prevents the "data storm" 
+        // during Admin login that triggers system restrictions. These tables 
+        // will now only sync when an active listener is attached.
+        
         initializedOwnerUid = ownerUid
     }
 

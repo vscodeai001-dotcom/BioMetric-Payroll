@@ -1,0 +1,173 @@
+{
+  "schemaVersion": "1100-A.1",
+  "firebase": {
+    "root": "owners/{ownerUid}",
+    "defaultOwnerUid": "biometricpayroll",
+    "authoritative": true,
+    "database": "Realtime Database"
+  },
+  "rules": {
+    "sharedDataPath": "owners/{ownerUid}/{table}/{recordId}",
+    "webWrite": "Firebase only after authorization",
+    "androidWrite": "Firebase only after authorization",
+    "localStores": "cache/offline only"
+  },
+  "tables": [
+    {
+      "entity": "Employee",
+      "firebaseTable": "employees",
+      "category": "master"
+    },
+    {
+      "entity": "Shop",
+      "firebaseTable": "shops",
+      "category": "master"
+    },
+    {
+      "entity": "AttendanceLog",
+      "firebaseTable": "attendance",
+      "category": "transaction"
+    },
+    {
+      "entity": "AttendancePunch",
+      "firebaseTable": "attendance_punches",
+      "category": "transaction"
+    },
+    {
+      "entity": "SalaryAdvance",
+      "firebaseTable": "advance_payments",
+      "category": "transaction"
+    },
+    {
+      "entity": "EmployeeHistory",
+      "firebaseTable": "employee_history",
+      "category": "history"
+    },
+    {
+      "entity": "CompanyHoliday",
+      "firebaseTable": "shop_closed_days",
+      "category": "settings"
+    },
+    {
+      "entity": "AttendanceRegularization",
+      "firebaseTable": "regularizations",
+      "category": "workflow"
+    },
+    {
+      "entity": "LeaveRequest",
+      "firebaseTable": "leave_requests",
+      "category": "workflow"
+    },
+    {
+      "entity": "ResignationRequest",
+      "firebaseTable": "resignation_requests",
+      "category": "workflow"
+    },
+    {
+      "entity": "SalarySnapshot",
+      "firebaseTable": "salary_snapshots",
+      "category": "payroll"
+    },
+    {
+      "entity": "AuditLog",
+      "firebaseTable": "audit_logs",
+      "category": "audit"
+    },
+    {
+      "entity": "DailySummary",
+      "firebaseTable": "daily_summaries",
+      "category": "summary"
+    },
+    {
+      "entity": "ShiftSchedule",
+      "firebaseTable": "shift_schedules",
+      "category": "schedule"
+    },
+    {
+      "entity": "PayrollHistory",
+      "firebaseTable": "payroll_history",
+      "category": "payroll"
+    },
+    {
+      "entity": "PayrollPreview",
+      "firebaseTable": "payroll_previews",
+      "category": "calculation_output"
+    },
+    {
+      "entity": "PayrollFinalization",
+      "firebaseTable": "payroll_finalization",
+      "category": "workflow"
+    },
+    {
+      "entity": "BonusRecord",
+      "firebaseTable": "bonus_records",
+      "category": "payroll"
+    },
+    {
+      "entity": "TaxDeclaration",
+      "firebaseTable": "tax_declarations",
+      "category": "statutory"
+    },
+    {
+      "entity": "FBPComponent",
+      "firebaseTable": "fbp_components",
+      "category": "statutory"
+    },
+    {
+      "entity": "FlexibleBenefitDeclaration",
+      "firebaseTable": "fbp_declarations",
+      "category": "statutory"
+    },
+    {
+      "entity": "FeatureSettings",
+      "firebaseTable": "feature_settings",
+      "category": "settings"
+    },
+    {
+      "entity": "CompanySetting",
+      "firebaseTable": "company_settings",
+      "category": "settings"
+    },
+    {
+      "entity": "ProfessionalTaxSlab",
+      "firebaseTable": "professional_tax_slabs",
+      "category": "statutory"
+    },
+    {
+      "entity": "YearEndSummary",
+      "firebaseTable": "year_end_summaries",
+      "category": "summary"
+    },
+    {
+      "entity": "FnFSettlement",
+      "firebaseTable": "fnf_settlements",
+      "category": "payroll"
+    },
+    {
+      "entity": "ReportDefinition",
+      "firebaseTable": "report_definitions",
+      "category": "reporting"
+    },
+    {
+      "entity": "GeoPunchAudit",
+      "firebaseTable": "geo_punch_audits",
+      "category": "audit"
+    }
+  ],
+  "controlTrees": [
+    "user_profiles",
+    "sessions",
+    "tracking",
+    "tracking_scopes",
+    "geofences",
+    "recycle_bin",
+    "owner_events",
+    "mobile_auth_events"
+  ],
+  "nonGoals": [
+    "No UI/layout changes",
+    "No payroll formula changes",
+    "No destructive data cleanup",
+    "No removal of existing functionality in 1100-A"
+  ]
+}

@@ -1,0 +1,8 @@
+1100-E Employee-domain consumer migration
+
+Firebase SSOT employee reads migrated across Web employee-facing and admin read consumers.
+Added FirebaseEmployeeManagementService.GetEmployeeByEmailAsync().
+DashboardAnalyticsService now uses Firebase employee projection for employee names, active count, and leave balance.
+Existing SQL mutation/calculation boundaries intentionally retained.
+
+Build status: NOT RUN. dotnet executable is unavailable in the execution environment.

@@ -1,5 +1,6 @@
 package com.biometric.app.sync
 
+import android.util.Log
 import com.biometric.app.data.dao.LocalAdvancePaymentDao
 import com.biometric.app.data.dao.LocalAttendanceDao
 import com.biometric.app.data.dao.LocalAttendancePunchDao
@@ -22,12 +23,10 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -66,6 +65,7 @@ class FirebaseRoomHydrator @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
+    private val writeMutex = Mutex()
     private val listeners = mutableListOf<Pair<Query, ChildEventListener>>()
     private val valueListeners = mutableListOf<Pair<Query, ValueEventListener>>()
     @Volatile private var activeOwnerUid: String? = null
@@ -150,44 +150,50 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildRemoved(snapshot: DataSnapshot) {
                 val key = snapshot.key ?: return
                 scope.launch {
-                    runCatching { onDelete(key) }
-                        .onFailure { error ->
-                            android.util.Log.e("FirebaseRoomHydrator", "Failed to delete Room record $table/$key", error)
-                        }
+                    writeMutex.withLock {
+                        runCatching { onDelete(key) }
+                            .onFailure { error ->
+                                Log.e("FirebaseRoomHydrator", "Failed to delete Room record $table/$key", error)
+                            }
+                    }
                 }
             }
 
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
 
             override fun onCancelled(error: DatabaseError) {
-                android.util.Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table", error.toException())
+                Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table", error.toException())
             }
         }
         ref.addChildEventListener(listener)
         // Reconcile the existing Room cache against the authoritative Firebase
-        // snapshot once after listener registration. ChildEventListener delivers
-        // live adds/changes/removes, but it cannot tell us which stale Room rows
-        // are absent from Firebase. Only rows already marked as synced are
-        // eligible for cleanup. Unsynced local writes are preserved so an
-        // offline write is never silently discarded.
+        // snapshot once after listener registration. Wait briefly to allow 
+        // initial child-added events to settle.
         ref.addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 scope.launch {
-                    runCatching {
-                        val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
-                        val staleSynced = existing().asSequence()
-                            .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
-                            .map { it.first }
-                            .toList()
-                        staleSynced.forEach { onDelete(it) }
-                    }.onFailure { error ->
-                        android.util.Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
+                    delay(2000L) // Increased stagger for reconciliation
+                    writeMutex.withLock {
+                        runCatching {
+                            val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                            val staleSynced = existing().asSequence()
+                                .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
+                                .map { it.first }
+                                .toList()
+                            
+                            if (staleSynced.isNotEmpty()) {
+                                Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
+                                staleSynced.forEach { onDelete(it) }
+                            }
+                        }.onFailure { error ->
+                            Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
+                        }
                     }
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                android.util.Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
+                Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
             }
         })
         // Keep the ChildEventListener alive for the application lifetime.
@@ -199,10 +205,12 @@ class FirebaseRoomHydrator @Inject constructor(
         snapshot: DataSnapshot,
         onUpsert: suspend (DataSnapshot) -> Unit
     ) {
-        runCatching { onUpsert(snapshot) }
-            .onFailure { error ->
-                android.util.Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${snapshot.key}", error)
-            }
+        writeMutex.withLock {
+            runCatching { onUpsert(snapshot) }
+                .onFailure { error ->
+                    Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${snapshot.key}", error)
+                }
+        }
     }
 
     private fun DataSnapshot.raw(name: String): Any? {

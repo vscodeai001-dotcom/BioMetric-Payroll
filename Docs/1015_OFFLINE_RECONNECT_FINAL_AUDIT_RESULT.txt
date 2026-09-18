@@ -1,0 +1,24 @@
+1015 OFFLINE / RECONNECT FINAL AUDIT
+
+STATUS: IMPLEMENTED
+
+Added:
+- FirebaseReconnectCoordinator
+- Application reconnect recovery wiring
+- Atomic Firebase counter allocation for employee Tax/FBP IDs
+- 1015 audit documentation
+
+Preserved:
+- Firebase SSOT architecture
+- Room local cache
+- Firebase offline persistence
+- GPS durable queue
+- WorkManager retry/backoff
+- existing UI/layout
+- existing payroll/business calculations
+- no Neon/Render dependency
+
+Validation:
+- Source/static checks: PASS
+- ZIP integrity: PASS after packaging
+- Full Gradle build: NOT CLAIMED unless dependency resolution is available

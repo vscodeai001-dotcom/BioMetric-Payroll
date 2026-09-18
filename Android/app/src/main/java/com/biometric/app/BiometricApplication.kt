@@ -23,6 +23,7 @@ import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -44,53 +45,42 @@ class BiometricApplication : Application(), Configuration.Provider {
             .build()
 
     override fun onCreate() {
-        super.onCreate()
-
-        // Keep one application-scoped realtime coordinator. Activities and fragments
-        // only register their visible state; no screen creates its own SignalR bus.
-        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
-            override fun onActivityResumed(activity: Activity) {
-                realtimeUiDispatcher.onActivityResumed(activity)
-            }
-
-            override fun onActivityPaused(activity: Activity) {
-                realtimeUiDispatcher.onActivityPaused(activity)
-            }
-
-            override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) = Unit
-            override fun onActivityStarted(activity: Activity) = Unit
-            override fun onActivityStopped(activity: Activity) = Unit
-            override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) = Unit
-            override fun onActivityDestroyed(activity: Activity) = Unit
-        })
-
         // Firebase disk persistence MUST be configured before any FirebaseDatabase
-        // reference/listener is touched. Hilt/realtime coordinators can touch
-        // Firebase very early during startup, so configure it before starting them.
+        // reference/listener is touched. Hilt injection happens in super.onCreate()
+        // and can trigger singleton constructors that touch Firebase.
         runCatching {
             val firebaseDatabase = FirebaseDatabase.getInstance()
             firebaseDatabase.setPersistenceEnabled(true)
             firebaseDatabase.setPersistenceCacheSizeBytes(100 * 1024 * 1024)
         }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
 
+        super.onCreate()
+
+        // Keep one application-scoped realtime coordinator. Activities and fragments
+
         // Start only when a persisted authenticated session exists. Login/logout
         // continue to own authentication state; this is realtime infrastructure only.
         if (sessionStore.isLoggedIn()) {
-            adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-            runCatching { firebaseReconnectCoordinator.start() }
-                .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+            CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+                delay(3000) // 3s staggered start for heavy Firebase listeners
+                if (!sessionStore.isLoggedIn()) return@launch
+                adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                runCatching { firebaseReconnectCoordinator.start() }
+                    .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+            }
         }
 
         // OSMDroid must be initialized BEFORE any Activity creates a MapView.
-        // The previous asynchronous initialization could race MainActivity and
-        // leave the map surface grey until a later redraw/restart.
-        runCatching {
-            val osm = org.osmdroid.config.Configuration.getInstance()
-            osm.load(this, getSharedPreferences("osmdroid", MODE_PRIVATE))
-            osm.userAgentValue = "BioMetricPayroll_Android_" + packageName
-            osm.tileDownloadThreads = 4
-            osm.tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
-        }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization failed", it) }
+        // Moved to IO thread to prevent main-thread blockage during startup.
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                val osm = org.osmdroid.config.Configuration.getInstance()
+                osm.load(this@BiometricApplication, getSharedPreferences("osmdroid", MODE_PRIVATE))
+                osm.userAgentValue = "BioMetricPayroll_Android_" + packageName
+                osm.tileDownloadThreads = 4
+                osm.tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
+            }.onFailure { Log.w("BiometricApplication", "OSMDroid initialization failed", it) }
+        }
 
         runCatching {
             ThemeManager.applyTheme(this, sessionStore.userThemeKey())
@@ -116,7 +106,7 @@ class BiometricApplication : Application(), Configuration.Provider {
 
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "automated_business_backup_periodic",
-                ExistingPeriodicWorkPolicy.REPLACE,
+                ExistingPeriodicWorkPolicy.KEEP,
                 backupRequest
             )
         }.onFailure { Log.e("BiometricApplication", "Backup scheduling failed", it) }
