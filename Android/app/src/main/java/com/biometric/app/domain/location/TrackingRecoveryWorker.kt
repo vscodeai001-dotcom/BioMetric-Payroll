@@ -23,7 +23,19 @@ class TrackingRecoveryWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         if (!sessionStore.isLoggedIn()) return Result.success()
 
-        val prefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
+        
+        // Background GPS recovery is an Employee/Staff feature only.
+        val role = sessionStore.userRole().trim().uppercase()
+        if (role !in setOf("STAFF", "EMPLOYEE")) {
+            Log.d("TrackingRecovery", "Skipping GPS recovery for role=$role")
+            return Result.success()
+        }
+        val employeeId = sessionStore.employeeId()
+        if (employeeId <= 0) {
+            Log.w("TrackingRecovery", "Skipping GPS recovery: invalid employeeId=$employeeId")
+            return Result.success()
+        }
+val prefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
         val geoEnabled = prefs.getBoolean("enable_geo_fencing", true)
 
         if (!geoEnabled) {

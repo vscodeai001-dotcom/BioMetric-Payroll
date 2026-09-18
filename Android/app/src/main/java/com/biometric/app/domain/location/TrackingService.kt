@@ -75,6 +75,12 @@ class TrackingService : Service() {
     private var locationUpdatesStarted = false
     private var signalRStarted = false
     private val sequenceLock = Any()
+    private fun isEmployeeTrackingRole(): Boolean {
+        val role = sessionStore.userRole().trim().uppercase()
+        return role == "STAFF" || role == "EMPLOYEE"
+    }
+
+
 
     companion object {
         private const val CHANNEL_ID = "tracking_channel"
@@ -99,7 +105,18 @@ class TrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        // Defensive role boundary. TrackingService may be invoked by recovery after Admin login.
+        if (!isEmployeeTrackingRole()) {
+            Log.w(
+                "TrackingService",
+                "Ignoring TrackingService creation for role=${sessionStore.userRole()} " +
+                    "employeeId=${sessionStore.employeeId()}"
+            )
+            stopSelf()
+            return
+        }
+fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
         offlineMonitor.start()
         offlineMonitor.record(OfflineTrackingMonitor.SERVICE_RECOVERED, OfflineTrackingMonitor.INFO, "Tracking service initialized/recovered")
@@ -113,7 +130,17 @@ class TrackingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Only start foreground if not already started
+        
+        if (!isEmployeeTrackingRole()) {
+            Log.w(
+                "TrackingService",
+                "Rejecting start request for non-employee role=${sessionStore.userRole()} " +
+                    "employeeId=${sessionStore.employeeId()}"
+            )
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+// Only start foreground if not already started
         if (!isForeground) {
             startForegroundSafe()
             isForeground = true

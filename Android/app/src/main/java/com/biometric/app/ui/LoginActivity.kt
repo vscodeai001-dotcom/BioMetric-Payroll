@@ -400,7 +400,6 @@ class LoginActivity : MotionBaseActivity() {
                             putLong("last_active_time", System.currentTimeMillis())
                         }
 
-                        adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
                         setLoading(false)
                         proceedToMain()
                         return@launch
@@ -512,12 +511,6 @@ class LoginActivity : MotionBaseActivity() {
                     putLong("last_active_time", System.currentTimeMillis())
                 }
 
-            // Start Firebase realtime synchronization directly.
-            // Android does not need Payroll.Web running for this.
-            adminRealtimeCoordinator.start {
-                realtimeUiDispatcher.refreshVisible()
-            }
-
             setLoading(false)
 
             // SuperAdmin/Admin -> MainActivity
@@ -544,7 +537,14 @@ class LoginActivity : MotionBaseActivity() {
         // If they are an Admin or SuperAdmin, always go to MainActivity (Admin Dashboard)
         // If they are STAFF, go to EmployeeHomeActivity
         val destination = if (role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name) {
-            MainActivity::class.java
+            
+            // Admin sessions must never inherit an Employee GPS service.
+            stopService(Intent(this, com.biometric.app.domain.location.TrackingService::class.java))
+            getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                putBoolean("is_service_active_intended", false)
+                putBoolean("tracking_waiting_for_shift", false)
+            }
+MainActivity::class.java
         } else {
             EmployeeHomeActivity::class.java
         }

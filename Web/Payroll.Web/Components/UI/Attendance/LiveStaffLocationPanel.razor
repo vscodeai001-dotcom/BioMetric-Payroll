@@ -3,6 +3,8 @@
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.JSInterop
 @using System.Text.Json
+@using System.Globalization
+
 @implements IAsyncDisposable
 
 @inject IJSRuntime JSRuntime
@@ -3086,8 +3088,23 @@
             return false;
         }
 
-        return property.ValueKind == JsonValueKind.Number &&
-               property.TryGetDouble(out value);
+        if (property.ValueKind == JsonValueKind.Number &&
+            property.TryGetDouble(out value))
+        {
+            return true;
+        }
+
+        if (property.ValueKind == JsonValueKind.String &&
+            double.TryParse(
+                property.GetString(),
+                NumberStyles.Float | NumberStyles.AllowThousands,
+                CultureInfo.InvariantCulture,
+                out value))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryGetJsonBool(
@@ -3105,14 +3122,20 @@
             return false;
         }
 
-        if (property.ValueKind != JsonValueKind.True &&
-            property.ValueKind != JsonValueKind.False)
+        if (property.ValueKind == JsonValueKind.True ||
+            property.ValueKind == JsonValueKind.False)
         {
-            return false;
+            value = property.GetBoolean();
+            return true;
         }
 
-        value = property.GetBoolean();
-        return true;
+        if (property.ValueKind == JsonValueKind.String &&
+            bool.TryParse(property.GetString(), out value))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryGetJsonInt(
@@ -3130,13 +3153,23 @@
             return false;
         }
 
-        if (property.ValueKind != JsonValueKind.Number ||
-            !property.TryGetInt32(out value))
+        if (property.ValueKind == JsonValueKind.Number &&
+            property.TryGetInt32(out value))
         {
-            return false;
+            return true;
         }
 
-        return true;
+        if (property.ValueKind == JsonValueKind.String &&
+            int.TryParse(
+                property.GetString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out value))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool TryGetJsonString(
@@ -3284,14 +3317,14 @@
         {
             await FirebaseRealtime.StreamGlobalChangesAsync(
                 $"owners/{ownerUid.Trim()}/tracking",
-                async (_, _, ct) =>
+                async (path, data, ct) =>
                 {
                     if (disposed || ct.IsCancellationRequested)
                         return;
 
                     try
                     {
-                        await RefreshLocations();
+                        await ApplyFirebaseTrackingChange(path, data);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {
@@ -3299,7 +3332,7 @@
                     catch (Exception ex)
                     {
                         Console.Error.WriteLine(
-                            $"Firebase live-location refresh failed: {ex}");
+                            $"Firebase live-location event failed: {ex}");
                     }
                 },
                 token);
@@ -3336,6 +3369,282 @@
         }
     }
 
+
+    private async Task ApplyFirebaseTrackingChange(
+        string path,
+        JsonElement? data)
+    {
+        if (disposed)
+            return;
+
+        var relative = path.Trim('/');
+
+        // Expected stream paths under owners/{ownerUid}/tracking:
+        // live/{employeeId}
+        // sessions/{employeeId}/{sessionId}
+        // live (initial/root replacement)
+        if (relative.Equals("live", StringComparison.OrdinalIgnoreCase))
+        {
+            if (data is not JsonElement root ||
+                root.ValueKind == JsonValueKind.Null)
+            {
+                locations.Clear();
+            }
+            else if (root.ValueKind == JsonValueKind.Object)
+            {
+                var validEmployeeIds = employees
+                    .Select(e => e.EmployeeID)
+                    .ToHashSet();
+
+                var next = new List<LiveEmployeeLocation>();
+
+                foreach (var node in root.EnumerateObject())
+                {
+                    if (!int.TryParse(node.Name, out var employeeId) ||
+                        employeeId <= 0 ||
+                        !validEmployeeIds.Contains(employeeId) ||
+                        node.Value.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    if (TryParseLiveEmployeeLocation(
+                        employeeId,
+                        node.Value,
+                        out var location))
+                    {
+                        next.Add(location);
+                    }
+                }
+
+                locations.Clear();
+                locations.AddRange(next);
+            }
+
+            lastRefresh = DateTime.Now;
+            mapNeedsUpdate = true;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (relative.StartsWith(
+                "live/",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = relative.Split(
+                '/',
+                StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length < 2 ||
+                !int.TryParse(parts[1], out var employeeId) ||
+                employeeId <= 0)
+                return;
+
+            if (data is not JsonElement node ||
+                node.ValueKind == JsonValueKind.Null)
+            {
+                locations.RemoveAll(
+                    x => x.EmployeeId == employeeId);
+            }
+            else
+            {
+                var validEmployee =
+                    employees.Any(
+                        e => e.EmployeeID == employeeId);
+
+                if (!validEmployee ||
+                    node.ValueKind != JsonValueKind.Object)
+                    return;
+
+                var state =
+                    GetJsonStringValue(
+                        node,
+                        "State",
+                        "state");
+
+                if (state.Equals(
+                        "ENDED",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals(
+                        "OFFLINE",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    locations.RemoveAll(
+                        x => x.EmployeeId == employeeId);
+                }
+                else if (TryParseLiveEmployeeLocation(
+                             employeeId,
+                             node,
+                             out var location))
+                {
+                    var index =
+                        locations.FindIndex(
+                            x => x.EmployeeId == employeeId);
+
+                    if (index >= 0)
+                        locations[index] = location;
+                    else
+                        locations.Add(location);
+                }
+            }
+
+            lastRefresh = DateTime.Now;
+            mapNeedsUpdate = true;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (relative.StartsWith(
+                "sessions/",
+                StringComparison.OrdinalIgnoreCase) &&
+            data is JsonElement session &&
+            session.ValueKind == JsonValueKind.Object)
+        {
+            var state =
+                GetJsonStringValue(
+                    session,
+                    "State",
+                    "state");
+
+            if (state.Equals(
+                    "ENDED",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = relative.Split(
+                    '/',
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                if (parts.Length >= 2 &&
+                    int.TryParse(parts[1], out var employeeId) &&
+                    employeeId > 0)
+                {
+                    locations.RemoveAll(
+                        x => x.EmployeeId == employeeId);
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+    }
+
+    private bool TryParseLiveEmployeeLocation(
+        int employeeId,
+        JsonElement json,
+        out LiveEmployeeLocation location)
+    {
+        location = new LiveEmployeeLocation();
+
+        if (!TryGetJsonDouble(
+                json,
+                "Latitude",
+                out var lat) ||
+            !TryGetJsonDouble(
+                json,
+                "Longitude",
+                out var lng) ||
+            !double.IsFinite(lat) ||
+            !double.IsFinite(lng) ||
+            lat < -90 ||
+            lat > 90 ||
+            lng < -180 ||
+            lng > 180 ||
+            (lat == 0 && lng == 0))
+        {
+            return false;
+        }
+
+        var payloadEmployeeId =
+            GetJsonInt(
+                json,
+                "EmployeeId",
+                "employeeId");
+
+        if (payloadEmployeeId > 0 &&
+            payloadEmployeeId != employeeId)
+            return false;
+
+        var state =
+            GetJsonStringValue(
+                json,
+                "State",
+                "state");
+
+        if (state.Equals(
+                "ENDED",
+                StringComparison.OrdinalIgnoreCase) ||
+            state.Equals(
+                "OFFLINE",
+                StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var accuracy =
+            TryGetJsonDouble(
+                json,
+                "AccuracyMeters",
+                out var acc)
+                ? Math.Max(0, acc)
+                : 0;
+
+        var timestamp =
+            TryGetJsonDateTime(
+                json,
+                "LastUpdatedUtc",
+                out var updated)
+                ? updated.ToUniversalTime()
+                : TryGetJsonDateTime(
+                    json,
+                    "Timestamp",
+                    out var captured)
+                    ? captured.ToUniversalTime()
+                    : DateTime.UtcNow;
+
+        var sessionStarted =
+            TryGetJsonDateTime(
+                json,
+                "SessionStartedUtc",
+                out var started)
+                ? started.ToUniversalTime()
+                : timestamp;
+
+        var sessionId = Guid.Empty;
+
+        if (TryGetJsonString(
+                json,
+                "SessionId",
+                out var sessionText))
+        {
+            Guid.TryParse(
+                sessionText,
+                out sessionId);
+        }
+
+        var distance =
+            CalculateDistanceMeters(
+                lat,
+                lng,
+                currentOfficeLatitude,
+                currentOfficeLongitude);
+
+        var within =
+            currentOfficeRadius > 0 &&
+            distance <= currentOfficeRadius + 1;
+
+        location = new LiveEmployeeLocation
+        {
+            EmployeeId = employeeId,
+            Latitude = lat,
+            Longitude = lng,
+            AccuracyMeters = accuracy,
+            DistanceMeters = distance,
+            AllowedRadiusMeters =
+                currentOfficeRadius,
+            IsWithinAllowedRadius = within,
+            LastUpdatedUtc = timestamp,
+            SessionStartedUtc = sessionStarted,
+            SessionId = sessionId
+        };
+
+        return true;
+    }
 
     private async Task RefreshLocations()
     {

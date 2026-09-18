@@ -24,7 +24,19 @@ class TrackingNotificationReceiver : BroadcastReceiver() {
             val trackingPrefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
             val geoEnabled = trackingPrefs.getBoolean("enable_geo_fencing", true)
             
-            if (sessionStore.isLoggedIn() && geoEnabled) {
+            
+            val role = sessionStore.userRole().trim().uppercase()
+            val employeeId = sessionStore.employeeId()
+            // Recovery broadcasts are process-wide. Never start GPS for Admin/SuperAdmin.
+            if (role !in setOf("STAFF", "EMPLOYEE")) {
+                Log.d("TrackingNotifReceiver", "Ignoring tracking restore for role=$role")
+                return
+            }
+            if (employeeId <= 0) {
+                Log.w("TrackingNotifReceiver", "Ignoring tracking restore: invalid employeeId=$employeeId")
+                return
+            }
+if (sessionStore.isLoggedIn() && geoEnabled) {
                 Log.i("TrackingNotifReceiver", "Aggressively restoring tracking service...")
                 val serviceIntent = Intent(context, TrackingService::class.java).apply {
                     action = if (intent.action == TrackingService.ACTION_REFRESH_WINDOW) TrackingService.ACTION_REFRESH_WINDOW else TrackingService.ACTION_START

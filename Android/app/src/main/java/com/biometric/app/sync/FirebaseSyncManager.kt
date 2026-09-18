@@ -41,12 +41,7 @@ class FirebaseSyncManager @Inject constructor(
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val auth = FirebaseAuth.getInstance()
-    private val database = FirebaseDatabase.getInstance().apply {
-        try {
-            setPersistenceEnabled(true)
-            setPersistenceCacheSizeBytes(100 * 1024 * 1024)
-        } catch (_: Exception) {}
-    }.reference
+    private val database = FirebaseDatabase.getInstance().reference
 
     fun getGlobalRef() = database
 
@@ -112,6 +107,7 @@ class FirebaseSyncManager @Inject constructor(
 
     @Synchronized
     fun startSync() {
+        if (!isAuthenticated()) return
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
         if (initializedOwnerUid == ownerUid) return
 
@@ -176,7 +172,7 @@ class FirebaseSyncManager @Inject constructor(
                                     @Suppress("UNCHECKED_CAST")
                                     decodeAuditLog(childSnapshot)?.let { list.add(it as T) }
                                 } else {
-                                    childSnapshot.getValue(T::class.java)?.let { list.add(it) }
+                                    tolerantFirebaseValue<T>(childSnapshot)?.let { list.add(it) }
                                 }
                             }
                         } catch (e: Exception) {
@@ -256,6 +252,147 @@ class FirebaseSyncManager @Inject constructor(
         query.addValueEventListener(listener)
         awaitClose { query.removeEventListener(listener) }
     }
+
+    @PublishedApi
+    internal inline fun <reified T : Any> tolerantFirebaseValue(snapshot: DataSnapshot): T? {
+        return try {
+            if (T::class.java == com.biometric.app.data.entity.Employee::class.java) {
+                val e = com.biometric.app.data.entity.Employee(
+                    employeeId = snapshot.child("employeeId").value?.toString()
+                        ?.takeIf { it.isNotBlank() } ?: snapshot.key.orEmpty(),
+                    shopId = snapshot.child("shopId").value?.toString().orEmpty(),
+                    name = snapshot.child("name").value?.toString().orEmpty(),
+                    phone = snapshot.child("phone").value?.toString().orEmpty(),
+                    email = snapshot.child("email").value?.toString(),
+                    biometricId = snapshot.child("biometricId").value?.toString().orEmpty(),
+                    role = snapshot.child("role").value?.toString() ?: "Staff",
+                    salaryType = snapshot.child("salaryType").value?.toString() ?: "MONTHLY_FIXED",
+                    salaryRate = snapshot.child("salaryRate").value.numberOrDouble(),
+                    paidLeaveBalance = snapshot.child("paidLeaveBalance").value.numberOrDouble(),
+                    sickLeaveBalance = snapshot.child("sickLeaveBalance").value.numberOrDouble(),
+                    salaryCalculationMethod = snapshot.child("salaryCalculationMethod").value?.toString()
+                        ?: "Pro-Rata Hourly",
+                    shiftStart = snapshot.child("shiftStart").value?.toString() ?: "10:00",
+                    shiftEnd = snapshot.child("shiftEnd").value?.toString() ?: "22:00",
+                    breakHours = snapshot.child("breakHours").value.numberOrDouble(),
+                    compOffDayOfWeek = snapshot.child("compOffDayOfWeek").value.intOrNull(),
+                    otRule = snapshot.child("otRule").value?.toString() ?: "No Overtime",
+                    otFlatRate = snapshot.child("otFlatRate").value.numberOrDouble(),
+                    otRateMultiplier = snapshot.child("otRateMultiplier").value.numberOrDouble(default = 1.0),
+                    dailyAllowance = snapshot.child("dailyAllowance").value.numberOrDouble(),
+                    nightShiftAllowance = snapshot.child("nightShiftAllowance").value.numberOrDouble(),
+                    allowanceEffectiveDate = snapshot.child("allowanceEffectiveDate").value.longOrLong(System.currentTimeMillis()),
+                    isActive = snapshot.child("isActive").value.boolOrNull(true),
+                    hireDate = snapshot.child("hireDate").value.longOrLong(System.currentTimeMillis()),
+                    dob = snapshot.child("dob").value.longOrNull(),
+                    terminateDate = snapshot.child("terminateDate").value.longOrNull(),
+                    enableShiftRotation = snapshot.child("enableShiftRotation").value.boolOrNull(false),
+                    rotationGroup = snapshot.child("rotationGroup").value?.toString(),
+                    shiftRotationPattern = snapshot.child("shiftRotationPattern").value?.toString(),
+                    createdAt = snapshot.child("createdAt").value.longOrLong(System.currentTimeMillis()),
+                    isBonusEligibleRule = snapshot.child("isBonusEligibleRule").value.boolOrNull(true),
+                    isPaidLeaveEligibleRule = snapshot.child("isPaidLeaveEligibleRule").value.boolOrNull(true),
+                    paidLeaveOnWeekdays = snapshot.child("paidLeaveOnWeekdays").value.boolOrNull(true),
+                    paidLeaveOnWeekends = snapshot.child("paidLeaveOnWeekends").value.boolOrNull(false),
+                    bankAccountNumber = snapshot.child("bankAccountNumber").value?.toString(),
+                    bankIfscCode = snapshot.child("bankIfscCode").value?.toString(),
+                    bankName = snapshot.child("bankName").value?.toString(),
+                    uanNumber = snapshot.child("uanNumber").value?.toString(),
+                    esiNumber = snapshot.child("esiNumber").value?.toString(),
+                    enablePf = snapshot.child("enablePf").value.boolOrNull(false),
+                    enableEsi = snapshot.child("enableEsi").value.boolOrNull(false),
+                    tdsRatePercent = snapshot.child("tdsRatePercent").value.numberOrDouble(),
+                    lastActive = snapshot.child("lastActive").value.longOrNull(),
+                    syncState = 1,
+                    lastModified = snapshot.child("lastModified").value.longOrLong(System.currentTimeMillis())
+                )
+                @Suppress("UNCHECKED_CAST")
+                e as T
+            } else if (T::class.java == com.biometric.app.data.entity.Attendance::class.java) {
+                val a = com.biometric.app.data.entity.Attendance(
+                    attendanceId = snapshot.child("attendanceId").value?.toString() ?: snapshot.key.orEmpty(),
+                    employeeId = snapshot.child("employeeId").value?.toString().orEmpty(),
+                    shopId = snapshot.child("shopId").value?.toString().orEmpty(),
+                    checkInTime = snapshot.child("checkInTime").value.longOrLong(0L),
+                    checkOutTime = snapshot.child("checkOutTime").value.longOrNull(),
+                    type = snapshot.child("type").value?.toString() ?: "WORK",
+                    hoursWorked = snapshot.child("hoursWorked").value.numberOrDouble(),
+                    shiftStart = snapshot.child("shiftStart").value?.toString() ?: "10:00",
+                    shiftEnd = snapshot.child("shiftEnd").value?.toString() ?: "22:00",
+                    shift2Start = snapshot.child("shift2Start").value?.toString(),
+                    shift2End = snapshot.child("shift2End").value?.toString(),
+                    breakHours = snapshot.child("breakHours").value.numberOrDouble(),
+                    salaryType = snapshot.child("salaryType").value?.toString() ?: "MONTHLY_FIXED",
+                    salaryRate = snapshot.child("salaryRate").value.numberOrDouble(),
+                    note = snapshot.child("note").value?.toString(),
+                    synced = snapshot.child("synced").value.boolOrNull(false),
+                    lateDeduction = snapshot.child("lateDeduction").value.numberOrDouble(),
+                    otHours = snapshot.child("otHours").value.numberOrDouble(),
+                    createdAt = snapshot.child("createdAt").value.longOrLong(System.currentTimeMillis()),
+                    syncState = 1,
+                    lastModified = snapshot.child("lastModified").value.longOrLong(System.currentTimeMillis())
+                )
+                @Suppress("UNCHECKED_CAST")
+                a as T
+            } else if (T::class.java == com.biometric.app.data.entity.AdvancePayment::class.java) {
+                val a = com.biometric.app.data.entity.AdvancePayment(
+                    advanceId = snapshot.child("advanceId").value?.toString() ?: snapshot.key.orEmpty(),
+                    employeeId = snapshot.child("employeeId").value?.toString().orEmpty(),
+                    shopId = snapshot.child("shopId").value?.toString().orEmpty(),
+                    amount = snapshot.child("amount").value.numberOrDouble(),
+                    date = snapshot.child("date").value.longOrLong(System.currentTimeMillis()),
+                    isRecovered = snapshot.child("isRecovered").value.boolOrNull(false),
+                    recoveryPaymentId = snapshot.child("recoveryPaymentId").value?.toString()
+                )
+                @Suppress("UNCHECKED_CAST")
+                a as T
+            } else {
+                snapshot.getValue(T::class.java)
+            }
+        } catch (e: Exception) {
+            Log.w(
+                "FirebaseSyncManager",
+                "Skipping malformed Firebase row key=${snapshot.key}",
+                e
+            )
+            null
+        }
+    }
+
+    @PublishedApi
+    internal fun Any?.numberOrDouble(default: Double = 0.0): Double =
+        when (this) {
+            is Number -> toDouble()
+            else -> this?.toString()?.trim()?.toDoubleOrNull() ?: default
+        }
+
+    @PublishedApi
+    internal fun Any?.intOrNull(): Int? =
+        when (this) {
+            is Number -> toInt()
+            else -> this?.toString()?.trim()?.toIntOrNull()
+        }
+
+    @PublishedApi
+    internal fun Any?.longOrLong(default: Long): Long =
+        when (this) {
+            is Number -> toLong()
+            else -> this?.toString()?.trim()?.toLongOrNull() ?: default
+        }
+
+    @PublishedApi
+    internal fun Any?.longOrNull(): Long? =
+        when (this) {
+            is Number -> toLong()
+            else -> this?.toString()?.trim()?.toLongOrNull()
+        }
+
+    @PublishedApi
+    internal fun Any?.boolOrNull(default: Boolean): Boolean =
+        when (this) {
+            is Boolean -> this
+            else -> this?.toString()?.trim()?.toBooleanStrictOrNull() ?: default
+        }
 
     data class RealtimeChangedItem(
         val entity: String = "",

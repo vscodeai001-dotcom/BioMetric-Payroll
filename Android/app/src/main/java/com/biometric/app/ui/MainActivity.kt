@@ -38,6 +38,7 @@ import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import android.widget.TextView
 import com.biometric.app.sync.SignalRManager
+import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
@@ -107,6 +108,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var brandingManager: BrandingManager
     @Inject lateinit var signalR: SignalRManager
+    @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var osrmApi: OsrmApiService
 
     private lateinit var adapter: ShopAdapter
@@ -129,7 +131,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var currentGeofenceRadiusMeters: Int = 0
     private var statusFilter = "All"
     private var adminMapAutoCentered = false
-    private var adminInfoWindow: InfoWindow? = null
+        private var commandCenterMapReady = false
+private var adminInfoWindow: InfoWindow? = null
     private var adminMapLayerIndex = 0
     private var adminZoneVisible = true
     private val approvalFilter = MutableStateFlow("All")
@@ -224,6 +227,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         binding.hubTracking.visibility = if (hub == "TRACKING") View.VISIBLE else View.GONE
         binding.hubReports.visibility = if (hub == "REPORTS") View.VISIBLE else View.GONE
 
+        // Initialize the hidden command-center map only when Tracking is opened.
+        // Keeping two tile renderers active during Admin startup can cause CPU/GPU
+        // contention and input-dispatch ANRs on constrained devices.
+        if (hub == "TRACKING") ensureCommandCenterMapReady()
+
         val activeHub = when (hub) {
             "DASHBOARD" -> binding.hubDashboard
             "WORKFORCE" -> binding.hubWorkforce
@@ -285,59 +293,18 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
 
     private fun setupAdminMap() {
-        // Keep the Admin dashboard map on the same stable OSMDroid tile path
-        // used by the working Employee map.
+        // Configure only the visible dashboard map during startup. The hidden
+        // command-center map is initialized on demand when Tracking is opened.
         runCatching {
             OsmConfig.getInstance().userAgentValue = "BioMetricPayroll_Android_" + packageName
             OsmConfig.getInstance().tileDownloadThreads = 4
             OsmConfig.getInstance().tileFileSystemCacheMaxBytes = 200L * 1024L * 1024L
         }
 
-        val maps = listOf(binding.adminMapView, binding.commandCenterMapView)
+        configureAdminMap(binding.adminMapView, allowNetwork = true)
 
-        maps.forEach { map ->
-            map.apply {
-                setUseDataConnection(true)
-                setTileSource(adminOpenStreetMapSource())
-                setMultiTouchControls(true)
-
-                zoomController.setVisibility(
-                    CustomZoomButtonsController.Visibility.NEVER
-                )
-
-                minZoomLevel = 3.0
-                maxZoomLevel = 20.0
-                controller.setZoom(13.0)
-                controller.setCenter(GeoPoint(11.9139, 79.8145))
-
-                // Do not clear the tile cache here or after a delay.
-                // Clearing it after the first tiles are drawn can make the
-                // dashboard briefly show a real map and then turn into the
-                // card's flat background when the replacement tiles are not
-                // immediately available.
-                applyCurrentThemeToMap(this)
-
-                addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-                    if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) {
-                        post {
-                            invalidate()
-                            controller.setCenter(mapCenterFallback(this))
-                        }
-                    }
-                }
-
-                post {
-                    invalidate()
-                    controller.setCenter(mapCenterFallback(this))
-                    postDelayed({
-                        invalidate()
-                    }, 500L)
-                    postDelayed({
-                        invalidate()
-                    }, 1500L)
-                }
-            }
-        }
+        // Keep the hidden command-center surface inert until Tracking is selected.
+        binding.commandCenterMapView.setBackgroundColor(Color.TRANSPARENT)
 
         setupAdminDashboardMapControls()
 
@@ -346,6 +313,45 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let { b ->
                 b.llAdminMapLoading.visibility = View.GONE
                 observeLiveLocations()
+            }
+        }
+    }
+
+    private fun configureAdminMap(map: MapView, allowNetwork: Boolean) {
+        map.setUseDataConnection(allowNetwork)
+        map.setTileSource(adminOpenStreetMapSource())
+        map.setMultiTouchControls(true)
+        map.setBackgroundColor(Color.TRANSPARENT)
+        map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+        map.minZoomLevel = 3.0
+        map.maxZoomLevel = 20.0
+        map.controller.setZoom(13.0)
+        map.controller.setCenter(GeoPoint(11.9139, 79.8145))
+        applyCurrentThemeToMap(map)
+
+        map.post {
+            map.invalidate()
+            map.requestLayout()
+        }
+    }
+
+    private fun ensureCommandCenterMapReady() {
+        if (commandCenterMapReady) return
+        _binding?.let { b ->
+            val map = b.commandCenterMapView
+            configureAdminMap(map, allowNetwork = true)
+            commandCenterMapReady = true
+            map.post {
+                map.invalidate()
+                map.requestLayout()
+            }
+            viewModel.companySettings.value?.let { settings ->
+                if (settings.officeLatitude != 0.0 || settings.officeLongitude != 0.0) {
+                    map.controller.setCenter(
+                        GeoPoint(settings.officeLatitude, settings.officeLongitude)
+                    )
+                    map.controller.setZoom(16.0)
+                }
             }
         }
     }
@@ -1077,6 +1083,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         _binding?.commandCenterMapView?.onPause()
     }
     override fun onDestroy() {
+        commandCenterMapReady = false
         adminRoadRouteJobs.values.forEach { it.cancel() }
         adminRoadRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }

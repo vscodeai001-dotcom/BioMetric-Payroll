@@ -35,6 +35,7 @@ class AdminRealtimeCoordinator @Inject constructor(
 
     @Synchronized
     fun start(onLocalRefresh: () -> Unit = {}) {
+        if (!firebaseSync.isAuthenticated()) return
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
 
         if (collectJob?.isActive == true && activeOwnerUid == ownerUid) return
@@ -43,8 +44,8 @@ class AdminRealtimeCoordinator @Inject constructor(
             stop()
         }
 
-        firebaseSync.startSync()
-        hydrator.start()
+        // MainActivity owns the data/hydration start. The coordinator is only
+        // an invalidation listener, preventing duplicate Firebase/Room listeners.
         activeOwnerUid = ownerUid
 
         collectJob = scope.launch {
