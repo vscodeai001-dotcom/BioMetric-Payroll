@@ -82,64 +82,74 @@ public sealed class FirebaseBonusService
             EmployeeTable,
             ct);
 
-        if (json is null ||
-            json.Value.ValueKind != JsonValueKind.Object)
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
         {
             return new List<Employee>();
         }
 
         var result = new List<Employee>();
 
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object)
+            foreach (var item in json.Value.EnumerateObject())
             {
-                continue;
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(item.Value, item.Name);
+                if (employee != null) result.Add(employee);
             }
-
-            var id =
-                Int(item.Value, "employeeId")
-                ?? Int(item.Value, "EmployeeID")
-                ?? IntFromKey(item.Name);
-
-            if (!id.HasValue || id.Value <= 0)
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
             {
-                continue;
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(row, fallbackId);
+                if (employee != null) result.Add(employee);
             }
-
-            var isActive =
-                Bool(item.Value, "isActive")
-                ?? Bool(item.Value, "IsActive")
-                ?? true;
-
-            if (!isActive)
-            {
-                continue;
-            }
-
-            result.Add(new Employee
-            {
-                EmployeeID = id.Value,
-                Name =
-                    String(item.Value, "name")
-                    ?? String(item.Value, "Name")
-                    ?? "Employee",
-
-                Email =
-                    String(item.Value, "email")
-                    ?? String(item.Value, "Email"),
-
-                Role =
-                    String(item.Value, "role")
-                    ?? String(item.Value, "Role"),
-
-                IsDeleted = false
-            });
         }
 
         return result
             .OrderBy(e => e.Name)
             .ToList();
+    }
+
+    private static Employee? ParseActiveEmployee(JsonElement row, string key)
+    {
+        var id =
+            Int(row, "employeeId")
+            ?? Int(row, "EmployeeID")
+            ?? IntFromKey(key);
+
+        if (!id.HasValue || id.Value <= 0) return null;
+
+        var isActive =
+            Bool(row, "isActive")
+            ?? Bool(row, "IsActive")
+            ?? true;
+
+        if (!isActive) return null;
+
+        return new Employee
+        {
+            EmployeeID = id.Value,
+            Name =
+                String(row, "name")
+                ?? String(row, "Name")
+                ?? "Employee",
+
+            Email =
+                String(row, "email")
+                ?? String(row, "Email"),
+
+            Role =
+                String(row, "role")
+                ?? String(row, "Role"),
+
+            IsDeleted = false
+        };
     }
 
     public async Task<List<BonusRecord>> GetAsync(
@@ -167,100 +177,91 @@ public sealed class FirebaseBonusService
                 ct);
         }
 
-        if (json is null ||
-            json.Value.ValueKind != JsonValueKind.Object)
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
         {
             return new List<BonusRecord>();
         }
 
         var result = new List<BonusRecord>();
 
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object)
+            foreach (var item in json.Value.EnumerateObject())
             {
-                continue;
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var bonus = ParseBonus(item.Value, item.Name, employeeId, from, to);
+                if (bonus != null) result.Add(bonus);
             }
-
-            var row = item.Value;
-
-            var empId =
-                Int(row, "employeeId")
-                ?? Int(row, "EmployeeID");
-
-            if (!empId.HasValue || empId.Value <= 0)
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
             {
-                continue;
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var bonus = ParseBonus(row, fallbackId, employeeId, from, to);
+                if (bonus != null) result.Add(bonus);
             }
-
-            if (employeeId > 0 &&
-                empId.Value != employeeId)
-            {
-                continue;
-            }
-
-            var date =
-                Date(row, "bonusDate")
-                ?? Date(row, "BonusDate");
-
-            if (!date.HasValue)
-            {
-                continue;
-            }
-
-            if (from.HasValue &&
-                date.Value.Date < from.Value.Date)
-            {
-                continue;
-            }
-
-            if (to.HasValue &&
-                date.Value.Date > to.Value.Date)
-            {
-                continue;
-            }
-
-            var key = item.Name;
-
-            var bonusId =
-                Int(row, "bonusId")
-                ?? Int(row, "BonusID")
-                ?? IntFromKey(key);
-
-            if (!bonusId.HasValue)
-            {
-                bonusId = StableInt(key);
-            }
-
-            var amount =
-                Decimal(row, "amount")
-                ?? Decimal(row, "Amount")
-                ?? 0m;
-
-            var description =
-                String(row, "description")
-                ?? String(row, "Description");
-
-            var payrollIdPaid =
-                Int(row, "payrollIdPaid")
-                ?? Int(row, "PayrollID_Paid");
-
-            result.Add(new BonusRecord
-            {
-                BonusID = bonusId.Value,
-                EmployeeID = empId.Value,
-                BonusDate = date.Value,
-                Amount = amount,
-                Description = description,
-                PayrollID_Paid = payrollIdPaid,
-                FirebaseKey = key
-            });
         }
 
         return result
             .OrderByDescending(x => x.BonusDate)
             .ThenBy(x => x.EmployeeID)
             .ToList();
+    }
+
+    private static BonusRecord? ParseBonus(JsonElement row, string key, int employeeId, DateTime? from, DateTime? to)
+    {
+        var empId =
+            Int(row, "employeeId")
+            ?? Int(row, "EmployeeID");
+
+        if (!empId.HasValue || empId.Value <= 0) return null;
+        if (employeeId > 0 && empId.Value != employeeId) return null;
+
+        var date =
+            Date(row, "bonusDate")
+            ?? Date(row, "BonusDate");
+
+        if (!date.HasValue) return null;
+        if (from.HasValue && date.Value.Date < from.Value.Date) return null;
+        if (to.HasValue && date.Value.Date > to.Value.Date) return null;
+
+        var bonusId =
+            Int(row, "bonusId")
+            ?? Int(row, "BonusID")
+            ?? IntFromKey(key);
+
+        if (!bonusId.HasValue)
+        {
+            bonusId = StableInt(key);
+        }
+
+        var amount =
+            Decimal(row, "amount")
+            ?? Decimal(row, "Amount")
+            ?? 0m;
+
+        var description =
+            String(row, "description")
+            ?? String(row, "Description");
+
+        var payrollIdPaid =
+            Int(row, "payrollIdPaid")
+            ?? Int(row, "PayrollID_Paid");
+
+        return new BonusRecord
+        {
+            BonusID = bonusId.Value,
+            EmployeeID = empId.Value,
+            BonusDate = date.Value,
+            Amount = amount,
+            Description = description,
+            PayrollID_Paid = payrollIdPaid,
+            FirebaseKey = key
+        };
     }
 
     public async Task<bool> SaveAsync(

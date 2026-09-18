@@ -1396,9 +1396,23 @@ public sealed class FirebaseRealtimeService
             if (string.IsNullOrWhiteSpace(table)) continue;
 
             var remote = await GetOwnerTableAsync(ownerUid, table, cancellationToken);
-            var existingKeys = remote.HasValue && remote.Value.ValueKind == JsonValueKind.Object
-                ? remote.Value.EnumerateObject().Select(x => x.Name).ToHashSet(StringComparer.Ordinal)
-                : new HashSet<string>(StringComparer.Ordinal);
+            var existingKeys = new HashSet<string>(StringComparer.Ordinal);
+            if (remote.HasValue)
+            {
+                if (remote.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var p in remote.Value.EnumerateObject()) existingKeys.Add(p.Name);
+                }
+                else if (remote.Value.ValueKind == JsonValueKind.Array)
+                {
+                    var index = 0;
+                    foreach (var item in remote.Value.EnumerateArray())
+                    {
+                        if (item.ValueKind != JsonValueKind.Null) existingKeys.Add(index.ToString(CultureInfo.InvariantCulture));
+                        index++;
+                    }
+                }
+            }
 
             var entityType = db.Model.GetEntityTypes()
                 .FirstOrDefault(x => x.ClrType.Name == entityName);

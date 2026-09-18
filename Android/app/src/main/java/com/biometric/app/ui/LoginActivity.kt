@@ -25,6 +25,7 @@ import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.tasks.await
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.firebase.database.FirebaseDatabase
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -271,6 +272,33 @@ class LoginActivity : MotionBaseActivity() {
             }.getOrNull()
 
             var claims = tokenResult?.claims.orEmpty()
+            
+            // Standalone Fallback: If claims are not present yet, attempt to read the 
+            // global user profile. This makes login "standalone" and immediate after 
+            // the user is created on the Web, without waiting for the background 
+            // provisioning service to stamp claims.
+            if (claims["role"] == null || claims["employee_id"] == null) {
+                runCatching {
+                    val profileSnapshot = FirebaseDatabase.getInstance()
+                        .getReference("user_profiles")
+                        .child(firebaseUser.uid)
+                        .get()
+                        .await()
+                    
+                    if (profileSnapshot.exists()) {
+                        val fallbackClaims = mutableMapOf<String, Any>()
+                        profileSnapshot.child("role").value?.let { fallbackClaims["role"] = it }
+                        profileSnapshot.child("employeeId").value?.let { fallbackClaims["employee_id"] = it }
+                        profileSnapshot.child("ownerUid").value?.let { fallbackClaims["owner_uid"] = it }
+                        
+                        if (fallbackClaims.isNotEmpty()) {
+                            claims = fallbackClaims
+                            Log.i("LoginActivity", "Using standalone profile fallback for user ${firebaseUser.uid}")
+                        }
+                    }
+                }
+            }
+
             repeat(4) { attempt ->
                 val hasApplicationRole = !claims["role"]?.toString().isNullOrBlank()
                 val hasEmployeeId = (claims["employee_id"]?.toString()?.toIntOrNull() ?: 0) > 0

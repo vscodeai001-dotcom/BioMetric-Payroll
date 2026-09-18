@@ -56,24 +56,45 @@ public sealed class FirebaseRegularizationService
     public async Task<List<Employee>> GetActiveEmployeesAsync(CancellationToken ct = default)
     {
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
         var result = new List<Employee>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var id = Int(item.Value, "employeeId") ?? IntFromKey(item.Name);
-            if (!id.HasValue || id <= 0) continue;
-            if (!(Bool(item.Value, "isActive") ?? true)) continue;
-            result.Add(new Employee
+            foreach (var item in json.Value.EnumerateObject())
             {
-                EmployeeID = id.Value,
-                Name = String(item.Value, "name") ?? String(item.Value, "Name") ?? "Employee",
-                Email = String(item.Value, "email") ?? String(item.Value, "Email"),
-                Role = String(item.Value, "role") ?? String(item.Value, "Role"),
-                IsDeleted = false
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(item.Value, item.Name);
+                if (employee != null) result.Add(employee);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(row, fallbackId);
+                if (employee != null) result.Add(employee);
+            }
         }
         return result.OrderBy(e => e.Name).ToList();
+    }
+
+    private static Employee? ParseActiveEmployee(JsonElement row, string key)
+    {
+        var id = Int(row, "employeeId") ?? IntFromKey(key);
+        if (!id.HasValue || id <= 0) return null;
+        if (!(Bool(row, "isActive") ?? true)) return null;
+        return new Employee
+        {
+            EmployeeID = id.Value,
+            Name = String(row, "name") ?? String(row, "Name") ?? "Employee",
+            Email = String(row, "email") ?? String(row, "Email"),
+            Role = String(row, "role") ?? String(row, "Role"),
+            IsDeleted = false
+        };
     }
 
     public async Task<List<AttendanceRegularization>> GetAsync(int employeeId = 0, CancellationToken ct = default)
@@ -84,39 +105,63 @@ public sealed class FirebaseRegularizationService
 
         // Older records may use employeeId instead of staffId. When an employee
         // query returns no rows, retry the canonical numeric employeeId field.
-        if ((json is null || json.Value.ValueKind != JsonValueKind.Object || !json.Value.EnumerateObject().Any()) && employeeId > 0)
+        if ((json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array) ||
+            (json.Value.ValueKind == JsonValueKind.Object && !json.Value.EnumerateObject().Any()) ||
+            (json.Value.ValueKind == JsonValueKind.Array && json.Value.GetArrayLength() == 0)) && employeeId > 0)
+        {
             json = await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, ct);
+        }
 
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<AttendanceRegularization>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var row = item.Value;
-            var empId = Int(row, "employeeId") ?? Int(row, "staffId") ?? IntFromKey(item.Name);
-            if (!empId.HasValue || empId <= 0 || (employeeId > 0 && empId != employeeId)) continue;
-
-            var date = DateOnlyValue(row, "date") ?? DateOnlyValue(row, "dateOfPunch");
-            var requested = TimeOnlyValue(row, "requestedTime", date) ?? TimeOnlyValue(row, "punchTimeNew", date) ?? TimeOnly.MinValue;
-            if (!date.HasValue) continue;
-
-            result.Add(new AttendanceRegularization
+            foreach (var item in json.Value.EnumerateObject())
             {
-                RegularizationId = Int(row, "regularizationId") ?? Int(row, "id") ?? IntFromKey(item.Name) ?? 0,
-                FirebaseKey = item.Name,
-                EmployeeId = empId.Value,
-                DateOfPunch = date.Value,
-                IsInPunch = string.Equals(String(row, "punchType"), "IN", StringComparison.OrdinalIgnoreCase)
-                    || Bool(row, "isInPunch") == true,
-                PunchTimeNew = requested,
-                Reason = String(row, "reason") ?? "",
-                Status = String(row, "status") ?? "Pending",
-                AdminRemarks = String(row, "adminRemarks") ?? String(row, "AdminRemarks"),
-                SubmissionDate = DateTimeValue(row, "submittedAt") ?? DateTimeValue(row, "submissionDate") ?? DateTime.Now
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var reg = ParseRegularization(item.Value, item.Name, employeeId);
+                if (reg != null) result.Add(reg);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var reg = ParseRegularization(row, fallbackId, employeeId);
+                if (reg != null) result.Add(reg);
+            }
         }
         return result.OrderByDescending(x => x.SubmissionDate).ThenByDescending(x => x.RegularizationId).ToList();
+    }
+
+    private static AttendanceRegularization? ParseRegularization(JsonElement row, string key, int employeeId)
+    {
+        var empId = Int(row, "employeeId") ?? Int(row, "staffId") ?? IntFromKey(key);
+        if (!empId.HasValue || empId <= 0 || (employeeId > 0 && empId != employeeId)) return null;
+
+        var date = DateOnlyValue(row, "date") ?? DateOnlyValue(row, "dateOfPunch");
+        if (!date.HasValue) return null;
+        var requested = TimeOnlyValue(row, "requestedTime", date) ?? TimeOnlyValue(row, "punchTimeNew", date) ?? TimeOnly.MinValue;
+
+        return new AttendanceRegularization
+        {
+            RegularizationId = Int(row, "regularizationId") ?? Int(row, "id") ?? IntFromKey(key) ?? 0,
+            FirebaseKey = key,
+            EmployeeId = empId.Value,
+            DateOfPunch = date.Value,
+            IsInPunch = string.Equals(String(row, "punchType"), "IN", StringComparison.OrdinalIgnoreCase)
+                || Bool(row, "isInPunch") == true,
+            PunchTimeNew = requested,
+            Reason = String(row, "reason") ?? "",
+            Status = String(row, "status") ?? "Pending",
+            AdminRemarks = String(row, "adminRemarks") ?? String(row, "AdminRemarks"),
+            SubmissionDate = DateTimeValue(row, "submittedAt") ?? DateTimeValue(row, "submissionDate") ?? DateTime.Now
+        };
     }
 
     public async Task<bool> SaveAsync(AttendanceRegularization request, CancellationToken ct = default)

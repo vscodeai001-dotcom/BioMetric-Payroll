@@ -35,34 +35,55 @@ public sealed class FirebaseAttendanceService
         if (from > to) return new();
 
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, "daily_summaries", ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<DailySummary>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var emp = Int(item.Value, "employeeId", "EmployeeID", "staffId", "StaffID");
-            var date = Date(item.Value, "shiftDate", "ShiftDate", "date", "Date");
-            if (!emp.HasValue || date is null || date.Value < from || date.Value > to) continue;
-
-            result.Add(new DailySummary
+            foreach (var item in json.Value.EnumerateObject())
             {
-                SummaryID = Int(item.Value, "summaryId", "SummaryID") ?? IntFromKey(item.Name) ?? 0,
-                EmployeeID = emp.Value,
-                ShiftDate = date.Value,
-                Status = String(item.Value, "status", "Status") ?? "Absent",
-                EarnedStandardHours = Decimal(item.Value, "earnedStandardHours", "EarnedStandardHours") ?? 0m,
-                TotalOvertimeDuration = Duration(item.Value, "totalOvertimeMs", "totalOvertimeDuration", "TotalOvertimeDuration"),
-                TotalPenaltyDuration = Duration(item.Value, "totalPenaltyMs", "totalPenaltyDuration", "TotalPenaltyDuration"),
-                TotalLateness = Duration(item.Value, "totalLatenessMs", "totalLateness", "TotalLateness"),
-                TotalBreakPenalty = Duration(item.Value, "totalBreakPenaltyMs", "totalBreakPenalty", "TotalBreakPenalty"),
-                ScheduledShiftDuration = Duration(item.Value, "scheduledShiftDurationMs", "scheduledShiftDuration", "ScheduledShiftDuration"),
-                ShiftAllowanceEarned = Decimal(item.Value, "shiftAllowanceEarned", "ShiftAllowanceEarned") ?? 0m,
-                IsManualOverride = Bool(item.Value, "isManualOverride", "IsManualOverride") ?? false
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseDailySummary(item.Value, item.Name, from, to);
+                if (summary != null) result.Add(summary);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseDailySummary(row, fallbackId, from, to);
+                if (summary != null) result.Add(summary);
+            }
         }
 
         return result.OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID).ToList();
+    }
+
+    private static DailySummary? ParseDailySummary(JsonElement row, string key, DateOnly from, DateOnly to)
+    {
+        var emp = Int(row, "employeeId", "EmployeeID", "staffId", "StaffID");
+        var date = Date(row, "shiftDate", "ShiftDate", "date", "Date");
+        if (!emp.HasValue || date is null || date.Value < from || date.Value > to) return null;
+
+        return new DailySummary
+        {
+            SummaryID = Int(row, "summaryId", "SummaryID") ?? IntFromKey(key) ?? 0,
+            EmployeeID = emp.Value,
+            ShiftDate = date.Value,
+            Status = String(row, "status", "Status") ?? "Absent",
+            EarnedStandardHours = Decimal(row, "earnedStandardHours", "EarnedStandardHours") ?? 0m,
+            TotalOvertimeDuration = Duration(row, "totalOvertimeMs", "totalOvertimeDuration", "TotalOvertimeDuration"),
+            TotalPenaltyDuration = Duration(row, "totalPenaltyMs", "totalPenaltyDuration", "TotalPenaltyDuration"),
+            TotalLateness = Duration(row, "totalLatenessMs", "totalLateness", "TotalLateness"),
+            TotalBreakPenalty = Duration(row, "totalBreakPenaltyMs", "totalBreakPenalty", "TotalBreakPenalty"),
+            ScheduledShiftDuration = Duration(row, "scheduledShiftDurationMs", "scheduledShiftDuration", "ScheduledShiftDuration"),
+            ShiftAllowanceEarned = Decimal(row, "shiftAllowanceEarned", "ShiftAllowanceEarned") ?? 0m,
+            IsManualOverride = Bool(row, "isManualOverride", "IsManualOverride") ?? false
+        };
     }
 
     public async Task<List<DailySummary>> GetDailySummariesAsync(
@@ -76,34 +97,55 @@ public sealed class FirebaseAttendanceService
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "daily_summaries", "employeeId", employeeId, ct);
 
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<DailySummary>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var emp = Int(item.Value, "employeeId", "EmployeeID");
-            var date = Date(item.Value, "shiftDate", "ShiftDate");
-            if (emp != employeeId || date is null || date.Value < from || date.Value > to) continue;
-
-            result.Add(new DailySummary
+            foreach (var item in json.Value.EnumerateObject())
             {
-                SummaryID = Int(item.Value, "summaryId", "SummaryID") ?? IntFromKey(item.Name) ?? 0,
-                EmployeeID = employeeId,
-                ShiftDate = date.Value,
-                Status = String(item.Value, "status", "Status") ?? "Absent",
-                EarnedStandardHours = Decimal(item.Value, "earnedStandardHours", "EarnedStandardHours") ?? 0m,
-                TotalOvertimeDuration = Duration(item.Value, "totalOvertimeMs", "totalOvertimeDuration", "TotalOvertimeDuration"),
-                TotalPenaltyDuration = Duration(item.Value, "totalPenaltyMs", "totalPenaltyDuration", "TotalPenaltyDuration"),
-                TotalLateness = Duration(item.Value, "totalLatenessMs", "totalLateness", "TotalLateness"),
-                TotalBreakPenalty = Duration(item.Value, "totalBreakPenaltyMs", "totalBreakPenalty", "TotalBreakPenalty"),
-                ScheduledShiftDuration = Duration(item.Value, "scheduledShiftDurationMs", "scheduledShiftDuration", "ScheduledShiftDuration"),
-                ShiftAllowanceEarned = Decimal(item.Value, "shiftAllowanceEarned", "ShiftAllowanceEarned") ?? 0m,
-                IsManualOverride = Bool(item.Value, "isManualOverride", "IsManualOverride") ?? false
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseDailySummaryForEmployee(item.Value, item.Name, employeeId, from, to);
+                if (summary != null) result.Add(summary);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseDailySummaryForEmployee(row, fallbackId, employeeId, from, to);
+                if (summary != null) result.Add(summary);
+            }
         }
 
         return result.OrderBy(x => x.ShiftDate).ToList();
+    }
+
+    private static DailySummary? ParseDailySummaryForEmployee(JsonElement row, string key, int employeeId, DateOnly from, DateOnly to)
+    {
+        var emp = Int(row, "employeeId", "EmployeeID");
+        var date = Date(row, "shiftDate", "ShiftDate");
+        if (emp != employeeId || date is null || date.Value < from || date.Value > to) return null;
+
+        return new DailySummary
+        {
+            SummaryID = Int(row, "summaryId", "SummaryID") ?? IntFromKey(key) ?? 0,
+            EmployeeID = employeeId,
+            ShiftDate = date.Value,
+            Status = String(row, "status", "Status") ?? "Absent",
+            EarnedStandardHours = Decimal(row, "earnedStandardHours", "EarnedStandardHours") ?? 0m,
+            TotalOvertimeDuration = Duration(row, "totalOvertimeMs", "totalOvertimeDuration", "TotalOvertimeDuration"),
+            TotalPenaltyDuration = Duration(row, "totalPenaltyMs", "totalPenaltyDuration", "TotalPenaltyDuration"),
+            TotalLateness = Duration(row, "totalLatenessMs", "totalLateness", "TotalLateness"),
+            TotalBreakPenalty = Duration(row, "totalBreakPenaltyMs", "totalBreakPenalty", "TotalBreakPenalty"),
+            ScheduledShiftDuration = Duration(row, "scheduledShiftDurationMs", "scheduledShiftDuration", "ScheduledShiftDuration"),
+            ShiftAllowanceEarned = Decimal(row, "shiftAllowanceEarned", "ShiftAllowanceEarned") ?? 0m,
+            IsManualOverride = Bool(row, "isManualOverride", "IsManualOverride") ?? false
+        };
     }
 
     public async Task<List<AttendanceLog>> GetAttendancePunchesAsync(
@@ -115,36 +157,57 @@ public sealed class FirebaseAttendanceService
         if (from > to) return new();
 
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, "attendance_punches", ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<AttendanceLog>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var emp = Int(item.Value, "staffId", "employeeId", "EmployeeID");
-            var timestamp = UnixDateTime(item.Value, "timestamp", "createdAt", "checkInTime");
-            if (!emp.HasValue || timestamp is null) continue;
-            if (employeeId.HasValue && emp.Value != employeeId.Value) continue;
-
-            var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
-            if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) continue;
-
-            result.Add(new AttendanceLog
+            foreach (var item in json.Value.EnumerateObject())
             {
-                LogID = Int(item.Value, "punchId", "attendanceId", "LogID") ?? IntFromKey(item.Name) ?? 0,
-                EmployeeID = emp.Value,
-                BiometricID = String(item.Value, "biometricId", "BiometricID") ?? string.Empty,
-                PunchTime = timestamp.Value,
-                DeviceID = String(item.Value, "deviceId", "DeviceID"),
-                LogType = String(item.Value, "type", "source", "note", "LogType"),
-                IsApproved = Bool(item.Value, "isApproved", "IsApproved")
-                    ?? !string.Equals(String(item.Value, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
-                Latitude = Double(item.Value, "latitude", "Latitude"),
-                Longitude = Double(item.Value, "longitude", "Longitude")
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var punch = ParseAttendancePunch(item.Value, item.Name, from, to, employeeId);
+                if (punch != null) result.Add(punch);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var punch = ParseAttendancePunch(row, fallbackId, from, to, employeeId);
+                if (punch != null) result.Add(punch);
+            }
         }
 
         return result.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToList();
+    }
+
+    private static AttendanceLog? ParseAttendancePunch(JsonElement row, string key, DateOnly from, DateOnly to, int? employeeId)
+    {
+        var emp = Int(row, "staffId", "employeeId", "EmployeeID");
+        var timestamp = UnixDateTime(row, "timestamp", "createdAt", "checkInTime");
+        if (!emp.HasValue || timestamp is null) return null;
+        if (employeeId.HasValue && emp.Value != employeeId.Value) return null;
+
+        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
+        if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) return null;
+
+        return new AttendanceLog
+        {
+            LogID = Int(row, "punchId", "attendanceId", "LogID") ?? IntFromKey(key) ?? 0,
+            EmployeeID = emp.Value,
+            BiometricID = String(row, "biometricId", "BiometricID") ?? string.Empty,
+            PunchTime = timestamp.Value,
+            DeviceID = String(row, "deviceId", "DeviceID"),
+            LogType = String(row, "type", "source", "note", "LogType"),
+            IsApproved = Bool(row, "isApproved", "IsApproved")
+                ?? !string.Equals(String(row, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
+            Latitude = Double(row, "latitude", "Latitude"),
+            Longitude = Double(row, "longitude", "Longitude")
+        };
     }
 
     public async Task<List<AttendanceLog>> GetAttendancePunchesAsync(
@@ -158,34 +221,55 @@ public sealed class FirebaseAttendanceService
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "attendance_punches", "staffId", employeeId, ct);
 
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<AttendanceLog>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var emp = Int(item.Value, "staffId", "employeeId", "EmployeeID");
-            var timestamp = UnixDateTime(item.Value, "timestamp", "createdAt", "checkInTime");
-            if (emp != employeeId || timestamp is null) continue;
-            var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
-            if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) continue;
-
-            result.Add(new AttendanceLog
+            foreach (var item in json.Value.EnumerateObject())
             {
-                LogID = Int(item.Value, "punchId", "attendanceId", "LogID") ?? IntFromKey(item.Name) ?? 0,
-                EmployeeID = employeeId,
-                BiometricID = String(item.Value, "biometricId", "BiometricID") ?? string.Empty,
-                PunchTime = timestamp.Value,
-                DeviceID = String(item.Value, "deviceId", "DeviceID"),
-                LogType = String(item.Value, "type", "source", "note", "LogType"),
-                IsApproved = Bool(item.Value, "isApproved", "IsApproved")
-                    ?? !string.Equals(String(item.Value, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
-                Latitude = Double(item.Value, "latitude", "Latitude"),
-                Longitude = Double(item.Value, "longitude", "Longitude")
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var punch = ParseAttendancePunchForEmployee(item.Value, item.Name, employeeId, from, to);
+                if (punch != null) result.Add(punch);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var punch = ParseAttendancePunchForEmployee(row, fallbackId, employeeId, from, to);
+                if (punch != null) result.Add(punch);
+            }
         }
 
         return result.OrderBy(x => x.PunchTime).ToList();
+    }
+
+    private static AttendanceLog? ParseAttendancePunchForEmployee(JsonElement row, string key, int employeeId, DateOnly from, DateOnly to)
+    {
+        var emp = Int(row, "staffId", "employeeId", "EmployeeID");
+        var timestamp = UnixDateTime(row, "timestamp", "createdAt", "checkInTime");
+        if (emp != employeeId || timestamp is null) return null;
+        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
+        if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) return null;
+
+        return new AttendanceLog
+        {
+            LogID = Int(row, "punchId", "attendanceId", "LogID") ?? IntFromKey(key) ?? 0,
+            EmployeeID = employeeId,
+            BiometricID = String(row, "biometricId", "BiometricID") ?? string.Empty,
+            PunchTime = timestamp.Value,
+            DeviceID = String(row, "deviceId", "DeviceID"),
+            LogType = String(row, "type", "source", "note", "LogType"),
+            IsApproved = Bool(row, "isApproved", "IsApproved")
+                ?? !string.Equals(String(row, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
+            Latitude = Double(row, "latitude", "Latitude"),
+            Longitude = Double(row, "longitude", "Longitude")
+        };
     }
 
     private static JsonElement? Raw(JsonElement element, params string[] names)

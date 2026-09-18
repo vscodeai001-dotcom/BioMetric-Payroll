@@ -88,33 +88,47 @@ public sealed class FirebaseYearEndSummaryService
         if (taxYear <= 0) return result;
 
         var json = await _firebase.GetOwnerTableAsync(ResolveOwnerUid(), Table, cancellationToken);
-        if (json is not { ValueKind: JsonValueKind.Object })
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
             return result;
 
-        foreach (var property in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (property.Value.ValueKind != JsonValueKind.Object)
-                continue;
-
-            var item = property.Value;
-            var itemYear = ReadInt(item, "taxYear");
-            if (itemYear != taxYear)
-                continue;
-
-            result.Add(new YearEndSummary
+            foreach (var property in json.Value.EnumerateObject())
             {
-                SummaryID = ReadInt(item, "summaryId"),
-                EmployeeID = ReadInt(item, "employeeId"),
-                TaxYear = itemYear,
-                GrossTaxableSalary = ReadDecimal(item, "grossTaxableSalary"),
-                TotalTdsDeducted = ReadDecimal(item, "totalTdsDeducted"),
-                TotalPfContributionEmployee = ReadDecimal(item, "totalPfContributionEmployee"),
-                TotalAnnualAbsentDays = ReadInt(item, "totalAnnualAbsentDays"),
-                TotalAnnualOtPay = ReadDecimal(item, "totalAnnualOtPay")
-            });
+                if (property.Value.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseYearEndSummary(property.Value, taxYear);
+                if (summary != null) result.Add(summary);
+            }
+        }
+        else
+        {
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var summary = ParseYearEndSummary(row, taxYear);
+                if (summary != null) result.Add(summary);
+            }
         }
 
         return result.OrderBy(x => x.EmployeeID).ToList();
+    }
+
+    private static YearEndSummary? ParseYearEndSummary(JsonElement item, int taxYear)
+    {
+        var itemYear = ReadInt(item, "taxYear");
+        if (itemYear != taxYear) return null;
+
+        return new YearEndSummary
+        {
+            SummaryID = ReadInt(item, "summaryId"),
+            EmployeeID = ReadInt(item, "employeeId"),
+            TaxYear = itemYear,
+            GrossTaxableSalary = ReadDecimal(item, "grossTaxableSalary"),
+            TotalTdsDeducted = ReadDecimal(item, "totalTdsDeducted"),
+            TotalPfContributionEmployee = ReadDecimal(item, "totalPfContributionEmployee"),
+            TotalAnnualAbsentDays = ReadInt(item, "totalAnnualAbsentDays"),
+            TotalAnnualOtPay = ReadDecimal(item, "totalAnnualOtPay")
+        };
     }
 
     public static string ComputeSummaryHash(YearEndSummary summary)

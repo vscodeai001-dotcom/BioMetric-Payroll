@@ -47,28 +47,30 @@ public sealed class FirebaseShiftScheduleService
         var json = employeeId > 0
             ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, cancellationToken)
             : await _firebase.GetOwnerTableAsync(OwnerUid, Table, cancellationToken);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object)
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
             return new List<ShiftSchedule>();
 
         var result = new List<ShiftSchedule>();
-        foreach (var property in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            var row = property.Value;
-            if (row.ValueKind != JsonValueKind.Object) continue;
-
-            var schedule = ParseSchedule(row, property.Name);
-            if (schedule == null) continue;
-            if (employeeId > 0 && schedule.EmployeeID != employeeId) continue;
-
-            // Recurring patterns are retained as context exactly like the
-            // existing Web scheduler. Concrete shifts are filtered by date.
-            if (!schedule.IsRecurringPattern)
+            foreach (var property in json.Value.EnumerateObject())
             {
-                if (from.HasValue && schedule.ShiftDate < from.Value) continue;
-                if (to.HasValue && schedule.ShiftDate > to.Value) continue;
+                if (property.Value.ValueKind != JsonValueKind.Object) continue;
+                var schedule = ParseScheduleRecord(property.Value, property.Name, employeeId, from, to);
+                if (schedule != null) result.Add(schedule);
             }
-
-            result.Add(schedule);
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var schedule = ParseScheduleRecord(row, fallbackId, employeeId, from, to);
+                if (schedule != null) result.Add(schedule);
+            }
         }
 
         return result
@@ -76,6 +78,23 @@ public sealed class FirebaseShiftScheduleService
             .ThenBy(x => x.EmployeeID)
             .ThenBy(x => x.StartTime)
             .ToList();
+    }
+
+    private static ShiftSchedule? ParseScheduleRecord(JsonElement row, string key, int employeeId, DateOnly? from, DateOnly? to)
+    {
+        var schedule = ParseSchedule(row, key);
+        if (schedule == null) return null;
+        if (employeeId > 0 && schedule.EmployeeID != employeeId) return null;
+
+        // Recurring patterns are retained as context exactly like the
+        // existing Web scheduler. Concrete shifts are filtered by date.
+        if (!schedule.IsRecurringPattern)
+        {
+            if (from.HasValue && schedule.ShiftDate < from.Value) return null;
+            if (to.HasValue && schedule.ShiftDate > to.Value) return null;
+        }
+
+        return schedule;
     }
 
     public async Task<Employee?> GetEmployeeAsync(
@@ -116,39 +135,58 @@ public sealed class FirebaseShiftScheduleService
         CancellationToken cancellationToken = default)
     {
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, cancellationToken);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object)
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
             return new List<Employee>();
 
         var employees = new List<Employee>();
-        foreach (var property in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            var row = property.Value;
-            if (row.ValueKind != JsonValueKind.Object) continue;
-
-            var id = Int(row, "employeeId") ?? IntFromKey(property.Name);
-            if (!id.HasValue || id.Value <= 0) continue;
-
-            var isActive = Bool(row, "isActive") ?? true;
-            if (!isActive) continue;
-
-            employees.Add(new Employee
+            foreach (var property in json.Value.EnumerateObject())
             {
-                EmployeeID = id.Value,
-                Name = String(row, "name") ?? "Employee",
-                Role = String(row, "role"),
-                Email = String(row, "email"),
-                ShiftStartTime = Time(row, "shiftStart"),
-                ShiftEndTime = Time(row, "shiftEnd"),
-                CompOffDayOfWeek = Enum.TryParse<DayOfWeek>(String(row, "compOffDayOfWeek"), true, out var off)
-                    ? off
-                    : Int(row, "compOffDayOfWeek") is int offInt && offInt >= 0 && offInt <= 6
-                        ? (DayOfWeek?)offInt
-                        : null,
-                IsDeleted = false
-            });
+                if (property.Value.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(property.Value, property.Name);
+                if (employee != null) employees.Add(employee);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(row, fallbackId);
+                if (employee != null) employees.Add(employee);
+            }
         }
 
         return employees.OrderBy(x => x.Name).ToList();
+    }
+
+    private static Employee? ParseActiveEmployee(JsonElement row, string key)
+    {
+        var id = Int(row, "employeeId") ?? IntFromKey(key);
+        if (!id.HasValue || id.Value <= 0) return null;
+
+        var isActive = Bool(row, "isActive") ?? true;
+        if (!isActive) return null;
+
+        return new Employee
+        {
+            EmployeeID = id.Value,
+            Name = String(row, "name") ?? "Employee",
+            Role = String(row, "role"),
+            Email = String(row, "email"),
+            ShiftStartTime = Time(row, "shiftStart"),
+            ShiftEndTime = Time(row, "shiftEnd"),
+            CompOffDayOfWeek = Enum.TryParse<DayOfWeek>(String(row, "compOffDayOfWeek"), true, out var off)
+                ? off
+                : Int(row, "compOffDayOfWeek") is int offInt && offInt >= 0 && offInt <= 6
+                    ? (DayOfWeek?)offInt
+                    : null,
+            IsDeleted = false
+        };
     }
 
     public async Task<bool> CanEmployeeViewShiftsAsync(

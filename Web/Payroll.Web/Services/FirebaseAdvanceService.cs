@@ -55,26 +55,47 @@ public sealed class FirebaseAdvanceService
     public async Task<List<Employee>> GetActiveEmployeesAsync(CancellationToken ct = default)
     {
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<Employee>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            var row = item.Value;
-            if (row.ValueKind != JsonValueKind.Object) continue;
-            var id = Int(row, "employeeId") ?? IntFromKey(item.Name);
-            if (!id.HasValue || id <= 0) continue;
-            if (!(Bool(row, "isActive") ?? true)) continue;
-            result.Add(new Employee
+            foreach (var item in json.Value.EnumerateObject())
             {
-                EmployeeID = id.Value,
-                Name = String(row, "name") ?? "Employee",
-                Email = String(row, "email"),
-                Role = String(row, "role"),
-                IsDeleted = false
-            });
+                var row = item.Value;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(row, item.Name);
+                if (employee != null) result.Add(employee);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var employee = ParseActiveEmployee(row, fallbackId);
+                if (employee != null) result.Add(employee);
+            }
         }
         return result.OrderBy(e => e.Name).ToList();
+    }
+
+    private static Employee? ParseActiveEmployee(JsonElement row, string key)
+    {
+        var id = Int(row, "employeeId") ?? IntFromKey(key);
+        if (!id.HasValue || id <= 0) return null;
+        if (!(Bool(row, "isActive") ?? true)) return null;
+        return new Employee
+        {
+            EmployeeID = id.Value,
+            Name = String(row, "name") ?? "Employee",
+            Email = String(row, "email"),
+            Role = String(row, "role"),
+            IsDeleted = false
+        };
     }
 
     public async Task<List<SalaryAdvance>> GetAsync(
@@ -87,40 +108,59 @@ public sealed class FirebaseAdvanceService
         var json = employeeId > 0
             ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, ct)
             : await _firebase.GetOwnerTableAsync(OwnerUid, Table, ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<SalaryAdvance>();
-        foreach (var item in json.Value.EnumerateObject())
+        if (json.Value.ValueKind == JsonValueKind.Object)
         {
-            if (item.Value.ValueKind != JsonValueKind.Object) continue;
-            var row = item.Value;
-            var empId = Int(row, "employeeId") ?? Int(row, "EmployeeId");
-            if (!empId.HasValue || empId <= 0) continue;
-            if (employeeId > 0 && empId != employeeId) continue;
-
-            var date = Date(row, "date") ?? Date(row, "advanceDate");
-            if (from.HasValue && (!date.HasValue || date.Value.Date < from.Value.Date)) continue;
-            if (to.HasValue && (!date.HasValue || date.Value.Date > to.Value.Date)) continue;
-
-            var recovered = Bool(row, "isRecovered") ?? Bool(row, "IsRecovered") ?? false;
-            var payrollId = Int(row, "payrollIdPaid") ?? Int(row, "PayrollID_Paid");
-            if (unpaidOnly && (recovered || payrollId.HasValue)) continue;
-
-            var key = item.Name;
-            var numericId = Int(row, "advanceId") ?? Int(row, "AdvanceID") ?? IntFromKey(key) ?? StableInt(key);
-            result.Add(new SalaryAdvance
+            foreach (var item in json.Value.EnumerateObject())
             {
-                AdvanceID = numericId,
-                EmployeeID = empId.Value,
-                AdvanceDate = date,
-                Amount = Decimal(row, "amount") ?? Decimal(row, "Amount") ?? 0m,
-                AdvanceType = String(row, "advanceType") ?? String(row, "AdvanceType") ?? String(row, "type") ?? "General",
-                PayrollID_Paid = payrollId,
-                FirebaseKey = key
-            });
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var advance = ParseAdvance(item.Value, item.Name, employeeId, from, to, unpaidOnly);
+                if (advance != null) result.Add(advance);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var advance = ParseAdvance(row, fallbackId, employeeId, from, to, unpaidOnly);
+                if (advance != null) result.Add(advance);
+            }
         }
 
         return result.OrderByDescending(x => x.AdvanceDate).ThenBy(x => x.EmployeeID).ToList();
+    }
+
+    private static SalaryAdvance? ParseAdvance(JsonElement row, string key, int employeeId, DateTime? from, DateTime? to, bool unpaidOnly)
+    {
+        var empId = Int(row, "employeeId") ?? Int(row, "EmployeeId");
+        if (!empId.HasValue || empId <= 0) return null;
+        if (employeeId > 0 && empId != employeeId) return null;
+
+        var date = Date(row, "date") ?? Date(row, "advanceDate");
+        if (from.HasValue && (!date.HasValue || date.Value.Date < from.Value.Date)) return null;
+        if (to.HasValue && (!date.HasValue || date.Value.Date > to.Value.Date)) return null;
+
+        var recovered = Bool(row, "isRecovered") ?? Bool(row, "IsRecovered") ?? false;
+        var payrollId = Int(row, "payrollIdPaid") ?? Int(row, "PayrollID_Paid");
+        if (unpaidOnly && (recovered || payrollId.HasValue)) return null;
+
+        var numericId = Int(row, "advanceId") ?? Int(row, "AdvanceID") ?? IntFromKey(key) ?? StableInt(key);
+        return new SalaryAdvance
+        {
+            AdvanceID = numericId,
+            EmployeeID = empId.Value,
+            AdvanceDate = date,
+            Amount = Decimal(row, "amount") ?? Decimal(row, "Amount") ?? 0m,
+            AdvanceType = String(row, "advanceType") ?? String(row, "AdvanceType") ?? String(row, "type") ?? "General",
+            PayrollID_Paid = payrollId,
+            FirebaseKey = key
+        };
     }
 
     public async Task<bool> SaveAsync(SalaryAdvance advance, CancellationToken ct = default)

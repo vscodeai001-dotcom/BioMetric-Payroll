@@ -49,8 +49,13 @@ class FirebaseEmployeeProvisioningVerifier @Inject constructor(
 
             val rowEmail = snapshot.child("email").value?.toString()?.trim().orEmpty()
             val authEmail = user.email?.trim().orEmpty()
+            
+            // SECURITY RULE: If an email is provisioned in the database record, it MUST match 
+            // the authenticated user's email. This prevents "shadow" logins if claims 
+            // were somehow stamped incorrectly. 
+            // EXCEPTION: We allow the login if the row email is blank (first-time provisioning).
             if (rowEmail.isNotBlank() && authEmail.isNotBlank() && !rowEmail.equals(authEmail, ignoreCase = true)) {
-                return@runCatching Result(false, "Firebase employee email does not match the provisioned employee record.")
+                return@runCatching Result(false, "Firebase employee email ($rowEmail) does not match the provisioned login record ($authEmail). Please ask Admin to verify the employee's email in User Management.")
             }
 
             val activeValue = snapshot.child("isActive").value
