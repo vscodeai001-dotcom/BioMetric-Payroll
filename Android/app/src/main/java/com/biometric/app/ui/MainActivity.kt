@@ -207,6 +207,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 it.playAnimation()
             }
             binding.liveDotAdmin.startAnimation(AnimationUtils.loadAnimation(this@MainActivity, R.anim.pulse))
+            binding.liveDotAdmin.startAnimation(AnimationUtils.loadAnimation(this@MainActivity, R.anim.pulse))
         }
 
         if (driveManager.isUserSignedIn()) {
@@ -411,7 +412,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupAdminDashboardMapControls() {
-        binding.btnAdminMapFollow.alpha = if (isAdminAutoFocusEnabled) 1.0f else 0.4f
         binding.btnAdminMapFollow.setOnClickListener {
             isAdminAutoFocusEnabled = !isAdminAutoFocusEnabled
             adminFollowingEmployeeId = null
@@ -739,8 +739,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 if (loc.employeeId <= 0) return@forEach
                 val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
                 val firebaseEmp = firebaseEmployeeData[loc.employeeId]
-
-                if (emp == null && firebaseEmp == null) return@forEach
                 
                 val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
                 val status = getLocStatus(loc)
@@ -860,14 +858,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     }
                 }
 
-                // Smoothly follow the selected employee or keep the view centered
-                // on workforce movement. Using animateTo() with a custom interval
-                // instead of per-frame setCenter() prevents the "vibrating" UI.
-                if (isAdminAutoFocusEnabled) {
-                    if (adminFollowingEmployeeId == null || adminFollowingEmployeeId == loc.employeeId) {
-                        dashboardMap.controller.animateTo(point)
-                        if (isTrackingHubActive) commandMap.controller.animateTo(point)
-                    }
+                // Smoothly follow the selected employee. Using animateTo() with 
+                // a custom interval instead of per-frame setCenter() prevents 
+                // the "vibrating" UI.
+                if (isAdminAutoFocusEnabled && adminFollowingEmployeeId == loc.employeeId) {
+                    dashboardMap.controller.animateTo(point)
+                    if (isTrackingHubActive) commandMap.controller.animateTo(point)
                 }
 
                 val office = officeMarker?.position
@@ -916,16 +912,22 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 geoPoints.add(point)
             }
             
-            // Initial camera fit only.
-            if (!adminMapAutoCentered && geoPoints.isNotEmpty()) {
+            // Camera fit only if workforce markers grow or initial fit.
+            val markerCount = geoPoints.size
+            val prevCount = dashboardMap.tag as? Int ?: 0
+            if (markerCount > 0 && (markerCount > prevCount || !adminMapAutoCentered)) {
                 createBoundingBox(geoPoints)?.let { box ->
                     dashboardMap.zoomToBoundingBox(box, true, 100)
                     if (isTrackingHubActive) commandMap.zoomToBoundingBox(box, true, 100)
                 }
                 adminMapAutoCentered = true
+                dashboardMap.tag = markerCount
             }
 
-            b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, locations.count { getLocStatus(it) == "Live" })
+            val liveOpCount = locations.count { getLocStatus(it) == "Live" }
+            b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, liveOpCount)
+            b.tvAdminMapLiveCount.text = "$liveOpCount Live / ${employeeData.size}"
+            
             dashboardMap.invalidate()
             if (isTrackingHubActive) commandMap.invalidate()
         }

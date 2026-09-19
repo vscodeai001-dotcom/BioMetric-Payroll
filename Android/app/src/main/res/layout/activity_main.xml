@@ -354,11 +354,20 @@
                                     android:text="📍 Live Staff Operations"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textStyle="bold" />
+                                <TextView
+                                    android:id="@+id/tvAdminMapLiveCount"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginStart="8dp"
+                                    android:text="0 Live / 0"
+                                    android:textColor="#198754"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold" />
                                 <View
                                     android:id="@+id/liveDotAdmin"
                                     android:layout_width="8dp"
                                     android:layout_height="8dp"
-                                    android:layout_marginStart="8dp"
+                                    android:layout_marginStart="4dp"
                                     android:background="@drawable/bg_live_dot" />
                                 <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
                                 <com.google.android.material.button.MaterialButton

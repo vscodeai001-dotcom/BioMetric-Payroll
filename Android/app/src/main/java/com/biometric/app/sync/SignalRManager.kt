@@ -48,16 +48,10 @@ class SignalRManager @Inject constructor(
 
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
         // Authoritative tenant check: Render GPS nodes that belong to the 
-        // current owner. We prioritize the employee master directory for 
-        // filtering, but we do not block initial live rendering if the 
-        // employee list is still hydrating.
-        val employeeIds = synchronized(ownerEmployeeIds) { ownerEmployeeIds.toSet() }
-        val filtered = if (employeeIds.isEmpty()) {
-            // Fallback: trust the live node during initial startup
-            raw.filterKeys { it > 0 }
-        } else {
-            raw.filterKeys { it > 0 && employeeIds.contains(it) }
-        }
+        // current owner. We prioritized the employee master directory before,
+        // but now we trust all positive IDs from the owner's live tracking node.
+        val filtered = raw.filterKeys { it > 0 }
+        
         _liveLocations.value = filtered
         _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
     }
