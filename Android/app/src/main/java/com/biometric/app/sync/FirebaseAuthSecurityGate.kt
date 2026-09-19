@@ -34,7 +34,7 @@ class FirebaseAuthSecurityGate @Inject constructor(
 
     suspend fun validateCurrentSession(): Result {
         val user = auth.currentUser
-            ?: return Result(false, message = "Firebase authentication session is missing.")
+            ?: return Result(false, message = "Firebase session expired or was cleared by the system. Please sign in again.")
 
         // Do not force a network refresh on every app start. Firebase already
         // persists and refreshes valid sessions automatically. A forced refresh

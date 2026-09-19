@@ -440,6 +440,11 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             openSelfService("profile") 
         }
 
+        binding.cvTroubleshoot.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, TroubleshootActivity::class.java))
+        }
+
         binding.btnLogout.setOnClickListener { 
             HapticUtil.vibrateClick(it)
             confirmLogout() 
@@ -499,8 +504,19 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
 
     private fun setupEmployeeMapControls() {
+        binding.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+        binding.btnEmployeeMapFollow.setOnClickListener {
+            isAutoFocusEnabled = !isAutoFocusEnabled
+            binding.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+            Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
+            
+            if (isAutoFocusEnabled && currentLat != 0.0) {
+                binding.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
+            }
+        }
         binding.btnEmployeeMapRoute.setOnClickListener {
-            isAutoFocusEnabled = true
+            isAutoFocusEnabled = false
+            binding.btnEmployeeMapFollow.alpha = 0.4f
             if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
                 val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
                 createBoundingBox(points)?.let { binding.mapview.zoomToBoundingBox(it, true, 120) }
@@ -723,10 +739,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             bearing, 
             sessionStore.employeeId()
         ) { animatedPoint ->
-            if (isAutoFocusEnabled) {
-                binding.mapview.controller.setCenter(animatedPoint)
-            }
-            
+            // Update UI on every frame for extreme smoothness
+            binding.mapview.invalidate()
+
             // Sync polyline starting point with animated marker
             runCatching {
                 routePolyline?.let { line ->
@@ -745,6 +760,13 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 }
             }
             binding.mapview.invalidate()
+        }
+
+        // Smooth camera follow. Using animateTo() only on actual GPS updates
+        // from the provider (not every animation frame) creates the premium
+        // "gliding" effect seen in Swiggy/Uber.
+        if (isAutoFocusEnabled) {
+            binding.mapview.controller.animateTo(toPosition)
         }
     }
 

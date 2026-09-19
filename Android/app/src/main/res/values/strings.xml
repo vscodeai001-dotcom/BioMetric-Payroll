@@ -261,4 +261,37 @@
     <string name="btn_configure">Configure</string>
     <string name="btn_finish_setup">Finish Setup ✨</string>
     <string name="msg_setup_complete">Reliability setup completed successfully! ✅</string>
+
+    <!-- Troubleshooting & Permissions -->
+    <string name="title_troubleshoot">Permissions &amp; Troubleshoot</string>
+    <string name="troubleshoot_warning_card">You are losing out on tracking accuracy due to missing permissions ⚠️</string>
+    <string name="label_critical_permissions">CRITICAL PERMISSIONS</string>
+    <string name="label_other_permissions">OTHER PERMISSIONS</string>
+    <string name="troubleshoot_step_notifications_title">Notifications</string>
+    <string name="troubleshoot_step_notifications_desc">Required to alert on tracking status and system updates.</string>
+    <string name="troubleshoot_step_gps_title">Location Services (GPS)</string>
+    <string name="troubleshoot_step_gps_desc">Required to accurately track your workspace presence.</string>
+    <string name="troubleshoot_step_bg_location_title">Always-On Location</string>
+    <string name="troubleshoot_step_bg_location_desc">Must be set to \"Allow all the time\" for 24/7 background tracking.</string>
+    <string name="troubleshoot_step_bg_usage_title">Unrestricted Data/Battery</string>
+    <string name="troubleshoot_step_bg_usage_desc">Ensure \"Allow background usage\" is ON to prevent tracking from being paused.</string>
+    <string name="troubleshoot_step_alarms_title">Alarms</string>
+    <string name="troubleshoot_step_alarms_desc">Required to maintain tracking frequency and background sync.</string>
+    <string name="troubleshoot_step_battery_title">Disable Battery Optimization</string>
+    <string name="troubleshoot_step_battery_desc">Required to run in the background 24/7/365.</string>
+    <string name="troubleshoot_step_camera_title">Camera</string>
+    <string name="troubleshoot_step_camera_desc">Required for biometric verification and selfie punches.</string>
+    <string name="troubleshoot_step_bluetooth_title">Bluetooth</string>
+    <string name="troubleshoot_step_bluetooth_desc">Required for nearby staff and device detection.</string>
+    <string name="troubleshoot_step_overlay_title">Draw over other apps</string>
+    <string name="troubleshoot_step_overlay_desc">Required to show high-priority alerts and system status.</string>
+    <string name="label_test_notifications">TEST NOTIFICATIONS</string>
+    <string name="desc_test_notifications">Enable all permissions above to test notifications. This is how you\'ll receive alerts.</string>
+    <string name="btn_test_notification">Test Notification</string>
+    <string name="btn_test_notification_lock">Test notification on screen lock</string>
+    <string name="label_session_health">SESSION HEALTH</string>
+    <string name="desc_session_health">If you keep getting logged out or see \"Session Missing\", try repairing your secure connection.</string>
+    <string name="btn_repair_session">Repair Secure Connection ⚡</string>
+    <string name="msg_test_notif_sent">Test notification sent! 🔔</string>
+    <string name="msg_test_notif_lock_sent">Lock your screen now. Notification will arrive in 5 seconds. 🔒</string>
 </resources>

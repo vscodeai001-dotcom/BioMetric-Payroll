@@ -520,6 +520,9 @@ public class GeoLocationService
                  */
                 try
                 {
+                    var live = LiveLocationStore.Get(employeeId);
+                    var speed = live?.SpeedMps ?? 0;
+
                     var clientEventId =
                         $"web-{sessionId:N}-{session.TotalPoints}";
 
@@ -531,7 +534,7 @@ public class GeoLocationService
                         latitude,
                         longitude,
                         safeAccuracy,
-                        0,
+                        speed,
                         new DateTimeOffset(captureTime).ToUnixTimeMilliseconds(),
                         allowedRadiusMeters,
                         session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,

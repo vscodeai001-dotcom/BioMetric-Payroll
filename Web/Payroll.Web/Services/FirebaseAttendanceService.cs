@@ -192,7 +192,7 @@ public sealed class FirebaseAttendanceService
         if (!emp.HasValue || timestamp is null) return null;
         if (employeeId.HasValue && emp.Value != employeeId.Value) return null;
 
-        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
+        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, GetIndiaTimeZoneId()).Date;
         if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) return null;
 
         return new AttendanceLog
@@ -208,6 +208,19 @@ public sealed class FirebaseAttendanceService
             Latitude = Double(row, "latitude", "Latitude"),
             Longitude = Double(row, "longitude", "Longitude")
         };
+    }
+
+    private static string GetIndiaTimeZoneId()
+    {
+        try
+        {
+            TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+            return "Asia/Kolkata";
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return "India Standard Time";
+        }
     }
 
     public async Task<List<AttendanceLog>> GetAttendancePunchesAsync(
@@ -254,7 +267,7 @@ public sealed class FirebaseAttendanceService
         var emp = Int(row, "staffId", "employeeId", "EmployeeID");
         var timestamp = UnixDateTime(row, "timestamp", "createdAt", "checkInTime");
         if (emp != employeeId || timestamp is null) return null;
-        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, "Asia/Kolkata").Date;
+        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, GetIndiaTimeZoneId()).Date;
         if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) return null;
 
         return new AttendanceLog
@@ -289,9 +302,12 @@ public sealed class FirebaseAttendanceService
     private static int? Int(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return null;
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
         if (value.Value.TryGetInt32(out var i)) return i;
-        return int.TryParse(value.Value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out i) ? (int?)i : null;
+        var text = value.Value.ToString();
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out i)) return i;
+        if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (int)Math.Round(d);
+        return null;
     }
 
     private static int? IntFromKey(string key) => int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? i : null;
@@ -299,17 +315,21 @@ public sealed class FirebaseAttendanceService
     private static decimal? Decimal(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return null;
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
         if (value.Value.TryGetDecimal(out var d)) return d;
-        return decimal.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? (decimal?)d : null;
+        var text = value.Value.ToString();
+        if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
+        return null;
     }
 
     private static double? Double(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return null;
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
         if (value.Value.TryGetDouble(out var d)) return d;
-        return double.TryParse(value.Value.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d) ? (double?)d : null;
+        var text = value.Value.ToString();
+        if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
+        return null;
     }
 
     private static bool? Bool(JsonElement element, params string[] names)
@@ -327,7 +347,7 @@ public sealed class FirebaseAttendanceService
         var text = value.Value.ToString();
         if (DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)) return d;
         if (value.Value.TryGetInt64(out var ms))
-            return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(ms).ToOffset(TimeSpan.FromHours(5.5)).Date);
+            return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(ms).ToOffset(TimeZoneInfo.FindSystemTimeZoneById(GetIndiaTimeZoneId()).BaseUtcOffset).Date);
         return null;
     }
 

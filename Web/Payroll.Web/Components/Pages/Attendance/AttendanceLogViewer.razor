@@ -656,7 +656,7 @@
             // DAILY SUMMARIES
             // ----------------------------------------------------
 
-            List<DailySummary> data;
+            List<DailySummary> data = new();
             var cacheKey = BuildAttendanceCacheKey(dStart, dEnd, selectedEmployeeId);
             try
             {
@@ -664,6 +664,8 @@
             }
             catch (Exception firebaseReadEx)
             {
+                _logger.LogWarning(firebaseReadEx, "Firebase attendance summary read failed. Range: {Start} to {End}", dStart, dEnd);
+
                 if (!_attendanceCacheReady)
                     throw;
 
@@ -673,8 +675,6 @@
 
                 data = cached.DailySummaries;
                 _showingCachedAttendance = true;
-                _logger.LogWarning(firebaseReadEx,
-                    "Firebase attendance summary read failed. Using cached attendance data for {CacheKey}.", cacheKey);
             }
 
             if (selectedEmployeeId > 0)
@@ -692,6 +692,21 @@
                         d => d.EmployeeID)
                     .Distinct()
                     .ToList();
+
+            // Fix: If viewing a single employee, ensure they are in the list even if data is empty.
+            if (selectedEmployeeId > 0 && !employeeIds.Contains(selectedEmployeeId))
+            {
+                employeeIds.Add(selectedEmployeeId);
+            }
+            else if (selectedEmployeeId <= 0)
+            {
+                // Fix: Ensure all active employees are considered for punch loading
+                // if we are showing all employees.
+                foreach (var id in activeEmployeeIds)
+                {
+                    if (!employeeIds.Contains(id)) employeeIds.Add(id);
+                }
+            }
 
             // ----------------------------------------------------
             // SCHEDULES

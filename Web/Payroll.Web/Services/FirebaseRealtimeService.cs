@@ -989,6 +989,7 @@ public sealed class FirebaseRealtimeService
                 Put("enableShiftRotation", Value("EnableShiftRotation"));
                 Put("rotationGroup", Value("RotationGroup"));
                 Put("shiftRotationPattern", Value("ShiftRotationPattern"));
+                Put("aspNetUserId", Value("AspNetUserId"));
                 Put("isActive", Value("IsDeleted") is bool deleted ? !deleted : true);
                 break;
 

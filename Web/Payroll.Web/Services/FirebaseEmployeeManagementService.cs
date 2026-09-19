@@ -788,6 +788,7 @@ public sealed class FirebaseEmployeeManagementService
             BankAccountNumber = StringValue("bankAccountNumber"),
             BankIfscCode = StringValue("bankIfscCode"),
             BankName = StringValue("bankName"),
+            AspNetUserId = StringValue("aspNetUserId"),
             EnableShiftRotation = BoolValue("enableShiftRotation"),
             RotationGroup = StringValue("rotationGroup"),
             ShiftRotationPattern = StringValue("shiftRotationPattern"),

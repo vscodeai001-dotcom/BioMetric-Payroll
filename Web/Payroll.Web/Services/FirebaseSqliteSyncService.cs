@@ -794,12 +794,13 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private async Task<bool> SyncTrackingHistoryAsync(string ownerUid, CancellationToken ct)
     {
         var json = await _firebase.GetOwnerTableAsync(ownerUid, "tracking/history", ct);
-        if (json is null || json.Value.ValueKind != JsonValueKind.Object) return false;
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return false;
 
         var changed = false;
-        foreach (var employeeNode in json.Value.EnumerateObject())
+
+        async Task ProcessEmployeeNode(string empIdKey, JsonElement employeeNode)
         {
-            if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
+            if (employeeNode.ValueKind != JsonValueKind.Object) return;
 
             await using var scope = _scopeFactory.CreateAsyncScope();
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -807,20 +808,39 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             var entityType = db.Model.GetEntityTypes().First(x => x.ClrType.Name == "EmployeeLocationHistory");
             var keys = entityType.FindPrimaryKey()?.Properties;
 
-            foreach (var eventNode in employeeNode.Value.EnumerateObject())
+            var empChanged = false;
+            foreach (var eventNode in employeeNode.EnumerateObject())
             {
                 if (eventNode.Value.ValueKind != JsonValueKind.Object) continue;
                 try
                 {
-                    changed |= await UpsertRecordAsync(db, entityType, keys!, eventNode.Name, eventNode.Value, ct);
+                    empChanged |= await UpsertRecordAsync(db, entityType, keys!, eventNode.Name, eventNode.Value, ct);
                 }
                 catch { }
             }
 
-            if (changed)
+            if (empChanged)
             {
+                changed = true;
                 using var syncScope = _firebaseSyncWriteScope.Enter();
                 await db.SaveChangesAsync(ct);
+            }
+        }
+
+        if (json.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var employeeNode in json.Value.EnumerateObject())
+            {
+                await ProcessEmployeeNode(employeeNode.Name, employeeNode.Value);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var node in json.Value.EnumerateArray())
+            {
+                await ProcessEmployeeNode(index.ToString(), node);
+                index++;
             }
         }
         return changed;
@@ -1059,6 +1079,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     value,
                     property.ClrType);
 
+            // Special mapping for Employee break hours (Firebase) to minutes (SQL)
+            if (entityType.ClrType.Name == "Employee" && property.Name == "StandardBreakMinutes")
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var hours))
+                {
+                    converted = (int)Math.Round(hours * 60d);
+                }
+            }
+
             if (converted is null &&
                 Nullable.GetUnderlyingType(property.ClrType) == null &&
                 property.ClrType.IsValueType)
@@ -1112,6 +1141,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             ("leaverequestid", "id") => true,
             ("regularizationid", "id") => true,
             ("employeeid", "staffid") => true,
+            ("monthlysalary", "salaryrate") => true,
+            ("standardbreakminutes", "breakhours") => true,
+            ("payrolltypeoverride", "salarytype") => true,
+            ("terminationdate", "terminatedate") => true,
+            ("isdeleted", "isactive") => true,
+            ("shiftstarttime", "shiftstart") => true,
+            ("shiftendtime", "shiftend") => true,
+            ("hiredate", "hiredate") => true,
+            ("dob", "dob") => true,
+            ("standardhours", "standardhours") => true,
+            ("otrule", "otrule") => true,
+            ("otflatrate", "otflatrate") => true,
+            ("compoffdayofweek", "compoffdayofweek") => true,
             _ => false
         };
 

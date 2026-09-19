@@ -25,7 +25,7 @@ class FirebaseEmployeeProvisioningVerifier @Inject constructor(
     )
 
     suspend fun verify(employeeId: Int, ownerUid: String): Result {
-        val user = auth.currentUser ?: return Result(false, "Firebase authentication session is missing.")
+        val user = auth.currentUser ?: return Result(false, "Firebase session expired or was cleared by the system. Please sign in again.")
         if (employeeId <= 0 || ownerUid.isBlank()) {
             return Result(false, "Employee Firebase provisioning is incomplete.")
         }

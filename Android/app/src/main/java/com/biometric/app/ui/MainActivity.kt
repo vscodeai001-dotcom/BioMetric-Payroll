@@ -81,7 +81,9 @@ import android.os.Looper
 import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.MotionEvent
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.AnimationUtils
 import android.view.animation.OvershootInterpolator
 import androidx.core.graphics.toColorInt
 import com.biometric.app.api.AdminFeatureSettingsDto
@@ -137,6 +139,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var activeHubName: String = "DASHBOARD"
     private var adminMapLayerIndex = 0
     private var adminZoneVisible = true
+    private var adminTrailsVisible = true
     private var isAdminAutoFocusEnabled = false
     private var adminFollowingEmployeeId: Int? = null
     
@@ -203,6 +206,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 it.visibility = View.VISIBLE
                 it.playAnimation()
             }
+            binding.liveDotAdmin.startAnimation(AnimationUtils.loadAnimation(this@MainActivity, R.anim.pulse))
         }
 
         if (driveManager.isUserSignedIn()) {
@@ -333,6 +337,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         map.controller.setCenter(GeoPoint(11.9139, 79.8145))
         applyCurrentThemeToMap(map)
 
+        // REQUIREMENT: Robustly prevent parent NestedScrollView from intercepting map touches (pinch-to-zoom fix)
+        map.setOnTouchListener { v, event ->
+            v.parent.requestDisallowInterceptTouchEvent(true)
+            if (event.action == MotionEvent.ACTION_UP) {
+                v.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+
         map.post {
             map.invalidate()
             map.requestLayout()
@@ -344,6 +357,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         _binding?.let { b ->
             val map = b.commandCenterMapView
             configureAdminMap(map, allowNetwork = true)
+            
+            // REQUIREMENT: Prevent parent NestedScrollView from intercepting map touches
+            map.setOnTouchListener { v, _ ->
+                v.parent.requestDisallowInterceptTouchEvent(true)
+                false
+            }
+
             commandCenterMapReady = true
             map.post {
                 map.invalidate()
@@ -391,18 +411,20 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupAdminDashboardMapControls() {
-        binding.btnRefreshMap.setOnClickListener {
+        binding.btnAdminMapFollow.alpha = if (isAdminAutoFocusEnabled) 1.0f else 0.4f
+        binding.btnAdminMapFollow.setOnClickListener {
             isAdminAutoFocusEnabled = !isAdminAutoFocusEnabled
             adminFollowingEmployeeId = null
             
-            if (isAdminAutoFocusEnabled) {
-                Toast.makeText(this, "Auto-focus enabled 🛰️", Toast.LENGTH_SHORT).show()
-                binding.btnRefreshMap.alpha = 1.0f
-            } else {
-                Toast.makeText(this, "Auto-focus disabled 📍", Toast.LENGTH_SHORT).show()
-                binding.btnRefreshMap.alpha = 0.6f
-            }
+            binding.btnAdminMapFollow.alpha = if (isAdminAutoFocusEnabled) 1.0f else 0.4f
+            Toast.makeText(this, if (isAdminAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
+        }
 
+        binding.btnRefreshMap.setOnClickListener {
+            isAdminAutoFocusEnabled = false
+            adminFollowingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = 0.4f
+            
             val points = signalR.liveLocations.value.values
                 .map { GeoPoint(it.latitude, it.longitude) }
             val map = binding.adminMapView
@@ -447,6 +469,22 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             geofenceCircle?.fillPaint?.alpha = alpha
             geofenceCircle?.outlinePaint?.alpha = if (adminZoneVisible) 0xA0 else 0
             binding.adminMapView.invalidate()
+            Toast.makeText(this, if (adminZoneVisible) "Office Zone Visible 🏢" else "Office Zone Hidden 🛡️", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnAdminMapTrail.setOnClickListener {
+            adminTrailsVisible = !adminTrailsVisible
+            val alpha = if (adminTrailsVisible) 255 else 0
+            val casingAlpha = if (adminTrailsVisible) 150 else 0
+            
+            roadLines.values.forEach { it.outlinePaint.alpha = alpha }
+            roadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
+            roadLines2.values.forEach { it.outlinePaint.alpha = alpha }
+            roadCasings2.values.forEach { it.outlinePaint.alpha = casingAlpha }
+            
+            binding.adminMapView.invalidate()
+            binding.commandCenterMapView.invalidate()
+            Toast.makeText(this, if (adminTrailsVisible) "Trails Enabled ↝" else "Trails Disabled 📍", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnAdminMapFullscreen.setOnClickListener {
@@ -493,8 +531,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         lifecycleScope.launch {
             signalR.liveLocations
                 .collectLatest { liveMap ->
-                    // Stable Flow API: wait briefly for a burst to settle, then render the latest snapshot.
-                    delay(500L)
+                    // Stable Flow API: wait briefly for a burst to settle.
+                    // Reduced delay for more responsive live tracking.
+                    delay(200L)
                     _binding?.let { updateAdminMarkers(liveMap.values.toList()) }
                 }
         }
@@ -706,6 +745,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     markers[loc.employeeId]?.alpha = 0f; markers2[loc.employeeId]?.alpha = 0f
                     roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    roadLines2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    roadCasings2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     return@forEach
                 }
 
@@ -728,20 +769,45 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 m1.alpha = 1f
                 m1.title = employeeName
 
+                val m2 = if (isTrackingHubActive) {
+                    markers2.getOrPut(loc.employeeId) {
+                        Marker(commandMap).apply {
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                            commandMap.overlays.add(this)
+                        }
+                    }
+                } else null
+
+                m2?.let {
+                    it.alpha = 1f
+                    it.title = employeeName
+                }
+
                 MarkerAnimationHelper.animateMarker(
                     m1, 
                     point, 
                     loc.bearing.toFloat(), 
                     loc.employeeId
                 ) { animatedPoint ->
+                    m2?.position = animatedPoint
+                    m2?.rotation = m1.rotation
+
+                    // Sync both maps for extreme continuity
+                    dashboardMap.invalidate()
+                    if (isTrackingHubActive) commandMap.invalidate()
+
                     // Update road lines synchronously with marker movement
                     runCatching {
+                        val trailAlpha = if (adminTrailsVisible) 255 else 0
+                        val casingAlpha = if (adminTrailsVisible) 150 else 0
+
                         roadLines[loc.employeeId]?.let { l ->
                             val pts = l.actualPoints.toMutableList()
                             if (pts.size >= 2) {
                                 pts[0] = animatedPoint
                                 l.setPoints(pts)
                             }
+                            l.outlinePaint.alpha = trailAlpha
                         }
                         roadCasings[loc.employeeId]?.let { c ->
                             val pts = c.actualPoints.toMutableList()
@@ -749,15 +815,35 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                 pts[0] = animatedPoint
                                 c.setPoints(pts)
                             }
+                            c.outlinePaint.alpha = casingAlpha
+                        }
+                        // Repeat for command center map
+                        roadLines2[loc.employeeId]?.let { l ->
+                            val pts = l.actualPoints.toMutableList()
+                            if (pts.size >= 2) {
+                                pts[0] = animatedPoint
+                                l.setPoints(pts)
+                            }
+                            l.outlinePaint.alpha = trailAlpha
+                        }
+                        roadCasings2[loc.employeeId]?.let { c ->
+                            val pts = c.actualPoints.toMutableList()
+                            if (pts.size >= 2) {
+                                pts[0] = animatedPoint
+                                c.setPoints(pts)
+                            }
+                            c.outlinePaint.alpha = casingAlpha
                         }
                     }
-                    
-                    // Auto-focus logic
-                    if (isAdminAutoFocusEnabled) {
-                        if (adminFollowingEmployeeId == null || adminFollowingEmployeeId == loc.employeeId) {
-                            dashboardMap.controller.setCenter(animatedPoint)
-                            if (isTrackingHubActive) commandMap.controller.setCenter(animatedPoint)
-                        }
+                }
+
+                // Smoothly follow the selected employee or keep the view centered
+                // on workforce movement. Using animateTo() with a custom interval
+                // instead of per-frame setCenter() prevents the "vibrating" UI.
+                if (isAdminAutoFocusEnabled) {
+                    if (adminFollowingEmployeeId == null || adminFollowingEmployeeId == loc.employeeId) {
+                        dashboardMap.controller.animateTo(point)
+                        if (isTrackingHubActive) commandMap.controller.animateTo(point)
                     }
                 }
 
@@ -846,12 +932,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val map1 = binding.adminMapView
         val map2 = binding.commandCenterMapView
 
-        val c1 = roadCasings.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = 150; map1.overlays.add(0, this) } }
-        val l1 = roadLines.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; map1.overlays.add(1, this) } }
+        val trailAlpha = if (adminTrailsVisible) 255 else 0
+        val casingAlpha = if (adminTrailsVisible) 150 else 0
+
+        val c1 = roadCasings.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = casingAlpha; map1.overlays.add(0, this) } }
+        val l1 = roadLines.getOrPut(empId) { Polyline(map1).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = trailAlpha; map1.overlays.add(1, this) } }
         c1.setPoints(points); l1.setPoints(points)
 
-        val c2 = roadCasings2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = 150; map2.overlays.add(0, this) } }
-        val l2 = roadLines2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; map2.overlays.add(1, this) } }
+        val c2 = roadCasings2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = Color.WHITE; outlinePaint.strokeWidth = 14f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = casingAlpha; map2.overlays.add(0, this) } }
+        val l2 = roadLines2.getOrPut(empId) { Polyline(map2).apply { outlinePaint.color = "#4F46E5".toColorInt(); outlinePaint.strokeWidth = 8f; outlinePaint.strokeCap = Paint.Cap.ROUND; outlinePaint.alpha = trailAlpha; map2.overlays.add(1, this) } }
         c2.setPoints(points); l2.setPoints(points)
 
         map1.invalidate(); map2.invalidate()
@@ -1190,6 +1279,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, UserManagementActivity::class.java))
         }
+        binding.btnTroubleshoot.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, TroubleshootActivity::class.java))
+        }
         binding.btnOpenFullReportCenter.setOnClickListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, ReportCenterActivity::class.java))
@@ -1398,6 +1491,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     b.btnReportCenter.isVisible = isSuperAdmin || (s.enableCompanyReports && s.adminCanViewReports)
                     b.btnAddEmployee.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
                     b.btnUserManagement.isVisible = isSuperAdmin
+                    b.btnTroubleshoot.isVisible = isSuperAdmin || s.adminCanViewAttendance
                     b.btnRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
                     b.btnAuditTrail.isVisible = isSuperAdmin || s.enableAuditLog
 

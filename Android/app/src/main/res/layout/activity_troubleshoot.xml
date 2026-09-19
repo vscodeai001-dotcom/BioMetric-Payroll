@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/window_background">
+
+    <com.google.android.material.appbar.AppBarLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
+        app:elevation="0dp">
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_back"
+            app:title="@string/title_troubleshoot"
+            app:titleCentered="false"
+            app:titleTextAppearance="@style/TextAppearance.Material3.TitleMedium" />
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="12dp"
+                app:cardBackgroundColor="#FFF1F2"
+                app:strokeWidth="1dp"
+                app:strokeColor="#FDA4AF"
+                android:layout_marginBottom="24dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="16dp"
+                    android:gravity="center_vertical">
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_warning_triangle"
+                        app:tint="#E11D48" />
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="12dp"
+                        android:text="@string/troubleshoot_warning_card"
+                        android:textColor="#9F1239"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_critical_permissions"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:alpha="0.6"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Notifications -->
+            <include android:id="@+id/itemNotifications" layout="@layout/item_troubleshoot" />
+
+            <!-- GPS -->
+            <include android:id="@+id/itemGps" layout="@layout/item_troubleshoot" />
+
+            <!-- Background Location -->
+            <include android:id="@+id/itemBgLocation" layout="@layout/item_troubleshoot" />
+
+            <!-- Background Usage -->
+            <include android:id="@+id/itemBgUsage" layout="@layout/item_troubleshoot" />
+
+            <!-- Alarms -->
+            <include android:id="@+id/itemAlarms" layout="@layout/item_troubleshoot" />
+
+            <!-- Battery -->
+            <include android:id="@+id/itemBattery" layout="@layout/item_troubleshoot" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_other_permissions"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:alpha="0.6"
+                android:letterSpacing="0.1"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Camera -->
+            <include android:id="@+id/itemCamera" layout="@layout/item_troubleshoot" />
+
+            <!-- Bluetooth -->
+            <include android:id="@+id/itemBluetooth" layout="@layout/item_troubleshoot" />
+
+            <!-- Overlay -->
+            <include android:id="@+id/itemOverlay" layout="@layout/item_troubleshoot" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_test_notifications"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:alpha="0.6"
+                android:letterSpacing="0.1"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/desc_test_notifications"
+                android:textSize="13sp"
+                android:alpha="0.7"
+                android:layout_marginBottom="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTestNotification"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="@string/btn_test_notification"
+                app:cornerRadius="12dp"
+                android:layout_marginBottom="12dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTestNotificationLock"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="@string/btn_test_notification_lock"
+                app:cornerRadius="12dp"
+                android:layout_marginBottom="24dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/label_session_health"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:alpha="0.6"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/desc_session_health"
+                android:textSize="13sp"
+                android:alpha="0.7"
+                android:layout_marginBottom="16dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRepairSession"
+                style="@style/PremiumButton"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:text="@string/btn_repair_session"
+                app:cornerRadius="12dp"
+                android:layout_marginBottom="32dp" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

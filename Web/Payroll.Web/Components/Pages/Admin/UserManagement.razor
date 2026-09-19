@@ -74,7 +74,9 @@ else
     private List<Employee> allEmployees = new();
 
     private List<Employee> unlinkedEmployees =>
-        allEmployees.Where(e => string.IsNullOrEmpty(e.AspNetUserId)).ToList();
+        allEmployees
+            .Where(e => string.IsNullOrEmpty(e.AspNetUserId) || !userList.Any(u => u.UserId == e.AspNetUserId))
+            .ToList();
 
     private NewUserFormModel newUserForm = new();
 
@@ -119,6 +121,7 @@ else
             foreach (var u in users)
             {
                 var role = "Employee";
+                var email = u.Email ?? u.UserName ?? string.Empty;
 
                 if (roleIdsByUserId.TryGetValue(u.Id, out var roleIds))
                 {
@@ -131,8 +134,9 @@ else
                 }
 
                 var isCanonicalSuperAdmin =
+                    !string.IsNullOrEmpty(email) &&
                     string.Equals(
-                        u.Email ?? u.UserName,
+                        email,
                         "prakashshiva368@gmail.com",
                         StringComparison.OrdinalIgnoreCase);
 
@@ -144,13 +148,17 @@ else
                     : allEmployees.FirstOrDefault(e => e.AspNetUserId == u.Id)
                       ?? allEmployees.FirstOrDefault(e =>
                           !string.IsNullOrWhiteSpace(e.Email) &&
-                          string.Equals(e.Email.Trim(), u.Email?.Trim(), StringComparison.OrdinalIgnoreCase));
+                          !string.IsNullOrEmpty(email) &&
+                          string.Equals(e.Email.Trim(), email.Trim(), StringComparison.OrdinalIgnoreCase));
 
-                // User list is an application identity view, not a raw Firebase
-                // Auth dump. Employee users are shown only when linked to a saved
+                // Employee users are shown only when linked to a saved
                 // Employee record. Admin and the canonical SuperAdmin remain visible.
-                if (role == "Employee" && linked == null)
-                    continue;
+                // UNLINKED USERS are now shown so they can be fixed or deleted.
+                if (role == "Employee" && linked == null && !isCanonicalSuperAdmin)
+                {
+                    // If it's an employee role but not linked, we still show it
+                    // as a "Broken Link" or "Empty User" in the management list.
+                }
 
                 userList.Add(new UserRoleViewModel
                 {
@@ -159,7 +167,7 @@ else
                     UserName = u.UserName ?? u.Email ?? string.Empty,
                     CurrentRole = role,
                     EmployeeId = linked?.EmployeeID,
-                    EmployeeName = linked?.Name ?? (role == "Admin" ? "Administrator" : "SuperAdmin"),
+                    EmployeeName = linked?.Name ?? (role == "Admin" ? "Administrator" : (isCanonicalSuperAdmin ? "SuperAdmin" : "Unlinked User ⚠️")),
                 });
             }
 

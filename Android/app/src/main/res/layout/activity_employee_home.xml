@@ -311,6 +311,16 @@
                                 android:layout_height="wrap_content"
                                 android:orientation="horizontal">
                                 <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btnEmployeeMapFollow"
+                                    style="@style/Widget.Material3.Button.TextButton"
+                                    android:layout_width="58dp"
+                                    android:layout_height="38dp"
+                                    android:minWidth="0dp"
+                                    android:text="⦿ Follow"
+                                    android:textSize="9sp"
+                                    android:maxLines="1"
+                                    app:cornerRadius="9dp" />
+                                <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btnEmployeeMapLayers"
                                     style="@style/Widget.Material3.Button.TextButton"
                                     android:layout_width="58dp"
@@ -588,6 +598,55 @@
                         android:text="View Attendance Logs →"
                         android:textSize="12sp"
                         android:textStyle="bold" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Troubleshooting Card -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cvTroubleshoot"
+                style="@style/Widget.App.CardView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="24dp"
+                app:cardCornerRadius="16dp"
+                app:cardBackgroundColor="#FFF7ED"
+                app:strokeWidth="1dp"
+                app:strokeColor="#FED7AA">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:padding="16dp"
+                    android:gravity="center_vertical">
+                    <ImageView
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/ic_warning_triangle"
+                        app:tint="#EA580C" />
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="16dp"
+                        android:orientation="vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Permissions &amp; Troubleshoot"
+                            android:textStyle="bold"
+                            android:textColor="#9A3412" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Fix background tracking and alerts"
+                            android:textSize="12sp"
+                            android:textColor="#C2410C" />
+                    </LinearLayout>
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@drawable/ic_forward"
+                        app:tint="#EA580C" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

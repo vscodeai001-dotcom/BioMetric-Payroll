@@ -240,6 +240,12 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".ui.TroubleshootActivity"
+            android:exported="false"
+            android:label="@string/title_troubleshoot"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".ui.ExitManagementActivity"
             android:exported="false"
             android:label="Exit &amp; Settlement"

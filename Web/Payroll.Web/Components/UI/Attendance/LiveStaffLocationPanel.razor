@@ -3657,6 +3657,11 @@
             currentOfficeRadius > 0 &&
             distance <= currentOfficeRadius + 1;
 
+        // MIRROR ANDROID: Markers older than 5 minutes are considered Offline/Hidden.
+        var age = DateTime.UtcNow - timestamp;
+        if (age > TimeSpan.FromSeconds(LiveLocationStore.StaleTimeoutSeconds))
+            return false;
+
         location = new LiveEmployeeLocation
         {
             EmployeeId = employeeId,
@@ -3716,104 +3721,56 @@
                     employees.Select(e => e.EmployeeID).ToHashSet();
 
                 if (liveSnapshot.HasValue &&
-                    liveSnapshot.Value.ValueKind == JsonValueKind.Object)
+                    (liveSnapshot.Value.ValueKind == JsonValueKind.Object || liveSnapshot.Value.ValueKind == JsonValueKind.Array))
                 {
-                    foreach (var employeeNode in liveSnapshot.Value.EnumerateObject())
+                    if (liveSnapshot.Value.ValueKind == JsonValueKind.Object)
                     {
-                        var employeeId =
-                            int.TryParse(employeeNode.Name, out var keyId)
-                                ? keyId
-                                : GetJsonInt(employeeNode.Value, "EmployeeId", "employeeId");
-
-                        if (employeeId <= 0 ||
-                            !validEmployeeIds.Contains(employeeId) ||
-                            employeeNode.Value.ValueKind != JsonValueKind.Object)
-                            continue;
-
-                        var json = employeeNode.Value;
-
-                        var payloadEmployeeId =
-                            GetJsonInt(json, "EmployeeId", "employeeId");
-
-                        if (payloadEmployeeId > 0 &&
-                            payloadEmployeeId != employeeId)
-                            continue;
-
-                        var state =
-                            GetJsonStringValue(json, "State", "state");
-
-                        /*
-                         * New Web/Android writers publish ACTIVE. For backward
-                         * compatibility, an older live record without State is
-                         * accepted, but ENDED records are never rendered.
-                         */
-                        if (state.Equals("ENDED", StringComparison.OrdinalIgnoreCase) ||
-                            state.Equals("OFFLINE", StringComparison.OrdinalIgnoreCase))
-                            continue;
-
-                        if (!TryGetJsonDouble(json, "Latitude", out var lat) ||
-                            !TryGetJsonDouble(json, "Longitude", out var lng) ||
-                            !double.IsFinite(lat) ||
-                            !double.IsFinite(lng) ||
-                            lat < -90 || lat > 90 ||
-                            lng < -180 || lng > 180 ||
-                            (lat == 0 && lng == 0))
-                            continue;
-
-                        var accuracy =
-                            TryGetJsonDouble(json, "AccuracyMeters", out var acc)
-                                ? Math.Max(0, acc)
-                                : 0;
-
-                        var timestamp =
-                            TryGetJsonDateTime(json, "LastUpdatedUtc", out var updated)
-                                ? updated.ToUniversalTime()
-                                : TryGetJsonDateTime(json, "Timestamp", out var captured)
-                                    ? captured.ToUniversalTime()
-                                    : DateTime.UtcNow;
-
-                        var sessionStarted =
-                            TryGetJsonDateTime(json, "SessionStartedUtc", out var started)
-                                ? started.ToUniversalTime()
-                                : timestamp;
-
-                        var sessionId = Guid.Empty;
-                        if (TryGetJsonString(json, "SessionId", out var sessionText))
-                            Guid.TryParse(sessionText, out sessionId);
-
-                        /*
-                         * Do not render an abandoned/very old Firebase marker.
-                         * The live node is normally removed at session end, and
-                         * this age guard protects the map if a delete is delayed.
-                         */
-                        var age = DateTime.UtcNow - timestamp;
-                        if (age < TimeSpan.Zero)
-                            age = TimeSpan.Zero;
-
-                        if (age > TimeSpan.FromSeconds(120))
-                            continue;
-
-                        var distance = CalculateDistanceMeters(
-                            lat,
-                            lng,
-                            currentOfficeLatitude,
-                            currentOfficeLongitude);
-
-                        snapshot.Add(new LiveEmployeeLocation
+                        foreach (var employeeNode in liveSnapshot.Value.EnumerateObject())
                         {
-                            EmployeeId = employeeId,
-                            Latitude = lat,
-                            Longitude = lng,
-                            AccuracyMeters = accuracy,
-                            DistanceMeters = distance,
-                            AllowedRadiusMeters = currentOfficeRadius,
-                            IsWithinAllowedRadius =
-                                currentOfficeRadius > 0 &&
-                                distance <= currentOfficeRadius + 1,
-                            LastUpdatedUtc = timestamp,
-                            SessionStartedUtc = sessionStarted,
-                            SessionId = sessionId
-                        });
+                            var employeeId =
+                                int.TryParse(employeeNode.Name, out var keyId)
+                                    ? keyId
+                                    : GetJsonInt(employeeNode.Value, "EmployeeId", "employeeId");
+
+                            if (employeeId <= 0 ||
+                                !validEmployeeIds.Contains(employeeId) ||
+                                employeeNode.Value.ValueKind != JsonValueKind.Object)
+                                continue;
+
+                            if (TryParseLiveEmployeeLocation(
+                                employeeId,
+                                employeeNode.Value,
+                                out var location))
+                            {
+                                snapshot.Add(location);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var index = 0;
+                        foreach (var node in liveSnapshot.Value.EnumerateArray())
+                        {
+                            var fallbackId = index;
+                            index++;
+
+                            if (node.ValueKind != JsonValueKind.Object)
+                                continue;
+
+                            var employeeId = GetJsonInt(node, "EmployeeId", "employeeId");
+                            if (employeeId <= 0) employeeId = fallbackId;
+
+                            if (employeeId <= 0 || !validEmployeeIds.Contains(employeeId))
+                                continue;
+
+                            if (TryParseLiveEmployeeLocation(
+                                employeeId,
+                                node,
+                                out var location))
+                            {
+                                snapshot.Add(location);
+                            }
+                        }
                     }
                 }
 

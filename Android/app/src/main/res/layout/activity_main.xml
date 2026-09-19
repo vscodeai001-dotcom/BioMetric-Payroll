@@ -208,6 +208,12 @@
                                     android:text="📍 Live Staff Operations"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textStyle="bold" />
+                                <View
+                                    android:id="@+id/liveDotAdmin"
+                                    android:layout_width="8dp"
+                                    android:layout_height="8dp"
+                                    android:layout_marginStart="8dp"
+                                    android:background="@drawable/bg_live_dot" />
                                 <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
                                 <com.google.android.material.button.MaterialButton
                                     android:id="@+id/btnRefreshMap"
@@ -294,6 +300,16 @@
                                     android:gravity="center"
                                     android:padding="4dp">
                                     <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapFollow"
+                                        style="@style/Widget.Material3.Button.TextButton"
+                                        android:layout_width="42dp"
+                                        android:layout_height="38dp"
+                                        android:minWidth="0dp"
+                                        android:text="⦿"
+                                        android:textSize="16sp"
+                                        android:contentDescription="Toggle auto-follow"
+                                        app:cornerRadius="10dp" />
+                                    <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAdminMapZone"
                                         style="@style/Widget.Material3.Button.TextButton"
                                         android:layout_width="42dp"
@@ -302,6 +318,16 @@
                                         android:text="⌖"
                                         android:textSize="16sp"
                                         android:contentDescription="Toggle geofence zone"
+                                        app:cornerRadius="10dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapTrail"
+                                        style="@style/Widget.Material3.Button.TextButton"
+                                        android:layout_width="42dp"
+                                        android:layout_height="38dp"
+                                        android:minWidth="0dp"
+                                        android:text="↝"
+                                        android:textSize="16sp"
+                                        android:contentDescription="Toggle movement trails"
                                         app:cornerRadius="10dp" />
                                     <com.google.android.material.button.MaterialButton
                                         android:id="@+id/btnAdminMapLayer"
@@ -513,9 +539,19 @@
                                         style="@style/Widget.Material3.Button.TonalButton"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
+                                        android:layout_marginEnd="8dp"
                                         android:text="🔒 Users &amp; Roles"
                                         android:textSize="11sp"
                                         app:icon="@drawable/ic_search"
+                                        app:iconSize="16dp" />
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnTroubleshoot"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="🛠️ Troubleshoot"
+                                        android:textSize="11sp"
+                                        app:icon="@drawable/ic_warning_triangle"
                                         app:iconSize="16dp" />
                                 </LinearLayout>
                             </HorizontalScrollView>

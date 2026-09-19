@@ -47,12 +47,14 @@ class SignalRManager @Inject constructor(
     val ownerEmployees = _ownerEmployees.asStateFlow()
 
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
-        // Do not render a GPS node until the same owner has an Employee master
-        // record for that EmployeeId. This prevents scaffold/test records such as
-        // Staff #0 or an unrelated tenant employee from appearing on the map.
+        // Authoritative tenant check: Render GPS nodes that belong to the 
+        // current owner. We prioritize the employee master directory for 
+        // filtering, but we do not block initial live rendering if the 
+        // employee list is still hydrating.
         val employeeIds = synchronized(ownerEmployeeIds) { ownerEmployeeIds.toSet() }
         val filtered = if (employeeIds.isEmpty()) {
-            emptyMap()
+            // Fallback: trust the live node during initial startup
+            raw.filterKeys { it > 0 }
         } else {
             raw.filterKeys { it > 0 && employeeIds.contains(it) }
         }

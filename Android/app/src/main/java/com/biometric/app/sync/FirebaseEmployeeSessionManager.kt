@@ -45,7 +45,7 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         forceReplace: Boolean = false
     ): Result {
         val user = auth.currentUser
-            ?: return Result(false, message = "Firebase authentication session is missing.")
+            ?: return Result(false, message = "Firebase session expired or was cleared by the system. Please sign in again.")
 
         if (employeeId <= 0 || ownerUid.isBlank()) {
             return Result(false, message = "Employee Firebase profile is not provisioned yet.")

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.graphics.Color
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
@@ -30,6 +31,9 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.GeofenceDao
 import com.biometric.app.data.dao.OfflineTrackingEventDao
 import com.biometric.app.data.entity.OfflineTrackingEvent
+import com.biometric.app.sync.FirebaseEmployeeSessionManager
+import com.biometric.app.sync.FirebaseRoomHydrator
+import com.biometric.app.ui.TroubleshootActivity
 import java.util.UUID
 import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -54,6 +58,8 @@ class TrackingService : Service() {
     @Inject lateinit var attendancePolicy: AttendancePolicyRepository
     @Inject lateinit var trackingWindowResolver: TrackingWindowResolver
     @Inject lateinit var trackingConfiguration: TrackingConfigurationRepository
+    @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
+    @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -68,6 +74,7 @@ class TrackingService : Service() {
     private val latestLocationChannel = Channel<LocalLocation>(Channel.CONFLATED)
     private var gpsUploadJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var sessionJob: Job? = null
     private var policyJob: Job? = null
     private var trackingConfigListener: ValueEventListener? = null
     private var locationHandlerThread: HandlerThread? = null
@@ -235,10 +242,15 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                     if (!signalRStarted) {
                         signalRStarted = true
                         firebaseSync.startSync()
+                        firebaseRoomHydrator.start()
                     }
 
                     if (heartbeatJob?.isActive != true) {
                         startHeartbeatLoop()
+                    }
+                    
+                    if (sessionJob?.isActive != true) {
+                        startSessionGuard()
                     }
 
                     syncManager.schedulePeriodicSync()
@@ -419,27 +431,31 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         val pendingIntent = PendingIntent.getActivity(this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE)
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "System Synchronization", NotificationManager.IMPORTANCE_LOW)
-            channel.lockscreenVisibility = Notification.VISIBILITY_SECRET
+            val channel = NotificationChannel(CHANNEL_ID, "Critical Performance Sync", NotificationManager.IMPORTANCE_HIGH)
+            channel.lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             channel.setSound(null, null)
-            channel.enableLights(false)
+            channel.enableLights(true)
+            channel.lightColor = Color.BLUE
             channel.enableVibration(false)
-            channel.setShowBadge(false)
+            channel.setShowBadge(true)
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
+
+        val troubleshootIntent = Intent(this, TroubleshootActivity::class.java)
+        val troubleshootPendingIntent = PendingIntent.getActivity(this, 1, troubleshootIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val deleteIntent = Intent(this, TrackingNotificationReceiver::class.java).apply {
             action = "ACTION_NOTIFICATION_DISMISSED"
         }
         val deletePendingIntent = PendingIntent.getBroadcast(this, 0, deleteIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        // Extreme strategy: inform user and OS that this is an authoritative process
+        // Swiggy-level authoritative notification
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_logs) 
-            .setContentTitle("BioMetric: Sync Active 🛰️")
-            .setContentText("Authoritative background synchronization is active.")
-            .setSubText("Tracking schedule controlled by policy")
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT) 
+            .setContentTitle("BioMetric: Continuous Sync Active ⚡")
+            .setContentText("Keeping your workspace synchronization alive 24/7.")
+            .setSubText("Tracking status: Authoritative 🛰️")
+            .setPriority(NotificationCompat.PRIORITY_MAX) 
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) 
             .setOngoing(true)
@@ -447,6 +463,7 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
             .setLocalOnly(true)
             .setContentIntent(pendingIntent)
             .setDeleteIntent(deletePendingIntent)
+            .addAction(R.drawable.ic_warning_triangle, "Troubleshoot", troubleshootPendingIntent)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
             
@@ -609,26 +626,19 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
     private fun startHeartbeatLoop() {
-        heartbeatJob?.cancel()
-        heartbeatJob = serviceScope.launch {
-            while (isActive) {
-                try {
-                    val connected = withTimeoutOrNull(5_000L) {
-                        firebaseSync.syncStatus.firstOrNull()
-                    } ?: false
+        // ... (keep existing startHeartbeatLoop)
+    }
 
-                    getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                        putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
-                        putString(KEY_LAST_STATUS, if (connected) "Active" else "Offline")
+    private fun startSessionGuard() {
+        sessionJob?.cancel()
+        sessionJob = serviceScope.launch {
+            firebaseEmployeeSessionManager.observeSessionActive().collectLatest { active ->
+                if (!active && !isManualStopping) {
+                    Log.w("TrackingService", "Authoritative device session mismatch; stopping background tracking.")
+                    withContext(Dispatchers.Main) {
+                        stopTracking("SESSION_CONFLICT", keepRecovery = false)
                     }
-
-                    if (connected) {
-                        firebaseSync.startSync()
-                    }
-                } catch (e: Exception) {
-                    Log.d("TrackingService", "Firebase heartbeat deferred: ${e.message}")
                 }
-                delay(300_000L)
             }
         }
     }

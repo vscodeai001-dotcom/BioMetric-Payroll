@@ -28,7 +28,9 @@
 
                     @foreach (var emp in UnlinkedEmployees.OrderBy(e => e.Name))
                     {
-                        <option value="@emp.EmployeeID">@emp.Name (Bio: @emp.BiometricID)</option>
+                        <option value="@emp.EmployeeID">
+                            @emp.Name (Bio: @emp.BiometricID) @(string.IsNullOrEmpty(emp.Email) ? "" : $" - {emp.Email}")
+                        </option>
                     }
                 </select>
             </div>
