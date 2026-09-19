@@ -118,68 +118,214 @@
                             style="@style/PremiumCardView"
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
-                            android:layout_height="110dp"
-                            app:cardBackgroundColor="#264F46E5">
-                            <LinearLayout
+                            android:layout_height="130dp"
+                            app:cardBackgroundColor="#F5F3FF"
+                            app:strokeColor="#C4B5FD"
+                            app:strokeWidth="1dp"
+                            app:cardElevation="2dp">
+                            <RelativeLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
-                                android:padding="16dp"
-                                android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_total_workforce" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiWorkforce" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/star_staff" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#4F46E5" />
-                            </LinearLayout>
+                                android:padding="16dp">
+                                <TextView
+                                    android:id="@+id/lblWorkforce"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/label_total_workforce"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#6D28D9"
+                                    android:alpha="0.8" />
+                                <TextView
+                                    android:id="@+id/tvKpiWorkforce"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_below="@id/lblWorkforce"
+                                    android:text="0"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#4F46E5"
+                                    android:layout_marginTop="4dp" />
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentBottom="true"
+                                    android:text="@string/star_staff"
+                                    android:textSize="10sp"
+                                    android:textColor="#7C3AED"
+                                    android:background="#EDE9FE"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp" />
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_alignParentTop="true"
+                                    android:src="@drawable/ic_people"
+                                    android:alpha="0.15"
+                                    app:tint="#4F46E5" />
+                            </RelativeLayout>
                         </com.google.android.material.card.MaterialCardView>
 
                         <com.google.android.material.card.MaterialCardView
                             style="@style/PremiumCardView"
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
-                            android:layout_height="110dp"
-                            app:cardBackgroundColor="#26047857">
-                            <LinearLayout
+                            android:layout_height="130dp"
+                            app:cardBackgroundColor="#F0FDF4"
+                            app:strokeColor="#6EE7B7"
+                            app:strokeWidth="1dp"
+                            app:cardElevation="2dp">
+                            <RelativeLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
-                                android:padding="16dp"
-                                android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_present_today" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiPresent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0 / 0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:id="@+id/tvKpiAbsent" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⏳ 0 Absent" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#047857" />
-                            </LinearLayout>
+                                android:padding="16dp">
+                                <TextView
+                                    android:id="@+id/lblPresent"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/label_present_today"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#065F46"
+                                    android:alpha="0.8" />
+                                <TextView
+                                    android:id="@+id/tvKpiPresent"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_below="@id/lblPresent"
+                                    android:text="0 / 0"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#059669"
+                                    android:layout_marginTop="4dp" />
+                                <TextView
+                                    android:id="@+id/tvKpiAbsent"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentBottom="true"
+                                    android:text="⏳ 0 Absent"
+                                    android:textSize="10sp"
+                                    android:textColor="#047857"
+                                    android:background="#DCFCE7"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp" />
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_alignParentTop="true"
+                                    android:src="@drawable/ic_check_circle"
+                                    android:alpha="0.15"
+                                    app:tint="#059669" />
+                            </RelativeLayout>
                         </com.google.android.material.card.MaterialCardView>
 
                         <com.google.android.material.card.MaterialCardView
                             style="@style/PremiumCardView"
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
-                            android:layout_height="110dp"
-                            app:cardBackgroundColor="#26F59E0B">
-                            <LinearLayout
+                            android:layout_height="130dp"
+                            app:cardBackgroundColor="#FFFBEB"
+                            app:strokeColor="#FCD34D"
+                            app:strokeWidth="1dp"
+                            app:cardElevation="2dp">
+                            <RelativeLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
-                                android:padding="16dp"
-                                android:orientation="vertical">
-                                <TextView android:id="@+id/tvPayrollLabel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_payroll_cycle" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiPayroll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Done" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:id="@+id/tvPayrollVariance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📈 0.0% vs Last Month" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#D97706" />
-                            </LinearLayout>
+                                android:padding="16dp">
+                                <TextView
+                                    android:id="@+id/tvPayrollLabel"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/label_payroll_cycle"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#92400E"
+                                    android:alpha="0.8" />
+                                <TextView
+                                    android:id="@+id/tvKpiPayroll"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_below="@id/tvPayrollLabel"
+                                    android:text="Done"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#D97706"
+                                    android:layout_marginTop="4dp" />
+                                <TextView
+                                    android:id="@+id/tvPayrollVariance"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentBottom="true"
+                                    android:text="📈 0.0% vs Last Month"
+                                    android:textSize="10sp"
+                                    android:textColor="#B45309"
+                                    android:background="#FEF3C7"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp" />
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_alignParentTop="true"
+                                    android:src="@drawable/ic_logs"
+                                    android:alpha="0.15"
+                                    app:tint="#D97706" />
+                            </RelativeLayout>
                         </com.google.android.material.card.MaterialCardView>
 
                         <com.google.android.material.card.MaterialCardView
                             style="@style/PremiumCardView"
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
-                            android:layout_height="110dp"
-                            app:cardBackgroundColor="#26EF4444">
-                            <LinearLayout
+                            android:layout_height="130dp"
+                            app:cardBackgroundColor="#FEF2F2"
+                            app:strokeColor="#FCA5A5"
+                            app:strokeWidth="1dp"
+                            app:cardElevation="2dp">
+                            <RelativeLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
-                                android:padding="16dp"
-                                android:orientation="vertical">
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/label_unpaid_advances" android:textSize="10sp" android:textStyle="bold" android:alpha="0.7" />
-                                <TextView android:id="@+id/tvKpiAdvances" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="₹0" android:textSize="24sp" android:textStyle="bold" android:layout_marginTop="8dp" />
-                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📮 Action Required" android:textSize="10sp" android:layout_marginTop="4dp" android:textColor="#EF4444" />
-                            </LinearLayout>
+                                android:padding="16dp">
+                                <TextView
+                                    android:id="@+id/lblAdvances"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/label_unpaid_advances"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#991B1B"
+                                    android:alpha="0.8" />
+                                <TextView
+                                    android:id="@+id/tvKpiAdvances"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_below="@id/lblAdvances"
+                                    android:text="₹0"
+                                    android:textSize="28sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#DC2626"
+                                    android:layout_marginTop="4dp" />
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentBottom="true"
+                                    android:text="📮 Action Required"
+                                    android:textSize="10sp"
+                                    android:textColor="#B91C1C"
+                                    android:background="#FEE2E2"
+                                    android:paddingHorizontal="8dp"
+                                    android:paddingVertical="2dp" />
+                                <ImageView
+                                    android:layout_width="36dp"
+                                    android:layout_height="36dp"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_alignParentTop="true"
+                                    android:src="@drawable/ic_attach_money"
+                                    android:alpha="0.15"
+                                    app:tint="#DC2626" />
+                            </RelativeLayout>
                         </com.google.android.material.card.MaterialCardView>
 
                     </GridLayout>
@@ -563,6 +709,9 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        app:cardBackgroundColor="#FFF1F2"
+                        app:strokeColor="#FECDD3"
+                        app:strokeWidth="1dp"
                         android:layout_marginBottom="16dp">
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -578,6 +727,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text="Recent Advances"
+                                    android:textColor="#9F1239"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textStyle="bold" />
                                 <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
@@ -671,6 +821,9 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        app:cardBackgroundColor="#F8FAFC"
+                        app:strokeColor="#E2E8F0"
+                        app:strokeWidth="1dp"
                         android:layout_marginBottom="16dp">
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -682,7 +835,9 @@
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:text="Loading workforce data..."
-                                android:alpha="0.7"/>
+                                android:textStyle="bold"
+                                android:textColor="@color/text_primary"
+                                android:alpha="0.8"/>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
@@ -734,6 +889,9 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        app:cardBackgroundColor="#F1F5F9"
+                        app:strokeColor="#CBD5E1"
+                        app:strokeWidth="1dp"
                         android:layout_marginBottom="24dp">
                         <LinearLayout
                             android:layout_width="match_parent"
@@ -742,12 +900,13 @@
                             android:gravity="center_vertical"
                             android:padding="16dp">
                             <TextView
-                                android:layout_width="40dp"
-                                android:layout_height="40dp"
-                                android:background="@drawable/search_bg"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:background="@drawable/shape_circle"
+                                android:backgroundTint="#E2E8F0"
                                 android:gravity="center"
                                 android:text="🛠️"
-                                android:textSize="18sp" />
+                                android:textSize="22sp" />
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"

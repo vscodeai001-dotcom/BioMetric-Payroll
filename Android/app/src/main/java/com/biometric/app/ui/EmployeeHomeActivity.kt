@@ -108,6 +108,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private val iconCache = mutableMapOf<String, Drawable>()
     private var lastRoadRouteUpdate: Long = 0L
 
+    private var showRouteToOffice = false
+
     private var officeLat: Double = 0.0
     private var officeLon: Double = 0.0
     private var geoRadius: Int = 100
@@ -517,16 +519,22 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         binding.btnEmployeeMapRoute.setOnClickListener {
             isAutoFocusEnabled = false
             binding.btnEmployeeMapFollow.alpha = 0.4f
+            showRouteToOffice = true
             if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
                 val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
                 createBoundingBox(points)?.let { binding.mapview.zoomToBoundingBox(it, true, 120) }
+                updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
             }
         }
         binding.btnEmployeeMapOffice.setOnClickListener {
             isAutoFocusEnabled = false
+            showRouteToOffice = true
             if (officeLat != 0.0 && officeLon != 0.0) {
                 binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 binding.mapview.controller.setZoom(16.0)
+                if (currentLat != 0.0) {
+                    updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
+                }
             }
         }
         binding.btnEmployeeMapLayers.setOnClickListener {
@@ -635,8 +643,14 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 userMarker?.icon = icon
                 userMarker?.snippet = "Speed: ${formatSpeed(currentSpeed.toDouble())}\nDist: ${formatDistance(distance.toDouble())}"
 
-                // Swiggy Style Polyline (Road Snapped)
-                updateRoadRoute(officePoint, userPoint)
+                // REQUIREMENT: Only show route if explicitly enabled
+                if (showRouteToOffice) {
+                    // Swiggy Style Polyline (Road Snapped)
+                    updateRoadRoute(officePoint, userPoint)
+                } else {
+                    routePolyline?.let { it.outlinePaint.alpha = 0 }
+                    routeCasing?.let { it.outlinePaint.alpha = 0 }
+                }
 
                 b.tvRemainingDist.text = if (distance < 1000) "${distance.toInt()} m" else String.format(Locale.US, "%.1f km", distance / 1000.0)
                 val etaSec = (distance / 1.4).toInt()

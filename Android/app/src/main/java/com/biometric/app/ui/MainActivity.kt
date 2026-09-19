@@ -703,7 +703,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             // marker windows/routes and invalidating both OSMDroid surfaces when
             // the visible state has not changed.
             val renderSignature = buildString {
-                append(statusFilter).append('|').append(currentGeofenceRadiusMeters).append('|')
+                append(statusFilter).append('|').append(currentGeofenceRadiusMeters).append('|').append(adminFollowingEmployeeId).append('|')
                 locations.sortedBy { it.employeeId }.forEach { loc ->
                     val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
                     val fEmp = firebaseEmployeeData[loc.employeeId]
@@ -718,6 +718,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             lastRenderedLiveSignature = renderSignature
             val geoPoints = mutableListOf<GeoPoint>()
             val currentIds = locations.map { it.employeeId }
+
+            // Collision handling: group by approximate location to apply offset
+            val locationsByCoord = locations.groupBy { 
+                "%.5f:%.5f".format(Locale.US, it.latitude, it.longitude)
+            }
 
             // Cleanup removed markers
             markers.keys.filter { !currentIds.contains(it) }.forEach { id ->
@@ -750,7 +755,21 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     return@forEach
                 }
 
-                val point = GeoPoint(loc.latitude, loc.longitude)
+                // Apply spiral offset for overlapping markers
+                val coordKey = "%.5f:%.5f".format(Locale.US, loc.latitude, loc.longitude)
+                val group = locationsByCoord[coordKey] ?: emptyList()
+                val point = if (group.size > 1) {
+                    val index = group.indexOf(loc)
+                    val angle = 2.0 * Math.PI * index / group.size
+                    val radius = 0.00004 // ~4-5 meters offset
+                    GeoPoint(
+                        loc.latitude + radius * Math.cos(angle),
+                        loc.longitude + radius * Math.sin(angle)
+                    )
+                } else {
+                    GeoPoint(loc.latitude, loc.longitude)
+                }
+
                 val m1 = markers.getOrPut(loc.employeeId) {
                     Marker(dashboardMap).apply {
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
@@ -761,6 +780,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             isAdminAutoFocusEnabled = true
                             map.controller.animateTo(clicked.position)
                             clicked.showInfoWindow()
+                            
+                            // Immediately trigger route for selected employee
+                            updateAdminRoadRoute(loc.employeeId, point)
                             true
                         }
                     }
@@ -798,8 +820,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
                     // Update road lines synchronously with marker movement
                     runCatching {
-                        val trailAlpha = if (adminTrailsVisible) 255 else 0
-                        val casingAlpha = if (adminTrailsVisible) 150 else 0
+                        val isSelected = adminFollowingEmployeeId == loc.employeeId
+                        val trailAlpha = if (adminTrailsVisible && isSelected) 255 else 0
+                        val casingAlpha = if (adminTrailsVisible && isSelected) 150 else 0
 
                         roadLines[loc.employeeId]?.let { l ->
                             val pts = l.actualPoints.toMutableList()
@@ -881,7 +904,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     m2.snippet = m1.snippet
                 }
 
-                updateAdminRoadRoute(loc.employeeId, point)
+                // REQUIREMENT: Only show route for selected employee
+                if (adminFollowingEmployeeId == loc.employeeId) {
+                    updateAdminRoadRoute(loc.employeeId, point)
+                } else {
+                    roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    roadLines2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    roadCasings2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                }
                 geoPoints.add(point)
             }
             

@@ -2218,13 +2218,13 @@ window.updateGeoMap = async function (
             });
 
             // ------------------------------------------------
-            // ROUTE LINE
+            // ROUTE LINE (Hidden by default)
             // ------------------------------------------------
 
-            const routeLine = L.polyline([office, user], { color: "#0d6efd", weight: 3, opacity: 0.9, dashArray: "7,7" }).addTo(map);
+            const routeLine = L.polyline([office, user], { color: "#0d6efd", weight: 3, opacity: 0, dashArray: "7,7" }).addTo(map);
 
-            const roadRouteCasing = L.polyline([office, user], { color: '#ffffff', weight: 8, opacity: .78, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-            const roadRouteLine = L.polyline([office, user], { color: '#1688ff', weight: 5, opacity: .98, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+            const roadRouteCasing = L.polyline([office, user], { color: '#ffffff', weight: 8, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+            const roadRouteLine = L.polyline([office, user], { color: '#1688ff', weight: 5, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
             const journeyOverlay = window.payrollCreateJourneyOverlay(mapElement, 'payroll-employee-journey-overlay');
 
             // ------------------------------------------------
@@ -2348,9 +2348,22 @@ window.updateGeoMap = async function (
             if (employeeRoute?.geometry?.length > 1) {
                 mapData.roadRouteCasing.setLatLngs(employeeRoute.geometry);
                 mapData.roadRouteLine.setLatLngs(employeeRoute.geometry);
-                mapData.routeLine.setStyle({ opacity: 0 });
+
+                if (mapData.showRouteToOffice) {
+                    mapData.roadRouteCasing.setStyle({ opacity: .78 });
+                    mapData.roadRouteLine.setStyle({ opacity: .98 });
+                    mapData.routeLine.setStyle({ opacity: 0 });
+                } else {
+                    mapData.roadRouteCasing.setStyle({ opacity: 0 });
+                    mapData.roadRouteLine.setStyle({ opacity: 0 });
+                    mapData.routeLine.setStyle({ opacity: 0 });
+                }
             } else {
-                mapData.routeLine.setStyle({ opacity: .9 });
+                if (mapData.showRouteToOffice) {
+                    mapData.routeLine.setStyle({ opacity: .9 });
+                } else {
+                    mapData.routeLine.setStyle({ opacity: 0 });
+                }
             }
             const employeeRemaining = employeeRoute?.distanceMeters || window.payrollHaversineMeters(user, office);
             window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
@@ -2623,6 +2636,19 @@ window.updateEmployeeLiveGeoMap =
             if (route?.geometry?.length > 1) {
                 mapData.roadRouteCasing?.setLatLngs(route.geometry);
                 mapData.roadRouteLine?.setLatLngs(route.geometry);
+
+                if (mapData.showRouteToOffice) {
+                    mapData.roadRouteCasing?.setStyle({ opacity: .78 });
+                    mapData.roadRouteLine?.setStyle({ opacity: .98 });
+                    mapData.routeLine?.setStyle({ opacity: 0 });
+                } else {
+                    mapData.roadRouteCasing?.setStyle({ opacity: 0 });
+                    mapData.roadRouteLine?.setStyle({ opacity: 0 });
+                    mapData.routeLine?.setStyle({ opacity: 0 });
+                }
+            } else if (mapData.showRouteToOffice) {
+                mapData.routeLine?.setStyle({ opacity: .9 });
+            } else {
                 mapData.routeLine?.setStyle({ opacity: 0 });
             }
             const remaining = route?.distanceMeters || window.payrollHaversineMeters(target, office);
@@ -2965,7 +2991,9 @@ window.adminLiveMaps = {};
 window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selectedId) {
     const items = [];
     const byId = {};
-    const useCollisionOffsets = Number(selectedId) <= 0;
+    // REQUIREMENT: Always allow collision offsets so multiple employees at
+    // the same location are visible, regardless of selection.
+    const useCollisionOffsets = true;
 
     (Array.isArray(liveStaff) ? liveStaff : []).forEach(function (x) {
         const employeeId = Number(x.employeeId);
@@ -4534,10 +4562,22 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                 button.addEventListener('click', function () {
                     const action = this.dataset.geoAction;
                     if (action === 'route') {
+                        state.showRouteToOffice = true;
                         const b = L.latLngBounds([state.office, state.userMarker.getLatLng()]);
                         if (b.isValid()) map.fitBounds(b, { padding: [70, 70], maxZoom: 17, animate: true, duration: .7 });
+
+                        // Force immediate route visibility update
+                        state.roadRouteCasing?.setStyle({ opacity: .78 });
+                        state.roadRouteLine?.setStyle({ opacity: .98 });
+                        state.routeLine?.setStyle({ opacity: .9 });
                     } else if (action === 'office') {
+                        state.showRouteToOffice = true;
                         map.setView(state.office, Math.max(15, map.getZoom()), { animate: true });
+
+                        // Force immediate route visibility update
+                        state.roadRouteCasing?.setStyle({ opacity: .78 });
+                        state.roadRouteLine?.setStyle({ opacity: .98 });
+                        state.routeLine?.setStyle({ opacity: .9 });
                     } else if (action === 'layer') {
                         state.baseLayer = state.baseLayer === 'standard' ? 'dark' : state.baseLayer === 'dark' ? 'satellite' : 'standard';
                         if (!state.baseLayers) state.baseLayers = {};
