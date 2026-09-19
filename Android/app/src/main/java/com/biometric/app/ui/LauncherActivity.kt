@@ -3,6 +3,7 @@ package com.biometric.app.ui
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -38,9 +39,16 @@ class LauncherActivity : AppCompatActivity() {
 
             val validation = firebaseAuthSecurityGate.validateCurrentSession()
             if (!validation.allowed) {
-                // A persisted local token is not enough after Firebase Auth
-                // revocation, role removal, tenant mismatch, or employee session
-                // replacement on another device.
+                // If it's an Admin, we'll try to let them through to LoginActivity in "Unlock" mode
+                // rather than clearing everything immediately. LoginActivity will handle the rest.
+                val role = sessionStore.userRole()
+                if (role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name) {
+                    Log.w("Launcher", "Admin session validation failed, but letting LoginActivity handle unlock.")
+                    openLogin()
+                    return@launch
+                }
+
+                // For employees, or if no role found, we clear and redirect.
                 sessionStore.clearLogin()
                 authPrefs.edit(commit = true) { clear() }
                 userPrefs.edit(commit = true) { clear() }

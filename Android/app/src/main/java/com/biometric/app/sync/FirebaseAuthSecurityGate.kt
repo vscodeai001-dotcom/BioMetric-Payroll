@@ -34,7 +34,21 @@ class FirebaseAuthSecurityGate @Inject constructor(
 
     suspend fun validateCurrentSession(): Result {
         val user = auth.currentUser
-            ?: return Result(false, message = "Firebase session expired or was cleared by the system. Please sign in again.")
+        val sessionLoggedIn = sessionStore.isLoggedIn()
+        
+        // REQUIREMENT: Admin "never automatically logged out".
+        // If they are an Admin and we have a local session, we'll try to 
+        // proceed even if Firebase user is null (e.g. initialization delay).
+        val localRole = sessionStore.userRole()
+        val isAdmin = localRole == UserRole.ADMIN.name || localRole == UserRole.SUPER_ADMIN.name
+
+        if (user == null) {
+            if (isAdmin && sessionLoggedIn) {
+                Log.w("FirebaseAuthSecurity", "Firebase user is null but Admin is logged in locally; allowing persistence.")
+                return Result(true, localRole ?: "", sessionStore.firebaseOwnerUid() ?: "", sessionStore.employeeId())
+            }
+            return Result(false, message = "Firebase session expired or was cleared by the system. Please sign in again.")
+        }
 
         // Do not force a network refresh on every app start. Firebase already
         // persists and refreshes valid sessions automatically. A forced refresh
@@ -46,6 +60,12 @@ class FirebaseAuthSecurityGate @Inject constructor(
             Log.w("FirebaseAuthSecurity", "Cached Firebase ID token unavailable; forcing refresh.", cachedError)
             runCatching { user.getIdToken(true).await() }.getOrElse { refreshError ->
                 Log.w("FirebaseAuthSecurity", "Unable to refresh Firebase ID token", refreshError)
+                
+                if (isAdmin && sessionLoggedIn) {
+                   Log.w("FirebaseAuthSecurity", "Admin refresh failed but allowing persistence.")
+                   return Result(true, localRole ?: "", sessionStore.firebaseOwnerUid() ?: "", sessionStore.employeeId())
+                }
+                
                 return Result(false, message = "Firebase authentication session could not be refreshed.")
             }
         }

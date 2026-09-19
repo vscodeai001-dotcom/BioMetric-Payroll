@@ -71,8 +71,14 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         // GET
         // ============================================================
 
-        public IActionResult OnGet()
+        public async Task<IActionResult> OnGetAsync(bool? force = null)
         {
+            if (force == true)
+            {
+                // Force logout from another device/browser
+                return await OnPostAsync();
+            }
+
             return RedirectToPage(
                 "/Account/Login",
                 new

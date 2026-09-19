@@ -8,6 +8,9 @@
 @inject GeoLocationService GeoService
 @inject GeoFeatureAccessService GeoAccess
 @inject IHubContext<AttendanceRefreshHub> AttendanceHub
+@inject AuthenticationStateProvider AuthState
+@inject FirebaseRealtimeService FirebaseRealtime
+@inject NavigationManager Navigation
 
 @*
     Persistent employee GPS tracker.
@@ -39,10 +42,14 @@
     private bool starting;
     private bool trackingEnabled;
     private bool sessionStarted;
+    private bool sessionInvalidatedByOtherDevice;
 
     private DotNetObjectReference<EmployeeGpsTracker>? dotNetReference;
 
     private Guid liveLocationSessionId;
+    private string? firebaseUid;
+    private string? browserDeviceId;
+    private CancellationTokenSource? sessionMonitorCts;
 
     private DateTime lastHistorySavedUtc =
         DateTime.MinValue;
@@ -93,10 +100,20 @@
             trackingEnabled =
                 await GeoAccess.IsEnabledAsync();
 
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            firebaseUid = authState.User.FindFirst("FirebaseUid")?.Value;
+            browserDeviceId = authState.User.FindFirst("BioMetric-Employee-Device")?.Value;
+
             if (!trackingEnabled)
             {
                 Console.WriteLine(
                     $"Employee GPS disabled. EmployeeId={EmployeeId}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(firebaseUid))
+            {
+                sessionMonitorCts = new CancellationTokenSource();
+                _ = MonitorSessionAsync(sessionMonitorCts.Token);
             }
         }
         catch (Exception ex)
@@ -107,6 +124,59 @@
                 $"Employee GPS feature check failed. " +
                 $"EmployeeId={EmployeeId}. Error={ex}");
         }
+    }
+
+    private async Task MonitorSessionAsync(CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(firebaseUid)) return;
+
+        try
+        {
+            await FirebaseRealtime.StreamGlobalChangesAsync(
+                $"employee_sessions/{firebaseUid}",
+                async (path, data, token) =>
+                {
+                    if (disposed || token.IsCancellationRequested) return;
+
+                    if (data == null || data.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
+                    {
+                        // Session was explicitly deleted
+                        await ForceLogoutAsync("Your session was ended by the administrator.");
+                        return;
+                    }
+
+                    if (data.Value.TryGetProperty("deviceId", out var deviceProp))
+                    {
+                        var activeDevice = deviceProp.GetString() ?? "";
+                        // If the active device is not a WEB_BROWSER starting with our ID prefix,
+                        // it means another device (Android or another Web session) logged in.
+                        if (!string.IsNullOrWhiteSpace(browserDeviceId) &&
+                            !activeDevice.StartsWith("WEB_BROWSER_" + browserDeviceId.Substring(0, Math.Min(8, browserDeviceId.Length))))
+                        {
+                            await ForceLogoutAsync("This account is now active on another device.");
+                        }
+                    }
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Employee session monitor failed: {ex.Message}");
+        }
+    }
+
+    private async Task ForceLogoutAsync(string reason)
+    {
+        if (disposed) return;
+        sessionInvalidatedByOtherDevice = true;
+
+        await InvokeAsync(async () => {
+            // SignalR notification for the UI to show a toast
+            await AttendanceHub.Clients.All.SendAsync("SessionInvalidated", EmployeeId, reason);
+
+            // Perform explicit logout redirect
+            Navigation.NavigateTo("/Identity/Account/Logout?force=true", true);
+        });
     }
 
     protected override async Task OnAfterRenderAsync(

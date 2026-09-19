@@ -136,24 +136,28 @@ class LoginActivity : MotionBaseActivity() {
         
         applyWindowInsets(binding.main)
 
-        // Verify Firebase session status matches local storage.
-        // If Firebase session is lost but app thinks it is logged in,
-        // we must reset the local session to prevent "session missing" errors.
         val firebaseUser = FirebaseAuth.getInstance().currentUser
-        val loggedIn = mobileSessionStore.isLoggedIn() && firebaseUser != null
+        val sessionLoggedIn = mobileSessionStore.isLoggedIn()
         
-        if (mobileSessionStore.isLoggedIn() && firebaseUser == null) {
+        // REQUIREMENT: Admin "never automatically logged out".
+        // For Admins, we trust the local session even if Firebase briefly 
+        // reports null user, and we'll attempt recovery in proceedToMain.
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", "")
+        val isAdmin = role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name
+        
+        val loggedIn = if (isAdmin) sessionLoggedIn else (sessionLoggedIn && firebaseUser != null)
+        
+        if (sessionLoggedIn && firebaseUser == null && !isAdmin) {
             mobileSessionStore.clearLogin()
             clearProcessAuthorization(applicationContext)
             applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
                 .edit(commit = true) { clear() }
-            // Recursively call setupUI to refresh state with loggedIn=false
             setupUI()
             return
         }
 
         // VISIBILITY RULES:
-        // If logged in -> show "Unlock" mode. If not -> show "Login" mode.
+        // If logged in -> show "Unlock" mode (Pattern/Fingerprint). If not -> show "Login" mode.
         binding.tilUserId.visibility = if (loggedIn) View.GONE else View.VISIBLE
         binding.tilDynamic.visibility = if (loggedIn) View.GONE else View.VISIBLE
         binding.btnLoginAction.visibility = if (loggedIn) View.GONE else View.VISIBLE
@@ -162,8 +166,9 @@ class LoginActivity : MotionBaseActivity() {
         binding.btnReset.visibility = if (loggedIn) View.VISIBLE else View.GONE
         
         if (loggedIn) {
-            binding.tvWelcome.text = "Unlock BioMetric 🔒 🔓"
+            binding.tvWelcome.text = "Security Unlock 🔒"
             binding.btnReset.text = "Switch Account / Sign Out 👤"
+            binding.tvBiometricLabel.text = "Unlock with Screen Lock / Fingerprint 🔓"
         } else {
             binding.tvWelcome.text = "Welcome Back! 👋 ✨"
             binding.tilUserId.hint = "Email Address 📧"

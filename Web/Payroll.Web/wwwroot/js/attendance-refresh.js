@@ -258,12 +258,78 @@ window.attendanceRefresh = (function () {
     }
 
     async function start() {
-        // Firebase is the only realtime transport for the SSOT path.
-        // Once this page has authenticated with Firebase, it does not need
-        // SignalR/Render for subsequent realtime events.
-        if (!firebaseStarted)
-            await startFirebaseRealtime();
+        if (starting) return;
+        starting = true;
+
+        try {
+            // SignalR initialization
+            if (!connection) {
+                connection = new signalR.HubConnectionBuilder()
+                    .withUrl("/hubs/attendance-refresh")
+                    .withAutomaticReconnect()
+                    .build();
+
+                connection.on("DataChanged", onDataChanged);
+                connection.on("AttendanceChanged", onAttendanceChanged);
+                connection.on("PunchChanged", onPunchChanged);
+                connection.on("LocationChanged", onLocationChanged);
+                connection.on("SessionStarted", onSessionStarted);
+                connection.on("SessionEnded", onSessionEnded);
+                connection.on("GeoSettingsChanged", onGeoSettingsChanged);
+                connection.on("ApplicationDataChanged", onApplicationDataChanged);
+                connection.on("RegularizationChanged", onRegularizationChanged);
+                connection.on("LeaveChanged", onLeaveChanged);
+                connection.on("AdvanceChanged", onAdvanceChanged);
+                connection.on("BonusChanged", onBonusChanged);
+                connection.on("TaxDeclarationChanged", onTaxDeclarationChanged);
+                connection.on("EmployeeChanged", onEmployeeChanged);
+                connection.on("ExitChanged", onExitChanged);
+                connection.on("GlobalRefresh", onGlobalRefresh);
+                connection.on("SessionInvalidated", onSessionInvalidated);
+
+                await connection.start();
+                started = true;
+                console.log('SignalR connected.');
+            }
+
+            // Firebase is the only realtime transport for the SSOT path.
+            // Once this page has authenticated with Firebase, it does not need
+            // SignalR/Render for subsequent realtime events.
+            if (!firebaseStarted)
+                await startFirebaseRealtime();
+
+        } catch (err) {
+            console.error('Realtime connection failed:', err);
+            scheduleRetry();
+        } finally {
+            starting = false;
+        }
     }
+
+    function onGeoSettingsChanged(data) {
+        notifyListeners('GeoSettingsChanged', data);
+        window.dispatchEvent(new CustomEvent('geo-settings-changed', { detail: data }));
+    }
+
+    function onSessionInvalidated(employeeId, reason) {
+        window.dispatchEvent(new CustomEvent('session-invalidated', { detail: { employeeId, reason } }));
+    }
+
+    function onDataChanged(data) { notifyListeners('AttendanceChanged', data); }
+    function onAttendanceChanged(data) { notifyListeners('AttendanceChanged', data); }
+    function onPunchChanged(data) { notifyListeners('AttendanceChanged', data); }
+    function onLocationChanged(data) { notifyListeners('LocationChanged', data); }
+    function onSessionStarted(data) { notifyListeners('SessionStarted', data); }
+    function onSessionEnded(data) { notifyListeners('SessionEnded', data); }
+    function onApplicationDataChanged(data) { notifyListeners('ApplicationDataChanged', data); }
+    function onRegularizationChanged(data) { notifyListeners('RegularizationChanged', data); }
+    function onLeaveChanged(data) { notifyListeners('LeaveChanged', data); }
+    function onAdvanceChanged(data) { notifyListeners('AdvanceChanged', data); }
+    function onBonusChanged(data) { notifyListeners('BonusChanged', data); }
+    function onTaxDeclarationChanged(data) { notifyListeners('TaxDeclarationChanged', data); }
+    function onEmployeeChanged(data) { notifyListeners('EmployeeChanged', data); }
+    function onExitChanged(data) { notifyListeners('ExitChanged', data); }
+    function onGlobalRefresh(data) { notifyListeners('AttendanceChanged', data); }
 
     function scheduleRetry() {
 

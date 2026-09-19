@@ -469,19 +469,20 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
             try
             {
-                var claims =
-                    new[]
-                    {
-                        new Claim(
-                            DeviceClaimType,
-                            deviceId)
-                    };
+                var customClaims = new List<Claim>
+                {
+                    new Claim(DeviceClaimType, deviceId)
+                };
 
+                if (!string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    customClaims.Add(new Claim("FirebaseUid", firebaseUid));
+                }
 
                 await _signInManager.SignInWithClaimsAsync(
                     user,
                     Input.RememberMe,
-                    claims);
+                    customClaims);
             }
             catch (Exception ex)
             {

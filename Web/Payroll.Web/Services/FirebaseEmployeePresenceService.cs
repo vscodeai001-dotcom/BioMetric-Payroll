@@ -34,6 +34,7 @@ public sealed class FirebaseEmployeePresenceService
         if (string.IsNullOrWhiteSpace(ownerUid)) return false;
 
         var key = SanitizeKey(sessionId);
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var row = new Dictionary<string, object?>
         {
             ["employeeId"] = employeeId,
@@ -42,12 +43,28 @@ public sealed class FirebaseEmployeePresenceService
             ["platform"] = "WEB",
             ["deviceId"] = sessionId,
             ["active"] = true,
-            ["lastSeenAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            ["lastSeenAt"] = nowMs,
             ["updatedUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
         };
 
         try
         {
+            // REQUIREMENT: Enforce single-device rule across Web and Android.
+            // Publish the authoritative session lock to 'employee_sessions' node
+            // used by Android's lifecycle monitor. DeviceId 'WEB_BROWSER' indicates
+            // that the employee is currently active on the Web Dashboard.
+            var sessionRow = new Dictionary<string, object?>
+            {
+                ["deviceId"] = "WEB_BROWSER_" + key.Take(8),
+                ["employeeId"] = employeeId,
+                ["ownerUid"] = ownerUid,
+                ["uid"] = authUid,
+                ["lastSeenAt"] = nowMs,
+                ["createdAt"] = nowMs
+            };
+
+            await _firebase.SetGlobalRecordAsync($"employee_sessions/{authUid}", sessionRow, ct);
+
             return await _firebase.SetOwnerRecordAsync(
                 ownerUid, "presence", $"{employeeId}_{key}", row, ct);
         }

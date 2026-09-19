@@ -29,9 +29,9 @@ class BiometricAuthManager(
         })
 
     private val promptInfo = BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Biometric Login")
-        .setSubtitle("Log in using your fingerprint or face")
-        .setNegativeButtonText("Use Account Password")
+        .setTitle("Security Unlock 🔒")
+        .setSubtitle("Authenticate using your screen lock or fingerprint to continue.")
+        .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
         .build()
 
     fun canAuthenticate(): Boolean {
