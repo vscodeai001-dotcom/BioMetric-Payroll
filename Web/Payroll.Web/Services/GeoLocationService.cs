@@ -417,9 +417,9 @@ public class GeoLocationService
                 // held, so logout cannot interleave with the decision.
                 if (stableLocationState.HasValue)
                 {
-                    var attendanceEvaluationCompleted = radiusChanged
-                        ? true
-                        : await ProcessAutomaticGeofencePunchAsync(
+                    // REQUIREMENT: Process automatic punching even if radius changed.
+                    // This ensures Admin geofence adjustments take immediate effect.
+                    var attendanceEvaluationCompleted = await ProcessAutomaticGeofencePunchAsync(
                             db,
                             employeeId,
                             sessionId,
@@ -432,11 +432,7 @@ public class GeoLocationService
                             stableLocationState.Value);
 
                     // Persist the SAME stable state that drove the attendance
-                    // decision only when the evaluation completed safely. If
-                    // automatic attendance failed, keep the previous state so
-                    // the next valid GPS fix retries instead of silently
-                    // consuming the transition. Never overwrite it with raw
-                    // GPS state.
+                    // decision only when the evaluation completed safely.
                     if (attendanceEvaluationCompleted)
                     {
                         session.LastIsWithinAllowedRadius =
@@ -445,7 +441,7 @@ public class GeoLocationService
                     else
                     {
                         _logger.LogWarning(
-                            "Dual Attendance evaluation did not complete. Geofence state was not advanced so the transition can be retried. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                            "Dual Attendance evaluation did not complete. Geofence state was not advanced. EmployeeId={EmployeeId}, SessionId={SessionId}",
                             employeeId,
                             sessionId);
                     }
@@ -453,7 +449,7 @@ public class GeoLocationService
                     if (radiusChanged)
                     {
                         _logger.LogInformation(
-                            "Geofence radius changed during active GPS session; state re-baselined without an automatic punch. EmployeeId={EmployeeId}, SessionId={SessionId}, PreviousRadius={PreviousRadius}, NewRadius={NewRadius}, State={State}",
+                            "Geofence radius changed during active GPS session; state re-baselined with immediate attendance evaluation. EmployeeId={EmployeeId}, SessionId={SessionId}, PreviousRadius={PreviousRadius}, NewRadius={NewRadius}, State={State}",
                             employeeId,
                             sessionId,
                             session.LastAllowedRadiusMeters,

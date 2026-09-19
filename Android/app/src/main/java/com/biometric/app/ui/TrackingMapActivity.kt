@@ -138,35 +138,88 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private var isMapFullscreen = false
     private var mapLayerIndex = 0
+    private var adminZoneVisible = true
+    private var adminTrailsVisible = true
 
     private fun setupPremiumMapControls() {
         binding.btnMapFit.setOnClickListener {
-            isAutoFocusEnabled = true
+            isAutoFocusEnabled = false
             followingEmployeeId = null
-            fitAllVisibleStaff()
-            Toast.makeText(this, "Auto-focusing all staff", Toast.LENGTH_SHORT).show()
+            binding.btnAdminMapFollow.alpha = 0.4f
+            
+            val points = signalR.liveLocations.value.values
+                .map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
+            if (officeLat != 0.0 && officeLon != 0.0) points.add(GeoPoint(officeLat, officeLon))
+            
+            if (points.isNotEmpty()) {
+                val bounds = BoundingBox.fromGeoPoints(points)
+                binding.mapview.zoomToBoundingBox(bounds, true, 150)
+            }
+            Toast.makeText(this, "Fitting all staff", Toast.LENGTH_SHORT).show()
         }
+
+        binding.btnAdminMapOffice.setOnClickListener {
+            isAutoFocusEnabled = false
+            followingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = 0.4f
+            
+            if (officeLat != 0.0 && officeLon != 0.0) {
+                binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
+                binding.mapview.controller.setZoom(16.0)
+            }
+        }
+
+        binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+        binding.btnAdminMapFollow.setOnClickListener {
+            isAutoFocusEnabled = !isAutoFocusEnabled
+            followingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+            Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnAdminMapZone.setOnClickListener {
+            adminZoneVisible = !adminZoneVisible
+            val alpha = if (adminZoneVisible) 0x40 else 0
+            officeCircle?.fillPaint?.alpha = alpha
+            officeCircle?.outlinePaint?.alpha = if (adminZoneVisible) 0xA0 else 0
+            binding.mapview.invalidate()
+            Toast.makeText(this, if (adminZoneVisible) "Office Zone Visible 🏢" else "Office Zone Hidden 🛡️", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnAdminMapTrail.setOnClickListener {
+            adminTrailsVisible = !adminTrailsVisible
+            val alpha = if (adminTrailsVisible) 255 else 0
+            val casingAlpha = if (adminTrailsVisible) 150 else 0
+            
+            roadLines.values.forEach { it.outlinePaint.alpha = alpha }
+            roadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
+            
+            binding.mapview.invalidate()
+            Toast.makeText(this, if (adminTrailsVisible) "Trails Enabled ↝" else "Trails Disabled 📍", Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnMapLayer.setOnClickListener {
             mapLayerIndex = (mapLayerIndex + 1) % 4
+            val mapView = binding.mapview
             when (mapLayerIndex) {
                 0 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 1 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    mapView.setTileSource(TileSourceFactory.USGS_SAT)
+                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 2 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.OpenTopo)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    mapView.setTileSource(TileSourceFactory.OpenTopo)
+                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 else -> {
-                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    applyDarkThemeFilter(binding.mapview)
+                    mapView.setTileSource(TileSourceFactory.MAPNIK)
+                    applyDarkThemeFilter(mapView)
                 }
             }
-            binding.mapview.invalidate()
+            mapView.invalidate()
         }
         binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
     }
@@ -182,14 +235,6 @@ class TrackingMapActivity : MotionBaseActivity() {
                 )
             )
         )
-    }
-
-    private fun fitAllVisibleStaff() {
-        val points = signalR.liveLocations.value.values.map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
-        if (officeLat != 0.0 && officeLon != 0.0) points.add(GeoPoint(officeLat, officeLon))
-        if (points.isEmpty()) return
-        val bounds = BoundingBox.fromGeoPoints(points)
-        binding.mapview.zoomToBoundingBox(bounds, true, 150)
     }
 
     private fun toggleMapFullscreen() {
@@ -414,6 +459,11 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.tvMapSync.text =
             "Realtime • ${locations.size} sessions • ${staleCount} stale • ${offlineCount} offline"
 
+        // Collision handling: group by approximate location to apply offset
+        val locationsByCoord = locations.groupBy { 
+            "%.5f:%.5f".format(Locale.US, it.latitude, it.longitude)
+        }
+
         val currentIds = locations.map { it.employeeId }.toSet()
 
         markers.keys.filter { it !in currentIds }.toList().forEach { id ->
@@ -438,10 +488,22 @@ class TrackingMapActivity : MotionBaseActivity() {
                 return@forEach
             }
 
-            val point = GeoPoint(loc.latitude, loc.longitude)
+            // Apply spiral offset for overlapping markers
+            val coordKey = "%.5f:%.5f".format(Locale.US, loc.latitude, loc.longitude)
+            val group = locationsByCoord[coordKey] ?: emptyList()
+            val point = if (group.size > 1) {
+                val index = group.indexOf(loc)
+                val angle = 2.0 * Math.PI * index / group.size
+                val radius = 0.00004 // ~4-5 meters offset
+                GeoPoint(
+                    loc.latitude + radius * Math.cos(angle),
+                    loc.longitude + radius * Math.sin(angle)
+                )
+            } else {
+                GeoPoint(loc.latitude, loc.longitude)
+            }
 
             // Current company office/radius are the source of truth.
-            // Do not use a stale radius/status from the live payload.
             val hasCurrentOffice = officeLat != 0.0 && officeLon != 0.0
 
             val distanceFromOffice = if (hasCurrentOffice) {
@@ -462,7 +524,7 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             val marker = markers.getOrPut(loc.employeeId) {
                 Marker(mapView).apply {
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER) // Center anchor for rotation
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     title = emp?.name ?: "Staff #${loc.employeeId}"
                     mapView.overlays.add(this)
 
@@ -471,6 +533,9 @@ class TrackingMapActivity : MotionBaseActivity() {
                         isAutoFocusEnabled = true
                         map.controller.animateTo(clicked.position)
                         clicked.showInfoWindow()
+                        
+                        // Immediately trigger route for selected employee
+                        updateActivityRoadRoute(loc.employeeId, point)
                         true
                     }
                 }
@@ -486,25 +551,31 @@ class TrackingMapActivity : MotionBaseActivity() {
             ) { animatedPoint ->
                 // Update road lines synchronously with marker movement
                 runCatching {
+                    val isSelected = followingEmployeeId == loc.employeeId
+                    val trailAlpha = if (isSelected) 255 else 0
+                    val casingAlpha = if (isSelected) 150 else 0
+
                     roadLines[loc.employeeId]?.let { l ->
                         val pts = l.actualPoints.toMutableList()
                         if (pts.size >= 2) {
-                            pts[0] = animatedPoint
+                            pts[pts.size - 1] = animatedPoint
                             l.setPoints(pts)
                         }
+                        l.outlinePaint.alpha = trailAlpha
                     }
                     roadCasings[loc.employeeId]?.let { c ->
                         val pts = c.actualPoints.toMutableList()
                         if (pts.size >= 2) {
-                            pts[0] = animatedPoint
+                            pts[pts.size - 1] = animatedPoint
                             c.setPoints(pts)
                         }
+                        c.outlinePaint.alpha = casingAlpha
                     }
                 }
                 
-                // Auto-focus if enabled
+                // Smoothly follow the selected employee
                 if (isAutoFocusEnabled && followingEmployeeId == loc.employeeId) {
-                    mapView.controller.setCenter(animatedPoint)
+                    mapView.controller.animateTo(animatedPoint)
                 }
                 
                 mapView.invalidate()
@@ -528,21 +599,14 @@ class TrackingMapActivity : MotionBaseActivity() {
                 "${if (withinCurrentRadius) "Within range" else "Outside range"} | " +
                 "Accuracy: ±${loc.accuracyMeters.toInt()}m"
 
-            roadLines[loc.employeeId]?.outlinePaint?.alpha = 255
-            roadCasings[loc.employeeId]?.outlinePaint?.alpha = 255
-
-            updateActivityRoadRoute(loc.employeeId, point)
-            geoPoints.add(point)
-        }
-
-        binding.fabRefresh.setOnClickListener {
-            if (geoPoints.isNotEmpty()) {
-                val bounds = BoundingBox.fromGeoPoints(geoPoints)
-                mapView.zoomToBoundingBox(bounds, true, 150)
-            } else if (officeLat != 0.0 && officeLon != 0.0) {
-                mapView.controller.setCenter(GeoPoint(officeLat, officeLon))
-                mapView.controller.setZoom(16.0)
+            // REQUIREMENT: Only show route for selected employee
+            if (followingEmployeeId == loc.employeeId) {
+                updateActivityRoadRoute(loc.employeeId, point)
+            } else {
+                roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
             }
+            geoPoints.add(point)
         }
 
         mapView.invalidate()

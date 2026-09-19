@@ -1453,6 +1453,8 @@
         position:absolute; right:-3px; bottom:-3px; width:11px; height:11px; border-radius:50%;
         background:#22c55e; border:2px solid #fff; box-shadow:0 2px 7px rgba(0,0,0,.25);
     }
+    .payroll-map-user-status.stale { background:#f59e0b; }
+    .payroll-map-user-status.offline { background:#94a3b8; }
     .payroll-map-user-outside .payroll-map-user-status { background:#ef4444; }
     .payroll-map-user-initials { line-height:1; user-select:none; }
 
@@ -3483,23 +3485,7 @@
                     node.ValueKind != JsonValueKind.Object)
                     return;
 
-                var state =
-                    GetJsonStringValue(
-                        node,
-                        "State",
-                        "state");
-
-                if (state.Equals(
-                        "ENDED",
-                        StringComparison.OrdinalIgnoreCase) ||
-                    state.Equals(
-                        "OFFLINE",
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    locations.RemoveAll(
-                        x => x.EmployeeId == employeeId);
-                }
-                else if (TryParseLiveEmployeeLocation(
+                if (TryParseLiveEmployeeLocation(
                              employeeId,
                              node,
                              out var location))
@@ -3512,6 +3498,11 @@
                         locations[index] = location;
                     else
                         locations.Add(location);
+                }
+                else
+                {
+                    // If the parser rejected it (e.g. 24h timeout), only then remove it.
+                    locations.RemoveAll(x => x.EmployeeId == employeeId);
                 }
             }
 
@@ -3657,9 +3648,11 @@
             currentOfficeRadius > 0 &&
             distance <= currentOfficeRadius + 1;
 
-        // MIRROR ANDROID: Markers older than 5 minutes are considered Offline/Hidden.
+        // MIRROR ANDROID: Markers older than 24 hours are hidden.
+        // This ensures the map shows stale/offline employees as markers
+        // while they are still in the active Firebase node.
         var age = DateTime.UtcNow - timestamp;
-        if (age > TimeSpan.FromSeconds(LiveLocationStore.StaleTimeoutSeconds))
+        if (age > TimeSpan.FromHours(24))
             return false;
 
         location = new LiveEmployeeLocation

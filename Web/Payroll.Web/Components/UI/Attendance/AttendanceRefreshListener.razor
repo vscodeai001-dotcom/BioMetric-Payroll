@@ -27,6 +27,10 @@
     public EventCallback OnRegularizationChanged { get; set; }
 
 
+    [Parameter]
+    public EventCallback OnGeoSettingsChanged { get; set; }
+
+
     // ============================================================
     // SIGNALR JS REFERENCE
     // ============================================================
@@ -208,6 +212,33 @@
         {
             Console.Error.WriteLine(
                 $"RegularizationChanged callback failed: {ex}");
+        }
+    }
+
+
+    // ============================================================
+    // GEOFENCE SETTINGS CHANGED
+    // ============================================================
+
+    [JSInvokable]
+    public async Task GeoSettingsChanged(object? data = null)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            if (OnGeoSettingsChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnGeoSettingsChanged.InvokeAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"GeoSettingsChanged callback failed: {ex}");
         }
     }
 
