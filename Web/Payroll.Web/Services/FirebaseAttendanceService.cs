@@ -303,8 +303,9 @@ public sealed class FirebaseAttendanceService
     {
         var value = Raw(element, names);
         if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
-        if (value.Value.TryGetInt32(out var i)) return i;
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt32(out var i)) return i;
         var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
         if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out i)) return i;
         if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (int)Math.Round(d);
         return null;
@@ -316,8 +317,9 @@ public sealed class FirebaseAttendanceService
     {
         var value = Raw(element, names);
         if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
-        if (value.Value.TryGetDecimal(out var d)) return d;
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDecimal(out var d)) return d;
         var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
         if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
         return null;
     }
@@ -326,8 +328,9 @@ public sealed class FirebaseAttendanceService
     {
         var value = Raw(element, names);
         if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
-        if (value.Value.TryGetDouble(out var d)) return d;
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var d)) return d;
         var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
         if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
         return null;
     }
@@ -335,9 +338,14 @@ public sealed class FirebaseAttendanceService
     private static bool? Bool(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return null;
-        if (value.Value.ValueKind is JsonValueKind.True or JsonValueKind.False) return value.Value.GetBoolean();
-        return bool.TryParse(value.Value.ToString(), out var b) ? (bool?)b : null;
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
+        if (value.Value.ValueKind == JsonValueKind.True) return true;
+        if (value.Value.ValueKind == JsonValueKind.False) return false;
+        var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        if (bool.TryParse(text, out var b)) return b;
+        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) return n != 0;
+        return null;
     }
 
     private static DateOnly? Date(JsonElement element, params string[] names)
@@ -354,19 +362,22 @@ public sealed class FirebaseAttendanceService
     private static DateTime? UnixDateTime(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return null;
-        if (value.Value.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime;
         var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
         if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var dto)) return dto.LocalDateTime;
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs)) return DateTimeOffset.FromUnixTimeMilliseconds(pMs).LocalDateTime;
         return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt) ? dt : null;
     }
 
     private static TimeSpan Duration(JsonElement element, params string[] names)
     {
         var value = Raw(element, names);
-        if (value is null) return TimeSpan.Zero;
-        if (value.Value.TryGetDouble(out var number)) return TimeSpan.FromMilliseconds(number);
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return TimeSpan.Zero;
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var number)) return TimeSpan.FromMilliseconds(number);
         var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return TimeSpan.Zero;
         if (TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out var ts)) return ts;
         return double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var ms)
             ? TimeSpan.FromMilliseconds(ms)

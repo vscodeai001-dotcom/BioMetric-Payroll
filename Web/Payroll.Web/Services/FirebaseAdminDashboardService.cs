@@ -72,7 +72,11 @@ public sealed class FirebaseAdminDashboardService
             var summaries = Items(results[5]).ToList();
             var tracking = Items(results[6]).ToList();
 
-            var now = DateTime.Now;
+            // Authoritative Dashboard Date: Use India Timezone for the "Current" day
+            // regardless of the Web server's host clock or UTC state.
+            var indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
+                OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
             var today = DateOnly.FromDateTime(now);
 
             /*
@@ -495,7 +499,7 @@ public sealed class FirebaseAdminDashboardService
                     doubleValue >= int.MinValue &&
                     doubleValue <= int.MaxValue)
                 {
-                    return (int)doubleValue;
+                    return (int)Math.Round(doubleValue);
                 }
 
                 return null;
@@ -537,7 +541,7 @@ public sealed class FirebaseAdminDashboardService
                     parsedDouble >= int.MinValue &&
                     parsedDouble <= int.MaxValue)
                 {
-                    return (int)parsedDouble;
+                    return (int)Math.Round(parsedDouble);
                 }
 
                 return null;
@@ -633,27 +637,13 @@ public sealed class FirebaseAdminDashboardService
             return fallback;
         }
 
-        if (p.ValueKind ==
-            JsonValueKind.True)
-        {
-            return true;
-        }
+        if (p.ValueKind == JsonValueKind.True) return true;
+        if (p.ValueKind == JsonValueKind.False) return false;
 
-        if (p.ValueKind ==
-            JsonValueKind.False)
-        {
-            return false;
-        }
+        var text = p.ToString().Trim();
+        if (string.IsNullOrWhiteSpace(text)) return fallback;
 
-        var text =
-            p.ToString().Trim();
-
-        if (bool.TryParse(
-                text,
-                out var b))
-        {
-            return b;
-        }
+        if (bool.TryParse(text, out var b)) return b;
 
         if (int.TryParse(
                 text,
@@ -751,8 +741,17 @@ public sealed class FirebaseAdminDashboardService
             }
 
             /*
-             * Also support ordinary date strings.
+             * Also support ordinary ISO date strings.
              */
+            if (DateTimeOffset.TryParse(
+                    text,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal,
+                    out var dto))
+            {
+                return dto.LocalDateTime;
+            }
+
             if (DateTime.TryParse(
                     text,
                     CultureInfo.InvariantCulture,

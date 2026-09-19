@@ -1088,6 +1088,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 }
             }
 
+            // Special mapping for Employee isActive (Firebase) to IsDeleted (SQL) - REVERSED
+            if (entityType.ClrType.Name == "Employee" && property.Name == "IsDeleted")
+            {
+                if (converted is bool isActuallyActive)
+                {
+                    converted = !isActuallyActive;
+                }
+            }
+
             if (converted is null &&
                 Nullable.GetUnderlyingType(property.ClrType) == null &&
                 property.ClrType.IsValueType)
@@ -1225,30 +1234,75 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         try
         {
             if (type == typeof(string))
+            {
+                if (value.Value.ValueKind == JsonValueKind.String)
+                    return value.Value.GetString();
                 return value.Value.ToString();
+            }
 
             if (type == typeof(int))
-                return int.Parse(value.Value.ToString(), CultureInfo.InvariantCulture);
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt32(out var i))
+                    return i;
+                var text = value.Value.ToString();
+                if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out i)) return i;
+                if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (int)Math.Round(d);
+                return 0;
+            }
 
             if (type == typeof(long))
-                return long.Parse(value.Value.ToString(), CultureInfo.InvariantCulture);
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var l))
+                    return l;
+                var text = value.Value.ToString();
+                if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out l)) return l;
+                if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (long)Math.Round(d);
+                return 0L;
+            }
 
             if (type == typeof(decimal))
-                return decimal.Parse(value.Value.ToString(), CultureInfo.InvariantCulture);
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDecimal(out var dec))
+                    return dec;
+                var text = value.Value.ToString();
+                if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out dec)) return dec;
+                return 0m;
+            }
 
             if (type == typeof(double))
-                return double.Parse(value.Value.ToString(), CultureInfo.InvariantCulture);
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var dbl))
+                    return dbl;
+                var text = value.Value.ToString();
+                if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out dbl)) return dbl;
+                return 0.0;
+            }
 
             if (type == typeof(float))
-                return float.Parse(value.Value.ToString(), CultureInfo.InvariantCulture);
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetSingle(out var flt))
+                    return flt;
+                var text = value.Value.ToString();
+                if (float.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out flt)) return flt;
+                return 0.0f;
+            }
 
             if (type == typeof(bool))
-                return value.Value.ValueKind == JsonValueKind.True ||
-                    (value.Value.ValueKind == JsonValueKind.String &&
-                     bool.Parse(value.Value.GetString()!));
+            {
+                if (value.Value.ValueKind == JsonValueKind.True) return true;
+                if (value.Value.ValueKind == JsonValueKind.False) return false;
+                var text = value.Value.ToString();
+                if (bool.TryParse(text, out var b)) return b;
+                if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) return n != 0;
+                return false;
+            }
 
             if (type == typeof(Guid))
+            {
+                if (value.Value.ValueKind == JsonValueKind.String)
+                    return Guid.Parse(value.Value.GetString()!);
                 return Guid.Parse(value.Value.ToString());
+            }
 
             if (type == typeof(DateTime))
             {
@@ -1256,8 +1310,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     value.Value.TryGetInt64(out var ms))
                     return DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
 
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs))
+                    return DateTimeOffset.FromUnixTimeMilliseconds(pMs).UtcDateTime;
+
                 return DateTime.Parse(
-                    value.Value.ToString(),
+                    text!,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind);
             }
@@ -1268,8 +1326,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     value.Value.TryGetInt64(out var ms))
                     return DateTimeOffset.FromUnixTimeMilliseconds(ms);
 
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs))
+                    return DateTimeOffset.FromUnixTimeMilliseconds(pMs);
+
                 return DateTimeOffset.Parse(
-                    value.Value.ToString(),
+                    text!,
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.RoundtripKind);
             }
@@ -1281,8 +1343,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     return DateOnly.FromDateTime(
                         DateTimeOffset.FromUnixTimeMilliseconds(ms).DateTime);
 
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs))
+                    return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(pMs).DateTime);
+
                 return DateOnly.Parse(
-                    value.Value.ToString(),
+                    text!,
                     CultureInfo.InvariantCulture);
             }
 
@@ -1292,19 +1358,36 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     value.Value.TryGetDouble(out var ms))
                     return TimeOnly.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
 
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
                 return TimeOnly.Parse(
-                    value.Value.ToString(),
+                    text!,
                     CultureInfo.InvariantCulture);
             }
 
+            if (type == typeof(TimeSpan))
+            {
+                if (value.Value.ValueKind == JsonValueKind.Number &&
+                    value.Value.TryGetDouble(out var ms))
+                    return TimeSpan.FromMilliseconds(ms);
+
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var pMs))
+                    return TimeSpan.FromMilliseconds(pMs);
+
+                return TimeSpan.Parse(text!, CultureInfo.InvariantCulture);
+            }
+
             if (type.IsEnum)
-                return Enum.Parse(type, value.Value.ToString(), true);
+            {
+                var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                return Enum.Parse(type, text!, true);
+            }
 
             return JsonSerializer.Deserialize(
                 value.Value.GetRawText(),
                 type);
         }
-        catch
+        catch (Exception ex)
         {
             return null;
         }
