@@ -141,41 +141,47 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <HorizontalScrollView
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scrollbars="none">
+        android:layout_height="match_parent">
 
-        <LinearLayout
-            android:layout_width="wrap_content"
+        <HorizontalScrollView
+            android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="vertical">
+            android:scrollbars="none">
 
-            <!-- Table Header (Cloned from Web) -->
             <LinearLayout
-                android:layout_width="720dp"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="12dp"
-                android:background="#15000000"
-                android:gravity="center_vertical">
-                <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="🗓️ Date" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="🚩 Status" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📋 Sch." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⏱️ Work" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📉 Pen." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⚡ OT" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-                <TextView android:layout_width="0dp" android:layout_weight="1.5" android:layout_height="wrap_content" android:text="📜 Raw Punches" android:gravity="end" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
-            </LinearLayout>
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rvAttendance"
-                android:layout_width="720dp"
+                android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                tools:listitem="@layout/item_attendance_day" />
+                android:orientation="vertical">
 
-        </LinearLayout>
-    </HorizontalScrollView>
+                <!-- Table Header (Cloned from Web) -->
+                <LinearLayout
+                    android:layout_width="720dp"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="12dp"
+                    android:paddingVertical="12dp"
+                    android:background="#15000000"
+                    android:gravity="center_vertical">
+                    <TextView android:layout_width="0dp" android:layout_weight="1.2" android:layout_height="wrap_content" android:text="🗓️ Date" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="🚩 Status" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📋 Sch." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⏱️ Work" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="📉 Pen." android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="0.8" android:layout_height="wrap_content" android:text="⚡ OT" android:gravity="center" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                    <TextView android:layout_width="0dp" android:layout_weight="1.5" android:layout_height="wrap_content" android:text="📜 Raw Punches" android:gravity="end" android:textSize="10sp" android:textStyle="bold" android:textColor="@color/text_secondary" android:textAllCaps="true"/>
+                </LinearLayout>
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvAttendance"
+                    android:layout_width="720dp"
+                    android:layout_height="match_parent"
+                    tools:listitem="@layout/item_attendance_day" />
+
+            </LinearLayout>
+        </HorizontalScrollView>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
 </LinearLayout>

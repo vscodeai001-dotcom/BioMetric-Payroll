@@ -14,6 +14,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -81,6 +83,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val roadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var statusFilter = "All"
+    private var searchFilter = ""
     private var isAutoFocusEnabled = true
     private var followingEmployeeId: Int? = null
     
@@ -131,9 +134,17 @@ class TrackingMapActivity : MotionBaseActivity() {
                 R.id.chipOffline -> "Offline"
                 else -> "All"
             }
-            // Trigger marker update with current SignalR data
             updateMapMarkers(signalR.liveLocations.value.values.toList())
         }
+
+        binding.etMapSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                searchFilter = s?.toString()?.lowercase() ?: ""
+                updateMapMarkers(signalR.liveLocations.value.values.toList())
+            }
+        })
     }
 
     private var isMapFullscreen = false
@@ -435,6 +446,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     private fun updateMapMarkers(locations: List<SignalRManager.LiveLocation>) {
         val mapView = binding.mapview
         val employeeData = sharedViewModel.allEmployees.value
+        val firebaseEmployeeData = signalR.ownerEmployees.value
         val geoPoints = mutableListOf<GeoPoint>()
 
         val liveCount = locations.count { getLocStatus(it) == "Live" }
@@ -477,11 +489,19 @@ class TrackingMapActivity : MotionBaseActivity() {
 
         locations.forEach { loc ->
             val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
+            val firebaseEmp = firebaseEmployeeData[loc.employeeId]
+            
+            val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
             val status = getLocStatus(loc)
 
-            val isFilteredOut = statusFilter != "All" && statusFilter != status
+            val matchesStatus = statusFilter == "All" || statusFilter == status
+            val matchesSearch = searchFilter.isEmpty() || 
+                    employeeName.lowercase().contains(searchFilter) || 
+                    loc.employeeId.toString().contains(searchFilter)
+            
+            val isVisible = matchesStatus && matchesSearch
 
-            if (isFilteredOut) {
+            if (!isVisible) {
                 markers[loc.employeeId]?.alpha = 0f
                 roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
@@ -558,7 +578,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                     roadLines[loc.employeeId]?.let { l ->
                         val pts = l.actualPoints.toMutableList()
                         if (pts.size >= 2) {
-                            pts[pts.size - 1] = animatedPoint
+                            pts[0] = animatedPoint
                             l.setPoints(pts)
                         }
                         l.outlinePaint.alpha = trailAlpha
@@ -566,7 +586,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                     roadCasings[loc.employeeId]?.let { c ->
                         val pts = c.actualPoints.toMutableList()
                         if (pts.size >= 2) {
-                            pts[pts.size - 1] = animatedPoint
+                            pts[0] = animatedPoint
                             c.setPoints(pts)
                         }
                         c.outlinePaint.alpha = casingAlpha

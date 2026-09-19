@@ -43,8 +43,16 @@ class AttendanceLogsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setupRecyclerView()
+        setupSwipeRefresh()
         loadAttendance()
         setupRealTimeSync()
+    }
+
+    private fun setupSwipeRefresh() {
+        binding.swipeRefresh.setOnRefreshListener {
+            loadAttendance()
+        }
+        binding.swipeRefresh.setColorSchemeColors(ContextCompat.getColor(requireContext(), R.color.colorPrimary))
     }
 
     @OptIn(FlowPreview::class)
@@ -117,9 +125,11 @@ class AttendanceLogsFragment : Fragment() {
                 _binding?.let { b ->
                     adapter.submitList(logs)
                     updateSummary(logs)
+                    b.swipeRefresh.isRefreshing = false
                 }
             } catch (e: Exception) {
                 Log.e("AttendanceLogs", "Firebase load failed: ${e.message}", e)
+                _binding?.swipeRefresh?.isRefreshing = false
             }
         }
     }

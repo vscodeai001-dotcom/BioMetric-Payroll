@@ -131,9 +131,28 @@ public class GeoLocationService
                 company.OfficeLatitude,
                 company.OfficeLongitude);
 
+            var previousWithin = session.LastIsWithinAllowedRadius;
+            var currentWithin = distance <= (company.GeoRadiusMeters + 1);
+
+            if (previousWithin != currentWithin)
+            {
+                // REQUIREMENT: Trigger immediate automatic geofence punch when radius changes.
+                // This ensures "not takes effect" is fixed by evaluating state immediately.
+                await ProcessAutomaticGeofencePunchAsync(
+                    db,
+                    session.EmployeeId,
+                    session.SessionId,
+                    session.LastLatitude.Value,
+                    session.LastLongitude.Value,
+                    session.LastAccuracyMeters ?? 0.0,
+                    distance,
+                    company.GeoRadiusMeters,
+                    previousWithin,
+                    currentWithin);
+            }
+
             session.LastAllowedRadiusMeters = company.GeoRadiusMeters;
-            // Haversine rule + 1m buffer for UI stability
-            session.LastIsWithinAllowedRadius = distance <= (company.GeoRadiusMeters + 1);
+            session.LastIsWithinAllowedRadius = currentWithin;
         }
 
         await db.SaveChangesAsync();

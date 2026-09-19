@@ -26,10 +26,15 @@ import com.biometric.app.data.entity.ResignationRequest
 import com.biometric.app.sync.FirebaseSyncManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.time.Instant
@@ -97,22 +102,25 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         return if (last == "IN") "OUT" else "IN"
     }
 
-    fun changesFlow(): Flow<Unit> = callbackFlow {
+    fun changesFlow(): Flow<Unit> {
         val employeeKey = employeeId()
         val ref = firebaseSync.getOwnerRef()?.child("employees")?.child(employeeKey)
-        if (ref == null) {
-            close()
-            return@callbackFlow
-        }
-        // 1100-S: listen only to the authenticated Employee record. This keeps
-        // realtime parity with Web while avoiding owner-wide data invalidation
-        // and avoiding a Staff client dependency on collection enumeration.
-        val listener = object : com.google.firebase.database.ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) { trySend(Unit) }
-            override fun onCancelled(error: com.google.firebase.database.DatabaseError) { trySend(Unit) }
-        }
-        ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+        val firebaseFlow = if (ref != null) {
+            callbackFlow {
+                val listener = object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) { trySend(Unit) }
+                    override fun onCancelled(error: DatabaseError) { trySend(Unit) }
+                }
+                ref.addValueEventListener(listener)
+                awaitClose { ref.removeEventListener(listener) }
+            }
+        } else flowOf(Unit)
+
+        // 1100-S: Merge with application-wide events (e.g. automatic punches).
+        // This ensures the attendance list refreshes even if the employee master record is unchanged.
+        val appEventsFlow = firebaseSync.applicationEventsFlow().map { Unit }
+        
+        return merge(firebaseFlow, appEventsFlow)
     }
 
     private fun DataSnapshot.valueOf(name: String): Any? {
