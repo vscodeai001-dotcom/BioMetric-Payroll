@@ -218,4 +218,12 @@ object DateRangeUtil {
             set(Calendar.MILLISECOND, 999)
         }.timeInMillis
     }
+
+    fun parseIsoDate(isoDate: String): Long {
+        return try {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(isoDate)?.time ?: 0L
+        } catch (e: Exception) {
+            0L
+        }
+    }
 }

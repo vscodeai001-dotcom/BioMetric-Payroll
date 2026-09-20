@@ -186,7 +186,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         isBonusEligibleRule = bool("isBonusEligibleRule", true),
         isPaidLeaveEligibleRule = bool("isPaidLeaveEligibleRule", true),
         paidLeaveOnWeekdays = bool("paidLeaveOnWeekdays", true),
-        paidLeaveOnWeekends = bool("paidLeaveOnWeekends"),
+        paidLeaveOnWeekends = bool("paidLeaveOnWeekends", false),
         bankAccountNumber = string("bankAccountNumber"),
         bankIfscCode = string("bankIfscCode"),
         bankName = string("bankName"),
@@ -215,10 +215,12 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         salaryType = string("salaryType") ?: "MONTHLY_FIXED",
         salaryRate = double("salaryRate"),
         note = string("note"),
-        synced = bool("synced", true),
+        synced = bool("synced"),
         lateDeduction = double("lateDeduction"),
         otHours = double("otHours"),
-        createdAt = long("createdAt")
+        createdAt = long("createdAt"),
+        syncState = 1,
+        lastModified = long("lastModified")
     )
 
     private fun DataSnapshot.toAttendancePunch(): AttendancePunch = AttendancePunch(

@@ -36,7 +36,7 @@ class UserRepository @Inject constructor(
     )
 
     fun observeUsers(): Flow<List<UserViewModel>> =
-        firebaseSync.getDataFlow<UserProfile>("user_profiles")
+        firebaseSync.getGlobalDataFlow<UserProfile>("user_profiles")
             .map { profiles ->
                 profiles
                     .filter { it.uid.isNotBlank() }

@@ -802,6 +802,23 @@ class StaffActivity : MotionBaseActivity() {
             .show()
     }
 
+    /**
+     * Application-wide realtime invalidation endpoint.
+     * Firebase and Room flows automatically handle data updates; this method
+     * ensures the UI list and summary labels reflect changes immediately
+     * after the central hydration bridge has updated the local database.
+     */
+    private fun refreshRealtime() {
+        if (isFinishing || isDestroyed) return
+        lifecycleScope.launch {
+            // Trigger a UI update pass. The flows in observeViewModel are
+            // already collecting, but an explicit call ensures all summary
+            // labels and derived UI states are recalculated.
+            updateTotalPayableSummary()
+            adapter.notifyDataSetChanged()
+        }
+    }
+
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         val extraActions = listOf(
             GlobalSwitcherDelegate.ActionItem("👤", "Add Staff") {

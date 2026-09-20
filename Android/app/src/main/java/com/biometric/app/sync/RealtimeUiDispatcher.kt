@@ -29,14 +29,19 @@ class RealtimeUiDispatcher @Inject constructor() {
         "AdminManualPunchCorrectionActivity" to listOf("loadIssues"),
         "AdminPayrollActivity" to listOf("loadPreview", "loadHistory"),
         "AuditTrailActivity" to listOf("refreshData"),
-        "EmployeeHomeActivity" to listOf("loadDashboard"),
+        "EmployeeHomeActivity" to listOf("refreshRealtime"), // Updated for safe real-time sync
         "EmployeePunchActivity" to listOf("loadStatus"),
         "OfflineTrackingActivity" to listOf("refreshOnce"),
         "PunchCorrectionApprovalActivity" to listOf("load"),
         "SettingsActivity" to listOf("loadSettings"),
         "ShopClosedDaysActivity" to listOf("refreshData"),
+        "StaffActivity" to listOf("refreshRealtime"), // Updated for safe real-time sync
         "StaffDetailActivity" to listOf("refreshData", "refreshStaffListForCurrentFilter", "refreshSelectedEmployeeHistory"),
         "StaffPermissionActivity" to listOf("loadAdminPermissions"),
+        "TrackingMapActivity" to listOf("observeLiveLocations"), // Added for live map parity
+        "LeaveManagementActivity" to listOf("refreshData"), // Added for approvals parity
+        "RegularizationActivity" to listOf("refreshData"), // Added for approvals parity
+        "UserManagementActivity" to listOf("loadUsers"), // Added for user parity
         "PayslipListActivity" to emptyList(),
         "ReportCenterActivity" to emptyList()
     )

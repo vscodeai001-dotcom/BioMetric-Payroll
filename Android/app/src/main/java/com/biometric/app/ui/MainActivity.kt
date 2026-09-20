@@ -759,7 +759,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 val point = if (group.size > 1) {
                     val index = group.indexOf(loc)
                     val angle = 2.0 * Math.PI * index / group.size
-                    val radius = 0.00004 // ~4-5 meters offset
+                    // REQUIREMENT: Match TrackingMapActivity offset for visual consistency.
+                    val radius = 0.00015 // ~15-18 meters offset
                     GeoPoint(
                         loc.latitude + radius * Math.cos(angle),
                         loc.longitude + radius * Math.sin(angle)

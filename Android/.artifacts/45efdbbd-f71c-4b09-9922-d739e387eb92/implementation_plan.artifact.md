@@ -1,54 +1,67 @@
-# Critical Stability and UI Fixes Plan
+# Implementation Plan - Android Admin Parity & Fixes
 
-This plan addresses several critical issues including crashes, deserialization errors, session management bugs, and edge-to-edge UI overlaps.
+This plan aims to resolve several critical issues in the Android Admin application, focusing on data parity with the Web version, UI improvements for Employee/Attendance records, and fixing the Map and Settings modules.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Edge-to-Edge Changes**: I am moving from hardcoded layout padding to dynamic window inset handling. This will ensure the app looks consistent across devices with different taskbar heights (gesture vs. button navigation).
-> **Session Handling**: If a Firebase session is lost but the app thinks it's logged in, the user will now be prompted to log in again instead of seeing a "session missing" error.
+> The "User & Role Management" fix involves changing the Firebase path from owner-scoped to global. Ensure that the Firebase security rules allow Admin/SuperAdmin to read `user_profiles` at the root.
 
 ## Proposed Changes
 
-### [Sync & Data]
+### [Component: Data & Sync]
 
 #### [MODIFY] [FirebaseSyncManager.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/FirebaseSyncManager.kt)
-- Add `Gson` initialization for robust JSON serialization of complex `AuditLog` values.
-- Update `decodeAuditLog` to convert `HashMap` or other complex objects in `oldValue`/`newValue` to JSON strings instead of returning `null`.
+- Add `getGlobalDataFlow<T>(path: String)` to allow reading collections from the root level of the Firebase database.
+- This is necessary for `user_profiles` which are stored globally by the Web app.
 
-### [Authentication & Session]
+#### [MODIFY] [UserRepository.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/data/repository/UserRepository.kt)
+- Update `observeUsers()` to use `getGlobalDataFlow("user_profiles")`.
 
-#### [MODIFY] [LoginActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/LoginActivity.kt)
-- Enhance `setupUI` to verify the `FirebaseAuth` current user.
-- If `mobileSessionStore` reports an active session but Firebase does not, reset the local session state to allow a fresh login.
+---
 
-### [UI & Layout Stability]
+### [Component: Employee & Attendance UI]
 
-#### [MODIFY] [EmployeeHomeActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/EmployeeHomeActivity.kt)
-- Audit and fix all `binding` property accesses in asynchronous callbacks.
-- Replace non-nullable `binding` with safe-calls to `_binding` in map layout listeners and post-execution blocks to prevent `NullPointerException` during activity destruction.
+#### [MODIFY] [StaffDetailActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/StaffDetailActivity.kt)
+- Enhance the UI to mirror the Web Dashboard's KPI-style summary (Scheduled, Worked, OT, Penalty, etc.).
+- Add a detailed "Attendance Log" section that lists each day's punches, status, and calculated hours, similar to the Web's `AttendanceLogTable`.
+- Implement a better RecyclerView adapter for the attendance log.
 
-#### [MODIFY] [MotionBaseActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/MotionBaseActivity.kt)
-- Refine `applyWindowInsets` to dynamically detect scrolling containers (e.g., `NestedScrollView`) and apply bottom navigation insets as padding.
-- This ensures content is never obscured by the system taskbar while maintaining a "scrolling under" effect.
+#### [MODIFY] [activity_staff_detail.xml](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/res/layout/activity_staff_detail.xml)
+- Update layout to include the new summary header and detailed log list.
 
-#### [MODIFY] [activity_main.xml](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/res/layout/activity_main.xml)
-- Remove hardcoded `paddingBottom="90dp"`.
-- Ensure `clipToPadding="false"` is set on the main scrolling container to allow full scroll range.
+---
 
-### [Styling & Aesthetics]
+### [Component: Map UI]
 
-#### [MODIFY] [bg_premium_card.xml](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/res/drawable/bg_premium_card.xml)
-- Refine stroke and corner radius for a more premium look.
-- Ensure colors are fully reactive to Dark/Light mode transitions using `?attr/colorSurface`.
+#### [MODIFY] [TrackingMapActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/TrackingMapActivity.kt)
+- Increase the spiral offset radius for overlapping markers (from `0.00004` to `0.00015`, approx 15-20 meters) to ensure they are distinct at lower zoom levels.
+- Fix the "Full Screen" map toggle logic to ensure constraints are properly updated.
+
+#### [MODIFY] [MainActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/MainActivity.kt)
+- Apply the same pronounced spiral offset for the Dashboard live map.
+
+---
+
+### [Component: Real-time Sync]
+
+#### [MODIFY] [RealtimeUiDispatcher.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/RealtimeUiDispatcher.kt)
+- Add `StaffActivity` and `TrackingMapActivity` to the registry so they automatically refresh when Firebase reports a change.
+- Ensure all relevant refresh methods are included for each screen.
+
+#### [MODIFY] [FirebaseRoomHydrator.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/FirebaseRoomHydrator.kt)
+- Ensure all transactional nodes (like `daily_summaries`, `audit_logs`) are being watched with a long-lived listener.
+- Cross-check with Web `FirebaseRealtimeService` for any missing synchronization nodes.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run Gradle build to ensure no compilation errors: `./gradlew assembleDebug`
-- Unit tests for `FirebaseSyncManager.decodeAuditLog` (if applicable) to verify complex object serialization.
+- Run `:app:assembleDebug` to ensure compilation is successful.
+- Check logs for any Firebase synchronization errors.
 
 ### Manual Verification
-- **Session**: Log out from Firebase Console and verify `LoginActivity` correctly resets to Login mode.
-- **Scrolling**: Scroll to the bottom of the Workforce Hub on a device with button navigation and verify no content is obscured.
-- **Crash**: Rapidly rotate `EmployeeHomeActivity` while the map is loading to verify no NPE occurs.
+- **User Management**: Verify that the list of users now appears in the "User & Role Management" screen on Android.
+- **Employee Details**: Verify that the new summary header and attendance log list are visible and match Web data.
+- **Map**: Test the "Full Screen" button on the tracking map.
+- **Settings**: Verify that changing a feature toggle on Android reflects on the Web (and vice-versa).
+- **Sync**: Verify that punches added via the Web portal appear instantly on the Android app's attendance log.

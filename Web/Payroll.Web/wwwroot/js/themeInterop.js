@@ -3035,7 +3035,8 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
     if (!useCollisionOffsets || items.length < 2) return byId;
 
     // Group staff whose map markers would visually collide.
-    const collisionMeters = 45;
+    // REQUIREMENT: Increase collision threshold for more distinct markers.
+    const collisionMeters = 75;
     const parent = items.map(function (_, i) { return i; });
     function find(i) {
         while (parent[i] !== i) {
@@ -3075,7 +3076,8 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
         const center = [group[0].lat, group[0].lng];
         const centerPoint = map.latLngToLayerPoint(center);
         const count = group.length;
-        const radius = count <= 2 ? 28 : count <= 4 ? 34 : count <= 7 ? 40 : 46;
+        // REQUIREMENT: More pronounced fanning for clear visibility.
+        const radius = count <= 2 ? 42 : count <= 4 ? 48 : count <= 7 ? 54 : 60;
 
         group.forEach(function (item, index) {
             const angle = (-Math.PI / 2) + (index * (Math.PI * 2 / count));

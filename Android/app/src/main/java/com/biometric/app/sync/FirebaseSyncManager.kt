@@ -429,6 +429,32 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { ref.removeEventListener(listener) }
     }
 
+    inline fun <reified T : Any> getGlobalDataFlow(path: String): Flow<List<T>> = callbackFlow {
+        val ref = getGlobalRef().child(path)
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                lastSyncTime.value = System.currentTimeMillis()
+                syncScope.launch(Dispatchers.Default) {
+                    val list = mutableListOf<T>()
+                    for (childSnapshot in snapshot.children) {
+                        try {
+                            childSnapshot.getValue(T::class.java)?.let { list.add(it) }
+                        } catch (e: Exception) {
+                            Log.w("FirebaseSyncManager", "Global data conversion failed at $path", e)
+                        }
+                    }
+                    trySend(list)
+                }
+            }
+            override fun onCancelled(error: DatabaseError) {
+                trySend(emptyList())
+                this@callbackFlow.close()
+            }
+        }
+        ref.addValueEventListener(listener)
+        awaitClose { ref.removeEventListener(listener) }
+    }
+
     inline fun <reified T : Any> getGlobalItemFlow(path: String): Flow<T?> = callbackFlow {
         val ref = getGlobalRef().child(path)
         val listener = object : ValueEventListener {
@@ -573,26 +599,27 @@ class FirebaseSyncManager @Inject constructor(
                 true
             }
             if (committed) {
-                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(
-                    mapOf(
-                        "EmployeeId" to employeeId,
-                        "SessionId" to sessionId,
-                        "OwnerUid" to ownerUid,
-                        "EndReason" to endReason.take(40),
-                        "State" to "ENDED",
-                        "EndedAtUtc" to Date().toInstant().toString(),
-                        "Source" to "ANDROID_FIREBASE"
-                    )
-                ).await()
+                val endPayload = mapOf(
+                    "EmployeeId" to employeeId,
+                    "SessionId" to sessionId,
+                    "OwnerUid" to ownerUid,
+                    "EndReason" to endReason.take(40),
+                    "State" to "ENDED",
+                    "EndedAtUtc" to Date().toInstant().toString(),
+                    "Source" to "ANDROID_FIREBASE"
+                )
 
-                // A ended session must not leave a ghost marker in either
-                // compatibility or owner-scoped live tracking. The transaction
-                // above only commits when this session is still the authoritative
-                // session, so this cannot remove a newer session's marker.
+                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(endPayload).await()
+
+                // REQUIREMENT: Prevent late GPS points from resurrecting a ghost marker.
+                // Instead of deleting the live node, we set its state to ENDED.
+                // The pushLiveLocation transaction already checks for State=ENDED 
+                // and will refuse to overwrite it, making the termination durable.
+                val liveMarkerTerminator = mapOf("State" to "ENDED", "LastUpdatedUtc" to Date().toInstant().toString())
                 getGlobalRef().updateChildren(
                     mapOf(
-                        "tracking/live/$employeeId" to null,
-                        "owners/$ownerUid/tracking/live/$employeeId" to null
+                        "tracking/live/$employeeId/State" to "ENDED",
+                        "owners/$ownerUid/tracking/live/$employeeId/State" to "ENDED"
                     )
                 ).await()
             }

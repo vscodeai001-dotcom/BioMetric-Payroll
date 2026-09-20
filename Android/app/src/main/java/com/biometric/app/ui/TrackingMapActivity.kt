@@ -262,7 +262,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
                 topToTop = ConstraintLayout.LayoutParams.PARENT_ID
                 bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
-                topToBottom = ConstraintLayout.LayoutParams.UNSET
+                topToBottom = -1
             }
 
             controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -275,7 +275,7 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             // Restore map to its bounded position
             binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
-                topToTop = ConstraintLayout.LayoutParams.UNSET
+                topToTop = -1
                 topToBottom = binding.filterScroll.id
                 bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
             }
@@ -514,7 +514,9 @@ class TrackingMapActivity : MotionBaseActivity() {
             val point = if (group.size > 1) {
                 val index = group.indexOf(loc)
                 val angle = 2.0 * Math.PI * index / group.size
-                val radius = 0.00004 // ~4-5 meters offset
+                // REQUIREMENT: Increase radius so markers are clearly visible 
+                // even when at the exact same coordinate.
+                val radius = 0.00015 // ~15-18 meters offset
                 GeoPoint(
                     loc.latitude + radius * Math.cos(angle),
                     loc.longitude + radius * Math.sin(angle)

@@ -1434,6 +1434,19 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
     }
 
+    /**
+     * Application-wide realtime invalidation endpoint.
+     * Firebase and Room flows automatically handle data updates; this method
+     * ensures the UI list and summary labels reflect changes immediately
+     * after the central hydration bridge has updated the local database.
+     */
+    private fun refreshRealtime() {
+        if (isFinishing || isDestroyed) return
+        lifecycleScope.launch {
+            loadDashboard()
+        }
+    }
+
     private fun goToLogin() {
         // Only callers that explicitly decide the session is invalid reach this
         // method. Clear the stale mobile session here so Launcher/Login cannot

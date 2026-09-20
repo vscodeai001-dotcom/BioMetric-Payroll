@@ -23,6 +23,7 @@ import com.biometric.app.data.MainRepository
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.EmployeeHistory
 import com.biometric.app.data.entity.Attendance
+import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.data.EmployeeStats
 import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.entity.SalaryRules
@@ -63,6 +64,7 @@ class StaffDetailActivity : MotionBaseActivity() {
     @Inject lateinit var repository: MainRepository
 
     private lateinit var filterAdapter: HorizontalFilterAdapter
+    private lateinit var attendanceLogAdapter: AttendanceLogAdapter
     private var employeeId: String = ""
     private var allShopEmployees: List<Employee> = emptyList()
     private var eligibleStaffInPeriod: List<Employee> = emptyList()
@@ -91,6 +93,7 @@ class StaffDetailActivity : MotionBaseActivity() {
         setupRecyclerViews()
         observeViewModel()
         startLiveStatusListener()
+        observeAttendanceLog()
 
         setupMotionFeedback(
             binding.layoutFilterIcons.btnPrevDate,
@@ -328,6 +331,10 @@ class StaffDetailActivity : MotionBaseActivity() {
     private fun setupRecyclerViews() {
         binding.rvStaffHistory.layoutManager = LinearLayoutManager(this)
         binding.rvActivityLog.layoutManager = LinearLayoutManager(this)
+        
+        attendanceLogAdapter = AttendanceLogAdapter()
+        binding.rvAttendanceLog.layoutManager = LinearLayoutManager(this)
+        binding.rvAttendanceLog.adapter = attendanceLogAdapter
     }
 
     private fun adjustDate(amount: Int) {
@@ -850,6 +857,111 @@ class StaffDetailActivity : MotionBaseActivity() {
             .sortedBy { it.effectiveDate }
             .findLast { midnight >= getMidnight(it.effectiveDate) && (it.endDate == null || midnight <= getMidnight(it.endDate!!)) }
             ?: history.filter { it.type == type }.sortedBy { it.effectiveDate }.firstOrNull { getMidnight(it.effectiveDate) <= midnight }
+    }
+
+    private fun observeAttendanceLog() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    repository.allAttendancePunchesFlow,
+                    repository.allDailySummariesFlow
+                ) { punches, summaries ->
+                    punches to summaries
+                }.collectLatest { (allPunches, allSummaries) ->
+                    val range = DateRangeUtil.getRangeForPeriod(currentFilter, selectedDate.timeInMillis)
+                    val empId = employeeId
+                    
+                    if (empId.isBlank()) return@collectLatest
+                    
+                    val filteredSummaries = allSummaries.filter { 
+                        it.employeeId == empId.toIntOrNull() &&
+                        DateRangeUtil.parseIsoDate(it.shiftDate) in range.first..range.second
+                    }.sortedByDescending { it.shiftDate }
+                    
+                    val logRows = filteredSummaries.map { summary ->
+                        val dayPunches = allPunches.filter { 
+                            it.staffId == empId && it.date == summary.shiftDate 
+                        }.sortedBy { it.timestamp }
+                        
+                        AttendanceLogRow(
+                            date = summary.shiftDate,
+                            status = summary.status,
+                            scheduledDuration = summary.scheduledShiftDurationMs,
+                            workedDuration = (summary.earnedStandardHours * 3600000).toLong() + summary.totalOvertimeMs,
+                            otDuration = summary.totalOvertimeMs,
+                            penaltyDuration = summary.totalPenaltyMs,
+                            punches = dayPunches
+                        )
+                    }
+                    
+                    attendanceLogAdapter.submitList(logRows)
+                }
+            }
+        }
+    }
+
+    data class AttendanceLogRow(
+        val date: String,
+        val status: String,
+        val scheduledDuration: Long,
+        val workedDuration: Long,
+        val otDuration: Long,
+        val penaltyDuration: Long,
+        val punches: List<AttendancePunch>
+    )
+
+    inner class AttendanceLogAdapter : RecyclerView.Adapter<AttendanceLogAdapter.ViewHolder>() {
+        private var list = emptyList<AttendanceLogRow>()
+
+        fun submitList(newList: List<AttendanceLogRow>) {
+            list = newList
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_attendance_log_row, parent, false)
+            return ViewHolder(view)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val item = list[position]
+            val tvDate = holder.itemView.findViewById<TextView>(R.id.tvDate)
+            val tvStatus = holder.itemView.findViewById<TextView>(R.id.tvStatus)
+            val tvScheduled = holder.itemView.findViewById<TextView>(R.id.tvScheduled)
+            val tvWorked = holder.itemView.findViewById<TextView>(R.id.tvWorked)
+            val tvOT = holder.itemView.findViewById<TextView>(R.id.tvOT)
+            val tvPenalty = holder.itemView.findViewById<TextView>(R.id.tvPenalty)
+            val tvPunches = holder.itemView.findViewById<TextView>(R.id.tvPunches)
+
+            tvDate.text = item.date
+            tvStatus.text = item.status
+            tvScheduled.text = formatDuration(item.scheduledDuration)
+            tvWorked.text = formatDuration(item.workedDuration)
+            tvOT.text = formatDuration(item.otDuration)
+            tvPenalty.text = formatDuration(item.penaltyDuration)
+            
+            val punchStr = item.punches.joinToString(", ") { 
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(it.timestamp))
+            }
+            tvPunches.text = if (punchStr.isNotEmpty()) "Punches: $punchStr" else "No punches recorded"
+            tvPunches.visibility = if (item.punches.isNotEmpty()) View.VISIBLE else View.GONE
+
+            // Color coding
+            tvStatus.setTextColor(when {
+                item.status.contains("Present", true) -> ContextCompat.getColor(holder.itemView.context, R.color.green)
+                item.status.contains("Absent", true) -> ContextCompat.getColor(holder.itemView.context, R.color.red)
+                else -> ContextCompat.getColor(holder.itemView.context, R.color.text_secondary)
+            })
+        }
+
+        private fun formatDuration(ms: Long): String {
+            val h = ms / 3600000
+            val m = (ms % 3600000) / 60000
+            return String.format(Locale.getDefault(), "%02d:%02d", h, m)
+        }
+
+        override fun getItemCount() = list.size
+        inner class ViewHolder(v: View) : RecyclerView.ViewHolder(v)
     }
 
     override fun onDestroy() {

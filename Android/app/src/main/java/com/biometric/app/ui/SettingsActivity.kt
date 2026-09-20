@@ -177,28 +177,32 @@ class SettingsActivity : MotionBaseActivity() {
     private fun renderFeatureSwitches() {
         binding.featureToggleContainer.removeAllViews()
         featureSwitches.clear()
+        
+        // Filter and sort fields to ensure UI consistency
         FeatureSettings::class.java.declaredFields
-            .filter { Modifier.isPublic(it.modifiers) || !Modifier.isStatic(it.modifiers) }
+            .filter { !Modifier.isStatic(it.modifiers) }
             .filter { it.type == Boolean::class.javaPrimitiveType || it.type == java.lang.Boolean::class.java }
+            .sortedBy { it.name }
             .forEach { field ->
                 field.isAccessible = true
+                val name = field.name
                 val sw = MaterialSwitch(this)
-                sw.text = "${prettyFieldName(field.name)}  ⚙️"
+                sw.text = "${prettyFieldName(name)}  ⚙️"
                 sw.isChecked = (field.get(featureSettings) as? Boolean) ?: false
-                featureSwitches[field.name] = sw
-                binding.featureToggleContainer.addView(sw, LinearLayout.LayoutParams(-1, -2))
+                featureSwitches[name] = sw
+                
+                val params = LinearLayout.LayoutParams(-1, -2).apply {
+                    topMargin = 4; bottomMargin = 4
+                }
+                binding.featureToggleContainer.addView(sw, params)
             }
+        
+        // Special logic for Geofencing dependencies
         featureSwitches["enableDualAttendance"]?.setOnCheckedChangeListener { _, checked ->
             if (checked) featureSwitches["enableGeoFencing"]?.isChecked = true
         }
         featureSwitches["enableAutomaticGeofencePunching"]?.setOnCheckedChangeListener { _, checked ->
             if (checked) featureSwitches["enableGeoFencing"]?.isChecked = true
-        }
-        featureSwitches["enableGeoFencing"]?.setOnCheckedChangeListener { _, checked ->
-            if (!checked) {
-                featureSwitches["enableDualAttendance"]?.isChecked = false
-                featureSwitches["enableAutomaticGeofencePunching"]?.isChecked = false
-            }
         }
     }
 

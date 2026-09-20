@@ -236,29 +236,150 @@ class FirebaseRoomHydrator @Inject constructor(
     private fun DataSnapshot.b(name: String, default: Boolean = false): Boolean = when (val v = raw(name)) { is Boolean -> v; else -> v?.toString()?.toBooleanStrictOrNull() ?: default }
 
     private fun DataSnapshot.toShop() = Shop(
-        shopId = s("shopId") ?: key.orEmpty(), name = s("name").orEmpty(), location = s("location").orEmpty(),
-        openingDate = l("openingDate"), isActive = b("isActive", true), createdAt = l("createdAt"), updatedAt = l("updatedAt"),
-        latitude = d("latitude"), longitude = d("longitude")
+        shopId = s("shopId") ?: key.orEmpty(),
+        name = s("name").orEmpty(),
+        location = s("location").orEmpty(),
+        openingDate = l("openingDate"),
+        isActive = b("isActive", true),
+        brandingName = s("brandingName"),
+        brandingLogoUrl = s("brandingLogoUrl"),
+        salaryRules = toSalaryRules(),
+        createdAt = l("createdAt"),
+        updatedAt = l("updatedAt"),
+        latitude = d("latitude"),
+        longitude = d("longitude")
     )
+
+    private fun DataSnapshot.toSalaryRules() = SalaryRules(
+        newJoineeCutoffDay = i("newJoineeCutoffDay").takeIf { it > 0 } ?: 5,
+        maxAbsencesForPaidLeave = i("maxAbsencesForPaidLeave"),
+        maxAbsencesForBonus = i("maxAbsencesForBonus"),
+        maxShortfallMinutesForBonus = i("maxShortfallMinutesForBonus"),
+        paidLeaveDaysPool = i("paidLeaveDaysPool"),
+        defaultShiftStart = s("defaultShiftStart") ?: "10:00",
+        defaultShiftEnd = s("defaultShiftEnd") ?: "22:00",
+        defaultShift2Start = s("defaultShift2Start"),
+        defaultShift2End = s("defaultShift2End"),
+        defaultBreakHours = d("defaultBreakHours"),
+        defaultOtMultiplier = d("defaultOtMultiplier"),
+        isBonusEligibleDefault = b("isBonusEligibleDefault", true),
+        isPaidLeaveEligibleDefault = b("isPaidLeaveEligibleDefault", true),
+        paidLeaveOnWeekdaysDefault = b("paidLeaveOnWeekdaysDefault", true),
+        paidLeaveOnWeekendsDefault = b("paidLeaveOnWeekendsDefault", false)
+    )
+
     private fun DataSnapshot.toEmployee() = Employee(
         employeeId = s("employeeId") ?: l("employeeId").toString().takeIf { it != "0" } ?: key.orEmpty(),
-        shopId = s("shopId").orEmpty(), name = s("name").orEmpty(), role = s("role") ?: "Staff", isActive = b("isActive", true),
-        syncState = 1, lastModified = l("lastModified")
+        shopId = s("shopId").orEmpty(),
+        name = s("name").orEmpty(),
+        phone = s("phone").orEmpty(),
+        email = s("email"),
+        biometricId = s("biometricId").orEmpty(),
+        role = s("role") ?: "Staff",
+        salaryType = s("salaryType") ?: "MONTHLY_FIXED",
+        salaryRate = d("salaryRate"),
+        paidLeaveBalance = d("paidLeaveBalance"),
+        sickLeaveBalance = d("sickLeaveBalance"),
+        salaryCalculationMethod = s("salaryCalculationMethod") ?: "Pro-Rata Hourly",
+        shiftStart = s("shiftStart") ?: "10:00",
+        shiftEnd = s("shiftEnd") ?: "22:00",
+        breakHours = d("breakHours"),
+        shift2Start = s("shift2Start"),
+        shift2End = s("shift2End"),
+        weekendShiftStart = s("weekendShiftStart"),
+        weekendShiftEnd = s("weekendShiftEnd"),
+        weekendBreakHours = d("weekendBreakHours").takeIf { it > 0 },
+        weekendShift2Start = s("weekendShift2Start"),
+        weekendShift2End = s("weekendShift2End"),
+        compOffDayOfWeek = i("compOffDayOfWeek").takeIf { it >= 0 },
+        otRule = s("otRule") ?: "No Overtime",
+        otFlatRate = d("otFlatRate"),
+        otRateMultiplier = d("otRateMultiplier").takeIf { it > 0 } ?: 1.0,
+        dailyAllowance = d("dailyAllowance"),
+        nightShiftAllowance = d("nightShiftAllowance"),
+        allowanceEffectiveDate = l("allowanceEffectiveDate"),
+        isActive = b("isActive", true),
+        hireDate = l("hireDate"),
+        dob = l("dob").takeIf { it > 0 },
+        terminateDate = l("terminateDate").takeIf { it > 0 },
+        basicSalaryComponent = d("basicSalaryComponent"),
+        hraComponent = d("hraComponent"),
+        daComponent = d("daComponent"),
+        enableShiftRotation = b("enableShiftRotation"),
+        rotationGroup = s("rotationGroup"),
+        shiftRotationPattern = s("shiftRotationPattern"),
+        createdAt = l("createdAt"),
+        isBonusEligibleRule = b("isBonusEligibleRule", true),
+        isPaidLeaveEligibleRule = b("isPaidLeaveEligibleRule", true),
+        paidLeaveOnWeekdays = b("paidLeaveOnWeekdays", true),
+        paidLeaveOnWeekends = b("paidLeaveOnWeekends", false),
+        bankAccountNumber = s("bankAccountNumber"),
+        bankIfscCode = s("bankIfscCode"),
+        bankName = s("bankName"),
+        uanNumber = s("uanNumber"),
+        esiNumber = s("esiNumber"),
+        enablePf = b("enablePf"),
+        enableEsi = b("enableEsi"),
+        tdsRatePercent = d("tdsRatePercent"),
+        lastActive = l("lastActive").takeIf { it > 0 },
+        syncState = 1,
+        lastModified = l("lastModified")
     )
     private fun DataSnapshot.toAttendance() = Attendance(
-        attendanceId = s("attendanceId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(),
-        shopId = s("shopId").orEmpty(), checkInTime = l("checkInTime"), checkOutTime = l("checkOutTime").takeIf { it > 0 },
-        type = s("type") ?: "WORK", hoursWorked = d("hoursWorked"), syncState = 1
+        attendanceId = s("attendanceId") ?: key.orEmpty(),
+        employeeId = s("employeeId") ?: l("employeeId").toString(),
+        shopId = s("shopId").orEmpty(),
+        checkInTime = l("checkInTime"),
+        checkOutTime = l("checkOutTime").takeIf { it > 0 },
+        type = s("type") ?: "WORK",
+        hoursWorked = d("hoursWorked"),
+        shiftStart = s("shiftStart") ?: "10:00",
+        shiftEnd = s("shiftEnd") ?: "22:00",
+        shift2Start = s("shift2Start"),
+        shift2End = s("shift2End"),
+        breakHours = d("breakHours"),
+        salaryType = s("salaryType") ?: "MONTHLY_FIXED",
+        salaryRate = d("salaryRate"),
+        note = s("note"),
+        synced = b("synced"),
+        lateDeduction = d("lateDeduction"),
+        otHours = d("otHours"),
+        createdAt = l("createdAt"),
+        syncState = 1,
+        lastModified = l("lastModified")
     )
     private fun DataSnapshot.toAdvancePayment() = AdvancePayment(
         advanceId = s("advanceId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(),
         shopId = s("shopId").orEmpty(), amount = d("amount"), date = l("date"), isRecovered = b("isRecovered"), recoveryPaymentId = s("recoveryPaymentId")
     )
     private fun DataSnapshot.toEmployeeHistory() = EmployeeHistory(
-        historyId = s("historyId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(), version = i("version"),
-        type = s("type") ?: "SALARY", salaryType = s("salaryType").orEmpty(), oldValue = d("oldValue"), newValue = d("newValue"),
-        shiftStart = s("shiftStart").orEmpty(), shiftEnd = s("shiftEnd").orEmpty(), breakHours = d("breakHours"),
-        changeDate = l("changeDate"), effectiveDate = l("effectiveDate"), endDate = l("endDate").takeIf { it > 0 }, changeReason = s("changeReason"), salaryRate = d("salaryRate")
+        historyId = s("historyId") ?: key.orEmpty(),
+        employeeId = s("employeeId") ?: l("employeeId").toString(),
+        version = i("version"),
+        type = s("type") ?: "SALARY",
+        salaryType = s("salaryType").orEmpty(),
+        oldValue = d("oldValue"),
+        newValue = d("newValue"),
+        shiftStart = s("shiftStart").orEmpty(),
+        shiftEnd = s("shiftEnd").orEmpty(),
+        breakHours = d("breakHours"),
+        shift2Start = s("shift2Start"),
+        shift2End = s("shift2End"),
+        weekendShiftStart = s("weekendShiftStart"),
+        weekendShiftEnd = s("weekendShiftEnd"),
+        weekendBreakHours = d("weekendBreakHours").takeIf { it > 0 },
+        weekendShift2Start = s("weekendShift2Start"),
+        weekendShift2End = s("weekendShift2End"),
+        isBonusEligible = b("isBonusEligible", true),
+        isPaidLeaveEligible = b("isPaidLeaveEligible", true),
+        paidLeaveOnWeekdays = b("paidLeaveOnWeekdays", true),
+        paidLeaveOnWeekends = b("paidLeaveOnWeekends", false),
+        rulesOverrideJson = s("rulesOverrideJson"),
+        changeDate = l("changeDate"),
+        effectiveDate = l("effectiveDate"),
+        endDate = l("endDate").takeIf { it > 0 },
+        changeReason = s("changeReason"),
+        salaryRate = d("salaryRate")
     )
     private fun DataSnapshot.toShopClosedDay() = ShopClosedDay(
         id = s("id") ?: key.orEmpty(), shopId = s("shopId").orEmpty(), date = l("date"), paySalary = b("paySalary", true), reason = s("reason"), affectedEmployeeIds = emptyList()
@@ -269,9 +390,20 @@ class FirebaseRoomHydrator @Inject constructor(
         reason = s("reason").orEmpty(), status = s("status") ?: "Pending", adminRemarks = s("adminRemarks"), submittedAt = l("submittedAt")
     )
     private fun DataSnapshot.toAttendancePunch() = AttendancePunch(
-        punchId = s("punchId") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), date = s("date").orEmpty(),
-        type = s("type") ?: "IN", timestamp = l("timestamp"), latitude = d("latitude"), longitude = d("longitude"), accuracy = d("accuracy").toFloat(),
-        source = s("source") ?: "GEOFENCE", status = s("status") ?: "PENDING"
+        punchId = s("punchId") ?: key.orEmpty(),
+        staffId = s("staffId") ?: l("staffId").toString(),
+        date = s("date").orEmpty(),
+        type = s("type") ?: "IN",
+        timestamp = l("timestamp"),
+        latitude = d("latitude"),
+        longitude = d("longitude"),
+        accuracy = d("accuracy").toFloat(),
+        geofenceId = s("geofenceId"),
+        distanceFromGeofence = d("distanceFromGeofence"),
+        photoId = s("photoId"),
+        deviceId = s("deviceId") ?: "",
+        source = s("source") ?: "GEOFENCE",
+        status = s("status") ?: "PENDING"
     )
     private fun DataSnapshot.toLeaveRequest() = LeaveRequest(
         id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(),

@@ -17,6 +17,7 @@ import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.TrackingRecoveryWorker
 import com.biometric.app.sync.DashboardWarmingWorker
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.FirebaseRoomHydrator
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.ThemeManager
 import dagger.hilt.android.HiltAndroidApp
@@ -34,6 +35,7 @@ class BiometricApplication : Application(), Configuration.Provider {
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var locationSyncManager: LocationSyncManager
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var sessionStore: com.biometric.app.data.MobileSessionStore
     @Inject lateinit var themePreferenceSync: com.biometric.app.sync.ThemePreferenceSync
@@ -64,7 +66,12 @@ class BiometricApplication : Application(), Configuration.Provider {
             CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
                 delay(3000) // 3s staggered start for heavy Firebase listeners
                 if (!sessionStore.isLoggedIn()) return@launch
+                
+                // Requirement: Start both the invalidation coordinator AND 
+                // the database hydrator as soon as a session is active.
                 adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                firebaseRoomHydrator.start()
+                
                 runCatching { firebaseReconnectCoordinator.start() }
                     .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
             }
