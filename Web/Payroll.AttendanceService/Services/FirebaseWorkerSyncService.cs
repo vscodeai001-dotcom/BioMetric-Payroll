@@ -17,7 +17,6 @@ public sealed class FirebaseWorkerSyncService
 {
     private const string CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform";
     private const string DatabaseScope = "https://www.googleapis.com/auth/firebase.database";
-    private const string UserInfoEmailScope = "https://www.googleapis.com/auth/userinfo.email";
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<FirebaseWorkerSyncService> _logger;
@@ -335,12 +334,12 @@ public sealed class FirebaseWorkerSyncService
 
                 credential = GoogleCredential
                     .FromFile(credentialsPath)
-                    .CreateScoped(CloudPlatformScope, DatabaseScope, UserInfoEmailScope);
+                    .CreateScoped(CloudPlatformScope, DatabaseScope);
             }
             else
             {
                 credential = (await GoogleCredential.GetApplicationDefaultAsync())
-                    .CreateScoped(CloudPlatformScope, DatabaseScope, UserInfoEmailScope);
+                    .CreateScoped(CloudPlatformScope, DatabaseScope);
             }
 
             var projectId = _configuration["Firebase:ProjectId"]
