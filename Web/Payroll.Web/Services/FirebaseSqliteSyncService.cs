@@ -130,19 +130,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             {
                 if (live.ValueKind == JsonValueKind.Object)
                     foreach (var emp in live.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) await ProcessFirebaseLiveLocationAsync($"/live/{emp.Name}", emp.Value.Clone(), ct);
-                        else { var i = 0; foreach (var node in live.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) await ProcessFirebaseLiveLocationAsync($"/live/{i}", node.Clone(), ct); i++; } }
+                else { var i = 0; foreach (var node in live.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) await ProcessFirebaseLiveLocationAsync($"/live/{i}", node.Clone(), ct); i++; } }
             }
             if (eventData.Value.TryGetProperty("sessions", out var sessions) && (sessions.ValueKind == JsonValueKind.Object || sessions.ValueKind == JsonValueKind.Array))
             {
                 if (sessions.ValueKind == JsonValueKind.Object)
                     foreach (var emp in sessions.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) foreach (var sess in emp.Value.EnumerateObject()) await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{emp.Name}/{sess.Name}", sess.Value.Clone(), ct);
-                        else { var i = 0; foreach (var node in sessions.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var sess in node.EnumerateObject()) await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{i}/{sess.Name}", sess.Value.Clone(), ct); i++; } }
+                else { var i = 0; foreach (var node in sessions.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var sess in node.EnumerateObject()) await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{i}/{sess.Name}", sess.Value.Clone(), ct); i++; } }
             }
             if (eventData.Value.TryGetProperty("history", out var history) && (history.ValueKind == JsonValueKind.Object || history.ValueKind == JsonValueKind.Array))
             {
                 if (history.ValueKind == JsonValueKind.Object)
                     foreach (var emp in history.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) foreach (var evt in emp.Value.EnumerateObject()) await ProcessFirebaseTrackingEventAsync($"/history/{emp.Name}/{evt.Name}", evt.Value.Clone(), ct, false);
-                        else { var i = 0; foreach (var node in history.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var evt in node.EnumerateObject()) await ProcessFirebaseTrackingEventAsync($"/history/{i}/{evt.Name}", evt.Value.Clone(), ct, false); i++; } }
+                else { var i = 0; foreach (var node in history.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var evt in node.EnumerateObject()) await ProcessFirebaseTrackingEventAsync($"/history/{i}/{evt.Name}", evt.Value.Clone(), ct, false); i++; } }
             }
             return;
         }
@@ -512,15 +512,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
     private static bool AliasMatches(string clr, string fb) => (Normalize(clr), Normalize(fb)) switch
     {
-        ("logid", "attendanceid") => true,
-        ("leaverequestid", "id") => true,
-        ("regularizationid", "id") => true,
-        ("employeeid", "staffid") => true,
-        ("monthlysalary", "salaryrate") => true,
-        ("standardbreakminutes", "breakhours") => true,
-        ("payrolltypeoverride", "salarytype") => true,
-        ("terminationdate", "terminatedate") => true,
-        ("isdeleted", "isactive") => true,
+        ("logid", "attendanceid") => true, ("leaverequestid", "id") => true, ("regularizationid", "id") => true,
+        ("employeeid", "staffid") => true, ("monthlysalary", "salaryrate") => true, ("standardbreakminutes", "breakhours") => true,
+        ("payrolltypeoverride", "salarytype") => true, ("terminationdate", "terminatedate") => true, ("isdeleted", "isactive") => true,
         _ => false
     };
 
