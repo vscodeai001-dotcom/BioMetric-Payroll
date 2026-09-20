@@ -932,7 +932,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var keyValues = new object?[keys.Count];
         for (var i = 0; i < keys.Count; i++)
         {
-            keyValues[i] = ConvertStringValue(keyParts[i], keys[i].ClrType);
+            var keyProperty = keys[i];
+            keyValues[i] = ConvertStringValue(keyParts[i], keyProperty.ClrType);
             if (keyValues[i] is null)
                 return false;
         }
@@ -948,56 +949,177 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     }
 
     private async Task<bool> UpsertTableAsync(
-        string entityName,
-        JsonElement table,
-        CancellationToken ct)
+     string entityName,
+     JsonElement table,
+     CancellationToken ct)
     {
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-        await using var db = await factory.CreateDbContextAsync(ct);
+        // LeaveRequest requires special handling because its shared EF model
+        // uses an identity/ValueGeneratedOnAdd key while Firebase owns the
+        // actual record ID.
+        //
+        // Each LeaveRequest is processed with its own DbContext so that one
+        // problematic/generated-key record cannot collide with another tracked
+        // LeaveRequest instance.
 
-        var entityType = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
-        if (entityType == null) return false;
+        if (entityName.Equals("LeaveRequest", StringComparison.Ordinal))
+        {
+            var leaveRequestChanged = false;
 
-        var keys = entityType.FindPrimaryKey()?.Properties;
-        if (keys == null || keys.Count == 0) return false;
+            foreach (var leaveChild in table.EnumerateObject())
+            {
+                if (leaveChild.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                try
+                {
+                    await using var leaveScope =
+                        _scopeFactory.CreateAsyncScope();
+
+                    var leaveFactory =
+                        leaveScope.ServiceProvider
+                            .GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+                    await using var leaveDb =
+                        await leaveFactory.CreateDbContextAsync(ct);
+
+                    var leaveEntityType =
+                        leaveDb.Model.GetEntityTypes()
+                            .FirstOrDefault(x => x.ClrType.Name == entityName);
+
+                    var leaveKeys =
+                        leaveEntityType?.FindPrimaryKey()?.Properties;
+
+                    if (leaveEntityType == null ||
+                        leaveKeys == null ||
+                        leaveKeys.Count == 0)
+                    {
+                        _logger.LogWarning(
+                            "Firebase LeaveRequest sync skipped because EF entity/key metadata was not found.");
+                        continue;
+                    }
+
+                    var rowChanged = await UpsertRecordAsync(
+                        leaveDb,
+                        leaveEntityType,
+                        leaveKeys,
+                        leaveChild.Name,
+                        leaveChild.Value,
+                        ct);
+
+                    if (!rowChanged)
+                        continue;
+
+                    using var leaveSyncScope =
+                        _firebaseSyncWriteScope.Enter();
+
+                    await leaveDb.SaveChangesAsync(ct);
+
+                    leaveRequestChanged = true;
+                }
+                catch (OperationCanceledException)
+                    when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // A single invalid/duplicate LeaveRequest must never stop
+                    // Firebase synchronization or terminate the Web host.
+                    _logger.LogError(
+                        ex,
+                        "Firebase LeaveRequest projection failed for row {Key}; continuing with remaining leave records.",
+                        leaveChild.Name);
+                }
+            }
+
+            return leaveRequestChanged;
+        }
+
+        // ------------------------------------------------------------
+        // Normal Firebase table synchronization
+        // ------------------------------------------------------------
+
+        await using var tableScope =
+            _scopeFactory.CreateAsyncScope();
+
+        var tableFactory =
+            tableScope.ServiceProvider
+                .GetRequiredService<IDbContextFactory<AppDbContext>>();
+
+        await using var tableDb =
+            await tableFactory.CreateDbContextAsync(ct);
+
+        var tableEntityType =
+            tableDb.Model.GetEntityTypes()
+                .FirstOrDefault(x => x.ClrType.Name == entityName);
+
+        if (tableEntityType == null)
+            return false;
+
+        var tableKeys =
+            tableEntityType.FindPrimaryKey()?.Properties;
+
+        if (tableKeys == null || tableKeys.Count == 0)
+            return false;
 
         var changedAny = false;
         var processedCount = 0;
 
         foreach (var child in table.EnumerateObject())
         {
-            if (child.Value.ValueKind != JsonValueKind.Object) continue;
+            if (child.Value.ValueKind != JsonValueKind.Object)
+                continue;
 
             try
             {
-                changedAny |= await UpsertRecordAsync(db, entityType, keys, child.Name, child.Value, ct);
+                changedAny |= await UpsertRecordAsync(
+                    tableDb,
+                    tableEntityType,
+                    tableKeys,
+                    child.Name,
+                    child.Value,
+                    ct);
+
                 processedCount++;
 
-                // REQUIREMENT: Periodic saving and tracker clearing must be robust.
-                // Clear the tracker even if no changes occurred to prevent memory pressure
-                // and identity map bloat during large table syncs.
+                // Save in batches to avoid keeping a very large Firebase
+                // snapshot tracked inside one EF context.
                 if (processedCount % 100 == 0)
                 {
                     if (changedAny)
                     {
-                        using var syncScope = _firebaseSyncWriteScope.Enter();
-                        await db.SaveChangesAsync(ct);
+                        using var batchSyncScope =
+                            _firebaseSyncWriteScope.Enter();
+
+                        await tableDb.SaveChangesAsync(ct);
+
                         changedAny = false;
                     }
-                    db.ChangeTracker.Clear();
+
+                    tableDb.ChangeTracker.Clear();
                 }
+            }
+            catch (OperationCanceledException)
+                when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Skipping Firebase row {Entity}/{Key}.", entityName, child.Name);
+                _logger.LogDebug(
+                    ex,
+                    "Skipping Firebase row {Entity}/{Key}.",
+                    entityName,
+                    child.Name);
             }
         }
 
         if (changedAny)
         {
-            using var syncScope = _firebaseSyncWriteScope.Enter();
-            await db.SaveChangesAsync(ct);
+            using var finalSyncScope =
+                _firebaseSyncWriteScope.Enter();
+
+            await tableDb.SaveChangesAsync(ct);
         }
 
         return true;
@@ -1016,14 +1138,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         for (var i = 0; i < keys.Count; i++)
         {
-            var value = FindJsonValue(json, keys[i].Name);
+            var keyProperty = keys[i];
+            var value = FindJsonValue(json, keyProperty.Name);
             if (value is not null)
             {
-                keyValues[i] = ConvertValue(value, keys[i].ClrType);
+                keyValues[i] = ConvertValue(value, keyProperty.ClrType);
             }
             else if (keyParts.Length > i)
             {
-                keyValues[i] = ConvertStringValue(keyParts[i], keys[i].ClrType);
+                keyValues[i] = ConvertStringValue(keyParts[i], keyProperty.ClrType);
             }
             else
             {
@@ -1048,7 +1171,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 {
                     for (int i = 0; i < keys.Count; i++)
                     {
-                        var val = keys[i].PropertyInfo?.GetValue(e);
+                        var keyProperty = keys[i];
+                        var val = keyProperty.PropertyInfo?.GetValue(e);
                         if (!Equals(val, keyValues[i])) return false;
                     }
                     return true;
@@ -1062,9 +1186,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         {
             for (int i = 0; i < keys.Count; i++)
             {
-                if (keys[i].PropertyInfo != null)
+                var keyProperty = keys[i];
+                if (keyProperty.PropertyInfo != null)
                 {
-                    keys[i].PropertyInfo.SetValue(target, keyValues[i]);
+                    keyProperty.PropertyInfo.SetValue(target, keyValues[i]);
                 }
             }
         }
@@ -1111,7 +1236,32 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (existing == null && changed)
         {
-            db.Add(target);
+            // Firebase record keys are authoritative for the compatibility
+            // projection. Several entities, including LeaveRequest, use an
+            // identity/ValueGeneratedOnAdd key in the SQL model. Calling
+            // DbSet.Add() directly can make EF/SQLite treat an explicitly
+            // supplied Firebase key as a store-generated/temporary key. When
+            // SaveChanges reads the generated value back, EF can then collide
+            // with another tracked instance and throw:
+            // "cannot be tracked because another instance with the same key".
+            //
+            // Attach first so EF records the supplied key as the real key, then
+            // switch the entity to Added and explicitly mark generated key
+            // properties as non-temporary. This preserves the Firebase key
+            // without changing the database schema or business logic.
+            var entry = db.Entry(target);
+            entry.State = EntityState.Unchanged;
+
+            for (int i = 0; i < keys.Count; i++)
+            {
+                var keyMetadata = keys[i];
+                var keyProperty = entry.Property(keyMetadata.Name);
+                keyProperty.CurrentValue = keyValues[i];
+                if (keyMetadata.ValueGenerated != ValueGenerated.Never)
+                    keyProperty.IsTemporary = false;
+            }
+
+            entry.State = EntityState.Added;
         }
         else if (existing != null && changed && db.Entry(target).State == EntityState.Unchanged)
         {
@@ -1386,7 +1536,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 value.Value.GetRawText(),
                 type);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             return null;
         }
