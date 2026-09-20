@@ -2920,19 +2920,29 @@
             }
             else
             {
-                mapNeedsUpdate = true;
-                await InvokeAsync(StateHasChanged);
+                /*
+                 * NORMAL GPS FIX: do not trigger a Blazor render.
+                 *
+                 * The browser-side Leaflet realtime bridge already moves the
+                 * existing marker, updates the tooltip, and keeps the live
+                 * route endpoint synchronized. Re-rendering this component for
+                 * every GPS sample rebuilds the Razor subtree around the map
+                 * and produces the visible blink/flicker seen on the admin page.
+                 *
+                 * Lifecycle changes (new session / removed session / settings
+                 * changes) still use the authoritative refresh paths below.
+                 */
+                mapNeedsUpdate = false;
             }
 
             // Refresh selected history only when the selected employee's
             // current session actually changed. Normal GPS fixes do not need
             // to reload the entire history table.
-            if (selectedEmployeeId > 0 &&
-                TryGetPayloadEmployeeId(data, out var changedEmployeeId) &&
-                changedEmployeeId == selectedEmployeeId)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            // Do not re-render the Razor component for a normal GPS fix, even
+            // when an employee is selected. The browser-side Leaflet bridge
+            // updates the marker/tooltip directly. Re-rendering the selected
+            // details subtree on every GPS sample causes the visible blink.
+            // The details are refreshed on genuine lifecycle/application events.
         }
         catch (Exception ex)
         {
@@ -3614,13 +3624,46 @@
                     }
                 }
 
+                var previousSignature = string.Join(
+                    '|',
+                    locations
+                        .OrderBy(x => x.EmployeeId)
+                        .ThenBy(x => x.SessionId)
+                        .Select(x => $"{x.EmployeeId}:{x.SessionId}"));
+
+                var nextSignature = string.Join(
+                    '|',
+                    next
+                        .OrderBy(x => x.EmployeeId)
+                        .ThenBy(x => x.SessionId)
+                        .Select(x => $"{x.EmployeeId}:{x.SessionId}"));
+
                 locations.Clear();
                 locations.AddRange(next);
-            }
 
-            lastRefresh = DateTime.Now;
-            mapNeedsUpdate = true;
-            await InvokeAsync(StateHasChanged);
+                lastRefresh = DateTime.Now;
+
+                // Root-level Firebase snapshots can arrive as part of a
+                // transport/reconnect sequence. Only render when the live
+                // membership/session set actually changed. Coordinate-only
+                // changes are handled by the Leaflet realtime bridge, so they
+                // must not redraw the Blazor page.
+                var membershipChanged =
+                    !string.Equals(
+                        previousSignature,
+                        nextSignature,
+                        StringComparison.Ordinal);
+
+                if (membershipChanged)
+                {
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                }
+                else
+                {
+                    mapNeedsUpdate = false;
+                }
+            }
             return;
         }
 
@@ -4113,21 +4156,21 @@
                 if (token.IsCancellationRequested)
                     break;
 
-                // Firebase SSE already updates the map immediately. The old
-                // 5-second full RefreshLocations() rebuilt the component
-                // repeatedly and caused visible flicker. Reconcile only after
-                // 20 seconds without any Firebase tracking event.
-                if (DateTime.UtcNow - _lastFirebaseTrackingEventUtc >= TimeSpan.FromSeconds(20))
-                {
-                    await RefreshLocations();
-                    _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
-                }
+                /*
+                 * Do not periodically call RefreshLocations().
+                 * Firebase SSE plus the browser-side realtime map bridge are
+                 * authoritative for live GPS updates. A periodic full component
+                 * refresh is unnecessary and can visibly blink the entire map/UI.
+                 * The Firebase stream has its own reconnect loop, while explicit
+                 * lifecycle/application events still call RefreshLocations() when
+                 * they genuinely require an authoritative snapshot.
+                 */
 
                 /*
                  * Playback polling is only needed while the browser-side
                  * playback animation is actually running. Polling an idle
-                 * player was causing unnecessary Blazor renders every second,
-                 * which made the screen appear to refresh/flicker.
+                 * player would cause unnecessary Blazor renders every second,
+                 * which makes the screen appear to refresh/flicker.
                  */
                 if (playbackStatus == "Playing")
                 {
