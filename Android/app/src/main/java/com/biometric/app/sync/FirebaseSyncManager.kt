@@ -811,6 +811,39 @@ class FirebaseSyncManager @Inject constructor(
     suspend fun pushRecycleBin(item: RecycleBinItem) { getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await(); notifyRealtimeChanged("RecycleBinItem", "MODIFIED") }
     suspend fun pushAuditLog(log: AuditLog) { getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await(); notifyRealtimeChanged("AuditLog", "ADDED") }
 
+    /**
+     * Publishes a mobile authentication event (login/logout/conflict) to the
+     * global 'mobile_auth_events' node. The Web compatibility bridge projects
+     * these into the server's AuditLogs table for Admin monitoring.
+     */
+    suspend fun pushMobileAuthEvent(eventType: String, email: String, deviceId: String): Boolean {
+        if (!isAuthenticated()) return false
+        val employeeId = sessionStore.employeeId()
+        if (employeeId <= 0) return false
+        
+        val user = auth.currentUser ?: return false
+        val eventId = UUID.randomUUID().toString().replace("-", "")
+        
+        val payload = mapOf(
+            "employeeId" to employeeId,
+            "eventType" to eventType,
+            "firebaseUid" to user.uid,
+            "email" to email,
+            "deviceId" to deviceId,
+            "platform" to "Android",
+            "timestamp" to Date().toInstant().toString(),
+            "eventId" to eventId
+        )
+        
+        return try {
+            database.child("mobile_auth_events").child(user.uid).child(eventId).setValue(payload).await()
+            true
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Mobile auth event write failed", e)
+            false
+        }
+    }
+
     suspend fun pushTrackingEvent(event: OfflineTrackingEvent): Boolean {
         if (!isAuthenticated()) return false
         val employeeId = sessionStore.employeeId()

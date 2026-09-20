@@ -127,14 +127,10 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadCompanySettings() {
-        // Admin/SuperAdmin Android dashboards read the geofence configuration
-        // directly from Firebase first. This removes the map's dependency on
-        // Payroll.Web/Mobile API availability while retaining the existing API
-        // as a compatibility fallback for older installations.
         val ownerRef = firebaseSync.getOwnerRef()
         if (ownerRef != null) {
             val settingsRef = ownerRef.child("company_settings").child("1")
-            settingsRef.addListenerForSingleValueEvent(object : ValueEventListener {
+            settingsRef.addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val officeLat = snapshot.numberValue("officeLatitude", "OfficeLatitude")
                     val officeLon = snapshot.numberValue("officeLongitude", "OfficeLongitude")
@@ -147,17 +143,13 @@ class MainViewModel @Inject constructor(
                             officeLongitude = officeLon,
                             geoRadiusMeters = radius ?: 1000
                         )
-                    } else {
-                        Log.w("MainViewModel", "Firebase company settings unavailable; retaining current settings")
                     }
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w("MainViewModel", "Firebase company settings read cancelled: ${error.message}")
+                    Log.w("MainViewModel", "Firebase company settings listener cancelled: ${error.message}")
                 }
             })
-        } else {
-            Log.w("MainViewModel", "Firebase owner reference unavailable; retaining current settings")
         }
     }
 

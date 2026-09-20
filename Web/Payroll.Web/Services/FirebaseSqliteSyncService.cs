@@ -52,8 +52,13 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // consumed by this same compatibility bridge so the existing Web UI
         // updates without a browser refresh.
         var ownerTask = RunOwnerStreamLoopAsync(ownerUid, stoppingToken);
-        var trackingTask = RunGlobalStreamLoopAsync("tracking", async (path, data, ct) =>
+
+        // REQUIREMENT: Sync tracking history and events from the owner-scoped node.
+        // Android now writes history to /owners/{ownerUid}/tracking/history to
+        // maintain tenant isolation.
+        var trackingTask = RunGlobalStreamLoopAsync($"owners/{ownerUid}/tracking", async (path, data, ct) =>
             await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
+
         var authTask = RunGlobalStreamLoopAsync("mobile_auth_events", async (path, data, ct) =>
             await ProcessFirebaseMobileAuthEventAsync(path, data, ct), stoppingToken);
         await Task.WhenAll(ownerTask, trackingTask, authTask);
@@ -284,32 +289,31 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // Android when Firebase is temporarily unavailable. Replaying these
         // events restores the exact GPS session boundary before/after queued
         // location points are processed, without changing attendance formulas.
-        if (parts.Length >= 3 &&
-            parts[0].Equals("events", StringComparison.OrdinalIgnoreCase))
+        if (parts.Any(p => p.Equals("events", StringComparison.OrdinalIgnoreCase)))
         {
             await ProcessFirebaseTrackingLifecycleEventAsync(eventData.Value, ct);
             return;
         }
 
-        if (parts.Length >= 2 &&
-            parts[0].Equals("live", StringComparison.OrdinalIgnoreCase))
+        if (parts.Any(p => p.Equals("live", StringComparison.OrdinalIgnoreCase)))
         {
             await ProcessFirebaseLiveLocationAsync(
-     relativePath ?? "/",
-     eventData.Value,
-     ct);
+                relativePath ?? "/",
+                eventData.Value,
+                ct);
+            return;
         }
 
-        if (parts.Length >= 3 &&
-            parts[0].Equals("sessions", StringComparison.OrdinalIgnoreCase))
+        if (parts.Any(p => p.Equals("sessions", StringComparison.OrdinalIgnoreCase)))
         {
             await ProcessFirebaseTrackingSessionEventAsync(
-    relativePath ?? "/",
-    eventData.Value,
-    ct);
+                relativePath ?? "/",
+                eventData.Value,
+                ct);
+            return;
         }
 
-        if (parts.Length < 3 || !parts[0].Equals("history", StringComparison.OrdinalIgnoreCase))
+        if (!parts.Any(p => p.Equals("history", StringComparison.OrdinalIgnoreCase)))
             return;
 
         var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
@@ -969,6 +973,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return false;
 
         var changedAny = false;
+        var processedCount = 0;
 
         foreach (var child in table.EnumerateObject())
         {
@@ -984,6 +989,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     child.Name,
                     child.Value,
                     ct);
+
+                processedCount++;
+
+                // Save periodically to prevent the identity map from becoming too
+                // large and to isolate identity conflicts between disparate records.
+                if (processedCount % 100 == 0 && changedAny)
+                {
+                    using var syncScope = _firebaseSyncWriteScope.Enter();
+                    await db.SaveChangesAsync(ct);
+                    changedAny = false;
+                }
             }
             catch (Exception ex)
             {
@@ -1001,7 +1017,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             await db.SaveChangesAsync(ct);
         }
 
-        return changedAny;
+        return true;
     }
 
     private static async Task<bool> UpsertRecordAsync(
@@ -1058,12 +1074,33 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (target == null)
             return false;
 
+        // If the entity is new, initialize its primary key properties from the
+        // lookup values. We do this BEFORE the loop so they are established
+        // as the authoritative keys for this instance.
+        if (existing == null)
+        {
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (keys[i].PropertyInfo != null)
+                {
+                    keys[i].PropertyInfo.SetValue(target, keyValues[i]);
+                }
+            }
+        }
+
         var changed = false;
 
         foreach (var property in entityType.GetProperties())
         {
             if (property.IsShadowProperty() ||
                 property.PropertyInfo == null)
+                continue;
+
+            // REQUIREMENT: Avoid setting primary key properties in the generic loop.
+            // This prevents "cannot be tracked because another instance..." errors
+            // caused by marking key properties as modified or changing them
+            // after the entity is already tracked by the context.
+            if (keys.Any(k => k.Name == property.Name))
                 continue;
 
             var value =
