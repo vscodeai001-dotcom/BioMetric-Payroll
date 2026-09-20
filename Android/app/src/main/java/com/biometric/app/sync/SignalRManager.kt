@@ -163,11 +163,9 @@ class SignalRManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.w(
-                    "SignalRManager",
-                    "Firebase live-location listener cancelled",
-                    error.toException()
-                )
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("SignalRManager", "Firebase live-location listener cancelled: ${error.message}")
+                }
             }
         }
 
@@ -217,7 +215,9 @@ class SignalRManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.w("SignalRManager", "Owner employee binding listener cancelled", error.toException())
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("SignalRManager", "Owner employee binding listener cancelled: ${error.message}")
+                }
             }
         }
         employeeListener = employeesListener

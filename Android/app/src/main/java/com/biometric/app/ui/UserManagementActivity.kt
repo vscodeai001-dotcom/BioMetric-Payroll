@@ -4,7 +4,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.isVisible
@@ -14,13 +16,17 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
+import com.biometric.app.api.AdminCreateUserRequest
+import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.UserRepository
 import com.biometric.app.databinding.ActivityUserManagementBinding
+import com.biometric.app.databinding.DialogAddUserBinding
 import com.biometric.app.ui.viewmodel.UserViewModel
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -58,13 +64,56 @@ class UserManagementActivity : MotionBaseActivity() {
         observeViewModel()
         
         binding.fabAddUser.setOnClickListener {
-            // Replicate UserCreationForm from Web
-            MaterialAlertDialogBuilder(this)
-                .setTitle("Add New User")
-                .setMessage("Please use the Web Portal for user creation in Phase 3. Deletion and View are supported here.")
-                .setPositiveButton("OK", null)
-                .show()
+            showAddUserDialog()
         }
+    }
+
+    private fun showAddUserDialog() {
+        val dialogBinding = DialogAddUserBinding.inflate(layoutInflater)
+        
+        // Setup Roles
+        val roles = listOf("Employee", "Admin", "SuperAdmin")
+        val roleAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, roles)
+        dialogBinding.spinnerRole.setAdapter(roleAdapter)
+        dialogBinding.spinnerRole.setText("Employee", false)
+
+        // Setup Employees
+        lifecycleScope.launch {
+            val employeeData = viewModel.availableEmployees.first()
+            val employeeNames = employeeData.map { "${it.name} (#${it.employeeId})" }
+            val empAdapter = ArrayAdapter(this@UserManagementActivity, android.R.layout.simple_dropdown_item_1line, employeeNames)
+            dialogBinding.spinnerEmployee.setAdapter(empAdapter)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Create New User 👤")
+            .setView(dialogBinding.root)
+            .setPositiveButton("Create") { _, _ ->
+                val email = dialogBinding.etUserEmail.text.toString().trim()
+                val password = dialogBinding.etUserPassword.text.toString()
+                val role = dialogBinding.spinnerRole.text.toString()
+                val empText = dialogBinding.spinnerEmployee.text.toString()
+                val employeeId = if (empText.isNotBlank()) empText.substringAfter("(#").substringBefore(")").toIntOrNull() ?: 0 else 0
+
+                if (email.isBlank() || password.isBlank()) {
+                    Toast.makeText(this, "Email and Password are required", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+
+                val request = AdminCreateUserRequest(
+                    email = email,
+                    password = password,
+                    role = role,
+                    employeeId = employeeId,
+                    displayName = if (employeeId > 0) empText.substringBefore(" (#") else null
+                )
+
+                viewModel.createUser(request) { success, message ->
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun setupRecyclerView() {

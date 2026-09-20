@@ -92,7 +92,8 @@ class OfflineSyncWorker @AssistedInject constructor(
                     speed = loc.speed.toDouble(),
                     bearing = loc.bearing.toDouble(),
                     batteryLevel = loc.batteryLevel,
-                    timestamp = loc.timestamp
+                    timestamp = loc.timestamp,
+                    isOffline = loc.isOfflineCapture
                 )
 
                 if (uploaded) {

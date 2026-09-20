@@ -420,7 +420,9 @@ class FirebaseSyncManager @Inject constructor(
             override fun onChildRemoved(snapshot: DataSnapshot) {}
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
             override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseSyncManager", "Owner realtime event listener cancelled", error.toException())
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseSyncManager", "Owner realtime event listener cancelled: ${error.message}")
+                }
             }
         }
         ref.addChildEventListener(listener)
@@ -632,7 +634,8 @@ class FirebaseSyncManager @Inject constructor(
         speed: Double,
         bearing: Double = 0.0,
         batteryLevel: Int,
-        timestamp: Long
+        timestamp: Long,
+        isOffline: Boolean = false
     ): Boolean {
         if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank() || sequence <= 0L) return false
 
@@ -653,7 +656,8 @@ class FirebaseSyncManager @Inject constructor(
             "Timestamp" to Date(timestamp).toInstant().toString(),
             "LastUpdatedUtc" to Date().toInstant().toString(),
             "ClientEventId" to clientEventId,
-            "Source" to "ANDROID_FIREBASE"
+            "Source" to if (isOffline) "OfflineSync" else "Online",
+            "CaptureSource" to if (isOffline) "OfflineSync" else "Online"
         )
 
         return try {

@@ -696,7 +696,8 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                 speed = location.speed.toDouble(),
                 bearing = location.bearing.toDouble(),
                 batteryLevel = location.batteryLevel,
-                timestamp = location.timestamp
+                timestamp = location.timestamp,
+                isOffline = location.isOfflineCapture
             )
 
             if (uploaded) {

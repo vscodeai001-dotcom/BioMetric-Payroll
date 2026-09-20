@@ -1398,10 +1398,11 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             // Logout remains Firebase-native. Do the same automatic OUT check
             // against the local/Firebase punch stream used by the Employee UI.
             runCatching {
-                if (selfService.nextPunchType() == "OUT") {
+                val currentId = sessionStore.employeeId()
+                if (currentId > 0 && selfService.nextPunchType() == "OUT") {
                     val punch = AttendancePunch(
                         punchId = UUID.randomUUID().toString(),
-                        staffId = sessionStore.employeeId().toString(),
+                        staffId = currentId.toString(),
                         date = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()),
                         type = "OUT",
                         timestamp = System.currentTimeMillis(),
@@ -1418,7 +1419,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     repository.insertPunch(punch)
                 }
             }.onFailure {
-                Log.e("EmployeeHome", "Firebase logout auto-OUT failed: ${it.message}", it)
+                Log.e("EmployeeHome", "Firebase logout auto-OUT check skipped: ${it.message}")
             }
 
             runCatching { firebaseEmployeeSessionManager.release() }

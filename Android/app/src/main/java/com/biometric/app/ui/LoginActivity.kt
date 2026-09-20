@@ -18,6 +18,7 @@ import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.sync.ThemePreferenceSync
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.MotionManager
@@ -47,6 +48,7 @@ class LoginActivity : MotionBaseActivity() {
     @Inject lateinit var realtimeUiDispatcher: RealtimeUiDispatcher
     @Inject lateinit var firebaseEmployeeSessionManager: com.biometric.app.sync.FirebaseEmployeeSessionManager
     @Inject lateinit var firebaseEmployeeProvisioningVerifier: com.biometric.app.sync.FirebaseEmployeeProvisioningVerifier
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var biometricAuthManager: BiometricAuthManager
 
@@ -194,6 +196,10 @@ class LoginActivity : MotionBaseActivity() {
             // Firebase is the primary Android authentication path.
             // Admin/SuperAdmin authenticate directly with Firebase and do not
             // depend on Payroll.Web.
+            if (forceReplace) {
+                firebaseSync.pushMobileAuthEvent("FORCE_LOGOUT_REQUESTED", email, getAndroidDeviceId())
+            }
+            
             val firebaseResult = runCatching {
                 FirebaseAuth.getInstance()
                     .signInWithEmailAndPassword(email, pass)
@@ -448,12 +454,14 @@ class LoginActivity : MotionBaseActivity() {
                         }
 
                         setLoading(false)
+                        firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId())
                         proceedToMain()
                         return@launch
                     }
 
                     if (sessionResult.conflict) {
                         setLoading(false)
+                        firebaseSync.pushMobileAuthEvent("SECOND_DEVICE_ATTEMPT", firebaseUser.email ?: email, getAndroidDeviceId())
                         AlertDialog.Builder(this@LoginActivity)
                             .setTitle("Employee already logged in")
                             .setMessage("This employee account is already active on another device. Replace that active session with this device?")
@@ -559,6 +567,7 @@ class LoginActivity : MotionBaseActivity() {
                 }
 
             setLoading(false)
+            firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId())
 
             // SuperAdmin/Admin -> MainActivity
             // Employee -> EmployeeHomeActivity

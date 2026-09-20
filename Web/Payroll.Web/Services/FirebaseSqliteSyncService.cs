@@ -342,9 +342,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
         }
 
-        var captureSource = source.Equals("ANDROID_FIREBASE", StringComparison.OrdinalIgnoreCase)
-            ? "Online"
-            : source;
+        // REQUIREMENT: Correctly identify Android capture source for offline auditing.
+        var captureSource = source;
+        if (source.Equals("ANDROID_FIREBASE", StringComparison.OrdinalIgnoreCase))
+            captureSource = "Online";
 
         if (evaluateAttendance)
         {
@@ -951,63 +952,45 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         JsonElement table,
         CancellationToken ct)
     {
-        await using var scope =
-            _scopeFactory.CreateAsyncScope();
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await factory.CreateDbContextAsync(ct);
 
-        var factory =
-            scope.ServiceProvider
-                .GetRequiredService<IDbContextFactory<AppDbContext>>();
-
-        await using var db =
-            await factory.CreateDbContextAsync(ct);
-
-        var entityType =
-            db.Model.GetEntityTypes()
-                .FirstOrDefault(x => x.ClrType.Name == entityName);
-
-        if (entityType == null)
-            return false;
+        var entityType = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
+        if (entityType == null) return false;
 
         var keys = entityType.FindPrimaryKey()?.Properties;
-        if (keys == null || keys.Count == 0)
-            return false;
+        if (keys == null || keys.Count == 0) return false;
 
         var changedAny = false;
         var processedCount = 0;
 
         foreach (var child in table.EnumerateObject())
         {
-            if (child.Value.ValueKind != JsonValueKind.Object)
-                continue;
+            if (child.Value.ValueKind != JsonValueKind.Object) continue;
 
             try
             {
-                changedAny |= await UpsertRecordAsync(
-                    db,
-                    entityType,
-                    keys,
-                    child.Name,
-                    child.Value,
-                    ct);
-
+                changedAny |= await UpsertRecordAsync(db, entityType, keys, child.Name, child.Value, ct);
                 processedCount++;
 
-                // Save periodically to prevent the identity map from becoming too
-                // large and to isolate identity conflicts between disparate records.
-                if (processedCount % 100 == 0 && changedAny)
+                // REQUIREMENT: Periodic saving and tracker clearing must be robust.
+                // Clear the tracker even if no changes occurred to prevent memory pressure
+                // and identity map bloat during large table syncs.
+                if (processedCount % 100 == 0)
                 {
-                    using var syncScope = _firebaseSyncWriteScope.Enter();
-                    await db.SaveChangesAsync(ct);
-                    changedAny = false;
+                    if (changedAny)
+                    {
+                        using var syncScope = _firebaseSyncWriteScope.Enter();
+                        await db.SaveChangesAsync(ct);
+                        changedAny = false;
+                    }
+                    db.ChangeTracker.Clear();
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(
-                    ex,
-                    "Skipping Firebase row {Entity}/{Key}.",
-                    entityName,
-                    child.Name);
+                _logger.LogDebug(ex, "Skipping Firebase row {Entity}/{Key}.", entityName, child.Name);
             }
         }
 
@@ -1033,24 +1016,14 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         for (var i = 0; i < keys.Count; i++)
         {
-            var value =
-                FindJsonValue(
-                    json,
-                    keys[i].Name);
-
+            var value = FindJsonValue(json, keys[i].Name);
             if (value is not null)
             {
-                keyValues[i] =
-                    ConvertValue(
-                        value,
-                        keys[i].ClrType);
+                keyValues[i] = ConvertValue(value, keys[i].ClrType);
             }
             else if (keyParts.Length > i)
             {
-                keyValues[i] =
-                    ConvertStringValue(
-                        keyParts[i],
-                        keys[i].ClrType);
+                keyValues[i] = ConvertStringValue(keyParts[i], keys[i].ClrType);
             }
             else
             {
@@ -1058,25 +1031,33 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
         }
 
-        if (keyValues.Any(x => x is null))
-            return false;
+        if (keyValues.Any(x => x is null)) return false;
 
-        var existing =
-            await db.FindAsync(
-                entityType.ClrType,
-                keyValues,
-                ct);
+        // REQUIREMENT: Prevent identity map conflicts ("already being tracked").
+        // First check the database/tracker via FindAsync.
+        var existing = await db.FindAsync(entityType.ClrType, keyValues, ct);
 
-        var target =
-            existing ??
-            Activator.CreateInstance(entityType.ClrType);
+        // If FindAsync fails to find a tracked entity (e.g. due to state or type nuances),
+        // perform a manual lookup in the tracker to ensure we don't attempt to track a duplicate.
+        if (existing == null)
+        {
+            existing = db.ChangeTracker.Entries()
+                .Where(e => e.Metadata.Name == entityType.Name)
+                .Select(e => e.Entity)
+                .FirstOrDefault(e =>
+                {
+                    for (int i = 0; i < keys.Count; i++)
+                    {
+                        var val = keys[i].PropertyInfo?.GetValue(e);
+                        if (!Equals(val, keyValues[i])) return false;
+                    }
+                    return true;
+                });
+        }
 
-        if (target == null)
-            return false;
+        var target = existing ?? Activator.CreateInstance(entityType.ClrType);
+        if (target == null) return false;
 
-        // If the entity is new, initialize its primary key properties from the
-        // lookup values. We do this BEFORE the loop so they are established
-        // as the authoritative keys for this instance.
         if (existing == null)
         {
             for (int i = 0; i < keys.Count; i++)
@@ -1089,32 +1070,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         }
 
         var changed = false;
-
         foreach (var property in entityType.GetProperties())
         {
-            if (property.IsShadowProperty() ||
-                property.PropertyInfo == null)
-                continue;
+            if (property.IsShadowProperty() || property.PropertyInfo == null) continue;
+            if (keys.Any(k => k.Name == property.Name)) continue;
 
-            // REQUIREMENT: Avoid setting primary key properties in the generic loop.
-            // This prevents "cannot be tracked because another instance..." errors
-            // caused by marking key properties as modified or changing them
-            // after the entity is already tracked by the context.
-            if (keys.Any(k => k.Name == property.Name))
-                continue;
+            var value = FindJsonValue(json, property.Name);
+            if (value is null) continue;
 
-            var value =
-                FindJsonValue(
-                    json,
-                    property.Name);
-
-            if (value is null)
-                continue;
-
-            var converted =
-                ConvertValue(
-                    value,
-                    property.ClrType);
+            var converted = ConvertValue(value, property.ClrType);
 
             // Special mapping for Employee break hours (Firebase) to minutes (SQL)
             if (entityType.ClrType.Name == "Employee" && property.Name == "StandardBreakMinutes")
@@ -1134,31 +1098,29 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 }
             }
 
-            if (converted is null &&
-                Nullable.GetUnderlyingType(property.ClrType) == null &&
-                property.ClrType.IsValueType)
+            if (converted is null && Nullable.GetUnderlyingType(property.ClrType) == null && property.ClrType.IsValueType)
                 continue;
 
-            var current =
-                property.PropertyInfo.GetValue(target);
-
+            var current = property.PropertyInfo.GetValue(target);
             if (!Equals(current, converted))
             {
-                property.PropertyInfo.SetValue(
-                    target,
-                    converted);
-
+                property.PropertyInfo.SetValue(target, converted);
                 changed = true;
             }
         }
 
         if (existing == null && changed)
+        {
             db.Add(target);
-        else if (existing != null && changed)
+        }
+        else if (existing != null && changed && db.Entry(target).State == EntityState.Unchanged)
+        {
             db.Entry(target).State = EntityState.Modified;
+        }
 
         return changed;
     }
+
 
     private static JsonElement? FindJsonValue(
         JsonElement json,

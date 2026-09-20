@@ -137,7 +137,10 @@ class FirebaseEmployeeSessionManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                close(error.toException())
+                // Terminate the flow gracefully if permission is lost (e.g. during logout)
+                // or the listener is otherwise cancelled. Do not throw fatal exceptions.
+                trySend(false)
+                close()
             }
         }
 

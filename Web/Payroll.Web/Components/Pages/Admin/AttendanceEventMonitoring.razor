@@ -74,9 +74,13 @@ else
             await using var db = await DbFactory.CreateDbContextAsync();
             var from = IndiaToUtc(startDate.Date);
             var to = IndiaToUtc(endDate.Date.AddDays(1));
+
+            // REQUIREMENT: Monitor login/logout lifecycle across both Web and Android.
+            // Android events use "AUTH_SESSION" as ActionType. Web also uses this.
             var raw = await db.AuditLogs.AsNoTracking()
-                .Where(x => x.ActionType == "AUTH_SESSION" && x.EntityType == "EmployeeAttendanceSession" && x.Timestamp >= from && x.Timestamp < to)
+                .Where(x => x.ActionType == "AUTH_SESSION" && x.Timestamp >= from && x.Timestamp < to)
                 .OrderByDescending(x => x.Timestamp).Take(1000).ToListAsync();
+
             events = raw.Select(x => new Row(x.Timestamp, x.UserEmail, x.EntityID, ExtractEvent(x.Details), x.Details ?? string.Empty))
                 .Where(x => string.IsNullOrWhiteSpace(eventFilter) || x.EventType.Equals(eventFilter, StringComparison.OrdinalIgnoreCase)).ToList();
         }

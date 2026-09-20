@@ -162,7 +162,10 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
 
             override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table", error.toException())
+                // Defensive: Permission denial during logout is expected and should not be logged as a severe error.
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table: ${error.message}")
+                }
             }
         }
         ref.addChildEventListener(listener)
@@ -302,7 +305,9 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
-                android.util.Log.w("FirebaseRoomHydrator", "Payroll history hydration cancelled", error.toException())
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Payroll history hydration cancelled: ${error.message}")
+                }
             }
         }
         query.addChildEventListener(listener)
@@ -339,7 +344,9 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
-                android.util.Log.w("FirebaseRoomHydrator", "Shift schedule hydration cancelled", error.toException())
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Shift schedule hydration cancelled: ${error.message}")
+                }
             }
         }
         query.addChildEventListener(listener)

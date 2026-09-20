@@ -109,7 +109,11 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             callbackFlow {
                 val listener = object : ValueEventListener {
                     override fun onDataChange(snapshot: DataSnapshot) { trySend(Unit) }
-                    override fun onCancelled(error: DatabaseError) { trySend(Unit) }
+                    override fun onCancelled(error: DatabaseError) { 
+                        // Defensive: Permission denial during logout is expected.
+                        // Terminate the flow gracefully.
+                        close()
+                    }
                 }
                 ref.addValueEventListener(listener)
                 awaitClose { ref.removeEventListener(listener) }
