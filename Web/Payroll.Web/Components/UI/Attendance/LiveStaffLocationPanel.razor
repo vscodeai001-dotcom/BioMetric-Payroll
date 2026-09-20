@@ -1,4 +1,4 @@
-﻿@using global::Payroll.Web.Services
+@using global::Payroll.Web.Services
 @using global::Payroll.Shared.Data
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.JSInterop
@@ -584,7 +584,7 @@
 
                     </div>
                 }
-                else if (selectedHistory.Count == 0)
+                else if (selectedHistory.Count == 0 && HistorySessions.Count == 0)
                 {
                     <div class="history-empty">
 
@@ -4194,18 +4194,30 @@
              * an active session from an ended session instead
              * of showing every session as "Recorded".
              */
-            var sessionIds =
-                selectedHistory
-                    .Where(x => x.SessionId != Guid.Empty)
-                    .Select(x => x.SessionId)
-                    .Distinct()
-                    .ToList();
+            /*
+             * IMPORTANT:
+             * The live map is driven by the current Firebase ACTIVE session.
+             * LocationHistory can lag behind that stream, especially immediately
+             * after Web/Android login. Therefore the timeline must load the real
+             * GPS session records for the selected date, not only sessions that
+             * already have persisted history points.
+             *
+             * This is read-only presentation reconciliation. It does not create,
+             * end, or modify any GPS session.
+             */
+            var daySessions =
+                await LocationHistoryService
+                    .GetGpsSessionsAsync(
+                        selectedEmployeeId,
+                        historyDate);
 
             gpsSessionLookup =
-                await LocationHistoryService
-                    .GetGpsSessionsByIdsAsync(
-                        selectedEmployeeId,
-                        sessionIds);
+                daySessions
+                    .Where(x => x.SessionId != Guid.Empty)
+                    .GroupBy(x => x.SessionId)
+                    .Select(g => g.OrderByDescending(x => x.StartedAtUtc).First())
+                    .ToDictionary(
+                        x => x.SessionId);
 
             playbackIndex = 0;
             selectedPlaybackSessionId = null;
@@ -4476,44 +4488,111 @@
     private int HistorySessionCount =>
         HistorySessions.Count;
 
-    private List<SessionSummary> HistorySessions =>
-        selectedHistory
-            .GroupBy(x => x.SessionId)
-            .Select(g =>
+    private List<SessionSummary> HistorySessions
+    {
+        get
+        {
+            /*
+             * Build the timeline from BOTH sources:
+             * 1. persisted GPS history points
+             * 2. authoritative EmployeeGpsSessions records
+             *
+             * This is the important distinction for a newly active session:
+             * the employee can already be LIVE while its first history points
+             * have not yet been persisted/projected. The active session must
+             * still appear in the timeline as ACTIVE.
+             */
+            var summaries = new List<SessionSummary>();
+
+            var historyGroups =
+                selectedHistory
+                    .Where(x => x.SessionId != Guid.Empty)
+                    .GroupBy(x => x.SessionId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.OrderBy(x => x.RecordedAtUtc).ToList());
+
+            foreach (var group in historyGroups)
             {
-                var points = g.OrderBy(x => x.RecordedAtUtc).ToList();
+                var points = group.Value;
+
                 double travel = 0;
                 for (int i = 1; i < points.Count; i++)
-                    travel += CalculateDistance(points[i - 1].Latitude, points[i - 1].Longitude, points[i].Latitude, points[i].Longitude);
-
-                var accuracies = points.Where(x => x.AccuracyMeters > 0).Select(x => x.AccuracyMeters).ToList();
-                gpsSessionLookup.TryGetValue(g.Key, out var session);
-
-                // The GPS session record is authoritative for lifecycle state.
-                // Do not infer an active session's end from its last persisted GPS point.
-                var startUtc = session?.StartedAtUtc ?? points.First().RecordedAtUtc;
-                var lastUpdateUtc = session?.LastUpdateAtUtc ?? points.Last().RecordedAtUtc;
-                var endUtc = session?.EndedAtUtc ?? DateTime.UtcNow;
-
-                // If a session is active, its duration continues to the current time.
-                // For ended sessions, use the actual session end instead of the last
-                // history point so the timeline reflects the real lifecycle.
-                if (session?.EndedAtUtc == null)
-                    endUtc = DateTime.UtcNow;
-
-                return new SessionSummary
                 {
-                    SessionId = g.Key,
+                    travel += CalculateDistance(
+                        points[i - 1].Latitude,
+                        points[i - 1].Longitude,
+                        points[i].Latitude,
+                        points[i].Longitude);
+                }
+
+                var accuracies =
+                    points
+                        .Where(x => x.AccuracyMeters > 0)
+                        .Select(x => x.AccuracyMeters)
+                        .ToList();
+
+                gpsSessionLookup.TryGetValue(
+                    group.Key,
+                    out var session);
+
+                var startUtc =
+                    session?.StartedAtUtc
+                    ?? points.First().RecordedAtUtc;
+
+                var lastUpdateUtc =
+                    session?.LastUpdateAtUtc
+                    ?? points.Last().RecordedAtUtc;
+
+                var endUtc =
+                    session?.EndedAtUtc
+                    ?? DateTime.UtcNow;
+
+                summaries.Add(new SessionSummary
+                {
+                    SessionId = group.Key,
                     StartUtc = startUtc,
                     LastUpdateUtc = lastUpdateUtc,
                     EndUtc = endUtc,
                     PointCount = points.Count,
                     TravelMeters = travel,
-                    AverageAccuracy = accuracies.Count == 0 ? 0 : accuracies.Average()
-                };
-            })
-            .OrderByDescending(x => x.StartUtc)
-            .ToList();
+                    AverageAccuracy =
+                        accuracies.Count == 0
+                            ? (session?.AverageAccuracyMeters ?? 0)
+                            : accuracies.Average()
+                });
+            }
+
+            /*
+             * Add session records that do not have history points yet.
+             * This is the case that previously made a LIVE employee appear
+             * to have only ENDED sessions in the timeline.
+             */
+            foreach (var session in gpsSessionLookup.Values)
+            {
+                if (session.SessionId == Guid.Empty ||
+                    historyGroups.ContainsKey(session.SessionId))
+                {
+                    continue;
+                }
+
+                summaries.Add(new SessionSummary
+                {
+                    SessionId = session.SessionId,
+                    StartUtc = session.StartedAtUtc,
+                    LastUpdateUtc = session.LastUpdateAtUtc,
+                    EndUtc = session.EndedAtUtc ?? DateTime.UtcNow,
+                    PointCount = session.TotalPoints,
+                    TravelMeters = session.TotalDistanceMeters,
+                    AverageAccuracy = session.AverageAccuracyMeters ?? 0
+                });
+            }
+
+            return summaries
+                .OrderByDescending(x => x.StartUtc)
+                .ToList();
+        }
+    }
 
     private static string ShortSessionId(Guid sessionId)
     {
@@ -4917,22 +4996,34 @@
         ?? "Employee";
 
 
-    private string HistoryStartText =>
-        selectedHistory.Count == 0
-            ? "-"
-            : ToLocalTime(
-                selectedHistory.First()
-                    .RecordedAtUtc)
+    private string HistoryStartText
+    {
+        get
+        {
+            var sessions = HistorySessions;
+            if (sessions.Count == 0)
+                return "-";
+
+            return ToLocalTime(
+                sessions.Min(x => x.StartUtc))
                 .ToString("HH:mm:ss");
+        }
+    }
 
 
-    private string HistoryEndText =>
-        selectedHistory.Count == 0
-            ? "-"
-            : ToLocalTime(
-                selectedHistory.Last()
-                    .RecordedAtUtc)
+    private string HistoryEndText
+    {
+        get
+        {
+            var sessions = HistorySessions;
+            if (sessions.Count == 0)
+                return "-";
+
+            return ToLocalTime(
+                sessions.Max(x => x.LastUpdateUtc))
                 .ToString("HH:mm:ss");
+        }
+    }
 
 
     private double HistoryMaxDistance =>
