@@ -166,9 +166,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var cap = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
         var src = GetString(eventData.Value, "CaptureSource", "Source") ?? "Online";
 
-        if (rad <= 0 || dist < 0) { var res = await geo.GetDistanceFromOfficeAsync(lat, lon); if (res.Success) { dist = res.DistanceMeters; rad = res.AllowedRadiusMeters; within = rad > 0 && dist <= rad + 2; } }
-        if (evaluateAttendance) await geo.UpdateGpsSessionAsync(employeeId, sessionId, lat, lon, acc, dist, rad, within, cap);
-        await geo.SaveLocationHistoryAsync(employeeId, sessionId, lat, lon, dist, rad, within, acc, cap, src);
+        if (rad <= 0 || dist < 0) { var res = await geoLocationService.GetDistanceFromOfficeAsync(lat, lon); if (res.Success) { dist = res.DistanceMeters; rad = res.AllowedRadiusMeters; within = rad > 0 && dist <= rad + 2; } }
+        if (evaluateAttendance) await geoLocationService.UpdateGpsSessionAsync(employeeId, sessionId, lat, lon, acc, dist, rad, within, cap);
+        await geoLocationService.SaveLocationHistoryAsync(employeeId, sessionId, lat, lon, dist, rad, within, acc, cap, src);
     }
 
     private async Task ProcessFirebaseTrackingLifecycleEventAsync(JsonElement eventData, CancellationToken ct)
@@ -229,8 +229,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             var key = (relativePath ?? "/").Trim('/').Split('/').LastOrDefault();
             if (int.TryParse(key, out var id))
             {
-                var sid = LiveLocationStore.GetSessionId(id);
-                if (sid.HasValue) LiveLocationStore.Remove(id, sid.Value);
+                var currentSid = LiveLocationStore.GetSessionId(id);
+                if (currentSid.HasValue) LiveLocationStore.Remove(id, currentSid.Value);
                 await _refreshService.NotifyLocationChangedAsync(id);
             }
             return;
@@ -476,7 +476,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (existing == null)
             existing = db.ChangeTracker.Entries().Where(e => e.Metadata == et).Select(e => e.Entity).FirstOrDefault(e =>
             {
-                for (int i = 0; i < keys.Count; i++) { var val = db.Entry(e).Property(keys[i].Name).CurrentValue; if (!AreKeysEqual(val, keyValues[i])) return false; }
+                for (int i = 0; i < keys.Count; i++) { var val = db.Entry(e).Property(keys[i]!.Name).CurrentValue; if (!AreKeysEqual(val, keyValues[i])) return false; }
                 return true;
             });
 

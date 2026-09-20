@@ -213,7 +213,8 @@
             started ||
             starting ||
             !trackingEnabled ||
-            EmployeeId <= 0)
+            EmployeeId <= 0 ||
+            sessionInvalidatedByOtherDevice)
         {
             return;
         }
