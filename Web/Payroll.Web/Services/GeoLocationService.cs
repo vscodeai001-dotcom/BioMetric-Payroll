@@ -134,22 +134,21 @@ public class GeoLocationService
             var previousWithin = session.LastIsWithinAllowedRadius;
             var currentWithin = distance <= (company.GeoRadiusMeters + 1);
 
-            if (previousWithin != currentWithin)
-            {
-                // REQUIREMENT: Trigger immediate automatic geofence punch when radius changes.
-                // This ensures "not takes effect" is fixed by evaluating state immediately.
-                await ProcessAutomaticGeofencePunchAsync(
-                    db,
-                    session.EmployeeId,
-                    session.SessionId,
-                    session.LastLatitude.Value,
-                    session.LastLongitude.Value,
-                    session.LastAccuracyMeters ?? 0.0,
-                    distance,
-                    company.GeoRadiusMeters,
-                    previousWithin,
-                    currentWithin);
-            }
+            // REQUIREMENT: Always evaluate against the new radius immediately.
+            // Rebaseline even if previous state was the same, to ensure the
+            // authoritative LastAllowedRadiusMeters is updated and any missed
+            // transitions are reconciled.
+            await ProcessAutomaticGeofencePunchAsync(
+                db,
+                session.EmployeeId,
+                session.SessionId,
+                session.LastLatitude.Value,
+                session.LastLongitude.Value,
+                session.LastAccuracyMeters ?? 0.0,
+                distance,
+                company.GeoRadiusMeters,
+                previousWithin,
+                currentWithin);
 
             session.LastAllowedRadiusMeters = company.GeoRadiusMeters;
             session.LastIsWithinAllowedRadius = currentWithin;
@@ -217,6 +216,12 @@ public class GeoLocationService
                     LiveLocationStore.Remove(
                         previous.EmployeeId,
                         previous.SessionId);
+
+                    // Ensure the Firebase live marker is un-bound from
+                    // this now-ended session.
+                    await _firebase.TerminateLiveLocationAsync(
+                        previous.EmployeeId,
+                        _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"));
                 }
 
                 var session = new EmployeeGpsSession
@@ -1200,6 +1205,13 @@ public class GeoLocationService
                 }
 
                 await db.SaveChangesAsync();
+
+                // REQUIREMENT: Synchronize session termination to Firebase.
+                // This ensures map markers go offline immediately without
+                // waiting for a SignalR broadcast or browser refresh.
+                await _firebase.TerminateLiveLocationAsync(
+                    employeeId,
+                    _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
 
                 foreach (var session in sessions)
                 {

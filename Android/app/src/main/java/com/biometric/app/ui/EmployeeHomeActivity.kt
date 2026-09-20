@@ -1425,7 +1425,13 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             runCatching { firebaseEmployeeSessionManager.release() }
             FirebaseAuth.getInstance().signOut()
             _binding?.let {
-                stopService(Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply { action = TrackingService.ACTION_STOP })
+                // Logout is authoritative. Send a signaled stop to the service 
+                // so it can notify Firebase of the session end before it terminates.
+                val stopIntent = Intent(this@EmployeeHomeActivity, TrackingService::class.java).apply { 
+                    action = TrackingService.ACTION_STOP 
+                }
+                startService(stopIntent)
+                
                 sessionStore.clearLogin()
                 getSharedPreferences("user_prefs", MODE_PRIVATE).edit { putBoolean("is_logged_in", false) }
                 applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit { putBoolean("is_locked", false) }

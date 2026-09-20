@@ -59,6 +59,7 @@ class MobileSessionStore @Inject constructor(
     fun getDashboardCache(): String? = prefs.getString("dashboard_stats_cache", null)
 
     fun clearLogin() {
+        clearGpsSession()
         prefs.edit { clear() }
     }
 

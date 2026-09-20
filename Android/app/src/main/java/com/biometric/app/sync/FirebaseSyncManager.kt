@@ -567,6 +567,17 @@ class FirebaseSyncManager @Inject constructor(
             // session has accepted the start.
             if (committed) {
                 getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
+
+                // REQUIREMENT: Bind the live marker to this specific session.
+                // This prevents late GPS packets from a previous session from
+                // overwriting the live position of the new session.
+                val liveBinding = mapOf(
+                    "SessionId" to sessionId,
+                    "State" to "ACTIVE",
+                    "LastUpdatedUtc" to payload["StartedAtUtc"]
+                )
+                getGlobalRef().child("tracking/live/$employeeId").updateChildren(liveBinding).await()
+                getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(liveBinding).await()
             }
             committed
         } catch (e: Exception) {
@@ -599,13 +610,14 @@ class FirebaseSyncManager @Inject constructor(
                 true
             }
             if (committed) {
+                val endAt = Date().toInstant().toString()
                 val endPayload = mapOf(
                     "EmployeeId" to employeeId,
                     "SessionId" to sessionId,
                     "OwnerUid" to ownerUid,
                     "EndReason" to endReason.take(40),
                     "State" to "ENDED",
-                    "EndedAtUtc" to Date().toInstant().toString(),
+                    "EndedAtUtc" to endAt,
                     "Source" to "ANDROID_FIREBASE"
                 )
 
@@ -615,13 +627,9 @@ class FirebaseSyncManager @Inject constructor(
                 // Instead of deleting the live node, we set its state to ENDED.
                 // The pushLiveLocation transaction already checks for State=ENDED 
                 // and will refuse to overwrite it, making the termination durable.
-                val liveMarkerTerminator = mapOf("State" to "ENDED", "LastUpdatedUtc" to Date().toInstant().toString())
-                getGlobalRef().updateChildren(
-                    mapOf(
-                        "tracking/live/$employeeId/State" to "ENDED",
-                        "owners/$ownerUid/tracking/live/$employeeId/State" to "ENDED"
-                    )
-                ).await()
+                val terminator = mapOf("State" to "ENDED", "LastUpdatedUtc" to endAt)
+                getGlobalRef().child("tracking/live/$employeeId").updateChildren(terminator).await()
+                getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(terminator).await()
             }
             committed
         } catch (e: Exception) {
@@ -698,10 +706,17 @@ class FirebaseSyncManager @Inject constructor(
             val accepted = liveRef.runTransactionAwait { current ->
                 val currentSession = current.child("SessionId").getValue(String::class.java).orEmpty()
                 val currentSequence = current.child("Sequence").getValue(Long::class.java) ?: 0L
-                val currentEnded = current.child("State").getValue(String::class.java).equals("ENDED", true)
+                val currentState = current.child("State").getValue(String::class.java).orEmpty()
 
-                if (currentEnded && currentSession == sessionId) return@runTransactionAwait false
-                if (currentSession == sessionId && currentSequence >= sequence) return@runTransactionAwait false
+                // REQUIREMENT: Bind markers to their session.
+                // A late location point from a previous session must never 
+                // overwrite the live position of a newer session.
+                if (currentSession.isNotBlank() && currentSession != sessionId) return@runTransactionAwait false
+
+                // Durable termination check.
+                if (currentState.equals("ENDED", true)) return@runTransactionAwait false
+                
+                if (currentSequence >= sequence) return@runTransactionAwait false
 
                 current.value = payload
                 current.child("State").value = "ACTIVE"

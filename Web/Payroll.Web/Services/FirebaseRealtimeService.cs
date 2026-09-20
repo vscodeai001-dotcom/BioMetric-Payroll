@@ -727,6 +727,29 @@ public sealed class FirebaseRealtimeService
         return await UpdateAsync(updates, cancellationToken);
     }
 
+    public async Task<bool> TerminateLiveLocationAsync(
+        int employeeId,
+        string? ownerUid = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (employeeId <= 0)
+            return false;
+
+        var updates = new Dictionary<string, object?>
+        {
+            [$"tracking/live/{employeeId}/State"] = "ENDED",
+            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = DateTime.UtcNow.ToString("O")
+        };
+
+        if (!string.IsNullOrWhiteSpace(ownerUid))
+        {
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/State"] = "ENDED";
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/LastUpdatedUtc"] = updates[$"tracking/live/{employeeId}/LastUpdatedUtc"];
+        }
+
+        return await UpdateAsync(updates, cancellationToken);
+    }
+
     public async Task<bool> PublishLocalApplicationChangeAsync(
         string ownerUid,
         string entity,

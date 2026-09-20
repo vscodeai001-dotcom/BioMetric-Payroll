@@ -159,10 +159,11 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                     ?: getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ACTIVE_STAFF, null)
                     ?: sessionStore.employeeId().toString()
                 
-                serverSessionStarted = false
+                // serverSessionStarted = false // REMOVED: Never reset if already true during recovery
+                
                 getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                     putString(KEY_ACTIVE_STAFF, staffId)
-                    putBoolean(KEY_SERVER_STARTED, false)
+                    // putBoolean(KEY_SERVER_STARTED, false) // REMOVED: Preserve server session state
                 }
 
                 // REQUIREMENT: Extreme 24/7 background persistence
@@ -217,24 +218,31 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                     // the Android GPS stream and run the exact existing geofence
                     // attendance state machine. This avoids duplicating attendance
                     // calculation logic on Android and prevents double punches.
-                    runCatching {
-                        val started = firebaseSync.pushTrackingSessionStarted(
-                            employeeId = sessionStore.employeeId(),
-                            sessionId = sessionStore.gpsSessionId()
-                        )
-                        if (!started) {
+                    if (!serverSessionStarted) {
+                        runCatching {
+                            val started = firebaseSync.pushTrackingSessionStarted(
+                                employeeId = sessionStore.employeeId(),
+                                sessionId = sessionStore.gpsSessionId()
+                            )
+                            if (started) {
+                                serverSessionStarted = true
+                                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                                    putBoolean(KEY_SERVER_STARTED, true)
+                                }
+                            } else {
+                                queueTrackingLifecycleEvent(
+                                    OfflineTrackingEvent.SESSION_STARTED,
+                                    sessionStore.gpsSessionId(),
+                                    "Tracking session start deferred until Firebase reconnects"
+                                )
+                            }
+                        }.onFailure {
                             queueTrackingLifecycleEvent(
                                 OfflineTrackingEvent.SESSION_STARTED,
                                 sessionStore.gpsSessionId(),
-                                "Tracking session start deferred until Firebase reconnects"
+                                "Tracking session start failed: ${it.message ?: "Firebase unavailable"}"
                             )
                         }
-                    }.onFailure {
-                        queueTrackingLifecycleEvent(
-                            OfflineTrackingEvent.SESSION_STARTED,
-                            sessionStore.gpsSessionId(),
-                            "Tracking session start failed: ${it.message ?: "Firebase unavailable"}"
-                        )
                     }
 
                     // Firebase is the independent realtime transport. Tracking
@@ -343,12 +351,16 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
             if (!locationUpdatesStarted) {
                 withContext(Dispatchers.Main) { startLocationUpdates() }
                 if (!serverSessionStarted) {
-                    serverSessionStarted = true
                     val started = firebaseSync.pushTrackingSessionStarted(
                         employeeId = sessionStore.employeeId(),
                         sessionId = sessionStore.gpsSessionId()
                     )
-                    if (!started) {
+                    if (started) {
+                        serverSessionStarted = true
+                        getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                            putBoolean(KEY_SERVER_STARTED, true)
+                        }
+                    } else {
                         queueTrackingLifecycleEvent(
                             OfflineTrackingEvent.SESSION_STARTED,
                             sessionStore.gpsSessionId(),
@@ -357,7 +369,8 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                     }
                 }
             }
-        } else if (locationUpdatesStarted) {
+        }
+else if (locationUpdatesStarted) {
             scheduleShiftBoundary(window.start)
             withContext(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
         } else {
@@ -626,7 +639,15 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
     private fun startHeartbeatLoop() {
-        // ... (keep existing startHeartbeatLoop)
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                // Heartbeat ensures the authoritative employee_sessions node 
+                // remains current even if the device is stationary.
+                firebaseEmployeeSessionManager.touch()
+                delay(60_000L)
+            }
+        }
     }
 
     private fun startSessionGuard() {
@@ -788,42 +809,54 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
     private fun stopTracking(endReason: String = "LOGGED_OUT", keepRecovery: Boolean = false) {
         isManualStopping = !keepRecovery
+        heartbeatJob?.cancel()
 
-        // End the exact active session in Firebase before clearing its local
-        // identifier. Web will then close the compatibility GPS session and
-        // remove only this session from its live-location state.
-        val activeEmployeeId = sessionStore.employeeId()
-        val activeSessionId = sessionStore.currentGpsSessionId()
-        if (activeEmployeeId > 0 && !activeSessionId.isNullOrBlank()) {
-            serviceScope.launch {
-                val ended = runCatching {
-                    firebaseSync.pushTrackingSessionEnded(
-                        employeeId = activeEmployeeId,
-                        sessionId = activeSessionId,
-                        endReason = endReason
-                    )
-                }.getOrElse {
-                    Log.w("TrackingService", "Tracking session end publish failed", it)
-                    false
-                }
-
-                if (!ended) {
-                    queueTrackingLifecycleEvent(
-                        OfflineTrackingEvent.SESSION_ENDED,
-                        activeSessionId,
-                        "Tracking session end deferred. Reason: ${endReason.take(100)}"
-                    )
-                }
-            }
-        }
-
-        sessionStore.clearGpsSession()
-
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-            putBoolean("is_service_active_intended", keepRecovery)
-            putBoolean("tracking_waiting_for_shift", keepRecovery)
-        }
+        // REQUIREMENT: "never automatically session ended".
+        // If keepRecovery is true (e.g. shift transition, restart tick), we 
+        // DO NOT end the Firebase session. This keeps the session continuous 
+        // in the Admin timeline. Only manual logout or conflict ends it.
         if (!keepRecovery) {
+            val activeEmployeeId = sessionStore.employeeId()
+            val activeSessionId = sessionStore.currentGpsSessionId()
+
+            if (activeEmployeeId > 0 && !activeSessionId.isNullOrBlank()) {
+                // Logout is authoritative. Wait for the Firebase session-end 
+                // signal to be sent before terminating the background service.
+                serviceScope.launch {
+                    try {
+                        firebaseSync.pushTrackingSessionEnded(
+                            employeeId = activeEmployeeId,
+                            sessionId = activeSessionId,
+                            endReason = endReason
+                        )
+                    } catch (e: Exception) {
+                        Log.w("TrackingService", "Tracking session end publish failed", e)
+                        queueTrackingLifecycleEvent(
+                            OfflineTrackingEvent.SESSION_ENDED,
+                            activeSessionId,
+                            "Tracking session end deferred. Reason: ${endReason.take(100)}"
+                        )
+                    } finally {
+                        withContext(Dispatchers.Main) {
+                            finalizeStop()
+                        }
+                    }
+                }
+            } else {
+                finalizeStop()
+            }
+            sessionStore.clearGpsSession()
+        } else {
+            finalizeStop()
+        }
+    }
+
+    private fun finalizeStop() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+            putBoolean("is_service_active_intended", !isManualStopping)
+            putBoolean("tracking_waiting_for_shift", !isManualStopping)
+        }
+        if (isManualStopping) {
             cancelRestartTick()
             cancelShiftBoundary()
         }
@@ -853,6 +886,7 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         trackingConfiguration.removeRealtimeListener(trackingConfigListener)
         trackingConfigListener = null
         policyJob?.cancel()
+        heartbeatJob?.cancel()
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }

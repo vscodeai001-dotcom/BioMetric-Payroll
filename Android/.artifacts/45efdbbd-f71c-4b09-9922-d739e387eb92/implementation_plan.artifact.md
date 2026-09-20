@@ -1,67 +1,57 @@
-# Implementation Plan - Android Admin Parity & Fixes
+# Implementation Plan - Cross-Platform Sync & Logout Stability (v2)
 
-This plan aims to resolve several critical issues in the Android Admin application, focusing on data parity with the Web version, UI improvements for Employee/Attendance records, and fixing the Map and Settings modules.
+This plan ensures that GPS sessions are accurately terminated across all platforms upon manual logout, and that live map markers reflect the current active session without "ghosting". It also fixes the Web logout 404 error.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> The "User & Role Management" fix involves changing the Firebase path from owner-scoped to global. Ensure that the Firebase security rules allow Admin/SuperAdmin to read `user_profiles` at the root.
+> The Web Logout fix will restore the correct Identity path (`/Identity/Account/Logout`).
+> The Android Logout fix ensures the background service stays alive until Firebase is notified of the session termination.
 
 ## Proposed Changes
 
-### [Component: Data & Sync]
+### [Component: Web UI]
+
+#### [MODIFY] [LoginDisplay.razor](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Components/Layout/LoginDisplay.razor)
+- Correct the logout redirection path to `/Identity/Account/Logout`.
+- Use a leading slash for the form action to ensure it resolves from the root.
+
+---
+
+### [Component: Web Geofencing Service]
+
+#### [MODIFY] [FirebaseRealtimeService.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Services/FirebaseRealtimeService.cs)
+- Add `TerminateLiveLocationAsync(int employeeId, string ownerUid)` to explicitly set the `live` marker to `State = ENDED`.
+
+#### [MODIFY] [GeoLocationService.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Services/GeoLocationService.cs)
+- In `EndAllGpsSessionsAsync`, call `TerminateLiveLocationAsync` to sync the termination to Firebase.
+- In `StartGpsSessionAsync`, when ending previous sessions, also call `TerminateLiveLocationAsync` for each old session to ensure the map marker is durably un-bound from them.
+
+---
+
+### [Component: Android Tracking Service]
+
+#### [MODIFY] [TrackingService.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/domain/location/TrackingService.kt)
+- Update `stopTracking` to be a `suspend` function (or use a coroutine) that ensures `pushTrackingSessionEnded` is fully committed in Firebase before the service terminates.
+- This prevents the race condition where the service kills itself before notifying the server of the logout.
+
+---
+
+### [Component: Firebase Synchronization]
 
 #### [MODIFY] [FirebaseSyncManager.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/FirebaseSyncManager.kt)
-- Add `getGlobalDataFlow<T>(path: String)` to allow reading collections from the root level of the Firebase database.
-- This is necessary for `user_profiles` which are stored globally by the Web app.
-
-#### [MODIFY] [UserRepository.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/data/repository/UserRepository.kt)
-- Update `observeUsers()` to use `getGlobalDataFlow("user_profiles")`.
-
----
-
-### [Component: Employee & Attendance UI]
-
-#### [MODIFY] [StaffDetailActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/StaffDetailActivity.kt)
-- Enhance the UI to mirror the Web Dashboard's KPI-style summary (Scheduled, Worked, OT, Penalty, etc.).
-- Add a detailed "Attendance Log" section that lists each day's punches, status, and calculated hours, similar to the Web's `AttendanceLogTable`.
-- Implement a better RecyclerView adapter for the attendance log.
-
-#### [MODIFY] [activity_staff_detail.xml](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/res/layout/activity_staff_detail.xml)
-- Update layout to include the new summary header and detailed log list.
-
----
-
-### [Component: Map UI]
-
-#### [MODIFY] [TrackingMapActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/TrackingMapActivity.kt)
-- Increase the spiral offset radius for overlapping markers (from `0.00004` to `0.00015`, approx 15-20 meters) to ensure they are distinct at lower zoom levels.
-- Fix the "Full Screen" map toggle logic to ensure constraints are properly updated.
-
-#### [MODIFY] [MainActivity.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/ui/MainActivity.kt)
-- Apply the same pronounced spiral offset for the Dashboard live map.
-
----
-
-### [Component: Real-time Sync]
-
-#### [MODIFY] [RealtimeUiDispatcher.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/RealtimeUiDispatcher.kt)
-- Add `StaffActivity` and `TrackingMapActivity` to the registry so they automatically refresh when Firebase reports a change.
-- Ensure all relevant refresh methods are included for each screen.
-
-#### [MODIFY] [FirebaseRoomHydrator.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/FirebaseRoomHydrator.kt)
-- Ensure all transactional nodes (like `daily_summaries`, `audit_logs`) are being watched with a long-lived listener.
-- Cross-check with Web `FirebaseRealtimeService` for any missing synchronization nodes.
+- **Authoritative Session Binding**:
+    - Update `pushTrackingSessionStarted` to atomically update the `live` marker node with the new `SessionId` and set `State = ACTIVE`.
+    - Update `pushLiveLocation` to use a Firebase transaction that compares the incoming `SessionId` with the one stored in the `live` marker.
+    - If the IDs don't match (meaning a newer session has started), the late location point is rejected for the `live` marker (but still saved to `history`).
+- **Durable Logout**: Fix the unused variable warning by correctly applying the `State = ENDED` update to the live marker node.
 
 ## Verification Plan
 
 ### Automated Tests
-- Run `:app:assembleDebug` to ensure compilation is successful.
-- Check logs for any Firebase synchronization errors.
+- Build both Android and Web projects.
 
 ### Manual Verification
-- **User Management**: Verify that the list of users now appears in the "User & Role Management" screen on Android.
-- **Employee Details**: Verify that the new summary header and attendance log list are visible and match Web data.
-- **Map**: Test the "Full Screen" button on the tracking map.
-- **Settings**: Verify that changing a feature toggle on Android reflects on the Web (and vice-versa).
-- **Sync**: Verify that punches added via the Web portal appear instantly on the Android app's attendance log.
+1.  **Web Logout**: Click logout on the Web Portal. Verify it no longer 404s and the user is redirected to the login page.
+2.  **Android Logout**: Log out from Saara's account on Android. Verify the Admin dashboard immediately shows the session as "Ended" and the marker goes "Offline".
+3.  **Cross-Device Conflict**: Log in on Device A, then Device B. Verify Device A's marker is correctly terminated in Firebase.

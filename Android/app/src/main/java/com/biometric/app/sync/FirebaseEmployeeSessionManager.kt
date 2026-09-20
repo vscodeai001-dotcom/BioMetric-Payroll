@@ -111,6 +111,21 @@ class FirebaseEmployeeSessionManager @Inject constructor(
     }
 
     /**
+     * Updates the lastSeenAt timestamp for the active session.
+     * Prevents the session from appearing stale in the Admin dashboard
+     * during long periods of stationary location.
+     */
+    suspend fun touch() {
+        val user = auth.currentUser ?: return
+        val ref = database.getReference("employee_sessions").child(user.uid).child("lastSeenAt")
+        runCatching {
+            ref.setValue(System.currentTimeMillis()).await()
+        }.onFailure {
+            Log.d("FirebaseEmployeeSession", "Session heartbeat touch failed")
+        }
+    }
+
+    /**
      * Observes the active session for the current authenticated user.
      * Emits true if this device is still the owner, false if another device logged in.
      */

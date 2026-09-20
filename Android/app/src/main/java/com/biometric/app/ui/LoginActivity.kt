@@ -16,6 +16,7 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.UserRole
 import com.biometric.app.data.repository.AuthRepository
 import com.biometric.app.databinding.ActivityLoginBinding
+import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.sync.FirebaseSyncManager
@@ -104,6 +105,13 @@ class LoginActivity : MotionBaseActivity() {
             lifecycleScope.launch {
                 runCatching { firebaseEmployeeSessionManager.release() }
                 runCatching { FirebaseAuth.getInstance().signOut() }
+                
+                // Authoritative shutdown signal to the GPS service.
+                val stopIntent = Intent(applicationContext, TrackingService::class.java).apply {
+                    action = TrackingService.ACTION_STOP
+                }
+                startService(stopIntent)
+
                 mobileSessionStore.clearLogin()
                 SecurityBaseActivity.clearProcessAuthorization(applicationContext)
                 applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
