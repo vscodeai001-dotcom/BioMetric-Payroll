@@ -81,13 +81,17 @@ window.attendanceRefresh = (function () {
                 'Firebase realtime transport authenticated. Live GPS listener is active.'
             );
 
-            const liveRef = firebaseDatabase.ref('tracking/live');
+            // Use the same owner-scoped live-location branch consumed by the
+            // Android Admin app. The legacy tracking/live branch is only a
+            // fallback for installations that do not return an owner UID.
+            const ownerUid = authResult.ownerUid || authResult.ownerUID || null;
+            const realtimeOwnerUid = ownerUid || 'biometricpayroll';
+            const liveRef = ownerUid
+                ? firebaseDatabase.ref('owners/' + ownerUid + '/tracking/live')
+                : firebaseDatabase.ref('tracking/live');
             liveRef.on('child_added', onFirebaseLiveLocation);
             liveRef.on('child_changed', onFirebaseLiveLocation);
             liveRef.on('child_removed', onFirebaseLiveLocationRemoved);
-
-            const ownerUid = authResult.ownerUid || authResult.ownerUID || null;
-            const realtimeOwnerUid = ownerUid || 'biometricpayroll';
             if (ownerUid) {
                 const ownerEventsRef = firebaseDatabase.ref('owner_events/' + ownerUid);
                 ownerEventsRef.on('child_added', onFirebaseApplicationEvent);

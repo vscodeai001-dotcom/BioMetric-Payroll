@@ -3,6 +3,7 @@ package com.biometric.app.sync
 import android.util.Log
 import com.biometric.app.data.MobileSessionStore
 import com.google.firebase.database.*
+import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -31,6 +32,25 @@ class SignalRManager @Inject constructor(
     private var reconciliationJob: Job? = null
     private var locationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
+
+    // Employee Android writes are published to client_events because employees
+    // are not allowed to write owner_events. Admin/SuperAdmin clients must
+    // consume that channel too, otherwise Android Admin can remain stale until
+    // a fresh login.
+    private var clientEventsRootListener: ChildEventListener? = null
+    private val clientEventEmployeeListeners = mutableMapOf<String, Pair<Query, ChildEventListener>>()
+
+    // Firebase Auth restoration can finish after MainActivity is created.
+    // Keep a process-wide auth bridge so realtime starts automatically when the
+    // persisted Firebase user becomes available.
+    private val authStateListener = FirebaseAuth.AuthStateListener { user ->
+        if (user != null && sessionStore.isLoggedIn()) {
+            managerScope.launch { start() }
+        } else if (user == null) {
+            stop()
+        }
+    }
+    private var authStateRegistered = false
     private val ownerEmployeeIds = mutableSetOf<Int>()
     private var lastOwnerLiveLocations: Map<Int, LiveLocation> = emptyMap()
     @Volatile private var activeOwnerUid: String? = null
@@ -59,6 +79,13 @@ class SignalRManager @Inject constructor(
 
     @Synchronized
     fun start() {
+        if (!authStateRegistered) {
+            FirebaseAuth.getInstance().addAuthStateListener(authStateListener)
+            authStateRegistered = true
+        }
+
+        // Firebase Auth restoration may still be in progress. The auth listener
+        // above will call start() again as soon as the user is available.
         if (!sessionStore.isLoggedIn() && !firebaseSync.isAuthenticated()) return
 
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
@@ -260,12 +287,124 @@ class SignalRManager @Inject constructor(
         employeeListener = employeesListener
         employeesRef.addValueEventListener(employeesListener)
 
+        if (role.equals("ADMIN", true) ||
+            role.equals("SUPERADMIN", true) ||
+            role.equals("SUPER_ADMIN", true) ||
+            role.equals("Admin", true) ||
+            role.equals("SuperAdmin", true)) {
+            startClientEventBridge()
+        }
+
         connectionJob = managerScope.launch {
             firebaseSync.syncStatus.collect { connected ->
                 if (connected) {
                     _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
                 }
             }
+        }
+    }
+
+    /**
+     * Android employees publish their realtime invalidation events under
+     * client_events/{employeeId}/{eventId}. Firebase rules intentionally do
+     * not allow employee clients to write owner_events directly.
+     *
+     * Admin Android therefore listens to both channels:
+     *   Web/Admin -> owner_events
+     *   Employee Android -> client_events
+     *
+     * The event is only an invalidation signal. Existing Room/Firebase
+     * hydration remains the source for the actual record contents.
+     */
+    private fun startClientEventBridge() {
+        if (clientEventsRootListener != null) return
+
+        val rootRef = firebaseSync.getGlobalRef().child("client_events")
+        val rootListener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                attachClientEventEmployeeNode(snapshot)
+            }
+
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                attachClientEventEmployeeNode(snapshot)
+            }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                detachClientEventEmployeeNode(snapshot.key.orEmpty())
+            }
+
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {
+                attachClientEventEmployeeNode(snapshot)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("SignalRManager", "Firebase client-events listener cancelled: ${error.message}")
+                }
+            }
+        }
+
+        clientEventsRootListener = rootListener
+        rootRef.addChildEventListener(rootListener)
+    }
+
+    private fun attachClientEventEmployeeNode(employeeSnapshot: DataSnapshot) {
+        val employeeKey = employeeSnapshot.key?.takeIf { it.isNotBlank() } ?: return
+        if (clientEventEmployeeListeners.containsKey(employeeKey)) return
+
+        // Only replay the newest invalidation for an existing employee node.
+        // New events continue to arrive through the same child listener.
+        val employeeRef = employeeSnapshot.ref.orderByChild("timestamp").limitToLast(1)
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                emitClientRealtimeChange(snapshot)
+            }
+
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                emitClientRealtimeChange(snapshot)
+            }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                emitClientRealtimeChange(snapshot)
+            }
+
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {
+                emitClientRealtimeChange(snapshot)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("SignalRManager", "Firebase client-events employee listener cancelled: ${error.message}")
+                }
+            }
+        }
+
+        clientEventEmployeeListeners[employeeKey] = employeeRef to listener
+        employeeRef.addChildEventListener(listener)
+    }
+
+    private fun detachClientEventEmployeeNode(employeeKey: String) {
+        if (employeeKey.isBlank()) return
+        clientEventEmployeeListeners.remove(employeeKey)?.let { (query, listener) ->
+            query.removeEventListener(listener)
+        }
+    }
+
+    private fun emitClientRealtimeChange(snapshot: DataSnapshot) {
+        val changes = snapshot.child("changes").children.mapNotNull { change ->
+            val entity = change.child("Entity").value?.toString()
+                ?: change.child("entity").value?.toString()
+            if (entity.isNullOrBlank()) return@mapNotNull null
+            RealtimeChangedItem(
+                entity = entity,
+                action = change.child("Action").value?.toString()
+                    ?: change.child("action").value?.toString()
+                    ?: "MODIFIED"
+            )
+        }
+
+        if (changes.isNotEmpty()) {
+            _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
         }
     }
 
@@ -385,10 +524,19 @@ class SignalRManager @Inject constructor(
                 }
             locationListener?.let { liveRef.removeEventListener(it) }
             employeeListener?.let { employeesRefForStop(ownerUid).removeEventListener(it) }
+
+            clientEventsRootListener?.let {
+                firebaseSync.getGlobalRef().child("client_events").removeEventListener(it)
+            }
+            clientEventEmployeeListeners.values.forEach { (query, listener) ->
+                query.removeEventListener(listener)
+            }
+            clientEventEmployeeListeners.clear()
         }
 
         locationListener = null
         employeeListener = null
+        clientEventsRootListener = null
         synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
         _ownerEmployees.value = emptyMap()
         lastOwnerLiveLocations = emptyMap()

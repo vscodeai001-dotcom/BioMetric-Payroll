@@ -12,6 +12,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.biometric.app.backup.BackupWorker
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.auth.FirebaseAuth
 import com.biometric.app.domain.location.LocationSyncManager
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.TrackingRecoveryWorker
@@ -40,6 +41,7 @@ class BiometricApplication : Application(), Configuration.Provider {
     @Inject lateinit var sessionStore: com.biometric.app.data.MobileSessionStore
     @Inject lateinit var themePreferenceSync: com.biometric.app.sync.ThemePreferenceSync
     @Inject lateinit var firebaseReconnectCoordinator: com.biometric.app.sync.FirebaseReconnectCoordinator
+    @Inject lateinit var signalRManager: com.biometric.app.sync.SignalRManager
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -58,24 +60,47 @@ class BiometricApplication : Application(), Configuration.Provider {
 
         super.onCreate()
 
-        // Keep one application-scoped realtime coordinator. Activities and fragments
+        // Keep one application-scoped realtime coordinator. Firebase Auth can
+        // restore its persisted user a little after Application.onCreate().
+        // Starting only from sessionStore.isLoggedIn() therefore creates a race:
+        // the UI opens with the old Room snapshot while Firebase listeners are
+        // not attached until the user logs out/in again. The AuthStateListener
+        // closes that startup gap and restarts the realtime stack after login.
+        val realtimeScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-        // Start only when a persisted authenticated session exists. Login/logout
-        // continue to own authentication state; this is realtime infrastructure only.
-        if (sessionStore.isLoggedIn()) {
-            CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
-                delay(3000) // 3s staggered start for heavy Firebase listeners
-                if (!sessionStore.isLoggedIn()) return@launch
-                
-                // Requirement: Start both the invalidation coordinator AND 
-                // the database hydrator as soon as a session is active.
+        fun startRealtimeInfrastructure() {
+            if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return
+            realtimeScope.launch {
+                delay(150)
+                if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return@launch
+
                 adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
                 firebaseRoomHydrator.start()
-                
                 runCatching { firebaseReconnectCoordinator.start() }
                     .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+                runCatching { signalRManager.start() }
+                    .onFailure { Log.w("BiometricApplication", "Firebase realtime manager start skipped", it) }
             }
         }
+
+        val authStateListener = FirebaseAuth.AuthStateListener { user ->
+            if (user != null && sessionStore.isLoggedIn()) {
+                startRealtimeInfrastructure()
+            } else {
+                // Remove tenant listeners immediately on explicit sign-out so
+                // the next account can never inherit the previous account's
+                // cached realtime state.
+                runCatching { signalRManager.stop() }
+                runCatching { firebaseReconnectCoordinator.stop() }
+                runCatching { firebaseRoomHydrator.stop() }
+                runCatching { adminRealtimeCoordinator.stop() }
+            }
+        }
+        FirebaseAuth.getInstance().addAuthStateListener(authStateListener)
+
+        // Also cover the case where Firebase Auth is already restored before
+        // the listener is registered.
+        startRealtimeInfrastructure()
 
         // OSMDroid must be initialized BEFORE any Activity creates a MapView.
         // Moved to IO thread to prevent main-thread blockage during startup.
