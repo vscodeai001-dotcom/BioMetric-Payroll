@@ -1788,7 +1788,7 @@ window.payrollEnsureAdminTooltipVisibility = function () {
             }
         `;
         document.head.appendChild(style);
-    } catch (_) {}
+    } catch (_) { }
 };
 
 window.payrollKeepAdminTooltipVisible = function (map, marker) {
@@ -1832,9 +1832,9 @@ window.payrollKeepAdminTooltipVisible = function (map, marker) {
                             noMoveStart: true
                         });
                     }
-                } catch (_) {}
+                } catch (_) { }
             });
-        } catch (_) {}
+        } catch (_) { }
     });
 };
 
@@ -1844,19 +1844,19 @@ window.payrollCreateAdminTooltipHtml = function (data, initials, withinRange, di
     const statusClass = withinRange ? 'within' : 'outside';
 
     return `<div class="admin-live-hover-card">` +
-           `<div class="admin-live-hover-title">` +
-           `<span class="hover-avatar">${initials}</span>` +
-           `<strong>${safeName}</strong>` +
-           `<span class="hover-state ${statusClass}">${statusText}</span>` +
-           `</div>` +
-           `<div class="admin-live-hover-grid">` +
-           `<span><small>Air Distance</small><b>${distance}</b></span>` +
-           `<span><small>Road Distance</small><b>${tooltipDistance}</b></span>` +
-           `<span><small>ETA</small><b>${tooltipEta}</b></span>` +
-           `<span><small>Speed</small><b>${tooltipSpeed}</b></span>` +
-           `<span><small>Allowed Radius</small><b>${data.allowedRadiusMeters || 0} m</b></span>` +
-           `<span><small>Accuracy</small><b>±${Math.round(data.accuracyMeters || 0)} m</b></span>` +
-           `</div></div>`;
+        `<div class="admin-live-hover-title">` +
+        `<span class="hover-avatar">${initials}</span>` +
+        `<strong>${safeName}</strong>` +
+        `<span class="hover-state ${statusClass}">${statusText}</span>` +
+        `</div>` +
+        `<div class="admin-live-hover-grid">` +
+        `<span><small>Air Distance</small><b>${distance}</b></span>` +
+        `<span><small>Road Distance</small><b>${tooltipDistance}</b></span>` +
+        `<span><small>ETA</small><b>${tooltipEta}</b></span>` +
+        `<span><small>Speed</small><b>${tooltipSpeed}</b></span>` +
+        `<span><small>Allowed Radius</small><b>${data.allowedRadiusMeters || 0} m</b></span>` +
+        `<span><small>Accuracy</small><b>±${Math.round(data.accuracyMeters || 0)} m</b></span>` +
+        `</div></div>`;
 };
 
 window.payrollFetchRoadRoute = async function (from, to, options = {}) {
@@ -2154,29 +2154,29 @@ window.updateGeoMap = async function (
                     ]
                 });
 
-    // ------------------------------------------------
-    // USER ICON (IDENTITY BASED PIN)
-    // ------------------------------------------------
+            // ------------------------------------------------
+            // USER ICON (IDENTITY BASED PIN)
+            // ------------------------------------------------
 
-    const rawName = String(employeeName || 'You').trim();
-    const nameParts = rawName.split(/\s+/).filter(Boolean);
-    const initials = nameParts.length === 1
-        ? nameParts[0].slice(0, 1)
-        : (nameParts[0][0] + nameParts[nameParts.length - 1][0]);
+            const rawName = String(employeeName || 'You').trim();
+            const nameParts = rawName.split(/\s+/).filter(Boolean);
+            const initials = nameParts.length === 1
+                ? nameParts[0].slice(0, 1)
+                : (nameParts[0][0] + nameParts[nameParts.length - 1][0]);
 
-    const avatarClass = isWithin ? 'within' : 'outside';
+            const avatarClass = isWithin ? 'within' : 'outside';
 
-    const userIcon =
-        L.divIcon({
-            className: "payroll-user-marker",
-            html:
-                '<div class="payroll-map-user payroll-map-user-' + avatarClass + '">' +
-                '<span class="payroll-map-user-initials">' + window.escapeAdminHtml(initials.toUpperCase()) + '</span>' +
-                '<span class="payroll-map-user-status"></span>' +
-                '</div>',
-            iconSize: [46, 54],
-            iconAnchor: [23, 54]
-        });
+            const userIcon =
+                L.divIcon({
+                    className: "payroll-user-marker",
+                    html:
+                        '<div class="payroll-map-user payroll-map-user-' + avatarClass + '">' +
+                        '<span class="payroll-map-user-initials">' + window.escapeAdminHtml(initials.toUpperCase()) + '</span>' +
+                        '<span class="payroll-map-user-status"></span>' +
+                        '</div>',
+                    iconSize: [46, 54],
+                    iconAnchor: [23, 54]
+                });
 
             // ------------------------------------------------
             // OFFICE MARKER
@@ -2344,7 +2344,7 @@ window.updateGeoMap = async function (
         mapData.lastRawPositionAt = rawNow;
 
         // Presentation road routing: update UI when route loads, but don't block map readiness.
-        window.payrollRequestJourneyRoute(mapData, user, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function(employeeRoute) {
+        window.payrollRequestJourneyRoute(mapData, user, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function (employeeRoute) {
             if (employeeRoute?.geometry?.length > 1) {
                 mapData.roadRouteCasing.setLatLngs(employeeRoute.geometry);
                 mapData.roadRouteLine.setLatLngs(employeeRoute.geometry);
@@ -2372,7 +2372,7 @@ window.updateGeoMap = async function (
                 accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
                 road: window.payrollGetNextRoadName(employeeRoute), arrived: employeeRemaining <= Math.max(25, allowedRadius)
             });
-        }).catch(function() { });
+        }).catch(function () { });
 
         // Initial overlay render (Air distance fallback while routing loads)
         const airRemaining = window.payrollHaversineMeters(user, office);
@@ -2537,14 +2537,14 @@ window.updateGeoMap = async function (
         );
 
         mapData.office = office;
-    mapData.radius = allowedRadius;
-    mapData.isWithin = !!isWithin;
+        mapData.radius = allowedRadius;
+        mapData.isWithin = !!isWithin;
 
-    if (typeof window.enhanceEmployeeGeoMap === 'function') {
-        window.enhanceEmployeeGeoMap(mapId);
-    }
+        if (typeof window.enhanceEmployeeGeoMap === 'function') {
+            window.enhanceEmployeeGeoMap(mapId);
+        }
 
-    return true;
+        return true;
 
     }
     catch (error) {
@@ -2632,7 +2632,7 @@ window.updateEmployeeLiveGeoMap =
         mapData.lastRawPosition = target.slice();
         mapData.lastRawPositionAt = now;
 
-        window.payrollRequestJourneyRoute(mapData, target, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function(route) {
+        window.payrollRequestJourneyRoute(mapData, target, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function (route) {
             if (route?.geometry?.length > 1) {
                 mapData.roadRouteCasing?.setLatLngs(route.geometry);
                 mapData.roadRouteLine?.setLatLngs(route.geometry);
@@ -2657,7 +2657,7 @@ window.updateEmployeeLiveGeoMap =
                 speedMps: mapData.speedMps, accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
                 road: window.payrollGetNextRoadName(route), arrived: remaining <= Math.max(25, Number(mapData.radius) || 100)
             });
-        }).catch(function() {});
+        }).catch(function () { });
 
         window.payrollSmoothMoveMarker(
             mapData.userMarker,
@@ -2711,7 +2711,7 @@ window.destroyGeoMap =
         }
 
 
-        try { if (mapData?._layoutObserver) mapData._layoutObserver.disconnect(); } catch (_) {}
+        try { if (mapData?._layoutObserver) mapData._layoutObserver.disconnect(); } catch (_) { }
 
         delete window.payrollGeoMaps[mapId];
     };
@@ -3808,7 +3808,7 @@ window.updateAdminLiveStaffMap =
                     const hasCollisionOffset =
                         !!displayItem &&
                         (Math.abs(Number(displayItem.offsetX || 0)) > 0 ||
-                         Math.abs(Number(displayItem.offsetY || 0)) > 0);
+                            Math.abs(Number(displayItem.offsetY || 0)) > 0);
 
                     if (!state.routeStates[employeeId]) {
                         state.routeStates[employeeId] = {};
@@ -4209,7 +4209,7 @@ window.updateAdminLiveStaffMap =
                             position,
                             office,
                             { minMoveMeters: 25, minIntervalMs: 30000 }
-                        ).then(function(route) {
+                        ).then(function (route) {
                             if (!route || !state.markers[employeeId] || Number(selectedId) !== employeeId) return;
                             const remaining = route.distanceMeters || window.payrollHaversineMeters(state.markers[employeeId].getLatLng(), office);
                             state.roadRouteCasings[employeeId]?.setLatLngs(route.geometry);
@@ -4233,14 +4233,14 @@ window.updateAdminLiveStaffMap =
                                     )
                                 );
                             }
-                        }).catch(function() {});
+                        }).catch(function () { });
                     } else {
                         // Unselected employees must never retain an old route.
-                        try { state.roadRouteLines[employeeId]?.remove(); } catch (e) {}
-                        try { state.roadRouteCasings[employeeId]?.remove(); } catch (e) {}
+                        try { state.roadRouteLines[employeeId]?.remove(); } catch (e) { }
+                        try { state.roadRouteCasings[employeeId]?.remove(); } catch (e) { }
                         delete state.roadRouteLines[employeeId];
                         delete state.roadRouteCasings[employeeId];
-                        try { state.routeStates[employeeId]?.controller?.abort(); } catch (e) {}
+                        try { state.routeStates[employeeId]?.controller?.abort(); } catch (e) { }
                         delete state.routeStates[employeeId];
                     }
 
@@ -4369,39 +4369,39 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
         state.baseLayer = state.baseLayer || 'standard';
 
         if (!state.premiumControls) {
-            const esc = window.payrollEscapeHtml || (v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c])));
+            const esc = window.payrollEscapeHtml || (v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])));
             const panel = document.createElement('div');
             panel.className = 'payroll-premium-map-ui';
             panel.innerHTML =
                 '<div class="payroll-map-commandbar">' +
-                  '<div class="payroll-map-search-wrap">' +
-                    '<span class="payroll-map-search-icon">⌕</span>' +
-                    '<input class="payroll-map-search" type="search" placeholder="Search staff" autocomplete="off" aria-label="Search staff" />' +
-                  '</div>' +
-                  '<select class="payroll-map-filter" aria-label="Map filter">' +
-                    '<option value="all">All staff</option>' +
-                    '<option value="live">Live</option>' +
-                    '<option value="stale">Stale</option>' +
-                    '<option value="offline">Offline</option>' +
-                    '<option value="within">Within range</option>' +
-                    '<option value="outside">Outside range</option>' +
-                  '</select>' +
-                  '<button type="button" class="payroll-map-tool-toggle" data-map-action="toggle" title="Toggle map tools">⚙ <span>Tools</span></button>' +
-                  '<div class="payroll-map-tools-group">' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff">⌖ <span>Fit</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office">⌂ <span>Office</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff">◉ <span>Follow</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence">◎ <span>Zone</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails">〰 <span>Trails</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
-                    '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
-                  '</div>' +
+                '<div class="payroll-map-search-wrap">' +
+                '<span class="payroll-map-search-icon">⌕</span>' +
+                '<input class="payroll-map-search" type="search" placeholder="Search staff" autocomplete="off" aria-label="Search staff" />' +
+                '</div>' +
+                '<select class="payroll-map-filter" aria-label="Map filter">' +
+                '<option value="all">All staff</option>' +
+                '<option value="live">Live</option>' +
+                '<option value="stale">Stale</option>' +
+                '<option value="offline">Offline</option>' +
+                '<option value="within">Within range</option>' +
+                '<option value="outside">Outside range</option>' +
+                '</select>' +
+                '<button type="button" class="payroll-map-tool-toggle" data-map-action="toggle" title="Toggle map tools">⚙ <span>Tools</span></button>' +
+                '<div class="payroll-map-tools-group">' +
+                '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff">⌖ <span>Fit</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office">⌂ <span>Office</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff">◉ <span>Follow</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence">◎ <span>Zone</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails">〰 <span>Trails</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                '</div>' +
                 '</div>' +
                 '<div class="payroll-map-statusbar">' +
-                  '<span class="payroll-map-status-live"><i></i><strong data-map-live>0</strong> live</span>' +
-                  '<span class="payroll-map-status-stale"><i></i><strong data-map-stale>0</strong> stale</span>' +
-                  '<span class="payroll-map-status-out"><i></i><strong data-map-out>0</strong> outside</span>' +
-                  '<span class="payroll-map-status-updated">● realtime</span>' +
+                '<span class="payroll-map-status-live"><i></i><strong data-map-live>0</strong> live</span>' +
+                '<span class="payroll-map-status-stale"><i></i><strong data-map-stale>0</strong> stale</span>' +
+                '<span class="payroll-map-status-out"><i></i><strong data-map-out>0</strong> outside</span>' +
+                '<span class="payroll-map-status-updated">● realtime</span>' +
                 '</div>';
             container.appendChild(panel);
 
@@ -4539,7 +4539,7 @@ window.applyPremiumAdminMapFilter = function (mapId) {
                 if (!visible && marker.isTooltipOpen()) marker.closeTooltip();
             } catch { }
         }
-        ['roadRouteLines','roadRouteCasings','trails','collisionConnectors','labels','journeyLabels'].forEach(function (group) {
+        ['roadRouteLines', 'roadRouteCasings', 'trails', 'collisionConnectors', 'labels', 'journeyLabels'].forEach(function (group) {
             const layer = state[group]?.[id];
             if (!layer) return;
             try {
@@ -4595,7 +4595,7 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         if (state.circle) state.circle.setStyle({ opacity: state.geofenceVisible ? .72 : 0, fillOpacity: state.geofenceVisible ? .08 : 0 });
     } else if (action === 'trails') {
         state.trailsVisible = !state.trailsVisible;
-        Object.values(state.trails || {}).forEach(function (layer) { try { layer.setStyle({ opacity: state.trailsVisible ? .9 : 0 }); } catch {} });
+        Object.values(state.trails || {}).forEach(function (layer) { try { layer.setStyle({ opacity: state.trailsVisible ? .9 : 0 }); } catch { } });
     } else if (action === 'layer') {
         const next = state.baseLayer === 'standard' ? 'dark' : state.baseLayer === 'dark' ? 'satellite' : 'standard';
         state.userSelectedLayer = next !== 'standard';
@@ -4609,7 +4609,7 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
             document.exitFullscreen?.();
             el.classList.remove('payroll-map-fullscreen');
         }
-        setTimeout(function () { try { state.map.invalidateSize({ animate: true }); } catch {} }, 250);
+        setTimeout(function () { try { state.map.invalidateSize({ animate: true }); } catch { } }, 250);
     }
     window.applyPremiumAdminMapFilter(mapId);
 };
@@ -4628,14 +4628,14 @@ window.enhanceEmployeeGeoMap = function (mapId) {
             panel.className = 'payroll-premium-employee-map-ui';
             panel.innerHTML =
                 '<div class="payroll-employee-map-tools">' +
-                  '<button type="button" data-geo-action="route" title="Fit office and your location">⌖ <span>Route</span></button>' +
-                  '<button type="button" data-geo-action="office" title="Focus office">⌂ <span>Office</span></button>' +
-                  '<button type="button" data-geo-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
-                  '<button type="button" data-geo-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                '<button type="button" data-geo-action="route" title="Fit office and your location">⌖ <span>Route</span></button>' +
+                '<button type="button" data-geo-action="office" title="Focus office">⌂ <span>Office</span></button>' +
+                '<button type="button" data-geo-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
+                '<button type="button" data-geo-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
                 '</div>' +
                 '<div class="payroll-employee-map-live">' +
-                  '<span class="payroll-map-live-dot"></span><strong>GPS LIVE</strong>' +
-                  '<span class="payroll-employee-map-accuracy"></span>' +
+                '<span class="payroll-map-live-dot"></span><strong>GPS LIVE</strong>' +
+                '<span class="payroll-employee-map-accuracy"></span>' +
                 '</div>';
             container.appendChild(panel);
             panel.querySelectorAll('[data-geo-action]').forEach(function (button) {
@@ -4669,29 +4669,29 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                                 attribution: '© OpenStreetMap contributors'
                             }
                         );
-                        if (!state.baseLayers.satellite) state.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {maxZoom:19, attribution:'Tiles © Esri'});
-                        Object.keys(state.baseLayers).forEach(function(k){ const l=state.baseLayers[k]; if(!l)return; if(k===state.baseLayer)l.addTo(map); else if(map.hasLayer(l))map.removeLayer(l); });
+                        if (!state.baseLayers.satellite) state.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' });
+                        Object.keys(state.baseLayers).forEach(function (k) { const l = state.baseLayers[k]; if (!l) return; if (k === state.baseLayer) l.addTo(map); else if (map.hasLayer(l)) map.removeLayer(l); });
                     } else if (action === 'fullscreen') {
                         if (!document.fullscreenElement) container.requestFullscreen?.(); else document.exitFullscreen?.();
-                        setTimeout(function(){ try{map.invalidateSize({animate:true});}catch{} },250);
+                        setTimeout(function () { try { map.invalidateSize({ animate: true }); } catch { } }, 250);
                     }
                 });
             });
             state.premiumControls = panel;
         }
-        if (!state.scaleControl) state.scaleControl = L.control.scale({ imperial:false, position:'bottomright', maxWidth:120 }).addTo(map);
+        if (!state.scaleControl) state.scaleControl = L.control.scale({ imperial: false, position: 'bottomright', maxWidth: 120 }).addTo(map);
 
         // The Remote Punch card can change width at responsive breakpoints.
         // Keep Leaflet sized to the actual map box so its controls remain
         // positioned correctly after the layout changes.
         if (!state._layoutObserver && typeof ResizeObserver !== 'undefined') {
             state._layoutObserver = new ResizeObserver(function () {
-                try { map.invalidateSize({ pan:false, animate:false }); } catch (_) {}
+                try { map.invalidateSize({ pan: false, animate: false }); } catch (_) { }
             });
             state._layoutObserver.observe(container);
         }
         requestAnimationFrame(function () {
-            try { map.invalidateSize({ pan:false, animate:false }); } catch (_) {}
+            try { map.invalidateSize({ pan: false, animate: false }); } catch (_) { }
         });
 
         const acc = state.premiumControls.querySelector('.payroll-employee-map-accuracy');
@@ -5283,7 +5283,7 @@ window.destroyAdminLiveStaffMap =
         }
         catch { }
 
-        try { if (state?._layoutObserver) state._layoutObserver.disconnect(); } catch (_) {}
+        try { if (state?._layoutObserver) state._layoutObserver.disconnect(); } catch (_) { }
 
         delete window.adminLiveMaps[
             mapId

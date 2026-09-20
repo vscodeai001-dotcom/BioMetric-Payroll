@@ -24,7 +24,7 @@ class TrackingConfigurationRepository @Inject constructor(
         val mode: String = "24/7",
         val customStart: String = "",
         val customEnd: String = "",
-        val intervalSeconds: Int = 30,
+        val intervalSeconds: Int = 30, // Default: 30s, configurable 15s-3600s
         val enabled: Boolean = true
     )
 

@@ -13,7 +13,7 @@
 @inject FirebaseEmployeeManagementService FirebaseEmployees
 @inject FirebaseRealtimeService FirebaseRealtime
 
-<div class="live-staff-card card border-0 shadow-sm mb-4 @(isPlaybackFullscreen ? "replay-fullscreen" : "")">
+<div class="live-staff-card card border-0 shadow-sm mb-4">
 
     <!-- ============================================================
          LIVE STAFF HEADER
@@ -68,17 +68,6 @@
             <div id="@mapId"
                  class="admin-live-map">
             </div>
-
-            @if (isPlaybackFullscreen)
-            {
-                <button type="button"
-                        class="replay-exit-button"
-                        @onclick="ExitPlayback"
-                        aria-label="Exit journey replay">
-                    <i class="bi bi-x-lg me-1"></i>
-                    Exit Replay
-                </button>
-            }
 
             @if (liveCount == 0)
             {
@@ -355,10 +344,54 @@
 
 
         <!-- ============================================================
+             GPS LOGS: HORIZONTAL TABBED / MINIMIZED BY DEFAULT
+             ============================================================ -->
+        <div class="admin-gps-log-tabs card border-0 shadow-sm mb-4">
+            <div class="admin-gps-log-tab-strip" role="tablist" aria-label="Employee GPS logs">
+                <button type="button"
+                        class="admin-gps-log-tab @(activeLogTab == "punch" ? "active" : "")"
+                        @onclick='() => ToggleLogTab("punch")'
+                        aria-selected="@(activeLogTab == "punch")">
+                    <i class="bi bi-shield-check"></i>
+                    <span>Punch Audit</span>
+                </button>
+
+                <button type="button"
+                        class="admin-gps-log-tab @(activeLogTab == "history" ? "active" : "")"
+                        @onclick='() => ToggleLogTab("history")'
+                        aria-selected="@(activeLogTab == "history")">
+                    <i class="bi bi-clock-history"></i>
+                    <span>Location History</span>
+                </button>
+
+                <button type="button"
+                        class="admin-gps-log-tab @(activeLogTab == "playback" ? "active" : "")"
+                        @onclick='() => ToggleLogTab("playback")'
+                        aria-selected="@(activeLogTab == "playback")">
+                    <i class="bi bi-play-circle-fill"></i>
+                    <span>Route Playback</span>
+                </button>
+
+                @if (activeLogTab != null)
+                {
+                    <button type="button"
+                            class="admin-gps-log-minimize"
+                            title="Minimize GPS logs"
+                            aria-label="Minimize GPS logs"
+                            @onclick="MinimizeLogTabs">
+                        <i class="bi bi-dash-lg"></i>
+                    </button>
+                }
+            </div>
+        </div>
+
+        @if (activeLogTab == "punch")
+        {
+        <!-- ============================================================
              GEO PUNCH AUDIT
              ============================================================ -->
         <div class="geo-punch-audit-card card border-0 shadow-sm mb-4">
-            <div class="geo-punch-audit-header d-flex justify-content-between align-items-center clickable" @onclick="() => isPunchAuditExpanded = !isPunchAuditExpanded">
+            <div class="geo-punch-audit-header d-flex justify-content-between align-items-center clickable" @onclick='() => ToggleLogTab("punch")'>
                 <div>
                     <h5 class="fw-bold mb-1">
                         <i class="bi bi-shield-check text-primary me-2"></i>
@@ -367,7 +400,7 @@
                     <small class="text-muted">GPS validation and attendance punch audit</small>
                 </div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    @if (isPunchAuditExpanded)
+                    @if (activeLogTab == "punch")
                     {
                         <button type="button" class="btn btn-outline-primary btn-sm"
                                 title="Previous day" aria-label="Previous day"
@@ -391,10 +424,10 @@
                             <span class="d-none d-md-inline ms-1">Refresh</span>
                         </button>
                     }
-                    <i class="bi @(isPunchAuditExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                    <i class="bi bi-dash-circle ms-2 opacity-50" title="Minimize"></i>
                 </div>
             </div>
-            @if (isPunchAuditExpanded)
+            @if (activeLogTab == "punch")
             {
                 @if (punchAuditLoading)
                 {
@@ -505,13 +538,16 @@
             </div>
         }
 
+        }
+        @if (activeLogTab == "history")
+        {
         <!-- ============================================================
              LOCATION HISTORY
              ============================================================ -->
 
         <div class="location-history-card card border-0 shadow-sm mb-4">
 
-            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick="() => isSessionTimelineExpanded = !isSessionTimelineExpanded">
+            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick='() => ToggleLogTab("history")'>
 
                 <div>
 
@@ -530,7 +566,7 @@
                 </div>
 
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                    @if (isSessionTimelineExpanded)
+                    @if (activeLogTab == "history")
                     {
                         <button type="button"
                                 class="btn btn-outline-primary btn-sm"
@@ -566,13 +602,13 @@
 
                         </button>
                     }
-                    <i class="bi @(isSessionTimelineExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                    <i class="bi bi-dash-circle ms-2 opacity-50" title="Minimize"></i>
                 </div>
 
             </div>
 
 
-            @if (isSessionTimelineExpanded)
+            @if (activeLogTab == "history")
             {
                 @if (historyLoading)
                 {
@@ -632,6 +668,11 @@
                         <div>
                             <small>TRAVEL</small>
                             <strong>@FormatDistance(HistoryTravelDistance)</strong>
+                        </div>
+
+                        <div>
+                            <small>CAPTURE INTERVAL</small>
+                            <strong>@HistoryCaptureIntervalText</strong>
                         </div>
 
                     </div>
@@ -705,15 +746,18 @@
         </div>
 
 
+        }
+        @if (activeLogTab == "playback")
+        {
         <!-- ====================================================
              ROUTE PLAYBACK
              ==================================================== -->
         <div class="location-history-card card border-0 shadow-sm mb-4">
-            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick="() => isRoutePlaybackExpanded = !isRoutePlaybackExpanded">
+            <div class="location-history-header d-flex justify-content-between align-items-center clickable" @onclick='() => ToggleLogTab("playback")'>
                 <div class="history-playback-title">
                     <i class="bi bi-play-circle-fill text-primary me-1"></i>
                     Route Playback
-                    @if (isRoutePlaybackExpanded)
+                    @if (activeLogTab == "playback")
                     {
                         @if (selectedPlaybackSessionId.HasValue)
                         {
@@ -730,11 +774,11 @@
                     }
                 </div>
                 <div class="d-flex align-items-center">
-                    <i class="bi @(isRoutePlaybackExpanded ? "bi-chevron-up" : "bi-chevron-down") ms-2 opacity-50"></i>
+                    <i class="bi bi-dash-circle ms-2 opacity-50" title="Minimize"></i>
                 </div>
             </div>
 
-            @if (isRoutePlaybackExpanded)
+            @if (activeLogTab == "playback")
             {
                 @if (selectedHistory.Count == 0)
                 {
@@ -828,11 +872,13 @@
                                 </tr>
                             </thead>
                             <tbody>
-                                @for (int i = 0; i < selectedHistory.Count; i++)
+                                @for (int i = 0; i < PlaybackTablePoints.Count; i++)
                                 {
-                                    var point = selectedHistory[i];
-                                    <tr class="@(PlaybackIndex == i ? "history-row-active" : "")" @onclick="() => SelectHistoryPoint(i)">
-                                        <td><span class="history-point-number">@(i + 1)</span></td>
+                                    var point = PlaybackTablePoints[i];
+                                    var globalIndex = PlaybackTableFirstIndex + i;
+                                    var historyIndex = selectedHistory.IndexOf(point);
+                                    <tr class="@(PlaybackIndex == globalIndex ? "history-row-active" : "")" @onclick="() => SelectHistoryPoint(historyIndex)">
+                                        <td><span class="history-point-number">@(globalIndex + 1)</span></td>
                                         <td class="fw-semibold">@(ToLocalTime(point.RecordedAtUtc).ToString("HH:mm:ss"))</td>
                                         <td>@FormatAccuracy(point.AccuracyMeters)</td>
                                         <td>@FormatDistance(point.DistanceFromOfficeMeters)</td>
@@ -854,15 +900,204 @@
                             </tbody>
                         </table>
                     </div>
+
+                    @if (PlaybackPoints.Count > PlaybackTablePageSize)
+                    {
+                        <div class="gps-playback-table-pager">
+                            <span>
+                                Showing @(PlaybackTableFirstIndex + 1)-@PlaybackTableLastIndex
+                                of @PlaybackPoints.Count GPS points
+                            </span>
+                            <div class="d-flex align-items-center gap-2">
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        @onclick="PreviousPlaybackTablePage"
+                                        disabled="@(playbackTablePage <= 0)">
+                                    <i class="bi bi-chevron-left"></i>
+                                </button>
+                                <span>Page @(playbackTablePage + 1) / @PlaybackTablePageCount</span>
+                                <button type="button"
+                                        class="btn btn-sm btn-outline-secondary"
+                                        @onclick="NextPlaybackTablePage"
+                                        disabled="@(playbackTablePage >= PlaybackTablePageCount - 1)">
+                                    <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
                 }
             }
         </div>
+        }
     }
 }
-
-
-
 <style>
+
+    /* ============================================================
+       GPS LOG TABS
+       Default state is minimized: only the horizontal tab strip is
+       visible until the administrator selects a tab.
+       ============================================================ */
+    .admin-gps-log-tabs {
+        overflow: hidden;
+    }
+
+    .admin-gps-log-tab-strip {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        min-height: 54px;
+        background: #182331;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        overflow-x: auto;
+        scrollbar-width: thin;
+    }
+
+    .admin-gps-log-tab {
+        appearance: none;
+        border: 0;
+        border-right: 1px solid rgba(255,255,255,.08);
+        background: transparent;
+        color: #aebbd0;
+        min-width: 170px;
+        padding: 13px 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-size: .78rem;
+        font-weight: 700;
+        white-space: nowrap;
+        transition: background .15s ease, color .15s ease;
+    }
+
+    .admin-gps-log-tab:hover {
+        background: rgba(13,110,253,.10);
+        color: #e7edf6;
+    }
+
+    .admin-gps-log-tab.active {
+        color: #fff;
+        background: #243449;
+        box-shadow: inset 0 -3px 0 #1688ff;
+    }
+
+    .admin-gps-log-tab i {
+        color: #1688ff;
+        font-size: 1rem;
+    }
+
+    .admin-gps-log-minimize {
+        margin-left: auto;
+        border: 0;
+        background: transparent;
+        color: #8492a6;
+        width: 48px;
+        min-width: 48px;
+        font-size: 1rem;
+    }
+
+    .admin-gps-log-minimize:hover {
+        color: #fff;
+        background: rgba(255,255,255,.06);
+    }
+
+    .admin-gps-log-tabs + .geo-punch-audit-card,
+    .admin-gps-log-tabs + .location-history-card {
+        margin-top: -1px;
+        border-radius: 0 0 12px 12px !important;
+    }
+
+    .admin-gps-log-tab-strip + * {
+        border-top-left-radius: 0;
+        border-top-right-radius: 0;
+    }
+
+    body.dark .admin-gps-log-tabs,
+    body.dark .admin-gps-log-tab-strip {
+        background: #161f2d !important;
+        color: #e7edf6 !important;
+    }
+
+    body.dark .admin-gps-log-tab {
+        color: #aebbd0;
+        border-color: rgba(255,255,255,.08);
+    }
+
+    body:not(.dark) .admin-gps-log-tab-strip {
+        background: #f6f8fb;
+        border-color: rgba(15,23,42,.08);
+    }
+
+    body:not(.dark) .admin-gps-log-tab {
+        color: #5b6878;
+        border-color: rgba(15,23,42,.08);
+    }
+
+    body:not(.dark) .admin-gps-log-tab.active {
+        color: #17324d;
+        background: #fff;
+    }
+
+    .location-history-summary {
+        grid-template-columns: repeat(6, minmax(110px, 1fr));
+    }
+
+    .gps-playback-table-pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        background: #1b2635;
+        color: #aebbd0;
+        border-top: 1px solid rgba(255,255,255,.08);
+        font-size: .72rem;
+    }
+
+    body:not(.dark) .gps-playback-table-pager {
+        background: #f6f8fb;
+        color: #5b6878;
+        border-color: rgba(15,23,42,.08);
+    }
+
+    @media(max-width:575px) {
+        .gps-playback-table-pager {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+    }
+
+    @media(max-width:991px) {
+        .admin-gps-log-tab {
+            min-width: 145px;
+            padding-left: 13px;
+            padding-right: 13px;
+        }
+
+        .location-history-summary {
+            grid-template-columns: repeat(3, minmax(110px, 1fr));
+        }
+    }
+
+    @media(max-width:575px) {
+        .admin-gps-log-tab {
+            min-width: 132px;
+            font-size: .7rem;
+            padding: 11px 10px;
+        }
+
+        .admin-gps-log-minimize {
+            width: 40px;
+            min-width: 40px;
+        }
+
+        .location-history-summary {
+            grid-template-columns: 1fr;
+        }
+    }
+
+
     .gps-session-summary {
         border-top: 1px solid #e9ecef;
         background: #fbfcfe
@@ -2314,134 +2549,6 @@
         pointer-events: none;
     }
 
-    /* Replay presentation. The existing map becomes the only primary surface. */
-    .live-staff-card.replay-fullscreen {
-        position: fixed !important;
-        inset: 0 !important;
-        z-index: 5000 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        max-width: none !important;
-        margin: 0 !important;
-        border-radius: 0 !important;
-        overflow: hidden !important;
-        display: block !important;
-    }
-
-    .replay-fullscreen .live-staff-header,
-    .replay-fullscreen .selected-live-card,
-    .replay-fullscreen .live-staff-list,
-    .replay-fullscreen .map-empty-overlay,
-    .replay-fullscreen .location-history-header,
-    .replay-fullscreen .location-history-summary,
-    .replay-fullscreen .gps-session-summary,
-    .replay-fullscreen .location-history-card > .table-responsive {
-        display: none !important;
-    }
-
-    .replay-fullscreen .live-staff-body {
-        display: block !important;
-        min-height: 100vh !important;
-        height: 100vh !important;
-        background: #0b1220 !important;
-    }
-
-    .replay-fullscreen .admin-map-wrapper {
-        position: absolute !important;
-        inset: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-    }
-
-    .replay-fullscreen .admin-live-map {
-        position: absolute !important;
-        inset: 0 !important;
-        width: 100% !important;
-        height: 100% !important;
-    }
-
-    .replay-fullscreen .map-live-legend {
-        bottom: 150px;
-    }
-
-    .replay-fullscreen .location-history-card {
-        position: absolute !important;
-        left: 16px !important;
-        right: 16px !important;
-        bottom: 14px !important;
-        z-index: 5100 !important;
-        margin: 0 !important;
-        overflow: visible !important;
-        background: transparent !important;
-        box-shadow: none !important;
-        pointer-events: none;
-    }
-
-    .replay-fullscreen .history-playback-toolbar,
-    .replay-fullscreen .history-playback-progress,
-    .replay-fullscreen .history-playback-status {
-        pointer-events: auto;
-        backdrop-filter: blur(16px);
-        box-shadow: 0 10px 35px rgba(0,0,0,.28);
-    }
-
-    .replay-fullscreen .history-playback-toolbar {
-        border: 1px solid rgba(255,255,255,.14);
-        border-radius: 14px 14px 0 0;
-    }
-
-    .replay-fullscreen .history-playback-progress {
-        border-left: 1px solid rgba(255,255,255,.14);
-        border-right: 1px solid rgba(255,255,255,.14);
-    }
-
-    .replay-fullscreen .history-playback-status {
-        border: 1px solid rgba(255,255,255,.14);
-        border-radius: 0 0 14px 14px;
-    }
-
-    .replay-fullscreen .history-playback-toolbar,
-    .replay-fullscreen .history-playback-progress,
-    .replay-fullscreen .history-playback-status {
-        background: rgba(18,28,43,.92);
-        color: #e7edf6;
-    }
-
-    body:not(.dark) .replay-fullscreen .history-playback-toolbar,
-    body:not(.dark) .replay-fullscreen .history-playback-progress,
-    body:not(.dark) .replay-fullscreen .history-playback-status {
-        background: rgba(255,255,255,.94);
-        color: #1f2937;
-        border-color: rgba(15,23,42,.12);
-    }
-
-    .replay-exit-button {
-        position: absolute;
-        top: 18px;
-        left: 18px;
-        z-index: 5200;
-        border: 1px solid rgba(255,255,255,.18);
-        border-radius: 11px;
-        padding: 9px 13px;
-        color: #fff;
-        background: rgba(15,23,42,.82);
-        backdrop-filter: blur(12px);
-        box-shadow: 0 8px 24px rgba(0,0,0,.24);
-        font-size: .75rem;
-        font-weight: 700;
-    }
-
-    .replay-exit-button:hover {
-        background: rgba(13,110,253,.92);
-        color: #fff;
-    }
-
-    body:not(.dark) .replay-exit-button {
-        color: #1f2937;
-        background: rgba(255,255,255,.94);
-        border-color: rgba(15,23,42,.12);
-    }
-
     @@media(max-width:991px) {
 
         .live-staff-body,
@@ -2695,17 +2802,15 @@
 
     private int playbackIndex;
 
+    // Keep large daily GPS histories lightweight in the browser. Playback itself
+    // still uses every GPS point; only the diagnostic table is paged.
+    private const int PlaybackTablePageSize = 100;
+    private int playbackTablePage;
+
     private CancellationTokenSource? playbackStateCts;
 
-    // Presentation-only state. It does not change GPS, attendance, session,
-    // database, or business logic. It temporarily presents the existing map
-    // as a focused journey-replay workspace.
-    private bool isPlaybackFullscreen;
-
-    // Collapse States (Web Dashboard)
-    private bool isPunchAuditExpanded = false;
-    private bool isSessionTimelineExpanded = false;
-    private bool isRoutePlaybackExpanded = false;
+    // Realtime log tab presentation. Null keeps the three log sections minimized.
+    private string? activeLogTab;
 
 
     private int liveCount =>
@@ -2728,6 +2833,29 @@
                 .OrderBy(x => x.RecordedAtUtc)
                 .ToList()
             : selectedHistory;
+
+    private IReadOnlyList<EmployeeLocationHistory> PlaybackTablePoints =>
+        PlaybackPoints
+            .Skip(playbackTablePage * PlaybackTablePageSize)
+            .Take(PlaybackTablePageSize)
+            .ToList();
+
+    private int PlaybackTablePageCount =>
+        Math.Max(
+            1,
+            (int)Math.Ceiling(
+                PlaybackPoints.Count /
+                (double)PlaybackTablePageSize));
+
+    private int PlaybackTableFirstIndex =>
+        PlaybackPoints.Count == 0
+            ? 0
+            : playbackTablePage * PlaybackTablePageSize;
+
+    private int PlaybackTableLastIndex =>
+        Math.Min(
+            PlaybackPoints.Count,
+            PlaybackTableFirstIndex + PlaybackTablePageSize);
 
     private bool CanPlayback =>
         PlaybackPoints.Count > 0;
@@ -3661,15 +3789,14 @@
 
         var sessionId = Guid.Empty;
 
-        if (TryGetJsonString(
-                json,
-                "SessionId",
-                out var sessionText))
+        if (TryGetJsonString(json, "SessionId", out var sessionText))
         {
-            Guid.TryParse(
-                sessionText,
-                out sessionId);
+            Guid.TryParse(sessionText, out sessionId);
         }
+
+        // A live marker without a valid GPS session is not authoritative.
+        if (sessionId == Guid.Empty)
+            return false;
 
         var distance =
             CalculateDistanceMeters(
@@ -4069,7 +4196,7 @@
                 currentOfficeRadius,
                 staff,
                 selectedEmployeeId,
-                isPlaybackFullscreen,
+                false,
                 liveLocationSignalRReference);
         }
         catch (Exception ex)
@@ -4194,6 +4321,7 @@
 
     private async Task LoadSelectedEmployeeHistory()
     {
+        playbackTablePage = 0;
         if (selectedEmployeeId <= 0)
         {
             selectedHistory.Clear();
@@ -4644,6 +4772,7 @@
         await StopPlayback();
 
         selectedPlaybackSessionId = sessionId;
+        playbackTablePage = 0;
         playbackIndex = 0;
         playbackStatus = "Ready";
 
@@ -4675,6 +4804,7 @@
         await StopPlayback();
 
         selectedPlaybackSessionId = null;
+        playbackTablePage = 0;
         playbackIndex = 0;
         playbackStatus = "Ready";
 
@@ -4726,283 +4856,9 @@
         await InvokeAsync(StateHasChanged);
     }
 
-
-    private async Task ExitPlayback()
-    {
-        isPlaybackFullscreen = false;
-
-        await StopPlayback();
-
-        mapNeedsUpdate = true;
-
-        await InvokeAsync(StateHasChanged);
-
-        // Restore the normal map dimensions after the fullscreen presentation
-        // has been removed. The map data itself remains untouched.
-        try
-        {
-            await JSRuntime.InvokeVoidAsync(
-                "restoreAdminHistoryPlaybackLayout",
-                mapId);
-        }
-        catch
-        {
-        }
-    }
-
-
-    private async Task PauseHistory()
-    {
-        if (!CanPlayback)
-            return;
-
-        playbackStatus =
-            "Paused";
-
-        await JSRuntime.InvokeVoidAsync(
-            "pauseAdminHistoryPlayback",
-            mapId);
-
-        await InvokeAsync(
-            StateHasChanged);
-    }
-
-
-    private async Task ResetHistory()
-    {
-        if (!CanPlayback)
-            return;
-
-        await JSRuntime.InvokeVoidAsync(
-            "resetAdminHistoryPlayback",
-            mapId);
-
-        playbackIndex = 0;
-
-        playbackStatus =
-            "Ready";
-
-        await InvokeAsync(
-            StateHasChanged);
-    }
-
-
-    private bool IsHistoryPointActive(int historyIndex)
-    {
-        if (historyIndex < 0 || historyIndex >= selectedHistory.Count || !CanPlayback)
-            return false;
-
-        var point = selectedHistory[historyIndex];
-
-        if (selectedPlaybackSessionId.HasValue &&
-            point.SessionId != selectedPlaybackSessionId.Value)
-            return false;
-
-        var playbackPoint = PlaybackPoints[PlaybackIndex];
-        return playbackPoint.Id == point.Id;
-    }
-
-    private async Task SelectHistoryPoint(int index)
-    {
-        if (index < 0 || index >= selectedHistory.Count)
-            return;
-
-        var point = selectedHistory[index];
-
-        // If a session is selected, clicking a point from another session
-        // automatically switches playback to that session.
-        if (selectedPlaybackSessionId.HasValue &&
-            point.SessionId != selectedPlaybackSessionId.Value)
-        {
-            await SelectPlaybackSession(point.SessionId);
-            return;
-        }
-
-        var playbackIndexForPoint = selectedPlaybackSessionId.HasValue
-            ? PlaybackPoints
-                .Select((x, i) => new { x, i })
-                .FirstOrDefault(x => x.x.Id == point.Id)?.i ?? -1
-            : index;
-
-        if (playbackIndexForPoint < 0)
-            return;
-
-        playbackIndex = playbackIndexForPoint;
-        playbackStatus = "Paused";
-
-        try
-        {
-            await JSRuntime.InvokeVoidAsync("pauseAdminHistoryPlayback", mapId);
-            await JSRuntime.InvokeVoidAsync("seekAdminHistoryPlayback", mapId, playbackIndex);
-        }
-        catch { }
-
-        await InvokeAsync(StateHasChanged);
-    }
-
-
-    private async Task SeekHistoryFromSlider(ChangeEventArgs e)
-    {
-        if (!CanPlayback)
-            return;
-
-        if (!int.TryParse(e.Value?.ToString(), out var index))
-            return;
-
-        index = Math.Max(0, Math.Min(PlaybackPoints.Count - 1, index));
-        playbackIndex = index;
-
-        await JSRuntime.InvokeVoidAsync(
-            "seekAdminHistoryPlayback",
-            mapId,
-            index);
-
-        playbackStatus =
-            "Paused";
-
-        await InvokeAsync(
-            StateHasChanged);
-    }
-
-
-    private async Task ChangePlaybackSpeed(
-        ChangeEventArgs e)
-    {
-        if (!double.TryParse(
-            e.Value?.ToString(),
-            out var speed))
-            return;
-
-        playbackSpeed =
-            Math.Max(.25, speed);
-
-        if (CanPlayback)
-        {
-            await JSRuntime.InvokeVoidAsync(
-                "setAdminHistoryPlaybackSpeed",
-                mapId,
-                playbackSpeed);
-        }
-    }
-
-
-    private void StartPlaybackPolling()
-    {
-        if (playbackStateCts != null)
-            return;
-
-        playbackStateCts =
-            new CancellationTokenSource();
-
-        _ =
-            PollPlaybackLoop(
-                playbackStateCts.Token);
-    }
-
-
-    private async Task PollPlaybackLoop(
-        CancellationToken token)
-    {
-        try
-        {
-            while (!token.IsCancellationRequested)
-            {
-                await Task.Delay(
-                    400,
-                    token);
-
-                if (token.IsCancellationRequested)
-                    break;
-
-                await PollPlaybackState();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(
-                $"Playback polling failed: {ex}");
-        }
-    }
-
-
-    private async Task PollPlaybackState()
-    {
-        if (!CanPlayback)
-            return;
-
-        try
-        {
-            var state =
-                await JSRuntime.InvokeAsync<PlaybackState?>(
-                    "getAdminHistoryPlaybackState",
-                    mapId);
-
-            if (state == null)
-                return;
-
-            var newIndex =
-                Math.Max(
-                    0,
-                    Math.Min(
-                        PlaybackPoints.Count - 1,
-                        state.Index));
-
-            var changed =
-                playbackIndex != newIndex;
-
-            playbackIndex =
-                newIndex;
-
-            if (state.Completed)
-            {
-                playbackStatus =
-                    "Completed";
-
-                StopPlaybackPolling();
-            }
-            else if (state.Playing)
-            {
-                playbackStatus =
-                    "Playing";
-            }
-
-            if (changed)
-            {
-                await InvokeAsync(
-                    StateHasChanged);
-            }
-        }
-        catch
-        {
-            // Browser circuit may be closing.
-        }
-    }
-
-
-    private void StopPlaybackPolling()
-    {
-        try
-        {
-            playbackStateCts?.Cancel();
-        }
-        catch
-        {
-        }
-
-        playbackStateCts?.Dispose();
-
-        playbackStateCts = null;
-    }
-
-
     private async Task StopPlayback()
     {
         StopPlaybackPolling();
-        isPlaybackFullscreen = false;
-
         try
         {
             await JSRuntime.InvokeVoidAsync(
@@ -5090,6 +4946,63 @@
     }
 
 
+    private string HistoryCaptureIntervalText
+    {
+        get
+        {
+            var points = selectedHistory
+                .OrderBy(x => x.SessionId)
+                .ThenBy(x => x.RecordedAtUtc)
+                .ToList();
+
+            if (points.Count < 2)
+                return "-";
+
+            var gaps = new List<double>();
+
+            foreach (var group in points.GroupBy(x => x.SessionId))
+            {
+                var ordered = group
+                    .OrderBy(x => x.RecordedAtUtc)
+                    .ToList();
+
+                for (var i = 1; i < ordered.Count; i++)
+                {
+                    var gap = (ordered[i].RecordedAtUtc - ordered[i - 1].RecordedAtUtc).TotalSeconds;
+
+                    // Ignore duplicate timestamps and very long idle/session gaps.
+                    if (gap >= 5 && gap <= 600)
+                        gaps.Add(gap);
+                }
+            }
+
+            if (gaps.Count == 0)
+                return "-";
+
+            gaps.Sort();
+            var median = gaps.Count % 2 == 0
+                ? (gaps[gaps.Count / 2 - 1] + gaps[gaps.Count / 2]) / 2d
+                : gaps[gaps.Count / 2];
+
+            return median >= 60
+                ? $"{median / 60d:F1} min"
+                : $"{median:F0} sec";
+        }
+    }
+
+
+    private void ToggleLogTab(string tab)
+    {
+        activeLogTab = activeLogTab == tab ? null : tab;
+    }
+
+
+    private void MinimizeLogTabs()
+    {
+        activeLogTab = null;
+    }
+
+
     private static double CalculateDistance(
         double lat1,
         double lon1,
@@ -5153,7 +5066,7 @@
     private LocationStatus GetLocationStatus(
         LiveEmployeeLocation? location)
     {
-        if (location == null)
+        if (location == null || location.SessionId == Guid.Empty)
             return LocationStatus.Offline;
 
         var age =

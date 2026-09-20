@@ -83,8 +83,9 @@ class BiometricApplication : Application(), Configuration.Provider {
             }
         }
 
-        val authStateListener = FirebaseAuth.AuthStateListener { user ->
-            if (user != null && sessionStore.isLoggedIn()) {
+        val authStateListener = FirebaseAuth.AuthStateListener {
+            val firebaseUser = FirebaseAuth.getInstance().currentUser
+            if (firebaseUser != null && sessionStore.isLoggedIn()) {
                 startRealtimeInfrastructure()
             } else {
                 // Remove tenant listeners immediately on explicit sign-out so

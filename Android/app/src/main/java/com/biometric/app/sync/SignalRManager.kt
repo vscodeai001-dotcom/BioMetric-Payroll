@@ -43,10 +43,11 @@ class SignalRManager @Inject constructor(
     // Firebase Auth restoration can finish after MainActivity is created.
     // Keep a process-wide auth bridge so realtime starts automatically when the
     // persisted Firebase user becomes available.
-    private val authStateListener = FirebaseAuth.AuthStateListener { user ->
-        if (user != null && sessionStore.isLoggedIn()) {
+    private val authStateListener = FirebaseAuth.AuthStateListener {
+        val firebaseUser = FirebaseAuth.getInstance().currentUser
+        if (firebaseUser != null && sessionStore.isLoggedIn()) {
             managerScope.launch { start() }
-        } else if (user == null) {
+        } else {
             stop()
         }
     }
@@ -71,7 +72,9 @@ class SignalRManager @Inject constructor(
         // Authoritative tenant check: Render GPS nodes that belong to the
         // current owner. We prioritized the employee master directory before,
         // but now we trust all positive IDs from the owner's live tracking node.
-        val filtered = raw.filterKeys { it > 0 }
+        val filtered = raw
+            .filterKeys { it > 0 }
+            .filterValues { it.sessionId.isNotBlank() }
 
         _liveLocations.value = filtered
         _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
@@ -184,8 +187,14 @@ class SignalRManager @Inject constructor(
 
                     if (employeeId <= 0) continue
 
+                    if (value.SessionId.isBlank()) {
+                        // A live marker without a GPS session is never authoritative.
+                        continue
+                    }
+
                     locations[employeeId] = LiveLocation(
                         employeeId = employeeId,
+                        sessionId = value.SessionId,
                         latitude = value.Latitude,
                         longitude = value.Longitude,
                         accuracyMeters = value.AccuracyMeters,
@@ -431,7 +440,10 @@ class SignalRManager @Inject constructor(
                 val timestamp = map["Timestamp"]?.toString()
                 val dedupeKey = "${id}|${timestamp.orEmpty()}|${lat}|${lon}"
                 byKey[dedupeKey] = LiveLocation(
-                    employeeId = eid, latitude = lat, longitude = lon,
+                    employeeId = eid,
+                    sessionId = map["SessionId"]?.toString().orEmpty(),
+                    latitude = lat,
+                    longitude = lon,
                     accuracyMeters = (map["AccuracyMeters"] as? Number)?.toDouble() ?: 0.0,
                     distanceMeters = (map["DistanceMeters"] as? Number)?.toDouble() ?: 0.0,
                     allowedRadiusMeters = (map["AllowedRadiusMeters"] as? Number)?.toInt() ?: 100,
@@ -479,6 +491,7 @@ class SignalRManager @Inject constructor(
 
         return FirebaseLiveLocation(
             EmployeeId = int("EmployeeId", "employeeId"),
+            SessionId = string("SessionId", "sessionId"),
             Latitude = double("Latitude", "latitude"),
             Longitude = double("Longitude", "longitude"),
             AccuracyMeters = double("AccuracyMeters", "accuracyMeters"),
@@ -592,6 +605,7 @@ class SignalRManager @Inject constructor(
 
     data class LiveLocation(
         @SerializedName("employeeId") val employeeId: Int,
+        @SerializedName("sessionId") val sessionId: String = "",
         @SerializedName("latitude") val latitude: Double,
         @SerializedName("longitude") val longitude: Double,
         @SerializedName("accuracyMeters") val accuracyMeters: Double,
