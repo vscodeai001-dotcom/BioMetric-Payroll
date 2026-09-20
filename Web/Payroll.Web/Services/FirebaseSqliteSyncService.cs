@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Payroll.Shared.Data;
 
 namespace Payroll.Web.Services;
 
@@ -37,30 +38,18 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     {
         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
 
-        var ownerUid = _configuration["Firebase:OwnerUid"]?.Trim();
-        if (string.IsNullOrWhiteSpace(ownerUid))
-            ownerUid = Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")?.Trim();
-        if (string.IsNullOrWhiteSpace(ownerUid))
-            ownerUid = "biometricpayroll";
+        var ownerUid = _configuration["Firebase:OwnerUid"]?.Trim()
+            ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")?.Trim()
+            ?? "biometricpayroll";
 
-        // First hydrate the local compatibility projection so the existing Web
-        // screens have a complete initial view of the Firebase SSOT.
         await SyncAllTablesAsync(ownerUid, stoppingToken);
 
-        // From this point forward Firebase's REST event streams are the trigger.
-        // Owner CRUD and native Android GPS are separate Firebase trees but are
-        // consumed by this same compatibility bridge so the existing Web UI
-        // updates without a browser refresh.
         var ownerTask = RunOwnerStreamLoopAsync(ownerUid, stoppingToken);
-
-        // REQUIREMENT: Sync tracking history and events from the owner-scoped node.
-        // Android now writes history to /owners/{ownerUid}/tracking/history to
-        // maintain tenant isolation.
         var trackingTask = RunGlobalStreamLoopAsync($"owners/{ownerUid}/tracking", async (path, data, ct) =>
             await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
-
         var authTask = RunGlobalStreamLoopAsync("mobile_auth_events", async (path, data, ct) =>
             await ProcessFirebaseMobileAuthEventAsync(path, data, ct), stoppingToken);
+
         await Task.WhenAll(ownerTask, trackingTask, authTask);
     }
 
@@ -70,63 +59,40 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         {
             try
             {
-                await _firebase.StreamOwnerChangesAsync(
-                    ownerUid,
-                    async (relativePath, eventData, ct) =>
+                await _firebase.StreamOwnerChangesAsync(ownerUid, async (relativePath, eventData, ct) =>
+                {
+                    var target = ParseFirebasePath(relativePath);
+                    if (target is null) return;
+
+                    if (target.Value.EntityName == "TrackingHistory") { await ProcessFirebaseTrackingEventAsync(relativePath, eventData, ct); return; }
+                    if (target.Value.EntityName == "MobileAuthEvent") { await ProcessFirebaseMobileAuthEventAsync(relativePath, eventData, ct); return; }
+
+                    if (!Tables.TryGetValue(target.Value.EntityName, out var firebaseTable)) return;
+
+                    bool changed;
+                    if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Null)
+                        changed = await DeleteLocalFirebaseRecordAsync(target.Value.EntityName, target.Value.RecordKey, ct);
+                    else
+                        changed = await SyncTableAsync(target.Value.EntityName, firebaseTable, ownerUid, ct);
+
+                    if (changed)
                     {
-                        var target = ParseFirebasePath(relativePath);
-                        if (target is null) return;
-
-                        if (target.Value.EntityName.Equals("TrackingHistory", StringComparison.Ordinal))
+                        await _refreshService.NotifyApplicationDataChangedAsync(new[] { target.Value.EntityName });
+                        if (target.Value.EntityName == "CompanySetting")
                         {
-                            await ProcessFirebaseTrackingEventAsync(relativePath, eventData, ct);
-                            return;
-                        }
-
-                        if (target.Value.EntityName.Equals("MobileAuthEvent", StringComparison.Ordinal))
-                        {
-                            await ProcessFirebaseMobileAuthEventAsync(relativePath, eventData, ct);
-                            return;
-                        }
-
-                        if (!Tables.TryGetValue(target.Value.EntityName, out var firebaseTable)) return;
-
-                        bool changed;
-                        if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Null)
-                        {
-                            changed = await DeleteLocalFirebaseRecordAsync(
-                                target.Value.EntityName, target.Value.RecordKey, ct);
-                        }
-                        else
-                        {
-                            changed = await SyncTableAsync(
-                                target.Value.EntityName, firebaseTable, ownerUid, ct);
-                        }
-
-                        if (changed)
-                        {
-                            await _refreshService.NotifyApplicationDataChangedAsync(
-                                new[] { target.Value.EntityName });
-
-                            if (target.Value.EntityName.Equals("CompanySetting", StringComparison.Ordinal))
+                            var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
+                            if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
                             {
-                                var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
-                                if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
-                                {
-                                    var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
-                                    var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
-                                    var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
-                                    await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
-                                }
+                                var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
+                                var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
+                                var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
+                                await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
                             }
                         }
-                    },
-                    stoppingToken);
+                    }
+                }, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Firebase owner realtime stream disconnected. Reconnecting.");
@@ -135,21 +101,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         }
     }
 
-    private async Task RunGlobalStreamLoopAsync(
-        string rootNode,
-        Func<string, JsonElement?, CancellationToken, Task> handler,
-        CancellationToken stoppingToken)
+    private async Task RunGlobalStreamLoopAsync(string rootNode, Func<string, JsonElement?, CancellationToken, Task> handler, CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
-            {
-                await _firebase.StreamGlobalChangesAsync(rootNode, handler, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
+            try { await _firebase.StreamGlobalChangesAsync(rootNode, handler, stoppingToken); }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Firebase {RootNode} realtime stream disconnected. Reconnecting.", rootNode);
@@ -158,15 +115,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         }
     }
 
-    private async Task ProcessFirebaseTrackingEventAsync(
-        string relativePath,
-        JsonElement? eventData,
-        CancellationToken ct,
-        bool evaluateAttendance = true)
+    private async Task ProcessFirebaseTrackingEventAsync(string relativePath, JsonElement? eventData, CancellationToken ct, bool evaluateAttendance = true)
     {
         using var geoScope = _scopeFactory.CreateScope();
         var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
-
         if (!eventData.HasValue || eventData.Value.ValueKind != JsonValueKind.Object) return;
 
         var path = (relativePath ?? "/").Trim('/');
@@ -174,345 +126,225 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (parts.Length == 0)
         {
-            if (eventData.Value.TryGetProperty("live", out var live) &&
-                (live.ValueKind == JsonValueKind.Object || live.ValueKind == JsonValueKind.Array))
+            if (eventData.Value.TryGetProperty("live", out var live) && (live.ValueKind == JsonValueKind.Object || live.ValueKind == JsonValueKind.Array))
             {
                 if (live.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var employeeNode in live.EnumerateObject())
-                    {
-                        if (employeeNode.Value.ValueKind == JsonValueKind.Object)
-                            await ProcessFirebaseLiveLocationAsync($"/live/{employeeNode.Name}", employeeNode.Value.Clone(), ct);
-                    }
-                }
-                else
-                {
-                    var index = 0;
-                    foreach (var node in live.EnumerateArray())
-                    {
-                        if (node.ValueKind == JsonValueKind.Object)
-                            await ProcessFirebaseLiveLocationAsync($"/live/{index}", node.Clone(), ct);
-                        index++;
-                    }
-                }
+                    foreach (var emp in live.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) await ProcessFirebaseLiveLocationAsync($"/live/{emp.Name}", emp.Value.Clone(), ct);
+                else { var i = 0; foreach (var node in live.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) await ProcessFirebaseLiveLocationAsync($"/live/{i}", node.Clone(), ct); i++; } }
             }
-
-            if (eventData.Value.TryGetProperty("sessions", out var sessions) &&
-                (sessions.ValueKind == JsonValueKind.Object || sessions.ValueKind == JsonValueKind.Array))
+            if (eventData.Value.TryGetProperty("sessions", out var sessions) && (sessions.ValueKind == JsonValueKind.Object || sessions.ValueKind == JsonValueKind.Array))
             {
                 if (sessions.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var employeeNode in sessions.EnumerateObject())
-                    {
-                        if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
-                        foreach (var sessionNode in employeeNode.Value.EnumerateObject())
-                        {
-                            if (sessionNode.Value.ValueKind == JsonValueKind.Object)
-                                await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{employeeNode.Name}/{sessionNode.Name}", sessionNode.Value.Clone(), ct);
-                        }
-                    }
-                }
-                else
-                {
-                    var index = 0;
-                    foreach (var employeeNode in sessions.EnumerateArray())
-                    {
-                        if (employeeNode.ValueKind == JsonValueKind.Object)
-                        {
-                            foreach (var sessionNode in employeeNode.EnumerateObject())
-                            {
-                                if (sessionNode.Value.ValueKind == JsonValueKind.Object)
-                                    await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{index}/{sessionNode.Name}", sessionNode.Value.Clone(), ct);
-                            }
-                        }
-                        index++;
-                    }
-                }
+                    foreach (var emp in sessions.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) foreach (var sess in emp.Value.EnumerateObject()) await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{emp.Name}/{sess.Name}", sess.Value.Clone(), ct);
+                else { var i = 0; foreach (var node in sessions.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var sess in node.EnumerateObject()) await ProcessFirebaseTrackingSessionEventAsync($"/sessions/{i}/{sess.Name}", sess.Value.Clone(), ct); i++; } }
             }
-
-            if (eventData.Value.TryGetProperty("history", out var history) &&
-                (history.ValueKind == JsonValueKind.Object || history.ValueKind == JsonValueKind.Array))
+            if (eventData.Value.TryGetProperty("history", out var history) && (history.ValueKind == JsonValueKind.Object || history.ValueKind == JsonValueKind.Array))
             {
                 if (history.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var employeeNode in history.EnumerateObject())
-                    {
-                        if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
-                        foreach (var eventNode in employeeNode.Value.EnumerateObject())
-                        {
-                            if (eventNode.Value.ValueKind == JsonValueKind.Object)
-                                await ProcessFirebaseTrackingEventAsync($"/history/{employeeNode.Name}/{eventNode.Name}", eventNode.Value.Clone(), ct, evaluateAttendance: false);
-                        }
-                    }
-                }
-                else
-                {
-                    var index = 0;
-                    foreach (var employeeNode in history.EnumerateArray())
-                    {
-                        if (employeeNode.ValueKind == JsonValueKind.Object)
-                        {
-                            foreach (var eventNode in employeeNode.EnumerateObject())
-                            {
-                                if (eventNode.Value.ValueKind == JsonValueKind.Object)
-                                    await ProcessFirebaseTrackingEventAsync($"/history/{index}/{eventNode.Name}", eventNode.Value.Clone(), ct, evaluateAttendance: false);
-                            }
-                        }
-                        index++;
-                    }
-                }
+                    foreach (var emp in history.EnumerateObject()) if (emp.Value.ValueKind == JsonValueKind.Object) foreach (var evt in emp.Value.EnumerateObject()) await ProcessFirebaseTrackingEventAsync($"/history/{emp.Name}/{evt.Name}", evt.Value.Clone(), ct, false);
+                else { var i = 0; foreach (var node in history.EnumerateArray()) { if (node.ValueKind == JsonValueKind.Object) foreach (var evt in node.EnumerateObject()) await ProcessFirebaseTrackingEventAsync($"/history/{i}/{evt.Name}", evt.Value.Clone(), ct, false); i++; } }
             }
             return;
         }
 
-        if (parts.Any(p => p.Equals("events", StringComparison.OrdinalIgnoreCase)))
-        {
-            await ProcessFirebaseTrackingLifecycleEventAsync(eventData.Value, ct);
-            return;
-        }
+        if (parts.Any(p => p.Equals("events", StringComparison.OrdinalIgnoreCase))) { await ProcessFirebaseTrackingLifecycleEventAsync(eventData.Value, ct); return; }
+        if (parts.Any(p => p.Equals("live", StringComparison.OrdinalIgnoreCase))) { await ProcessFirebaseLiveLocationAsync(relativePath ?? "/", eventData.Value, ct); return; }
+        if (parts.Any(p => p.Equals("sessions", StringComparison.OrdinalIgnoreCase))) { await ProcessFirebaseTrackingSessionEventAsync(relativePath ?? "/", eventData.Value, ct); return; }
 
-        if (parts.Any(p => p.Equals("live", StringComparison.OrdinalIgnoreCase)))
-        {
-            await ProcessFirebaseLiveLocationAsync(relativePath ?? "/", eventData.Value, ct);
-            return;
-        }
-
-        if (parts.Any(p => p.Equals("sessions", StringComparison.OrdinalIgnoreCase)))
-        {
-            await ProcessFirebaseTrackingSessionEventAsync(relativePath ?? "/", eventData.Value, ct);
-            return;
-        }
-
-        if (!parts.Any(p => p.Equals("history", StringComparison.OrdinalIgnoreCase)))
-            return;
+        if (!parts.Any(p => p.Equals("history", StringComparison.OrdinalIgnoreCase))) return;
 
         var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
-        if (employeeId <= 0) return;
-
         var sessionText = GetString(eventData.Value, "SessionId", "sessionId");
-        if (!Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
+        if (employeeId <= 0 || !Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
 
-        var latitude = GetDouble(eventData.Value, "Latitude", "latitude");
-        var longitude = GetDouble(eventData.Value, "Longitude", "longitude");
-        var accuracy = GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters");
-        var distance = GetDouble(eventData.Value, "DistanceMeters", "distanceMeters");
-        var radius = GetInt(eventData.Value, "AllowedRadiusMeters", "allowedRadiusMeters");
+        var lat = GetDouble(eventData.Value, "Latitude", "latitude");
+        var lon = GetDouble(eventData.Value, "Longitude", "longitude");
+        var acc = GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters");
+        var dist = GetDouble(eventData.Value, "DistanceMeters", "distanceMeters");
+        var rad = GetInt(eventData.Value, "AllowedRadiusMeters", "allowedRadiusMeters");
         var within = GetBool(eventData.Value, "IsWithinAllowedRadius", "isWithinAllowedRadius");
-        var captured = GetDateTime(eventData.Value, "Timestamp", "timestamp");
-        var source = GetString(eventData.Value, "CaptureSource", "captureSource", "Source", "source") ?? "Online";
+        var cap = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
+        var src = GetString(eventData.Value, "CaptureSource", "Source") ?? "Online";
 
-        if (radius <= 0 || distance < 0)
-        {
-            var calculated = await geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
-            if (calculated.Success)
-            {
-                distance = calculated.DistanceMeters;
-                radius = calculated.AllowedRadiusMeters;
-                within = radius > 0 && distance <= radius + 2;
-            }
-        }
-
-        var captureSource = source.Equals("ANDROID_FIREBASE", StringComparison.OrdinalIgnoreCase) ? "Online" : source;
-
-        if (evaluateAttendance)
-        {
-            await geoLocationService.UpdateGpsSessionAsync(employeeId, sessionId, latitude, longitude, accuracy, distance, radius, within, captured);
-        }
-
-        await geoLocationService.SaveLocationHistoryAsync(employeeId, sessionId, latitude, longitude, distance, radius, within, accuracy, captured, captureSource);
+        if (rad <= 0 || dist < 0) { var res = await geo.GetDistanceFromOfficeAsync(lat, lon); if (res.Success) { dist = res.DistanceMeters; rad = res.AllowedRadiusMeters; within = rad > 0 && dist <= rad + 2; } }
+        if (evaluateAttendance) await geo.UpdateGpsSessionAsync(employeeId, sessionId, lat, lon, acc, dist, rad, within, cap);
+        await geo.SaveLocationHistoryAsync(employeeId, sessionId, lat, lon, dist, rad, within, acc, cap, src);
     }
 
     private async Task ProcessFirebaseTrackingLifecycleEventAsync(JsonElement eventData, CancellationToken ct)
     {
         if (eventData.ValueKind != JsonValueKind.Object) return;
-        var nested = eventData.TryGetProperty("event", out var eventNode) && eventNode.ValueKind == JsonValueKind.Object ? eventNode : eventData;
-        var eventType = GetString(nested, "eventType", "EventType") ?? string.Empty;
-        if (!eventType.Equals("SESSION_STARTED", StringComparison.OrdinalIgnoreCase) && !eventType.Equals("SESSION_ENDED", StringComparison.OrdinalIgnoreCase)) return;
-        var employeeId = GetInt(eventData, "employeeId", "EmployeeId");
-        if (employeeId <= 0) employeeId = GetInt(nested, "employeeId", "EmployeeId");
-        var sessionText = GetString(nested, "sessionId", "SessionId");
-        if (employeeId <= 0 || !Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
+        var nested = eventData.TryGetProperty("event", out var node) && node.ValueKind == JsonValueKind.Object ? node : eventData;
+        var type = GetString(nested, "eventType", "EventType") ?? string.Empty;
+        var empId = GetInt(eventData, "employeeId", "EmployeeId");
+        if (empId <= 0) empId = GetInt(nested, "employeeId", "EmployeeId");
+        var sess = GetString(nested, "sessionId", "SessionId");
+        if (empId <= 0 || !Guid.TryParse(sess, out var sid) || sid == Guid.Empty) return;
 
         using var scope = _scopeFactory.CreateScope();
         var geo = scope.ServiceProvider.GetRequiredService<GeoLocationService>();
 
-        if (eventType.Equals("SESSION_STARTED", StringComparison.OrdinalIgnoreCase))
+        if (type.Equals("SESSION_STARTED", StringComparison.OrdinalIgnoreCase))
         {
-            var started = await geo.StartGpsSessionAsync(employeeId, sessionId);
-            if (started) await _refreshService.NotifyLocationChangedAsync(employeeId);
-            return;
+            if (await geo.StartGpsSessionAsync(empId, sid)) await _refreshService.NotifyLocationChangedAsync(empId);
         }
-
-        var message = GetString(nested, "message", "Message") ?? string.Empty;
-        var reason = "OFFLINE_SYNC";
-        const string prefix = "Tracking session end deferred. Reason:";
-        if (message.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        else if (type.Equals("SESSION_ENDED", StringComparison.OrdinalIgnoreCase))
         {
-            var parsed = message[prefix.Length..].Trim();
-            if (!string.IsNullOrWhiteSpace(parsed)) reason = parsed;
+            var msg = GetString(nested, "message", "Message") ?? string.Empty;
+            var reason = msg.Contains("Reason:") ? msg.Split("Reason:").Last().Trim() : "OFFLINE_SYNC";
+            await geo.EndGpsSessionAsync(empId, sid, reason);
+            await _refreshService.NotifyLocationChangedAsync(empId);
         }
-        await geo.EndGpsSessionAsync(employeeId, sessionId, reason);
-        await _refreshService.NotifyLocationChangedAsync(employeeId);
     }
 
     private async Task ProcessFirebaseTrackingSessionEventAsync(string relativePath, JsonElement? eventData, CancellationToken ct)
     {
-        using var geoScope = _scopeFactory.CreateScope();
-        var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
+        using var scope = _scopeFactory.CreateScope();
+        var geo = scope.ServiceProvider.GetRequiredService<GeoLocationService>();
         if (!eventData.HasValue || eventData.Value.ValueKind != JsonValueKind.Object) return;
-        var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
-        if (employeeId <= 0)
-        {
-            var parts = (relativePath ?? "").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length >= 2) int.TryParse(parts[1], out employeeId);
-        }
-        var sessionText = GetString(eventData.Value, "SessionId", "sessionId");
-        if (employeeId <= 0 || !Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
-        var endedText = GetString(eventData.Value, "EndedAtUtc", "endedAtUtc");
-        var endReason = GetString(eventData.Value, "EndReason", "endReason") ?? "LOGGED_OUT";
 
-        if (string.IsNullOrWhiteSpace(endedText))
+        var empId = GetInt(eventData.Value, "EmployeeId", "employeeId");
+        var sess = GetString(eventData.Value, "SessionId", "sessionId");
+        if (empId <= 0 || !Guid.TryParse(sess, out var sid) || sid == Guid.Empty) return;
+
+        var ended = GetString(eventData.Value, "EndedAtUtc", "endedAtUtc");
+        if (string.IsNullOrWhiteSpace(ended))
         {
-            var started = await geoLocationService.StartGpsSessionAsync(employeeId, sessionId);
-            if (started) await _refreshService.NotifyLocationChangedAsync(employeeId);
-            return;
+            if (await geo.StartGpsSessionAsync(empId, sid)) await _refreshService.NotifyLocationChangedAsync(empId);
         }
-        await geoLocationService.EndGpsSessionAsync(employeeId, sessionId, endReason);
-        await _refreshService.NotifyLocationChangedAsync(employeeId);
+        else
+        {
+            var reason = GetString(eventData.Value, "EndReason", "endReason") ?? "LOGGED_OUT";
+            await geo.EndGpsSessionAsync(empId, sid, reason);
+            await _refreshService.NotifyLocationChangedAsync(empId);
+        }
     }
 
     private async Task ProcessFirebaseLiveLocationAsync(string relativePath, JsonElement? eventData, CancellationToken ct)
     {
-        using var geoScope = _scopeFactory.CreateScope();
-        var geoLocationService = geoScope.ServiceProvider.GetRequiredService<GeoLocationService>();
-
+        using var scope = _scopeFactory.CreateScope();
+        var geo = scope.ServiceProvider.GetRequiredService<GeoLocationService>();
         if (!eventData.HasValue)
         {
-            var key = (relativePath ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
-            if (int.TryParse(key, out var removedEmployeeId))
+            var key = (relativePath ?? "/").Trim('/').Split('/').LastOrDefault();
+            if (int.TryParse(key, out var id))
             {
-                var currentSession = LiveLocationStore.GetSessionId(removedEmployeeId);
-                if (currentSession.HasValue) LiveLocationStore.Remove(removedEmployeeId, currentSession.Value);
-                await _refreshService.NotifyLocationChangedAsync(removedEmployeeId);
+                var sid = LiveLocationStore.GetSessionId(id);
+                if (sid.HasValue) LiveLocationStore.Remove(id, sid.Value);
+                await _refreshService.NotifyLocationChangedAsync(id);
             }
             return;
         }
 
-        if (eventData.Value.ValueKind != JsonValueKind.Object) return;
-        var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
-        if (employeeId <= 0)
-        {
-            var key = (relativePath ?? "/").Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
-            employeeId = int.TryParse(key, out var parsed) ? parsed : 0;
-        }
-        if (employeeId <= 0) return;
-        var sessionText = GetString(eventData.Value, "SessionId", "sessionId");
-        if (!Guid.TryParse(sessionText, out var sessionId) || sessionId == Guid.Empty) return;
+        var empId = GetInt(eventData.Value, "EmployeeId", "employeeId");
+        if (empId <= 0) { var key = (relativePath ?? "/").Trim('/').Split('/').LastOrDefault(); empId = int.TryParse(key, out var id) ? id : 0; }
+        if (empId <= 0) return;
 
-        var latitude = GetDouble(eventData.Value, "Latitude", "latitude");
-        var longitude = GetDouble(eventData.Value, "Longitude", "longitude");
-        var accuracy = Math.Max(0, GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters"));
-        var captured = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
+        var sess = GetString(eventData.Value, "SessionId", "sessionId");
+        if (!Guid.TryParse(sess, out var sid) || sid == Guid.Empty) return;
 
-        if (!double.IsFinite(latitude) || !double.IsFinite(longitude) || latitude is < -90 or > 90 || longitude is < -180 or > 180) return;
+        var lat = GetDouble(eventData.Value, "Latitude", "latitude");
+        var lon = GetDouble(eventData.Value, "Longitude", "longitude");
+        var acc = Math.Max(0, GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters"));
+        var cap = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
 
-        var distanceResult = await geoLocationService.GetDistanceFromOfficeAsync(latitude, longitude);
-        if (!distanceResult.Success) return;
+        if (!double.IsFinite(lat) || !double.IsFinite(lon) || Math.Abs(lat) > 90 || Math.Abs(lon) > 180) return;
 
-        var distance = distanceResult.DistanceMeters;
-        var radius = distanceResult.AllowedRadiusMeters;
-        var within = distanceResult.IsWithinAllowedRadius;
+        var res = await geo.GetDistanceFromOfficeAsync(lat, lon);
+        if (!res.Success) return;
 
-        var accepted = await geoLocationService.UpdateGpsSessionAsync(employeeId, sessionId, latitude, longitude, accuracy, distance, radius, within, captured);
-        if (accepted) await _refreshService.NotifyLocationChangedAsync(employeeId);
+        if (await geo.UpdateGpsSessionAsync(empId, sid, lat, lon, acc, res.DistanceMeters, res.AllowedRadiusMeters, res.IsWithinAllowedRadius, cap))
+            await _refreshService.NotifyLocationChangedAsync(empId);
     }
 
-    private static string? GetString(JsonElement element, params string[] names)
+    private static string? GetString(JsonElement el, params string[] names)
     {
-        foreach (var name in names)
-            if (element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String)
-                return value.GetString();
+        foreach (var n in names) if (el.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String) return v.GetString();
         return null;
     }
 
-    private static int GetInt(JsonElement element, params string[] names)
+    private static int GetInt(JsonElement el, params string[] names)
     {
-        foreach (var name in names)
+        foreach (var n in names)
         {
-            if (!element.TryGetProperty(name, out var value)) continue;
-            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var i)) return i;
-            if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out i)) return i;
+            if (!el.TryGetProperty(n, out var v)) continue;
+            if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)) return i;
+            if (v.ValueKind == JsonValueKind.String && int.TryParse(v.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out i)) return i;
         }
         return 0;
     }
 
-    private static double GetDouble(JsonElement element, params string[] names)
+    private static double GetDouble(JsonElement el, params string[] names)
     {
-        foreach (var name in names)
+        foreach (var n in names)
         {
-            if (!element.TryGetProperty(name, out var value)) continue;
-            if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var d)) return d;
-            if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
+            if (!el.TryGetProperty(n, out var v)) continue;
+            if (v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d)) return d;
+            if (v.ValueKind == JsonValueKind.String && double.TryParse(v.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out d)) return d;
         }
         return 0;
     }
 
-    private static bool GetBool(JsonElement element, params string[] names)
+    private static bool GetBool(JsonElement el, params string[] names)
     {
-        foreach (var name in names)
+        foreach (var n in names)
         {
-            if (!element.TryGetProperty(name, out var value)) continue;
-            if (value.ValueKind == JsonValueKind.True) return true;
-            if (value.ValueKind == JsonValueKind.False) return false;
-            if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var b)) return b;
+            if (!el.TryGetProperty(n, out var v)) continue;
+            if (v.ValueKind == JsonValueKind.True) return true;
+            if (v.ValueKind == JsonValueKind.False) return false;
+            if (v.ValueKind == JsonValueKind.String && bool.TryParse(v.GetString(), out var b)) return b;
         }
         return false;
     }
 
-    private static DateTime? GetDateTime(JsonElement element, params string[] names)
+    private static DateTime? GetDateTime(JsonElement el, params string[] names)
     {
-        var text = GetString(element, names);
+        var text = GetString(el, names);
         return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt) ? dt.ToUniversalTime() : null;
     }
 
     private async Task ProcessFirebaseMobileAuthEventAsync(string relativePath, JsonElement? eventData, CancellationToken ct)
     {
         if (!eventData.HasValue || eventData.Value.ValueKind != JsonValueKind.Object) return;
-        var normalizedPath = (relativePath ?? "/").Trim('/');
-        if (string.IsNullOrWhiteSpace(normalizedPath))
+        var path = (relativePath ?? "/").Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
         {
-            foreach (var employeeNode in eventData.Value.EnumerateObject())
-            {
-                if (employeeNode.Value.ValueKind != JsonValueKind.Object) continue;
-                foreach (var eventNode in employeeNode.Value.EnumerateObject())
-                {
-                    if (eventNode.Value.ValueKind != JsonValueKind.Object) continue;
-                    await ProcessFirebaseMobileAuthEventAsync($"/{employeeNode.Name}/{eventNode.Name}", eventNode.Value.Clone(), ct);
-                }
-            }
+            foreach (var node in eventData.Value.EnumerateObject())
+                if (node.Value.ValueKind == JsonValueKind.Object)
+                    foreach (var evt in node.Value.EnumerateObject())
+                        if (evt.Value.ValueKind == JsonValueKind.Object)
+                            await ProcessFirebaseMobileAuthEventAsync($"/{node.Name}/{evt.Name}", evt.Value.Clone(), ct);
             return;
         }
 
-        var employeeId = GetInt(eventData.Value, "employeeId", "EmployeeId");
-        var eventType = GetString(eventData.Value, "eventType", "EventType") ?? "MOBILE_AUTH_EVENT";
-        var uid = GetString(eventData.Value, "firebaseUid", "FirebaseUid") ?? string.Empty;
-        var email = GetString(eventData.Value, "email", "Email") ?? string.Empty;
-        var deviceId = GetString(eventData.Value, "deviceId", "DeviceId") ?? string.Empty;
+        var empId = GetInt(eventData.Value, "employeeId", "EmployeeId");
+        var type = GetString(eventData.Value, "eventType", "EventType") ?? "MOBILE_AUTH_EVENT";
+        var uid = GetString(eventData.Value, "firebaseUid", "FirebaseUid") ?? "";
+        var email = GetString(eventData.Value, "email", "Email") ?? "";
+        var devId = GetString(eventData.Value, "deviceId", "DeviceId") ?? "";
         var platform = GetString(eventData.Value, "platform", "Platform") ?? "Android";
-        var timestamp = GetDateTime(eventData.Value, "timestamp", "Timestamp") ?? DateTime.UtcNow;
-        var eventId = GetString(eventData.Value, "eventId", "EventId") ?? normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+        var ts = GetDateTime(eventData.Value, "timestamp", "Timestamp") ?? DateTime.UtcNow;
+        var eid = GetString(eventData.Value, "eventId", "EventId") ?? path.Split('/').LastOrDefault();
 
-        if (employeeId <= 0 || string.IsNullOrWhiteSpace(eventId)) return;
+        if (empId <= 0 || string.IsNullOrWhiteSpace(eid)) return;
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var db = await factory.CreateDbContextAsync(ct);
 
-        var marker = $"FirebaseMobileAuth:{eventId}";
+        var marker = $"FirebaseMobileAuth:{eid}";
         if (await db.AuditLogs.AsNoTracking().AnyAsync(x => x.EntityID == marker, ct)) return;
 
-        var details = new Dictionary<string, object?> { ["EventType"] = eventType, ["Platform"] = platform, ["DeviceId"] = deviceId, ["FirebaseUid"] = uid, ["RecordedAtUtc"] = timestamp.ToString("O"), ["EventId"] = eventId };
-        var log = new Payroll.Shared.Data.AuditLog { Timestamp = timestamp, UserID = string.IsNullOrWhiteSpace(uid) ? $"ANDROID_EMPLOYEE_{employeeId}" : uid, UserEmail = string.IsNullOrWhiteSpace(email) ? "Android" : email, ActionType = eventType.Length > 50 ? eventType[..50] : eventType, EntityType = "EmployeeSession", EntityID = marker, Details = JsonSerializer.Serialize(details) };
+        var log = new AuditLog
+        {
+            Timestamp = ts,
+            UserID = string.IsNullOrWhiteSpace(uid) ? $"ANDROID_EMPLOYEE_{empId}" : uid,
+            UserEmail = string.IsNullOrWhiteSpace(email) ? "Android" : email,
+            ActionType = type.Length > 50 ? type[..50] : type,
+            EntityType = "EmployeeSession",
+            EntityID = marker,
+            Details = JsonSerializer.Serialize(new { EventType = type, Platform = platform, DeviceId = devId, FirebaseUid = uid, RecordedAtUtc = ts.ToString("O"), EventId = eid })
+        };
 
         using var syncScope = _firebaseSyncWriteScope.Enter();
         db.AuditLogs.Add(log);
@@ -522,28 +354,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
     private async Task SyncAllTablesAsync(string ownerUid, CancellationToken ct)
     {
-        foreach (var table in Tables)
-        {
-            ct.ThrowIfCancellationRequested();
-            await SyncTableAsync(table.Key, table.Value, ownerUid, ct);
-        }
+        foreach (var table in Tables) { ct.ThrowIfCancellationRequested(); await SyncTableAsync(table.Key, table.Value, ownerUid, ct); }
     }
 
     private async Task<bool> SyncTableAsync(string entityName, string firebaseTable, string ownerUid, CancellationToken ct)
     {
         if (entityName == "EmployeeLocationHistory") return await SyncTrackingHistoryAsync(ownerUid, ct);
         var json = await _firebase.GetOwnerTableAsync(ownerUid, firebaseTable, ct);
-        if (json is null) return false;
+        if (!json.HasValue) return false;
 
         if (json.Value.ValueKind == JsonValueKind.Array)
         {
             var normalized = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            var index = 0;
-            foreach (var item in json.Value.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Null) normalized[index.ToString(CultureInfo.InvariantCulture)] = item.Clone();
-                index++;
-            }
+            var i = 0; foreach (var item in json.Value.EnumerateArray()) { if (item.ValueKind != JsonValueKind.Null) normalized[i.ToString()] = item.Clone(); i++; }
             return await UpsertTableAsync(entityName, JsonSerializer.SerializeToElement(normalized), ct);
         }
 
@@ -554,47 +377,33 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private async Task<bool> SyncTrackingHistoryAsync(string ownerUid, CancellationToken ct)
     {
         var json = await _firebase.GetOwnerTableAsync(ownerUid, "tracking/history", ct);
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return false;
+        if (!json.HasValue || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return false;
 
         var changed = false;
-        async Task ProcessEmployeeNode(string empIdKey, JsonElement employeeNode)
+        async Task ProcessNode(JsonElement node)
         {
-            if (employeeNode.ValueKind != JsonValueKind.Object) return;
+            if (node.ValueKind != JsonValueKind.Object) return;
             await using var scope = _scopeFactory.CreateAsyncScope();
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var db = await factory.CreateDbContextAsync(ct);
-            var entityType = db.Model.GetEntityTypes().First(x => x.ClrType.Name == "EmployeeLocationHistory");
-            var keys = entityType.FindPrimaryKey()?.Properties;
-
-            var empChanged = false;
-            var processedCount = 0;
-            foreach (var eventNode in employeeNode.EnumerateObject())
+            var et = db.Model.GetEntityTypes().First(x => x.ClrType.Name == "EmployeeLocationHistory");
+            var keys = et.FindPrimaryKey()?.Properties;
+            var empChanged = false; var count = 0;
+            foreach (var evt in node.EnumerateObject())
             {
-                if (eventNode.Value.ValueKind != JsonValueKind.Object) continue;
+                if (evt.Value.ValueKind != JsonValueKind.Object) continue;
                 try
                 {
-                    empChanged |= await UpsertRecordAsync(db, entityType, keys!, eventNode.Name, eventNode.Value, ct);
-                    processedCount++;
-                    if (processedCount % 100 == 0)
-                    {
-                        if (empChanged) { using var syncScope = _firebaseSyncWriteScope.Enter(); await db.SaveChangesAsync(ct); empChanged = false; changed = true; }
-                        db.ChangeTracker.Clear();
-                    }
+                    empChanged |= await UpsertRecordAsync(db, et, keys!, evt.Name, evt.Value, ct);
+                    if (++count % 100 == 0) { if (empChanged) { using var syncScope = _firebaseSyncWriteScope.Enter(); await db.SaveChangesAsync(ct); empChanged = false; changed = true; } db.ChangeTracker.Clear(); }
                 }
                 catch { }
             }
             if (empChanged) { changed = true; using var syncScope = _firebaseSyncWriteScope.Enter(); await db.SaveChangesAsync(ct); }
         }
 
-        if (json.Value.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var employeeNode in json.Value.EnumerateObject()) await ProcessEmployeeNode(employeeNode.Name, employeeNode.Value);
-        }
-        else
-        {
-            var index = 0;
-            foreach (var node in json.Value.EnumerateArray()) { await ProcessEmployeeNode(index.ToString(), node); index++; }
-        }
+        if (json.Value.ValueKind == JsonValueKind.Object) foreach (var node in json.Value.EnumerateObject()) await ProcessNode(node.Value);
+        else foreach (var node in json.Value.EnumerateArray()) await ProcessNode(node);
         return changed;
     }
 
@@ -603,24 +412,24 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var db = await factory.CreateDbContextAsync(ct);
-        var entityType = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
-        if (entityType == null) return false;
+        var et = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
+        if (et == null) return false;
         if (string.IsNullOrWhiteSpace(firebaseKey))
         {
-            var rows = await GetEntitySet(db, entityType.ClrType).Cast<object>().ToListAsync(ct);
+            var rows = await GetEntitySet(db, et.ClrType).Cast<object>().ToListAsync(ct);
             if (rows.Count == 0) return false;
             using var tableScope = _firebaseSyncWriteScope.Enter();
             db.RemoveRange(rows); await db.SaveChangesAsync(ct); return true;
         }
-        var keys = entityType.FindPrimaryKey()?.Properties;
+        var keys = et.FindPrimaryKey()?.Properties;
         if (keys == null || keys.Count == 0) return false;
-        var keyParts = firebaseKey.Split('|');
-        if (keyParts.Length < keys.Count) return false;
+        var parts = firebaseKey.Split('|');
+        if (parts.Length < keys.Count) return false;
         var keyValues = new object?[keys.Count];
-        for (var i = 0; i < keys.Count; i++) { keyValues[i] = ConvertStringValue(keyParts[i], keys[i].ClrType); if (keyValues[i] is null) return false; }
-        var existing = await db.FindAsync(entityType.ClrType, keyValues, ct);
+        for (var i = 0; i < keys.Count; i++) { keyValues[i] = ConvertStringValue(parts[i], keys[i].ClrType); if (keyValues[i] == null) return false; }
+        var existing = await db.FindAsync(et.ClrType, keyValues, ct);
         if (existing == null) return false;
-        using var recordScope = _firebaseSyncWriteScope.Enter();
+        using var syncScope = _firebaseSyncWriteScope.Enter();
         db.Remove(existing); await db.SaveChangesAsync(ct); return true;
     }
 
@@ -629,25 +438,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
         await using var db = await factory.CreateDbContextAsync(ct);
-        var entityType = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
-        if (entityType == null) return false;
-        var keys = entityType.FindPrimaryKey()?.Properties;
+        var et = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
+        if (et == null) return false;
+        var keys = et.FindPrimaryKey()?.Properties;
         if (keys == null || keys.Count == 0) return false;
 
-        var changedAny = false;
-        var processedCount = 0;
+        var changedAny = false; var count = 0;
         foreach (var child in table.EnumerateObject())
         {
             if (child.Value.ValueKind != JsonValueKind.Object) continue;
             try
             {
-                changedAny |= await UpsertRecordAsync(db, entityType, keys, child.Name, child.Value, ct);
-                processedCount++;
-                if (processedCount % 100 == 0)
-                {
-                    if (changedAny) { using var syncScope = _firebaseSyncWriteScope.Enter(); await db.SaveChangesAsync(ct); changedAny = false; }
-                    db.ChangeTracker.Clear();
-                }
+                changedAny |= await UpsertRecordAsync(db, et, keys, child.Name, child.Value, ct);
+                if (++count % 100 == 0) { if (changedAny) { using var syncScope = _firebaseSyncWriteScope.Enter(); await db.SaveChangesAsync(ct); changedAny = false; } db.ChangeTracker.Clear(); }
             }
             catch (Exception ex) { _logger.LogDebug(ex, "Skipping Firebase row {Entity}/{Key}.", entityName, child.Name); }
         }
@@ -655,64 +458,44 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         return true;
     }
 
-    private static async Task<bool> UpsertRecordAsync(AppDbContext db, IEntityType entityType, IReadOnlyList<IProperty> keys, string firebaseKey, JsonElement json, CancellationToken ct)
+    private static async Task<bool> UpsertRecordAsync(AppDbContext db, IEntityType et, IReadOnlyList<IProperty> keys, string firebaseKey, JsonElement json, CancellationToken ct)
     {
         var keyParts = firebaseKey.Split('|');
         var keyValues = new object?[keys.Count];
         for (var i = 0; i < keys.Count; i++)
         {
-            var value = FindJsonValue(json, keys[i].Name);
-            if (value is not null) keyValues[i] = ConvertValue(value, keys[i].ClrType);
+            var v = FindJsonValue(json, keys[i].Name);
+            if (v.HasValue) keyValues[i] = ConvertValue(v.Value, keys[i].ClrType);
             else if (keyParts.Length > i) keyValues[i] = ConvertStringValue(keyParts[i], keys[i].ClrType);
-            else keyValues[i] = null;
-
             if (keyValues[i] != null && keyValues[i]!.GetType() != keys[i].ClrType)
-            {
                 try { keyValues[i] = Convert.ChangeType(keyValues[i], Nullable.GetUnderlyingType(keys[i].ClrType) ?? keys[i].ClrType, CultureInfo.InvariantCulture); } catch { }
-            }
         }
 
-        if (keyValues.Any(x => x is null)) return false;
-        var existing = await db.FindAsync(entityType.ClrType, keyValues, ct);
+        if (keyValues.Any(x => x == null)) return false;
+        var existing = await db.FindAsync(et.ClrType, keyValues, ct);
         if (existing == null)
-        {
-            existing = db.ChangeTracker.Entries().Where(e => e.Metadata == entityType).Select(e => e.Entity).FirstOrDefault(e =>
+            existing = db.ChangeTracker.Entries().Where(e => e.Metadata == et).Select(e => e.Entity).FirstOrDefault(e =>
             {
-                for (int i = 0; i < keys.Count; i++)
-                {
-                    var val = db.Entry(e).Property(keys[i].Name).CurrentValue;
-                    if (!AreKeysEqual(val, keyValues[i])) return false;
-                }
+                for (int i = 0; i < keys.Count; i++) { var val = db.Entry(e).Property(keys[i].Name).CurrentValue; if (!AreKeysEqual(val, keyValues[i])) return false; }
                 return true;
             });
-        }
 
-        var target = existing ?? Activator.CreateInstance(entityType.ClrType);
+        var target = existing ?? Activator.CreateInstance(et.ClrType);
         if (target == null) return false;
-        if (existing == null)
-        {
-            for (int i = 0; i < keys.Count; i++) if (keys[i].PropertyInfo != null) keys[i].PropertyInfo.SetValue(target, keyValues[i]);
-        }
+        if (existing == null) for (int i = 0; i < keys.Count; i++) if (keys[i].PropertyInfo != null) keys[i].PropertyInfo.SetValue(target, keyValues[i]);
 
         var changed = false;
-        foreach (var property in entityType.GetProperties())
+        foreach (var prop in et.GetProperties())
         {
-            if (property.IsShadowProperty() || property.PropertyInfo == null) continue;
-            if (keys.Any(k => k.Name == property.Name)) continue;
-            var value = FindJsonValue(json, property.Name);
-            if (value is null) continue;
-            var converted = ConvertValue(value, property.ClrType);
-            if (entityType.ClrType.Name == "Employee" && property.Name == "StandardBreakMinutes")
-            {
-                if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var hours)) converted = (int)Math.Round(hours * 60d);
-            }
-            if (entityType.ClrType.Name == "Employee" && property.Name == "IsDeleted")
-            {
-                if (converted is bool isActuallyActive) converted = !isActuallyActive;
-            }
-            if (converted is null && Nullable.GetUnderlyingType(property.ClrType) == null && property.ClrType.IsValueType) continue;
-            var current = property.PropertyInfo.GetValue(target);
-            if (!Equals(current, converted)) { property.PropertyInfo.SetValue(target, converted); changed = true; }
+            if (prop.IsShadowProperty() || prop.PropertyInfo == null || keys.Any(k => k.Name == prop.Name)) continue;
+            var v = FindJsonValue(json, prop.Name);
+            if (!v.HasValue) continue;
+            var conv = ConvertValue(v.Value, prop.ClrType);
+            if (et.ClrType.Name == "Employee" && prop.Name == "StandardBreakMinutes" && v.Value.ValueKind == JsonValueKind.Number && v.Value.TryGetDouble(out var h)) conv = (int)Math.Round(h * 60d);
+            if (et.ClrType.Name == "Employee" && prop.Name == "IsDeleted" && conv is bool active) conv = !active;
+            if (conv == null && Nullable.GetUnderlyingType(prop.ClrType) == null && prop.ClrType.IsValueType) continue;
+            var cur = prop.PropertyInfo.GetValue(target);
+            if (!Equals(cur, conv)) { prop.PropertyInfo.SetValue(target, conv); changed = true; }
         }
 
         if (existing == null && changed) db.Add(target);
@@ -720,134 +503,85 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         return changed;
     }
 
-    private static JsonElement? FindJsonValue(JsonElement json, string propertyName)
+    private static JsonElement? FindJsonValue(JsonElement json, string propName)
     {
-        var wanted = Normalize(propertyName);
-        foreach (var property in json.EnumerateObject())
-        {
-            if (Normalize(property.Name) == wanted) return property.Value;
-            if (AliasMatches(propertyName, property.Name)) return property.Value;
-        }
+        var wanted = Normalize(propName);
+        foreach (var p in json.EnumerateObject()) { if (Normalize(p.Name) == wanted || AliasMatches(propName, p.Name)) return p.Value; }
         return null;
     }
 
-    private static bool AliasMatches(string clrName, string firebaseName)
-        => (Normalize(clrName), Normalize(firebaseName)) switch
-        {
-            ("logid", "attendanceid") => true,
-            ("leaverequestid", "id") => true,
-            ("regularizationid", "id") => true,
-            ("employeeid", "staffid") => true,
-            ("monthlysalary", "salaryrate") => true,
-            ("standardbreakminutes", "breakhours") => true,
-            ("payrolltypeoverride", "salarytype") => true,
-            ("terminationdate", "terminatedate") => true,
-            ("isdeleted", "isactive") => true,
-            ("shiftstarttime", "shiftstart") => true,
-            ("shiftendtime", "shiftend") => true,
-            ("hiredate", "hiredate") => true,
-            ("dob", "dob") => true,
-            ("standardhours", "standardhours") => true,
-            ("otrule", "otrule") => true,
-            ("otflatrate", "otflatrate") => true,
-            ("compoffdayofweek", "compoffdayofweek") => true,
-            _ => false
-        };
-
-    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-
-    private static IQueryable GetEntitySet(DbContext db, Type entityType)
+    private static bool AliasMatches(string clr, string fb) => (Normalize(clr), Normalize(fb)) switch
     {
-        var setMethod = typeof(DbContext).GetMethods().First(m => m.Name == nameof(DbContext.Set) && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 1 && m.GetParameters().Length == 0);
-        return (IQueryable)setMethod.MakeGenericMethod(entityType).Invoke(db, null)!;
+        ("logid", "attendanceid") => true, ("leaverequestid", "id") => true, ("regularizationid", "id") => true,
+        ("employeeid", "staffid") => true, ("monthlysalary", "salaryrate") => true, ("standardbreakminutes", "breakhours") => true,
+        ("payrolltypeoverride", "salarytype") => true, ("terminationdate", "terminatedate") => true, ("isdeleted", "isactive") => true,
+        _ => false
+    };
+
+    private static string Normalize(string v) => new(v.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static IQueryable GetEntitySet(DbContext db, Type et)
+    {
+        var method = typeof(DbContext).GetMethods().First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetGenericArguments().Length == 1 && m.GetParameters().Length == 0);
+        return (IQueryable)method.MakeGenericMethod(et).Invoke(db, null)!;
     }
 
-    private static object? ConvertStringValue(string value, Type targetType)
+    private static object? ConvertStringValue(string v, Type target)
     {
-        var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (string.IsNullOrWhiteSpace(value)) return null;
+        var type = Nullable.GetUnderlyingType(target) ?? target;
+        if (string.IsNullOrWhiteSpace(v)) return null;
         try
         {
-            if (type == typeof(string)) return value;
-            if (type == typeof(int)) return int.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(long)) return long.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(decimal)) return decimal.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(double)) return double.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(float)) return float.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(bool)) return bool.Parse(value);
-            if (type == typeof(Guid)) return Guid.Parse(value);
-            if (type == typeof(DateTime)) return DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-            if (type == typeof(DateTimeOffset)) return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
-            if (type == typeof(DateOnly)) return DateOnly.Parse(value, CultureInfo.InvariantCulture);
-            if (type == typeof(TimeOnly)) return TimeOnly.Parse(value, CultureInfo.InvariantCulture);
-            if (type.IsEnum) return Enum.Parse(type, value, true);
-            return value;
+            if (type == typeof(string)) return v; if (type == typeof(int)) return int.Parse(v, CultureInfo.InvariantCulture);
+            if (type == typeof(long)) return long.Parse(v, CultureInfo.InvariantCulture); if (type == typeof(decimal)) return decimal.Parse(v, CultureInfo.InvariantCulture);
+            if (type == typeof(double)) return double.Parse(v, CultureInfo.InvariantCulture); if (type == typeof(bool)) return bool.Parse(v);
+            if (type == typeof(Guid)) return Guid.Parse(v); if (type == typeof(DateTime)) return DateTime.Parse(v, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            if (type.IsEnum) return Enum.Parse(type, v, true); return v;
         }
         catch { return null; }
     }
 
-    private static object? ConvertValue(JsonElement? value, Type targetType)
+    private static object? ConvertValue(JsonElement v, Type target)
     {
-        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
-        var type = Nullable.GetUnderlyingType(targetType) ?? targetType;
+        if (v.ValueKind == JsonValueKind.Null) return null;
+        var type = Nullable.GetUnderlyingType(target) ?? target;
         try
         {
-            if (type == typeof(string)) return value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
-            if (type == typeof(int)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt32(out var i)) return i; var text = value.Value.ToString(); if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out i)) return i; if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (int)Math.Round(d); return 0; }
-            if (type == typeof(long)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var l)) return l; var text = value.Value.ToString(); if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out l)) return l; if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (long)Math.Round(d); return 0L; }
-            if (type == typeof(decimal)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDecimal(out var dec)) return dec; var text = value.Value.ToString(); if (decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out dec)) return dec; return 0m; }
-            if (type == typeof(double)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var dbl)) return dbl; var text = value.Value.ToString(); if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out dbl)) return dbl; return 0.0; }
-            if (type == typeof(float)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetSingle(out var flt)) return flt; var text = value.Value.ToString(); if (float.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out flt)) return flt; return 0.0f; }
-            if (type == typeof(bool)) { if (value.Value.ValueKind == JsonValueKind.True) return true; if (value.Value.ValueKind == JsonValueKind.False) return false; var text = value.Value.ToString(); if (bool.TryParse(text, out var b)) return b; if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) return n != 0; return false; }
-            if (type == typeof(Guid)) return Guid.Parse(value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString()! : value.Value.ToString());
-            if (type == typeof(DateTime)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime; var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs)) return DateTimeOffset.FromUnixTimeMilliseconds(pMs).UtcDateTime; return DateTime.Parse(text!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind); }
-            if (type == typeof(DateTimeOffset)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms); var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs)) return DateTimeOffset.FromUnixTimeMilliseconds(pMs); return DateTimeOffset.Parse(text!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind); }
-            if (type == typeof(DateOnly)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var ms)) return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(ms).DateTime); var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs)) return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(pMs).DateTime); return DateOnly.Parse(text!, CultureInfo.InvariantCulture); }
-            if (type == typeof(TimeOnly)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var ms)) return TimeOnly.FromTimeSpan(TimeSpan.FromMilliseconds(ms)); var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); return TimeOnly.Parse(text!, CultureInfo.InvariantCulture); }
-            if (type == typeof(TimeSpan)) { if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetDouble(out var ms)) return TimeSpan.FromMilliseconds(ms); var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var pMs)) return TimeSpan.FromMilliseconds(pMs); return TimeSpan.Parse(text!, CultureInfo.InvariantCulture); }
-            if (type.IsEnum) { var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString(); return Enum.Parse(type, text!, true); }
-            return JsonSerializer.Deserialize(value.Value.GetRawText(), type);
+            if (type == typeof(string)) return v.ValueKind == JsonValueKind.String ? v.GetString() : v.ToString();
+            if (type == typeof(int)) { if (v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)) return i; var s = v.ToString(); if (int.TryParse(s, out i)) return i; if (double.TryParse(s, out var d)) return (int)Math.Round(d); return 0; }
+            if (type == typeof(long)) { if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var l)) return l; var s = v.ToString(); if (long.TryParse(s, out l)) return l; if (double.TryParse(s, out var d)) return (long)Math.Round(d); return 0L; }
+            if (type == typeof(bool)) { if (v.ValueKind == JsonValueKind.True) return true; if (v.ValueKind == JsonValueKind.False) return false; var s = v.ToString(); if (bool.TryParse(s, out var b)) return b; return false; }
+            if (type == typeof(DateTime)) { if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var ms)) return DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime; var s = v.ToString(); if (long.TryParse(s, out var pms)) return DateTimeOffset.FromUnixTimeMilliseconds(pms).UtcDateTime; if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt)) return dt.ToUniversalTime(); return DateTime.MinValue; }
+            if (type.IsEnum) return Enum.Parse(type, v.ToString(), true);
+            return JsonSerializer.Deserialize(v.GetRawText(), type);
         }
         catch { return null; }
     }
 
     private static bool AreKeysEqual(object? a, object? b)
     {
-        if (a == null && b == null) return true;
-        if (a == null || b == null) return false;
-        if (Equals(a, b)) return true;
-        if (IsNumeric(a) && IsNumeric(b))
-        {
-            try { return Convert.ToInt64(a) == Convert.ToInt64(b); }
-            catch { try { return Convert.ToDouble(a) == Convert.ToDouble(b); } catch { } }
-        }
+        if (a == null && b == null) return true; if (a == null || b == null) return false; if (Equals(a, b)) return true;
+        if (IsNumeric(a) && IsNumeric(b)) try { return Convert.ToInt64(a) == Convert.ToInt64(b); } catch { try { return Convert.ToDouble(a) == Convert.ToDouble(b); } catch { } }
         return string.Equals(a.ToString(), b.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsNumeric(object obj)
+    private static bool IsNumeric(object? o)
     {
-        if (obj == null) return false;
-        var type = obj.GetType();
-        return type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(byte) ||
-               type == typeof(uint) || type == typeof(ulong) || type == typeof(ushort) || type == typeof(sbyte) ||
-               type == typeof(float) || type == typeof(double) || type == typeof(decimal);
+        if (o == null) return false; var t = o.GetType();
+        return t == typeof(int) || t == typeof(long) || t == typeof(short) || t == typeof(byte) || t == typeof(uint) || t == typeof(ulong) || t == typeof(float) || t == typeof(double) || t == typeof(decimal);
     }
 
     private readonly record struct FirebasePathTarget(string EntityName, string? RecordKey);
-
-    private static FirebasePathTarget? ParseFirebasePath(string relativePath)
+    private static FirebasePathTarget? ParseFirebasePath(string path)
     {
-        var normalized = (relativePath ?? "/").Trim('/');
-        if (string.IsNullOrWhiteSpace(normalized)) return null;
-        var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var firebaseTable = parts[0];
-        if (firebaseTable.Equals("tracking", StringComparison.OrdinalIgnoreCase) && parts.Length >= 4 && parts[1].Equals("history", StringComparison.OrdinalIgnoreCase)) return new FirebasePathTarget("TrackingHistory", parts[3]);
-        if (firebaseTable.Equals("tracking", StringComparison.OrdinalIgnoreCase)) return new FirebasePathTarget("TrackingHistory", null);
-        if (firebaseTable.Equals("mobile_auth_events", StringComparison.OrdinalIgnoreCase)) return new FirebasePathTarget("MobileAuthEvent", parts.Length >= 3 ? parts[2] : null);
-        var entity = Tables.FirstOrDefault(x => string.Equals(x.Value, firebaseTable, StringComparison.Ordinal));
-        if (string.IsNullOrWhiteSpace(entity.Key)) return null;
-        if (parts.Length == 1) return new FirebasePathTarget(entity.Key, null);
+        var norm = (path ?? "/").Trim('/'); if (string.IsNullOrWhiteSpace(norm)) return null;
+        var parts = norm.Split('/'); var tbl = parts[0];
+        if (tbl.Equals("tracking", StringComparison.OrdinalIgnoreCase)) return new FirebasePathTarget("TrackingHistory", parts.Length >= 4 ? parts[3] : null);
+        if (tbl.Equals("mobile_auth_events", StringComparison.OrdinalIgnoreCase)) return new FirebasePathTarget("MobileAuthEvent", parts.Length >= 3 ? parts[2] : null);
+        var ent = Tables.FirstOrDefault(x => string.Equals(x.Value, tbl, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(ent.Key)) return null;
+        if (parts.Length == 1) return new FirebasePathTarget(ent.Key, null);
         var key = Uri.UnescapeDataString(parts[1]).Replace("%2E", ".").Replace("%23", "#").Replace("%24", "$").Replace("%5B", "[").Replace("%5D", "]").Replace("%2F", "/");
-        return new FirebasePathTarget(entity.Key, key);
+        return new FirebasePathTarget(ent.Key, key);
     }
 }

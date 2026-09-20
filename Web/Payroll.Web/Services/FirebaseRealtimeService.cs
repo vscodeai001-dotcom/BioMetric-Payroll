@@ -1295,8 +1295,8 @@ public sealed class FirebaseRealtimeService
         if (value is string s)
         {
             if (long.TryParse(s, out var l)) return l;
-            if (DateTimeOffset.TryParse(s, out var parsed)) return parsed.ToUnixTimeMilliseconds();
-            if (DateOnly.TryParse(s, out var date))
+            if (DateTimeOffset.TryParse(text!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed)) return parsed.ToUnixTimeMilliseconds();
+            if (DateOnly.TryParse(text!, CultureInfo.InvariantCulture, out var date))
             {
                 if (secondary is TimeOnly time)
                     return new DateTimeOffset(date.ToDateTime(time, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
@@ -1304,10 +1304,12 @@ public sealed class FirebaseRealtimeService
                     return new DateTimeOffset(date.ToDateTime(secondaryTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
                 return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
             }
-            if (secondary is DateOnly secondaryDate && TimeOnly.TryParse(s, out var parsedTime))
+            if (secondary is DateOnly secondaryDate && TimeOnly.TryParse(text!, out var parsedTime))
                 return new DateTimeOffset(secondaryDate.ToDateTime(parsedTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-            if (secondary is string secondaryDateText && DateOnly.TryParse(secondaryDateText, out var parsedDate) && TimeOnly.TryParse(s, out var parsedTime2))
-                return new DateTimeOffset(parsedDate.ToDateTime(parsedTime2, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            if (secondary is string secondaryDateText && DateOnly.TryParse(secondaryDateText, out var pd) && TimeOnly.TryParse(text!, out var pt))
+                return new DateTimeOffset(pd.ToDateTime(pt, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+
+            return null;
         }
         return value;
     }
