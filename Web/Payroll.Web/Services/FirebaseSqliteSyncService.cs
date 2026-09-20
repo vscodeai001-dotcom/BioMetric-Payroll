@@ -961,60 +961,72 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // problematic/generated-key record cannot collide with another tracked
         // LeaveRequest instance.
 
-        if (entityName.Equals("LeaveRequest", StringComparison.Ordinal))
+        if (entityName.Equals("LeaveRequest", StringComparison.Ordinal) ||
+            entityName.Equals("AuditLog", StringComparison.Ordinal))
         {
-            var leaveRequestChanged = false;
+            var isolatedEntityChanged = false;
+            var isolatedEntityName = entityName;
 
-            foreach (var leaveChild in table.EnumerateObject())
+
+            foreach (var isolatedChild in table.EnumerateObject())
             {
-                if (leaveChild.Value.ValueKind != JsonValueKind.Object)
+                if (isolatedChild.Value.ValueKind != JsonValueKind.Object)
                     continue;
 
                 try
                 {
-                    await using var leaveScope =
+                    // IMPORTANT:
+                    // LeaveRequest and AuditLog both use generated/identity
+                    // primary-key metadata in the shared EF model while
+                    // Firebase supplies the authoritative record key.
+                    //
+                    // A separate DbContext per Firebase record prevents EF's
+                    // identity map/store-generated-value propagation from
+                    // making one record collide with another tracked instance.
+                    await using var isolatedScope =
                         _scopeFactory.CreateAsyncScope();
 
-                    var leaveFactory =
-                        leaveScope.ServiceProvider
+                    var isolatedFactory =
+                        isolatedScope.ServiceProvider
                             .GetRequiredService<IDbContextFactory<AppDbContext>>();
 
-                    await using var leaveDb =
-                        await leaveFactory.CreateDbContextAsync(ct);
+                    await using var isolatedDb =
+                        await isolatedFactory.CreateDbContextAsync(ct);
 
-                    var leaveEntityType =
-                        leaveDb.Model.GetEntityTypes()
-                            .FirstOrDefault(x => x.ClrType.Name == entityName);
+                    var isolatedEntityType =
+                        isolatedDb.Model.GetEntityTypes()
+                            .FirstOrDefault(x => x.ClrType.Name == isolatedEntityName);
 
-                    var leaveKeys =
-                        leaveEntityType?.FindPrimaryKey()?.Properties;
+                    var isolatedKeys =
+                        isolatedEntityType?.FindPrimaryKey()?.Properties;
 
-                    if (leaveEntityType == null ||
-                        leaveKeys == null ||
-                        leaveKeys.Count == 0)
+                    if (isolatedEntityType == null ||
+                        isolatedKeys == null ||
+                        isolatedKeys.Count == 0)
                     {
                         _logger.LogWarning(
-                            "Firebase LeaveRequest sync skipped because EF entity/key metadata was not found.");
+                            "Firebase {Entity} sync skipped because EF entity/key metadata was not found.",
+                            isolatedEntityName);
                         continue;
                     }
 
                     var rowChanged = await UpsertRecordAsync(
-                        leaveDb,
-                        leaveEntityType,
-                        leaveKeys,
-                        leaveChild.Name,
-                        leaveChild.Value,
+                        isolatedDb,
+                        isolatedEntityType,
+                        isolatedKeys,
+                        isolatedChild.Name,
+                        isolatedChild.Value,
                         ct);
 
                     if (!rowChanged)
                         continue;
 
-                    using var leaveSyncScope =
+                    using var isolatedSyncScope =
                         _firebaseSyncWriteScope.Enter();
 
-                    await leaveDb.SaveChangesAsync(ct);
+                    await isolatedDb.SaveChangesAsync(ct);
 
-                    leaveRequestChanged = true;
+                    isolatedEntityChanged = true;
                 }
                 catch (OperationCanceledException)
                     when (ct.IsCancellationRequested)
@@ -1023,16 +1035,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 }
                 catch (Exception ex)
                 {
-                    // A single invalid/duplicate LeaveRequest must never stop
-                    // Firebase synchronization or terminate the Web host.
+                    // A single invalid/duplicate identity-key record must
+                    // never terminate the Firebase synchronization service.
                     _logger.LogError(
                         ex,
-                        "Firebase LeaveRequest projection failed for row {Key}; continuing with remaining leave records.",
-                        leaveChild.Name);
+                        "Firebase {Entity} projection failed for row {Key}; continuing with remaining records.",
+                        isolatedEntityName,
+                        isolatedChild.Name);
                 }
             }
 
-            return leaveRequestChanged;
+            return isolatedEntityChanged;
         }
 
         // ------------------------------------------------------------
@@ -1116,10 +1129,31 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (changedAny)
         {
-            using var finalSyncScope =
-                _firebaseSyncWriteScope.Enter();
+            try
+            {
+                using var finalSyncScope =
+                    _firebaseSyncWriteScope.Enter();
 
-            await tableDb.SaveChangesAsync(ct);
+                await tableDb.SaveChangesAsync(ct);
+            }
+            catch (OperationCanceledException)
+                when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Do not allow one Firebase table's database projection
+                // failure to terminate the Web host. The affected batch is
+                // discarded from this context and the realtime stream remains
+                // available for the next change/reconnect.
+                _logger.LogError(
+                    ex,
+                    "Firebase table final SaveChanges failed for {Entity}; clearing the failed EF batch and continuing.",
+                    entityName);
+
+                tableDb.ChangeTracker.Clear();
+            }
         }
 
         return true;
