@@ -30,6 +30,9 @@ class SignalRManager @Inject constructor(
     private var applicationJob: Job? = null
     private var connectionJob: Job? = null
     private var reconciliationJob: Job? = null
+    // Firebase Auth can restore before the persisted owner UID is available.
+    // Retry startup briefly so Admin realtime does not require logout/login.
+    private var startRetryJob: Job? = null
     private var locationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
 
@@ -91,7 +94,14 @@ class SignalRManager @Inject constructor(
         // above will call start() again as soon as the user is available.
         if (!sessionStore.isLoggedIn() && !firebaseSync.isAuthenticated()) return
 
-        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() }
+        if (ownerUid == null) {
+            scheduleStartRetry()
+            return
+        }
+
+        startRetryJob?.cancel()
+        startRetryJob = null
         if (applicationJob?.isActive == true && activeOwnerUid == ownerUid) return
         if (activeOwnerUid != null && activeOwnerUid != ownerUid) stop()
 
@@ -353,6 +363,24 @@ class SignalRManager @Inject constructor(
         }
     }
 
+    private fun scheduleStartRetry() {
+        if (startRetryJob?.isActive == true) return
+
+        startRetryJob = managerScope.launch {
+            repeat(60) {
+                delay(500L)
+
+                if (!firebaseSync.isAuthenticated()) return@launch
+
+                val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() }
+                if (ownerUid != null) {
+                    start()
+                    return@launch
+                }
+            }
+        }
+    }
+
     /**
      * Immediately re-read the authoritative owner-scoped live-location node.
      * Firebase listeners normally reconnect automatically, but after a device
@@ -604,6 +632,8 @@ class SignalRManager @Inject constructor(
         val ownerUid = activeOwnerUid
         reconciliationJob?.cancel()
         reconciliationJob = null
+        startRetryJob?.cancel()
+        startRetryJob = null
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
 

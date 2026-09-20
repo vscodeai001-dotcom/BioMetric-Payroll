@@ -3587,7 +3587,7 @@ window.updateAdminLiveStaffMap =
             parsedOfficeLng === 0
         ) {
             console.warn(
-                "Admin live map: valid office GPS coordinates are not configured."
+                "Admin live map: office GPS coordinates are not available yet; waiting for Company Settings."
             );
             return;
         }
