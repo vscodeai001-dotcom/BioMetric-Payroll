@@ -42,7 +42,7 @@ class LauncherActivity : AppCompatActivity() {
                 // If it's an Admin, we'll try to let them through to LoginActivity in "Unlock" mode
                 // rather than clearing everything immediately. LoginActivity will handle the rest.
                 val role = sessionStore.userRole()
-                if (role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name) {
+                if (role == UserRole.Admin.name || role == UserRole.SuperAdmin.name) {
                     Log.w("Launcher", "Admin session validation failed, but letting LoginActivity handle unlock.")
                     openLogin()
                     return@launch
@@ -78,10 +78,10 @@ class LauncherActivity : AppCompatActivity() {
             }
 
             val destination = if (
-                validation.role == UserRole.ADMIN.name || validation.role == UserRole.SUPER_ADMIN.name
+                validation.role == UserRole.Admin.name || validation.role == UserRole.SuperAdmin.name
             ) MainActivity::class.java else EmployeeHomeActivity::class.java
 
-            if (validation.role == UserRole.STAFF.name) {
+            if (validation.role == UserRole.Employee.name) {
                 sharedViewModel.warmUpDashboard()
             }
 

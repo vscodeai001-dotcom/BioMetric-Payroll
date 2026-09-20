@@ -40,7 +40,7 @@ class FirebaseAuthSecurityGate @Inject constructor(
         // If they are an Admin and we have a local session, we'll try to 
         // proceed even if Firebase user is null (e.g. initialization delay).
         val localRole = sessionStore.userRole()
-        val isAdmin = localRole == UserRole.ADMIN.name || localRole == UserRole.SUPER_ADMIN.name
+        val isAdmin = localRole == UserRole.Admin.name || localRole == UserRole.SuperAdmin.name
 
         if (user == null) {
             if (isAdmin && sessionLoggedIn) {
@@ -74,9 +74,9 @@ class FirebaseAuthSecurityGate @Inject constructor(
         val rawRole = claims["role"]?.toString().orEmpty().trim()
         val isCanonicalSuperAdmin = user.email.equals(CANONICAL_SUPER_ADMIN_EMAIL, ignoreCase = true)
         val role = when {
-            isCanonicalSuperAdmin || rawRole.equals("SuperAdmin", true) || rawRole.equals(UserRole.SUPER_ADMIN.name, true) -> UserRole.SUPER_ADMIN.name
-            rawRole.equals("Admin", true) || rawRole.equals(UserRole.ADMIN.name, true) -> UserRole.ADMIN.name
-            rawRole.equals("Employee", true) || rawRole.equals("Staff", true) || rawRole.equals(UserRole.STAFF.name, true) -> UserRole.STAFF.name
+            isCanonicalSuperAdmin || rawRole.equals("SuperAdmin", true) || rawRole.equals(UserRole.SuperAdmin.name, true) -> UserRole.SuperAdmin.name
+            rawRole.equals("Admin", true) || rawRole.equals(UserRole.Admin.name, true) -> UserRole.Admin.name
+            rawRole.equals("Employee", true) || rawRole.equals("Staff", true) || rawRole.equals(UserRole.Employee.name, true) -> UserRole.Employee.name
             else -> ""
         }
 
@@ -85,14 +85,14 @@ class FirebaseAuthSecurityGate @Inject constructor(
         }
 
         val ownerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
-            ?: if (role == UserRole.SUPER_ADMIN.name && isCanonicalSuperAdmin) "biometricpayroll" else ""
+            ?: if (role == UserRole.SuperAdmin.name && isCanonicalSuperAdmin) "biometricpayroll" else ""
 
         if (ownerUid.isBlank()) {
             return Result(false, message = "Firebase account is missing the required owner_uid claim.")
         }
 
         val employeeId = claims["employee_id"]?.toString()?.toIntOrNull() ?: 0
-        if (role == UserRole.STAFF.name) {
+        if (role == UserRole.Employee.name) {
             if (employeeId <= 0) {
                 return Result(false, message = "Employee Firebase account is missing employee_id provisioning.")
             }

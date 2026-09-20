@@ -19,11 +19,11 @@ class AuthRepository @Inject constructor(
                 // Normalize role
                 val rawRole = res.role ?: ""
                 val role = when {
-                    rawRole.contains("Super", true) -> UserRole.SUPER_ADMIN.name
-                    rawRole.contains("Admin", true) -> UserRole.ADMIN.name
-                    rawRole.contains("Employee", true) -> UserRole.STAFF.name
-                    res.name.contains("Admin", true) -> UserRole.ADMIN.name
-                    else -> UserRole.STAFF.name
+                    rawRole.contains("Super", true) -> UserRole.SuperAdmin.name
+                    rawRole.contains("Admin", true) -> UserRole.Admin.name
+                    rawRole.contains("Employee", true) -> UserRole.Employee.name
+                    res.name.contains("Admin", true) -> UserRole.Admin.name
+                    else -> UserRole.Employee.name
                 }
 
                 return UserProfile(

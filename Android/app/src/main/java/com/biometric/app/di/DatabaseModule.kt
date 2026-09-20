@@ -114,6 +114,9 @@ object DatabaseModule {
     fun provideLocalFbpComponentDao(database: AppDatabase) = database.localFbpComponentDao()
 
     @Provides
+    fun provideLocalSettingsDao(database: AppDatabase) = database.localSettingsDao()
+
+    @Provides
     @Singleton
     fun provideMainRepository(
         @ApplicationContext context: Context,
@@ -132,14 +135,16 @@ object DatabaseModule {
         localResignationRequestDao: LocalResignationRequestDao,
         localDailySummaryDao: LocalDailySummaryDao,
         localShiftScheduleDao: LocalShiftScheduleDao,
-        localPayrollHistoryDao: LocalPayrollHistoryDao
+        localPayrollHistoryDao: LocalPayrollHistoryDao,
+        localSettingsDao: LocalSettingsDao
     ): MainRepository {
         return MainRepository(
             context, firebaseSync, firebaseRoomHydrator, dataSafety,
             localShopDao, localEmployeeDao, localAttendanceDao,
             advanceDao, historyDao, closedDayDao, regularizationDao,
             localAttendancePunchDao, localLeaveRequestDao, localResignationRequestDao,
-            localDailySummaryDao, localShiftScheduleDao, localPayrollHistoryDao
+            localDailySummaryDao, localShiftScheduleDao, localPayrollHistoryDao,
+            localSettingsDao
         )
     }
 }

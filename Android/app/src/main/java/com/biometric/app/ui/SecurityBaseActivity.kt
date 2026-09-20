@@ -111,7 +111,7 @@ abstract class SecurityBaseActivity : AppCompatActivity() {
     private fun startEmployeeLifecycleMonitorIfNeeded() {
         val role = getSharedPreferences(AUTH_PREFS, MODE_PRIVATE)
             .getString("user_role", "").orEmpty()
-        if (role != UserRole.STAFF.name || !sessionStore.isLoggedIn()) return
+        if (role != UserRole.Employee.name || !sessionStore.isLoggedIn()) return
 
         employeeLifecycleMonitor.start(lifecycleScope) { reason ->
             runOnUiThread {

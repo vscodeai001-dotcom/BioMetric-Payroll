@@ -1509,8 +1509,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun applyRolePermissions() {
-        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", UserRole.STAFF.name)
-        val isSuperAdmin = role == UserRole.SUPER_ADMIN.name
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", UserRole.Employee.name)
+        val isSuperAdmin = role == UserRole.SuperAdmin.name
 
         lifecycleScope.launch {
             viewModel.featureSettings.collectLatest { settings ->

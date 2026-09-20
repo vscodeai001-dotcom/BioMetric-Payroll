@@ -12,6 +12,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.biometric.app.R
+import com.biometric.app.data.entity.UserRole
 import com.biometric.app.databinding.ActivityRecycleBinBinding
 import com.biometric.app.ui.adapter.RecycleBinAdapter
 import com.biometric.app.ui.viewmodel.RecycleBinViewModel
@@ -42,8 +43,8 @@ class RecycleBinActivity : MotionBaseActivity() {
         
         applyWindowInsets(binding.clRecycleBinRoot, findViewById(R.id.appBar))
 
-        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", "STAFF")
-        if (role != com.biometric.app.data.entity.UserRole.SUPER_ADMIN.name) {
+        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", UserRole.Employee.name)
+        if (role != UserRole.SuperAdmin.name) {
             Toast.makeText(this, "Recycle Bin is restricted to SuperAdmin 🛡️", Toast.LENGTH_LONG).show()
             finish()
             return

@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.entity.UserProfile
+import com.biometric.app.data.entity.UserRole
 import com.biometric.app.databinding.ActivitySuperAdminManagementBinding
 import com.biometric.app.domain.BrandingManager
 import com.biometric.app.domain.FeatureManager
@@ -54,10 +55,10 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
 
         // Direct-launch protection: this screen changes another user's feature/branding profile.
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", com.biometric.app.data.entity.UserRole.STAFF.name)
+            .getString("user_role", UserRole.Employee.name)
             ?.trim()
             ?.uppercase()
-        if (role != com.biometric.app.data.entity.UserRole.SUPER_ADMIN.name) {
+        if (role != UserRole.SuperAdmin.name.uppercase()) {
             Toast.makeText(this, "SuperAdmin Management is restricted to SuperAdmin 🛡️", Toast.LENGTH_LONG).show()
             finish()
             return

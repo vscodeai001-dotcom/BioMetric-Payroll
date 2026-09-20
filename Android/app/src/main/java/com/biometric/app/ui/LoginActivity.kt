@@ -145,7 +145,7 @@ class LoginActivity : MotionBaseActivity() {
         // For Admins, we trust the local session even if Firebase briefly 
         // reports null user, and we'll attempt recovery in proceedToMain.
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("user_role", "")
-        val isAdmin = role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name
+        val isAdmin = role == UserRole.Admin.name || role == UserRole.SuperAdmin.name
         
         val loggedIn = if (isAdmin) sessionLoggedIn else (sessionLoggedIn && firebaseUser != null)
         
@@ -340,17 +340,17 @@ class LoginActivity : MotionBaseActivity() {
             val role = when {
                 isCanonicalSuperAdmin ||
                         rawRole.equals("SuperAdmin", ignoreCase = true) ||
-                        rawRole.equals(UserRole.SUPER_ADMIN.name, ignoreCase = true) ->
-                    UserRole.SUPER_ADMIN.name
+                        rawRole.equals(UserRole.SuperAdmin.name, ignoreCase = true) ->
+                    UserRole.SuperAdmin.name
 
                 rawRole.equals("Admin", ignoreCase = true) ||
-                        rawRole.equals(UserRole.ADMIN.name, ignoreCase = true) ->
-                    UserRole.ADMIN.name
+                        rawRole.equals(UserRole.Admin.name, ignoreCase = true) ->
+                    UserRole.Admin.name
 
                 rawRole.equals("Employee", ignoreCase = true) ||
                         rawRole.equals("Staff", ignoreCase = true) ||
-                        rawRole.equals(UserRole.STAFF.name, ignoreCase = true) ->
-                    UserRole.STAFF.name
+                        rawRole.equals(UserRole.Employee.name, ignoreCase = true) ->
+                    UserRole.Employee.name
 
                 else ->
                     "UNKNOWN"
@@ -371,7 +371,7 @@ class LoginActivity : MotionBaseActivity() {
             // already verified the password. This preserves every existing
             // Employee screen/API and the established single-device rule while
             // removing the password-dependent legacy login/provisioning path.
-            if (role == UserRole.STAFF.name) {
+            if (role == UserRole.Employee.name) {
                 if (tokenResult?.token.isNullOrBlank()) {
                     setLoading(false)
                     Toast.makeText(
@@ -580,13 +580,13 @@ class LoginActivity : MotionBaseActivity() {
         }
 
         val role = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", UserRole.STAFF.name)
+            .getString("user_role", UserRole.Employee.name)
         
         val employeeId = applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).getInt("employee_id", 0)
         
         // If they are an Admin or SuperAdmin, always go to MainActivity (Admin Dashboard)
         // If they are STAFF, go to EmployeeHomeActivity
-        val destination = if (role == UserRole.ADMIN.name || role == UserRole.SUPER_ADMIN.name) {
+        val destination = if (role == UserRole.Admin.name || role == UserRole.SuperAdmin.name) {
             
             // Admin sessions must never inherit an Employee GPS service.
             stopService(Intent(this, com.biometric.app.domain.location.TrackingService::class.java))

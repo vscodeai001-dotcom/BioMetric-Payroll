@@ -61,8 +61,8 @@ class GeofenceManagerActivity : MotionBaseActivity(), OnMapReadyCallback {
         applyWindowInsets(binding.clGeofenceManagerRoot, binding.appBar)
 
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", UserRole.STAFF.name).orEmpty()
-        if (!role.equals(UserRole.ADMIN.name, true) && !role.equals(UserRole.SUPER_ADMIN.name, true) &&
+            .getString("user_role", UserRole.Employee.name).orEmpty()
+        if (!role.equals(UserRole.Admin.name, true) && !role.equals(UserRole.SuperAdmin.name, true) &&
             !role.equals("Admin", true) && !role.equals("SuperAdmin", true)) {
             Toast.makeText(this, "Only Admin/SuperAdmin can manage geofences.", Toast.LENGTH_LONG).show()
             finish()

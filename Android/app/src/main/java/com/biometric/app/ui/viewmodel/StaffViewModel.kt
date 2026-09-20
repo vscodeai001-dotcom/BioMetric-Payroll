@@ -222,7 +222,7 @@ class StaffViewModel @Inject constructor(
 
                 val userProfile = UserProfile(
                     uid = empId, name = name, phone = phone, employeeId = loginId.ifBlank { empId },
-                    password = password, role = UserRole.STAFF.name
+                    password = password, role = UserRole.Employee.name
                 )
                 repository.pushProfileByUid(userProfile)
                 

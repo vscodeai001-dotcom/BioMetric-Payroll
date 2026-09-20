@@ -3701,17 +3701,21 @@
                  * An employee marker exists ONLY when:
                  *   1. the employee belongs to this owner, and
                  *   2. an active Firebase live record exists for that EmployeeID.
-                 *
-                 * This prevents an old SQL GPS session or unrelated employee
-                 * from appearing on the Web Admin map.
                  */
                 var liveSnapshot =
                     await FirebaseRealtime.GetOwnerTrackingLiveAsync(
                         FirebaseEmployees.OwnerUid);
 
                 var snapshot = new List<LiveEmployeeLocation>();
+
+                // REQUIREMENT: Ensure new employees added on Android or through
+                // the server provisioning path appear on the map without a
+                // manual page refresh. Re-hydrate the employee master list
+                // if an unknown location ID arrives.
                 var validEmployeeIds =
                     employees.Select(e => e.EmployeeID).ToHashSet();
+
+                var foundUnknownEmployee = false;
 
                 if (liveSnapshot.HasValue &&
                     (liveSnapshot.Value.ValueKind == JsonValueKind.Object || liveSnapshot.Value.ValueKind == JsonValueKind.Array))
@@ -3720,23 +3724,14 @@
                     {
                         foreach (var employeeNode in liveSnapshot.Value.EnumerateObject())
                         {
-                            var employeeId =
-                                int.TryParse(employeeNode.Name, out var keyId)
-                                    ? keyId
-                                    : GetJsonInt(employeeNode.Value, "EmployeeId", "employeeId");
+                            if (!int.TryParse(employeeNode.Name, out var employeeId))
+                                employeeId = GetJsonInt(employeeNode.Value, "EmployeeId", "employeeId");
 
-                            if (employeeId <= 0 ||
-                                !validEmployeeIds.Contains(employeeId) ||
-                                employeeNode.Value.ValueKind != JsonValueKind.Object)
-                                continue;
+                            if (employeeId <= 0) continue;
+                            if (!validEmployeeIds.Contains(employeeId)) { foundUnknownEmployee = true; continue; }
 
-                            if (TryParseLiveEmployeeLocation(
-                                employeeId,
-                                employeeNode.Value,
-                                out var location))
-                            {
+                            if (TryParseLiveEmployeeLocation(employeeId, employeeNode.Value, out var location))
                                 snapshot.Add(location);
-                            }
                         }
                     }
                     else
@@ -3744,24 +3739,48 @@
                         var index = 0;
                         foreach (var node in liveSnapshot.Value.EnumerateArray())
                         {
-                            var fallbackId = index;
-                            index++;
-
-                            if (node.ValueKind != JsonValueKind.Object)
-                                continue;
-
+                            var fallbackId = index; index++;
+                            if (node.ValueKind != JsonValueKind.Object) continue;
                             var employeeId = GetJsonInt(node, "EmployeeId", "employeeId");
                             if (employeeId <= 0) employeeId = fallbackId;
+                            if (employeeId <= 0) continue;
+                            if (!validEmployeeIds.Contains(employeeId)) { foundUnknownEmployee = true; continue; }
 
-                            if (employeeId <= 0 || !validEmployeeIds.Contains(employeeId))
-                                continue;
-
-                            if (TryParseLiveEmployeeLocation(
-                                employeeId,
-                                node,
-                                out var location))
-                            {
+                            if (TryParseLiveEmployeeLocation(employeeId, node, out var location))
                                 snapshot.Add(location);
+                        }
+                    }
+                }
+
+                if (foundUnknownEmployee)
+                {
+                    // Discovery: an employee is sending locations but is not in
+                    // our current cached list. Synchronize the master list and
+                    // retry the snapshot parse to include the new employee.
+                    await LoadEmployees();
+                    validEmployeeIds = employees.Select(e => e.EmployeeID).ToHashSet();
+                    snapshot.Clear();
+                    // Re-parse with updated membership
+                    if (liveSnapshot.HasValue)
+                    {
+                        if (liveSnapshot.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var node in liveSnapshot.Value.EnumerateObject())
+                            {
+                                int.TryParse(node.Name, out var id); if (id <= 0) id = GetJsonInt(node.Value, "EmployeeId");
+                                if (id > 0 && validEmployeeIds.Contains(id) && TryParseLiveEmployeeLocation(id, node.Value, out var loc))
+                                    snapshot.Add(loc);
+                            }
+                        }
+                        else
+                        {
+                            var idx = 0;
+                            foreach (var node in liveSnapshot.Value.EnumerateArray())
+                            {
+                                var id = GetJsonInt(node, "EmployeeId") != 0 ? GetJsonInt(node, "EmployeeId") : idx;
+                                if (id > 0 && validEmployeeIds.Contains(id) && TryParseLiveEmployeeLocation(id, node, out var loc))
+                                    snapshot.Add(loc);
+                                idx++;
                             }
                         }
                     }

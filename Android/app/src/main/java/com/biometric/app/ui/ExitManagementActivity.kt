@@ -42,7 +42,7 @@ class ExitManagementActivity : MotionBaseActivity() {
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
     private val requests = mutableListOf<ResignationRequest>()
-    private val currencyFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
+    private val currencyFormat = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

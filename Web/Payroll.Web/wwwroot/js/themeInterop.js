@@ -2745,7 +2745,7 @@ window.ensurePayrollPremiumMapStyles = function () {
       .payroll-employee-map-tools {
         display:flex;
         align-items:center;
-        flex-wrap:wrap;
+        flex-wrap:nowrap;
         gap:7px;
         width:fit-content;
         max-width:100%;
@@ -2757,17 +2757,29 @@ window.ensurePayrollPremiumMapStyles = function () {
         backdrop-filter:blur(14px);
         -webkit-backdrop-filter:blur(14px);
         pointer-events:auto;
+        transition: width .3s ease, padding .3s ease;
+      }
+
+      .payroll-map-tools-group {
+        display:none;
+        gap:7px;
+        align-items:center;
+      }
+
+      .payroll-map-commandbar.expanded .payroll-map-tools-group {
+        display:flex;
       }
 
       .payroll-map-search-wrap {
         display:flex;
         align-items:center;
-        min-width:190px;
+        min-width:160px;
         height:36px;
         padding:0 10px;
         border-radius:10px;
         background:rgba(255,255,255,.10);
         border:1px solid rgba(255,255,255,.16);
+        transition: width .3s ease;
       }
 
       .payroll-map-search-icon {
@@ -2800,6 +2812,7 @@ window.ensurePayrollPremiumMapStyles = function () {
       }
 
       .payroll-map-tool,
+      .payroll-map-tool-toggle,
       .payroll-employee-map-tools button {
         height:36px;
         min-width:72px;
@@ -2814,6 +2827,7 @@ window.ensurePayrollPremiumMapStyles = function () {
       }
 
       .payroll-map-tool:hover,
+      .payroll-map-tool-toggle:hover,
       .payroll-employee-map-tools button:hover {
         background:rgba(51,65,85,.98);
         border-color:rgba(96,165,250,.7);
@@ -2821,10 +2835,21 @@ window.ensurePayrollPremiumMapStyles = function () {
       }
 
       .payroll-map-tool.active,
+      .payroll-map-tool-toggle.active,
       .payroll-employee-map-tools button.active {
         background:rgba(37,99,235,.92);
         border-color:rgba(147,197,253,.85);
         color:white;
+      }
+
+      .payroll-map-tools-group {
+        display:none;
+        gap:7px;
+        align-items:center;
+      }
+
+      .payroll-map-commandbar.expanded .payroll-map-tools-group {
+        display:flex;
       }
 
       .payroll-map-statusbar,
@@ -2901,8 +2926,10 @@ window.ensurePayrollPremiumMapStyles = function () {
           gap:5px;
         }
         .payroll-map-filter { max-width:105px; }
-        .payroll-map-tool span { display:none; }
-        .payroll-map-tool { min-width:38px; padding:0 8px; }
+        .payroll-map-tool span,
+        .payroll-map-tool-toggle span { display:none; }
+        .payroll-map-tool,
+        .payroll-map-tool-toggle { min-width:38px; padding:0 8px; }
 
         /* Employee Remote Punch: force a compact 2 x 2 command grid on
            narrow cards. This prevents the toolbar from becoming a tall
@@ -4252,12 +4279,8 @@ window.updateAdminLiveStaffMap =
             // Fit map bounds on initial load or selection change
             if (!state.hasInitialFit || membershipChanged) {
                 const points = [office];
-                liveStaff.forEach(x => {
-                    const lat = Number(x.latitude);
-                    const lng = Number(x.longitude);
-                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                        points.push([lat, lng]);
-                    }
+                displayPoints.forEach(p => {
+                    points.push(p.pos);
                 });
 
                 if (points.length > 1) {
@@ -4333,13 +4356,16 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
                     '<option value="within">Within range</option>' +
                     '<option value="outside">Outside range</option>' +
                   '</select>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff">⌖ <span>Fit</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office">⌂ <span>Office</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff">◉ <span>Follow</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence">◎ <span>Zone</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails">〰 <span>Trails</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
-                  '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                  '<button type="button" class="payroll-map-tool-toggle" data-map-action="toggle" title="Toggle map tools">⚙ <span>Tools</span></button>' +
+                  '<div class="payroll-map-tools-group">' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff">⌖ <span>Fit</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office">⌂ <span>Office</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff">◉ <span>Follow</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence">◎ <span>Zone</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails">〰 <span>Trails</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
+                    '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                  '</div>' +
                 '</div>' +
                 '<div class="payroll-map-statusbar">' +
                   '<span class="payroll-map-status-live"><i></i><strong data-map-live>0</strong> live</span>' +
@@ -4494,6 +4520,17 @@ window.applyPremiumAdminMapFilter = function (mapId) {
 window.handlePremiumAdminMapAction = function (mapId, action) {
     const state = window.adminLiveMaps?.[mapId];
     if (!state?.map) return;
+
+    if (action === 'toggle') {
+        const bar = state.premiumControls?.querySelector('.payroll-map-commandbar');
+        const btn = state.premiumControls?.querySelector('.payroll-map-tool-toggle');
+        if (bar && btn) {
+            const expanded = bar.classList.toggle('expanded');
+            btn.classList.toggle('active', expanded);
+        }
+        return;
+    }
+
     const points = [state.office].filter(Boolean);
     (state.liveStaff || []).forEach(function (x) {
         const lat = Number(x.latitude), lng = Number(x.longitude);
