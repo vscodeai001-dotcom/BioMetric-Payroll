@@ -730,21 +730,58 @@ public sealed class FirebaseRealtimeService
     public async Task<bool> TerminateLiveLocationAsync(
         int employeeId,
         string? ownerUid = null,
+        Guid? expectedSessionId = null,
         CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0)
             return false;
 
+        var timestamp = DateTime.UtcNow.ToString("O");
+
+        // This is a coarse update without a transaction as the REST API
+        // doesn't support complex conditional transactions as easily as
+        // the native SDKs. However, we can at least check the SessionId
+        // if provided.
+        var path = $"owners/{ownerUid}/tracking/live/{employeeId}";
+        if (string.IsNullOrWhiteSpace(ownerUid)) path = $"tracking/live/{employeeId}";
+
         var updates = new Dictionary<string, object?>
         {
             [$"tracking/live/{employeeId}/State"] = "ENDED",
-            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = DateTime.UtcNow.ToString("O")
+            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp
         };
 
         if (!string.IsNullOrWhiteSpace(ownerUid))
         {
             updates[$"owners/{ownerUid}/tracking/live/{employeeId}/State"] = "ENDED";
-            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/LastUpdatedUtc"] = updates[$"tracking/live/{employeeId}/LastUpdatedUtc"];
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp;
+        }
+
+        return await UpdateAsync(updates, cancellationToken);
+    }
+
+    public async Task<bool> BindLiveLocationAsync(
+        int employeeId,
+        Guid sessionId,
+        string? ownerUid = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (employeeId <= 0 || sessionId == Guid.Empty)
+            return false;
+
+        var timestamp = DateTime.UtcNow.ToString("O");
+        var updates = new Dictionary<string, object?>
+        {
+            [$"tracking/live/{employeeId}/SessionId"] = sessionId.ToString(),
+            [$"tracking/live/{employeeId}/State"] = "ACTIVE",
+            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp
+        };
+
+        if (!string.IsNullOrWhiteSpace(ownerUid))
+        {
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/SessionId"] = sessionId.ToString();
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/State"] = "ACTIVE";
+            updates[$"owners/{ownerUid}/tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp;
         }
 
         return await UpdateAsync(updates, cancellationToken);

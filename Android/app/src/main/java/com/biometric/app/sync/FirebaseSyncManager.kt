@@ -624,12 +624,23 @@ class FirebaseSyncManager @Inject constructor(
                 getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(endPayload).await()
 
                 // REQUIREMENT: Prevent late GPS points from resurrecting a ghost marker.
-                // Instead of deleting the live node, we set its state to ENDED.
-                // The pushLiveLocation transaction already checks for State=ENDED 
-                // and will refuse to overwrite it, making the termination durable.
-                val terminator = mapOf("State" to "ENDED", "LastUpdatedUtc" to endAt)
-                getGlobalRef().child("tracking/live/$employeeId").updateChildren(terminator).await()
-                getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(terminator).await()
+                // Only mark the live node as ENDED if it is currently bound to 
+                // the session that is being closed. This prevents a logout on 
+                // one device from terminating a valid active session on another.
+                val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
+                liveRef.runTransactionAwait { current ->
+                    val currentSession = current.child("SessionId").getValue(String::class.java).orEmpty()
+                    if (currentSession == sessionId || currentSession.isBlank()) {
+                        current.child("State").value = "ENDED"
+                        current.child("LastUpdatedUtc").value = endAt
+                        true
+                    } else {
+                        false
+                    }
+                }
+                
+                // Sync compatibility node if transaction accepted
+                getGlobalRef().child("tracking/live/$employeeId/State").setValue("ENDED").await()
             }
             committed
         } catch (e: Exception) {

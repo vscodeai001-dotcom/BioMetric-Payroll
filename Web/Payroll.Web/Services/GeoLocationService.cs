@@ -221,7 +221,8 @@ public class GeoLocationService
                     // this now-ended session.
                     await _firebase.TerminateLiveLocationAsync(
                         previous.EmployeeId,
-                        _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"));
+                        _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"),
+                        expectedSessionId: previous.SessionId);
                 }
 
                 var session = new EmployeeGpsSession
@@ -239,6 +240,14 @@ public class GeoLocationService
 
                 db.EmployeeGpsSessions.Add(session);
                 await db.SaveChangesAsync();
+
+                // REQUIREMENT: Bind the live marker to the new session ID in Firebase.
+                // This ensures that late location fixes from a previous session
+                // (e.g. from another device) are ignored across both platforms.
+                await _firebase.BindLiveLocationAsync(
+                    employeeId,
+                    sessionId,
+                    _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
 
                 // Broadcast only after the database commit so every admin
                 // refresh triggered by SessionEnded observes EndedAtUtc.

@@ -1,42 +1,56 @@
-# Implementation Plan - Marker Style & Session Binding
+# Implementation Plan - Logout Punches & Map Selection Fixes
 
-This plan ensures map markers correctly differentiate between geofence status (Red/Blue) and tracking status (Green dot), and finalizes session binding logic across Web and Android to prevent ghost markers.
+This plan ensures that employees are automatically punched "OUT" upon manual logout if their attendance state is "IN", and fixes map visibility issues when an employee is selected or during playback.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> The Web Marker fix allows a Red marker (Outside geofence) to have a Green dot (Live), which correctly represents an active session outside the work zone.
+> The automatic "OUT" punch on logout respects the "Physical Machine Priority" rule. If a machine punch (ZKTeco) or other authoritative punch exists within a 120-second window, the automatic punch is skipped.
 
 ## Proposed Changes
 
 ### [Component: Web Dashboard]
 
-#### [MODIFY] [LiveStaffLocationPanel.razor](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Components/UI/Attendance/LiveStaffLocationPanel.razor)
-- Remove CSS: `.payroll-map-user-outside .payroll-map-user-status { background:#ef4444; }`.
-- This ensures that "Outside" employees who are actively tracking show a **Green** dot instead of Red.
+#### [MODIFY] [themeInterop.js](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/wwwroot/js/themeInterop.js)
+- Update `applyPremiumAdminMapFilter` to:
+    - Hide all markers except the selected one when `state.selectedId > 0`.
+    - Hide all live markers when `state.isPlayback` is true.
+- Update `updateAdminLiveStaffMap` to save the `isPlayback` state.
 
 ---
 
-### [Component: Web Geofencing Service]
-
-#### [MODIFY] [FirebaseRealtimeService.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Services/FirebaseRealtimeService.cs)
-- Add `BindLiveLocationAsync(int employeeId, Guid sessionId, string? ownerUid = null)` to set the `live` marker node's `SessionId` and `State = ACTIVE`.
+### [Component: GeoLocation Service]
 
 #### [MODIFY] [GeoLocationService.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Services/GeoLocationService.cs)
-- In `StartGpsSessionAsync`, call `BindLiveLocationAsync` for the *new* session ID.
-- This ensures the marker is "locked" to the new session, so late packets from a previously ended session (e.g. from another device) are ignored.
+- Add a new public method `ProcessManualLogoutPunchAsync(int employeeId)`:
+    - Checks if the employee has an odd number of punches for the current India business day.
+    - If odd, and no authoritative punch exists within the conflict window, creates a "ManualLogout" OUT punch.
+    - Synchronizes the punch to Firebase and notifies the UI.
 
 ---
 
-### [Component: Android Firebase Sync]
+### [Component: Logout Flow]
 
-#### [MODIFY] [FirebaseSyncManager.kt](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/sync/FirebaseSyncManager.kt)
-- Re-verify and ensure `pushLiveLocation` and `pushTrackingSessionStarted` correctly implement the session ID guard.
-- Cleanup: Remove unused `liveMarkerTerminator` variable.
+#### [MODIFY] [MobileEmployeeController.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Controllers/MobileEmployeeController.cs)
+- Call `_geo.ProcessManualLogoutPunchAsync(employeeId)` before ending GPS sessions in the `Logout` endpoint.
+
+#### [MODIFY] [Logout.cshtml.cs](file:///E:/Project/Android App Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Areas/Identity/Pages/Account/Logout.cshtml.cs)
+- Call `_geoLocationService.ProcessManualLogoutPunchAsync(employee.EmployeeID)` before ending GPS sessions in `EndEmployeeGpsSessionAsync`.
 
 ## Verification Plan
 
+### Automated Tests
+- Build both Android and Web projects.
+
 ### Manual Verification
-1.  **Marker Color**: Verify that an employee outside the radius has a **Red** marker but a **Green** dot if active.
-2.  **Second Device Login**: Login on Device A, then Device B. Verify that markers from Device A no longer update the map even if they arrive late.
-3.  **Logout Parity**: Log out from Saara's account on Android. Verify the session ends instantly on the Web Admin dash and the marker goes offline.
+1.  **Logout Punch**:
+    *   Punch "IN" on mobile/web.
+    *   Manually log out.
+    *   Verify an "OUT" punch (ManualLogout) is created in the attendance logs.
+2.  **Map Selection**:
+    *   Open the live map.
+    *   Select an employee from the list or map.
+    *   Verify all other employee markers are hidden.
+3.  **Playback Visibility**:
+    *   Start playback for an employee.
+    *   Verify that only the playback marker is visible, and all live markers are hidden.
