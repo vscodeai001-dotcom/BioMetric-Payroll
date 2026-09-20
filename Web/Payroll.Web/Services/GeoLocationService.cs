@@ -1290,6 +1290,93 @@ public class GeoLocationService
 
 
     // ================================================================
+    // PROCESS MANUAL LOGOUT PUNCH
+    // ================================================================
+
+    public async Task ProcessManualLogoutPunchAsync(int employeeId)
+    {
+        if (employeeId <= 0) return;
+
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+
+            await AcquireAttendanceAdvisoryLockAsync(db, employeeId);
+
+            var punchTime = GetIndiaNow();
+
+            var businessDayStart =
+                DateTime.SpecifyKind(
+                    punchTime.Date,
+                    DateTimeKind.Unspecified);
+
+            var businessDayEnd =
+                DateTime.SpecifyKind(
+                    punchTime.Date.AddDays(1),
+                    DateTimeKind.Unspecified);
+
+            var todaysPunches = await db.AttendanceLogs
+                .Where(x => x.EmployeeID == employeeId && x.PunchTime >= businessDayStart && x.PunchTime < businessDayEnd)
+                .OrderBy(x => x.PunchTime)
+                .ThenBy(x => x.LogID)
+                .ToListAsync();
+
+            // REQUIREMENT: Only create an OUT punch if they are currently IN (odd number of punches).
+            // This ensures manual logout closes the attendance session authoritatively.
+            if (todaysPunches.Count % 2 != 0)
+            {
+                /*
+                 * BIOMETRIC and explicit MOBILE punches are authoritative.
+                 * If one has already been committed close to this logout,
+                 * we skip the fallback to avoid duplicate/noisy events.
+                 */
+                var recentAuthoritative = todaysPunches
+                    .Where(IsAuthoritativeAttendancePunch)
+                    .Where(x => Math.Abs((x.PunchTime - punchTime).TotalSeconds) <= AuthoritativePunchProtectionSeconds)
+                    .OrderByDescending(x => x.PunchTime)
+                    .FirstOrDefault();
+
+                if (recentAuthoritative != null)
+                {
+                    _logger.LogInformation(
+                        "Manual logout OUT punch skipped because an authoritative attendance punch already exists. " +
+                        "EmployeeId={EmployeeId}, LogId={LogId}, Time={PunchTime}",
+                        employeeId, recentAuthoritative.LogID, recentAuthoritative.PunchTime);
+                    return;
+                }
+
+                var log = new AttendanceLog
+                {
+                    EmployeeID = employeeId,
+                    BiometricID = "MOBILE_LOGOUT",
+                    PunchTime = punchTime,
+                    DeviceID = "ManualLogout",
+                    LogType = "OUT",
+                    IsApproved = true
+                };
+
+                db.AttendanceLogs.Add(log);
+                await db.SaveChangesAsync();
+
+                // Synchronize to Firebase so the Android app observes the logout punch immediately.
+                _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
+
+                await _refreshService.NotifyAttendanceChangedAsync(employeeId, DateOnly.FromDateTime(punchTime));
+
+                _logger.LogInformation(
+                    "Manual logout OUT punch recorded. EmployeeId={EmployeeId}, LogId={LogId}",
+                    employeeId, log.LogID);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Fallback punch creation must never block the authoritative logout.
+            _logger.LogError(ex, "Failed to process manual logout punch. EmployeeId={EmployeeId}", employeeId);
+        }
+    }
+
+
+    // ================================================================
     // MARK SESSION TIMED OUT
     // ================================================================
     //

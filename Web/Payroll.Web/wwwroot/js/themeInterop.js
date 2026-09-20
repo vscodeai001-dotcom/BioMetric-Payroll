@@ -3628,6 +3628,7 @@ window.updateAdminLiveStaffMap =
                     hasInitialFit: false,
                     lastStaffSignature: '',
                     lastSelectedId: 0,
+                    isPlayback: !!isPlayback,
                     lastLocationAt: {},
                     routeStates: {},
                     roadRouteLines: {},
@@ -4313,6 +4314,7 @@ window.updateAdminLiveStaffMap =
 
             state.lastStaffSignature = staffSignature;
             state.lastSelectedId = Number(selectedId);
+            state.isPlayback = !!isPlayback;
             state.liveStaff = liveStaff;
             state.office = office;
             state.selectedId = Number(selectedId);
@@ -4486,6 +4488,9 @@ window.applyPremiumAdminMapFilter = function (mapId) {
     const staff = Array.isArray(state.liveStaff) ? state.liveStaff : [];
     let live = 0, stale = 0, outside = 0;
 
+    const selectedId = Number(state.lastSelectedId || 0);
+    const isPlayback = !!state.isPlayback;
+
     staff.forEach(function (x) {
         const id = Number(x.employeeId);
         const status = String(x.status || 'live').toLowerCase();
@@ -4493,18 +4498,28 @@ window.applyPremiumAdminMapFilter = function (mapId) {
         if (status === 'live') live++;
         if (status === 'stale') stale++;
         if (!within) outside++;
+
+        const isSelected = selectedId === id;
         const name = String(x.name || ('Employee ' + id)).toLowerCase();
+
+        // REQUIREMENT: If an employee is selected, hide all others.
+        // REQUIREMENT: If playback is active, hide all live markers.
+        const matchesSelection = selectedId === 0 || isSelected;
+        const matchesPlayback = !isPlayback;
+
         const matchesSearch = !search || name.includes(search) || String(id).includes(search);
         const matchesFilter =
             filter === 'all' ||
             filter === status ||
             (filter === 'within' && within) ||
             (filter === 'outside' && !within);
-        const visible = matchesSearch && matchesFilter;
+
+        const visible = matchesSearch && matchesFilter && matchesSelection && matchesPlayback;
+
         const marker = state.markers?.[id];
         if (marker) {
             marker.setOpacity(visible ? 1 : 0);
-            if (visible) marker.setZIndexOffset(Number(state.selectedId) === id ? 2500 : 0);
+            if (visible) marker.setZIndexOffset(isSelected ? 2500 : 0);
             try {
                 if (!visible && marker.isTooltipOpen()) marker.closeTooltip();
             } catch { }

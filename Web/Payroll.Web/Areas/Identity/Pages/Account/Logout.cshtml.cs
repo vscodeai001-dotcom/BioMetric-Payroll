@@ -242,6 +242,10 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     return;
                 }
 
+                // REQUIREMENT: If the employee is currently "IN", create an automatic
+                // "OUT" punch upon manual logout to close their attendance session.
+                await _geoLocationService.ProcessManualLogoutPunchAsync(employee.EmployeeID);
+
                 // Logout is authoritative: close every active GPS session
                 // under one employee-level lifecycle lock. This prevents a
                 // second active/legacy session from surviving the logout.

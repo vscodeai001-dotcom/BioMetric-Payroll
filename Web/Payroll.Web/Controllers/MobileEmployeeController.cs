@@ -480,6 +480,10 @@ public sealed class MobileEmployeeController : ControllerBase
         await _attendanceMonitor.RecordAsync(
             "LOGOUT_REQUESTED", userId, User.FindFirstValue(ClaimTypes.Email), deviceId, "Android", "REQUESTED", "MANUAL_LOGOUT");
 
+        // REQUIREMENT: If the employee is currently "IN", create an automatic
+        // "OUT" punch upon manual logout to close their attendance session.
+        await _geo.ProcessManualLogoutPunchAsync(employeeId);
+
         // Logout is authoritative: end every active GPS session before the
         // device lock is released. This also cleans up legacy duplicate
         // sessions without changing the database design.
