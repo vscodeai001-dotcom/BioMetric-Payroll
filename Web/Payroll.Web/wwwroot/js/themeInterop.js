@@ -3522,6 +3522,18 @@ window.updateAdminLiveStaffMap =
                     ? staff
                     : [];
 
+            // Default view shows every live employee. Once an employee is
+            // selected, the live map becomes employee-scoped and renders
+            // only that employee. Playback/detail routes therefore cannot
+            // leave unrelated live markers visible. This is presentation
+            // filtering only; Firebase, GPS sessions and attendance state
+            // remain unchanged.
+            const visibleStaff = Number(selectedId) > 0
+                ? liveStaff.filter(function (x) {
+                    return Number(x.employeeId) === Number(selectedId);
+                })
+                : liveStaff;
+
             const displayPoints = [];
 
             let state =
@@ -3651,7 +3663,7 @@ window.updateAdminLiveStaffMap =
 
             const staffIds =
                 new Set(
-                    liveStaff.map(
+                    visibleStaff.map(
                         function (x) {
                             return Number(
                                 x.employeeId
@@ -3736,7 +3748,7 @@ window.updateAdminLiveStaffMap =
             state.office = office.slice();
 
             const staffSignature =
-                liveStaff
+                visibleStaff
                     .map(function (x) {
                         return Number(x.employeeId);
                     })
@@ -3750,11 +3762,11 @@ window.updateAdminLiveStaffMap =
             const markerDisplayPositions =
                 window.payrollBuildAdminMarkerDisplayPositions(
                     state.map,
-                    liveStaff,
+                    visibleStaff,
                     selectedId
                 );
 
-            liveStaff.forEach(
+            visibleStaff.forEach(
                 function (x) {
                     const employeeId =
                         Number(
@@ -4288,8 +4300,10 @@ window.updateAdminLiveStaffMap =
             if (!state.hasInitialFit || membershipChanged) {
                 const points = [office];
 
-                // Use the authoritative list of current live staff to calculate bounds.
-                liveStaff.forEach(function (x) {
+                // Use the currently visible staff list. With a selection this
+                // keeps the camera scoped to the selected employee; without a
+                // selection it fits all live employees as before.
+                visibleStaff.forEach(function (x) {
                     const lat = Number(x.latitude);
                     const lng = Number(x.longitude);
                     if (Number.isFinite(lat) && Number.isFinite(lng)) {
@@ -4315,7 +4329,8 @@ window.updateAdminLiveStaffMap =
             state.lastStaffSignature = staffSignature;
             state.lastSelectedId = Number(selectedId);
             state.isPlayback = !!isPlayback;
-            state.liveStaff = liveStaff;
+            state.liveStaff = visibleStaff;
+            state.allLiveStaff = liveStaff;
             state.office = office;
             state.selectedId = Number(selectedId);
 
@@ -4323,7 +4338,7 @@ window.updateAdminLiveStaffMap =
             // rendered Leaflet state and never alter GPS, attendance, sessions,
             // persistence, or the existing Blazor flow.
             if (typeof window.enhanceAdminLiveMap === 'function') {
-                window.enhanceAdminLiveMap(mapId, office, liveStaff, selectedId);
+                window.enhanceAdminLiveMap(mapId, office, visibleStaff, selectedId);
             }
         } catch (error) {
             console.error("Admin live map update failed:", error);

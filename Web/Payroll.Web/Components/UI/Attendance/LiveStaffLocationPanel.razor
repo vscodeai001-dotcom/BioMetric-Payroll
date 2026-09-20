@@ -1,4 +1,4 @@
-@using global::Payroll.Web.Services
+﻿@using global::Payroll.Web.Services
 @using global::Payroll.Shared.Data
 @using Microsoft.EntityFrameworkCore
 @using Microsoft.JSInterop
@@ -666,7 +666,7 @@
                                                     title="Play this session route only">
                                                     <td><code>@ShortSessionId(session.SessionId)</code></td>
                                                     <td>@ToLocalTime(session.StartUtc).ToString("HH:mm:ss")</td>
-                                                    <td>@ToLocalTime(session.EndUtc).ToString("HH:mm:ss")</td>
+                                                    <td>@ToLocalTime(session.LastUpdateUtc).ToString("HH:mm:ss")</td>
                                                     <td>@FormatDuration(session.EndUtc - session.StartUtc)</td>
                                                     <td>@session.PointCount</td>
                                                     <td>@FormatDistance(session.TravelMeters)</td>
@@ -4485,12 +4485,28 @@
                 double travel = 0;
                 for (int i = 1; i < points.Count; i++)
                     travel += CalculateDistance(points[i - 1].Latitude, points[i - 1].Longitude, points[i].Latitude, points[i].Longitude);
+
                 var accuracies = points.Where(x => x.AccuracyMeters > 0).Select(x => x.AccuracyMeters).ToList();
+                gpsSessionLookup.TryGetValue(g.Key, out var session);
+
+                // The GPS session record is authoritative for lifecycle state.
+                // Do not infer an active session's end from its last persisted GPS point.
+                var startUtc = session?.StartedAtUtc ?? points.First().RecordedAtUtc;
+                var lastUpdateUtc = session?.LastUpdateAtUtc ?? points.Last().RecordedAtUtc;
+                var endUtc = session?.EndedAtUtc ?? DateTime.UtcNow;
+
+                // If a session is active, its duration continues to the current time.
+                // For ended sessions, use the actual session end instead of the last
+                // history point so the timeline reflects the real lifecycle.
+                if (session?.EndedAtUtc == null)
+                    endUtc = DateTime.UtcNow;
+
                 return new SessionSummary
                 {
                     SessionId = g.Key,
-                    StartUtc = points.First().RecordedAtUtc,
-                    EndUtc = points.Last().RecordedAtUtc,
+                    StartUtc = startUtc,
+                    LastUpdateUtc = lastUpdateUtc,
+                    EndUtc = endUtc,
                     PointCount = points.Count,
                     TravelMeters = travel,
                     AverageAccuracy = accuracies.Count == 0 ? 0 : accuracies.Average()
@@ -5342,6 +5358,7 @@
     {
         public Guid SessionId { get; set; }
         public DateTime StartUtc { get; set; }
+        public DateTime LastUpdateUtc { get; set; }
         public DateTime EndUtc { get; set; }
         public int PointCount { get; set; }
         public double TravelMeters { get; set; }
