@@ -1543,6 +1543,22 @@ public class GeoLocationService
             if (originalCaptureUtc > serverRecordedAtUtc.AddMinutes(5))
                 originalCaptureUtc = serverRecordedAtUtc;
 
+            // Firebase SSE sends the current history snapshot again after a
+            // reconnect. Android keeps the same capture timestamp/coordinates
+            // for a retried ClientEventId, so make the Web projection idempotent
+            // without changing the existing database schema.
+            var duplicate = await db.EmployeeLocationHistory
+                .AsNoTracking()
+                .AnyAsync(x =>
+                    x.EmployeeId == employeeId &&
+                    x.SessionId == sessionId &&
+                    x.CapturedAtUtc == originalCaptureUtc &&
+                    x.Latitude == latitude &&
+                    x.Longitude == longitude);
+
+            if (duplicate)
+                return;
+
             var record = new EmployeeLocationHistory
             {
                 EmployeeId = employeeId,

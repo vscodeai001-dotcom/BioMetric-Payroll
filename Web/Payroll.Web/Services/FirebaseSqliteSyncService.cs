@@ -182,6 +182,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var path = (relativePath ?? "/").Trim('/');
         var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
+        // History is an immutable GPS ledger. It must NEVER execute the live
+        // attendance/geofence state machine, including when Firebase sends an
+        // incremental history event rather than the initial snapshot.
+        if (parts.Any(p => p.Equals("history", StringComparison.OrdinalIgnoreCase)))
+            evaluateAttendance = false;
+
         // Firebase sends the initial tracking snapshot at /. Hydrate both the
         // current live branch and immutable history branch. History replay is
         // deliberately attendance-neutral; live data only updates the Web
@@ -805,36 +811,36 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private async Task<bool> SyncTrackingHistoryAsync(string ownerUid, CancellationToken ct)
     {
         var json = await _firebase.GetOwnerTableAsync(ownerUid, "tracking/history", ct);
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return false;
+        if (json is null ||
+            (json.Value.ValueKind != JsonValueKind.Object &&
+             json.Value.ValueKind != JsonValueKind.Array))
+            return false;
 
         var changed = false;
 
-        async Task ProcessEmployeeNode(string empIdKey, JsonElement employeeNode)
+        async Task ProcessEmployeeNode(JsonElement employeeNode)
         {
-            if (employeeNode.ValueKind != JsonValueKind.Object) return;
+            if (employeeNode.ValueKind != JsonValueKind.Object)
+                return;
 
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
-            await using var db = await factory.CreateDbContextAsync(ct);
-            var entityType = db.Model.GetEntityTypes().First(x => x.ClrType.Name == "EmployeeLocationHistory");
-            var keys = entityType.FindPrimaryKey()?.Properties;
-
-            var empChanged = false;
             foreach (var eventNode in employeeNode.EnumerateObject())
             {
-                if (eventNode.Value.ValueKind != JsonValueKind.Object) continue;
-                try
-                {
-                    empChanged |= await UpsertRecordAsync(db, entityType, keys!, eventNode.Name, eventNode.Value, ct);
-                }
-                catch { }
-            }
+                ct.ThrowIfCancellationRequested();
 
-            if (empChanged)
-            {
+                if (eventNode.Value.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                // Use the same authoritative history pipeline as the realtime
+                // stream. This avoids trying to map Android's ClientEventId
+                // onto the SQL identity Id and also gives startup hydration the
+                // same idempotent duplicate protection as reconnect replay.
+                await ProcessFirebaseTrackingEventAsync(
+                    $"/history/{eventNode.Name}",
+                    eventNode.Value.Clone(),
+                    ct,
+                    evaluateAttendance: false);
+
                 changed = true;
-                using var syncScope = _firebaseSyncWriteScope.Enter();
-                await db.SaveChangesAsync(ct);
             }
         }
 
@@ -842,18 +848,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         {
             foreach (var employeeNode in json.Value.EnumerateObject())
             {
-                await ProcessEmployeeNode(employeeNode.Name, employeeNode.Value);
+                await ProcessEmployeeNode(employeeNode.Value);
             }
         }
         else
         {
-            var index = 0;
-            foreach (var node in json.Value.EnumerateArray())
+            foreach (var employeeNode in json.Value.EnumerateArray())
             {
-                await ProcessEmployeeNode(index.ToString(), node);
-                index++;
+                await ProcessEmployeeNode(employeeNode);
             }
         }
+
         return changed;
     }
 

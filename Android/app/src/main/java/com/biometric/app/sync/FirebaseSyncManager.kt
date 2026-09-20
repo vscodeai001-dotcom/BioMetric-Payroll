@@ -639,8 +639,18 @@ class FirebaseSyncManager @Inject constructor(
                     }
                 }
                 
-                // Sync compatibility node if transaction accepted
-                getGlobalRef().child("tracking/live/$employeeId/State").setValue("ENDED").await()
+                // Sync the legacy compatibility live node only when the
+                // owner-scoped transaction actually closed this same session.
+                // A rejected transaction means a newer session owns the marker;
+                // never mark that newer session as ENDED.
+                val ownerLiveClosed = liveRef.get().await().let { snapshot ->
+                    snapshot.child("State").getValue(String::class.java)
+                        .equals("ENDED", ignoreCase = true) &&
+                    snapshot.child("SessionId").getValue(String::class.java).orEmpty() == sessionId
+                }
+                if (ownerLiveClosed) {
+                    getGlobalRef().child("tracking/live/$employeeId").updateChildren(endPayload).await()
+                }
             }
             committed
         } catch (e: Exception) {
@@ -707,44 +717,96 @@ class FirebaseSyncManager @Inject constructor(
         )
 
         return try {
-            // The immutable history key is the client event ID, so retries are
-            // idempotent. The live marker uses a transaction so an older offline
-            // point cannot overwrite a newer point after reconnect.
-            getGlobalRef().child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
-                .setValue(payload).await()
+            val sessionRef = getGlobalRef()
+                .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+            val sessionSnapshot = sessionRef.get().await()
+
+            if (!sessionSnapshot.exists()) {
+                // A GPS point without a durable session boundary is never
+                // accepted. The caller will retry the session-start lifecycle.
+                Log.w(
+                    "FirebaseSyncManager",
+                    "GPS point rejected because Firebase session does not exist. employee=$employeeId session=$sessionId"
+                )
+                return false
+            }
+
+            val sessionState = sessionSnapshot.child("State")
+                .getValue(String::class.java)
+                .orEmpty()
+
+            if (sessionState.equals("ENDED", ignoreCase = true)) {
+                // Offline points can arrive after logout. Preserve those points
+                // in immutable history, but NEVER resurrect the ended live
+                // marker or attendance session.
+                getGlobalRef()
+                    .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                    .setValue(payload + ("SessionState" to "ENDED"))
+                    .await()
+                return true
+            }
+
+            if (!sessionState.equals("ACTIVE", ignoreCase = true)) {
+                Log.w(
+                    "FirebaseSyncManager",
+                    "GPS point deferred because session state is '$sessionState'. employee=$employeeId session=$sessionId"
+                )
+                return false
+            }
 
             val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
+
+            // First claim the live sequence. The transaction is idempotent for
+            // the same ClientEventId so a history write failure can safely retry
+            // without being blocked by the already-accepted sequence.
             val accepted = liveRef.runTransactionAwait { current ->
                 val currentSession = current.child("SessionId").getValue(String::class.java).orEmpty()
                 val currentSequence = current.child("Sequence").getValue(Long::class.java) ?: 0L
                 val currentState = current.child("State").getValue(String::class.java).orEmpty()
+                val currentClientEventId = current.child("ClientEventId").getValue(String::class.java).orEmpty()
 
-                // REQUIREMENT: Bind markers to their session.
-                // A late location point from a previous session must never 
-                // overwrite the live position of a newer session.
                 if (currentSession.isNotBlank() && currentSession != sessionId) return@runTransactionAwait false
-
-                // Durable termination check.
                 if (currentState.equals("ENDED", true)) return@runTransactionAwait false
-                
-                if (currentSequence >= sequence) return@runTransactionAwait false
+                if (currentSequence > sequence) return@runTransactionAwait false
+
+                // Same event was already accepted. Keep the transaction
+                // committed so the immutable history write below is retried.
+                if (currentSequence == sequence &&
+                    currentClientEventId.isNotBlank() &&
+                    currentClientEventId != clientEventId) {
+                    return@runTransactionAwait false
+                }
 
                 current.value = payload
                 current.child("State").value = "ACTIVE"
                 true
             }
 
-            // Legacy compatibility stream receives the point only when it is the
-            // newest accepted live point. History has already been durably keyed.
-            if (accepted) {
-                getGlobalRef().child("tracking/live/$employeeId").setValue(payload).await()
-            }
+            if (!accepted) return false
+
+            // Immutable history is written only after the live/session checks
+            // succeed. This prevents stale GPS from an old session from being
+            // stored as a new active stream.
+            getGlobalRef()
+                .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                .setValue(payload)
+                .await()
+
+            // Legacy compatibility stream receives only the newest accepted
+            // point. It is never allowed to overwrite a newer owner-scoped
+            // session.
+            getGlobalRef()
+                .child("tracking/live/$employeeId")
+                .setValue(payload)
+                .await()
+
             true
         } catch (e: Exception) {
             Log.w("FirebaseSyncManager", "GPS Firebase write deferred", e)
             false
         }
     }
+
     suspend fun pushAttendancePunch(punch: AttendancePunch) {
         val id = punch.punchId.ifBlank { return }
         getOwnerRef()?.child("attendance_punches")?.child(id)?.setValue(punch)?.await()
