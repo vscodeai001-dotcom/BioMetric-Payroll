@@ -145,9 +145,29 @@
                         return;
                     }
 
-                    if (data.Value.TryGetProperty("deviceId", out var deviceProp))
+                    string? activeDevice = null;
+                    var normalizedPath = (path ?? "/").Trim('/');
+
+                    if (normalizedPath == "" || normalizedPath == "/")
                     {
-                        var activeDevice = deviceProp.GetString() ?? "";
+                        // Full object snapshot
+                        if (data.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                            data.Value.TryGetProperty("deviceId", out var deviceProp))
+                        {
+                            activeDevice = deviceProp.GetString();
+                        }
+                    }
+                    else if (normalizedPath.Equals("deviceId", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Direct property update
+                        if (data.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            activeDevice = data.Value.GetString();
+                        }
+                    }
+
+                    if (activeDevice != null)
+                    {
                         // If the active device is not a WEB_BROWSER starting with our ID prefix,
                         // it means another device (Android or another Web session) logged in.
                         if (!string.IsNullOrWhiteSpace(browserDeviceId) &&

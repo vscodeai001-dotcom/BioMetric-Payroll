@@ -118,6 +118,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                                     var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
                                     var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
                                     await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
+
+                                    // MIRROR: When Admin changes geofence radius on Android, immediately
+                                    // re-evaluate all active sessions on the server to ensure
+                                    // real-time attendance parity across platforms.
+                                    using var scope = _scopeFactory.CreateScope();
+                                    await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
                                 }
                             }
                         }
@@ -734,7 +740,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             Timestamp = timestamp,
             UserID = string.IsNullOrWhiteSpace(uid) ? $"ANDROID_EMPLOYEE_{employeeId}" : uid,
             UserEmail = string.IsNullOrWhiteSpace(email) ? "Android" : email,
-            ActionType = eventType.Length > 50 ? eventType[..50] : eventType,
+            ActionType = "AUTH_SESSION",
             EntityType = "EmployeeSession",
             EntityID = marker,
             Details = JsonSerializer.Serialize(details)

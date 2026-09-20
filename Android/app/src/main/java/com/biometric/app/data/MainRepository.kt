@@ -44,7 +44,8 @@ class MainRepository(
     private val localResignationRequestDao: LocalResignationRequestDao,
     private val localDailySummaryDao: LocalDailySummaryDao,
     private val localShiftScheduleDao: LocalShiftScheduleDao,
-    private val localPayrollHistoryDao: LocalPayrollHistoryDao
+    private val localPayrollHistoryDao: LocalPayrollHistoryDao,
+    private val localSettingsDao: LocalSettingsDao
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -241,6 +242,12 @@ class MainRepository(
 
     val allPayrollHistoriesFlow = localPayrollHistoryDao.getAllFlow()
         .stateIn(repositoryScope, SharingStarted.Eagerly, emptyList())
+
+    val companySettingsFlow = localSettingsDao.getCompanySettingsFlow()
+        .stateIn(repositoryScope, SharingStarted.Eagerly, null)
+
+    val featureSettingsFlow = localSettingsDao.getFeatureSettingsFlow()
+        .stateIn(repositoryScope, SharingStarted.Eagerly, null)
 
     // --- GENERIC LIST CACHING ---
     private val dashboardPrefs: SharedPreferences by lazy { context.getSharedPreferences("dashboard_optimistic_cache", Context.MODE_PRIVATE) }

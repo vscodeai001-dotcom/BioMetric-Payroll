@@ -32,6 +32,7 @@ import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.lang.reflect.Modifier
@@ -63,9 +64,81 @@ class SettingsActivity : MotionBaseActivity() {
         currentShopId = intent.getStringExtra("SHOP_ID")
         setupToolbar()
         loadSettings()
-        setupFeatureSettings()
+        observeSettings() // Mirror Web: observe Room flows for real-time parity
         setupTrackingConfiguration()
         setupListeners()
+    }
+
+    private fun observeSettings() {
+        lifecycleScope.launch {
+            viewModel.companySettings.collectLatest { response ->
+                if (response == null) return@collectLatest
+                companySettings = CompanySettings(
+                    companyName = response.companyName,
+                    officeLatitude = response.officeLatitude,
+                    officeLongitude = response.officeLongitude,
+                    geoRadiusMeters = response.geoRadiusMeters
+                )
+                renderCompanySettings()
+            }
+        }
+        lifecycleScope.launch {
+            viewModel.featureSettings.collectLatest { dto ->
+                if (dto == null) return@collectLatest
+                featureSettings = FeatureSettings(
+                    enableEmployeeManagement = dto.enableEmployeeManagement,
+                    enablePayroll = dto.enablePayroll,
+                    enableLeaveManagement = dto.enableLeaveManagement,
+                    enableSalaryAdvance = dto.enableSalaryAdvance,
+                    enableBonusManagement = dto.enableBonusManagement,
+                    enableProfessionalTax = dto.enableProfessionalTax,
+                    enableStatutoryCompliance = dto.enableStatutoryCompliance,
+                    enableEmailNotifications = dto.enableEmailNotifications,
+                    enableInAppNotifications = dto.enableInAppNotifications,
+                    enableCustomReporting = dto.enableCustomReporting,
+                    enableCompanyReports = dto.enableCompanyReports,
+                    enableAuditLog = dto.enableAuditLog,
+                    enableRecycleBin = dto.enableRecycleBin,
+                    enableGeoFencing = dto.enableGeoFencing,
+                    enableAutomaticGeofencePunching = dto.enableAutomaticGeofencePunching,
+                    enableDualAttendance = dto.enableDualAttendance,
+                    enablePunchCorrection = dto.enablePunchCorrection,
+                    enableRegularizationRequest = dto.enableRegularizationRequest,
+                    enableResignationModule = dto.enableResignationModule,
+                    enableYearEndSummary = dto.enableYearEndSummary,
+                    enableTaxDeclarations = dto.enableTaxDeclarations,
+                    enableFlexibleBenefits = dto.enableFlexibleBenefits,
+                    enableTdsDeduction = dto.enableTdsDeduction,
+                    enableAutoShiftRotation = dto.enableAutoShiftRotation,
+                    enableShiftScheduling = dto.enableShiftScheduling,
+                    enableSandwichRule = dto.enableSandwichRule,
+                    enableLeaveAccrual = dto.enableLeaveAccrual,
+                    showThemeToggle = dto.showThemeToggle,
+                    employeeToolsVisible = dto.employeeToolsVisible,
+                    employeeCanViewDashboard = dto.employeeCanViewDashboard,
+                    employeeCanViewAttendance = dto.employeeCanViewAttendance,
+                    employeeCanViewLeave = dto.employeeCanViewLeave,
+                    employeeCanViewLeaveHistory = dto.employeeCanViewLeaveHistory,
+                    employeeCanViewAdvance = dto.employeeCanViewAdvance,
+                    employeeCanViewBonus = dto.employeeCanViewBonus,
+                    employeeCanViewTax = dto.employeeCanViewTax,
+                    employeeCanViewPayslip = dto.employeeCanViewPayslip,
+                    employeeCanViewResignation = dto.employeeCanViewResignation,
+                    employeeCanViewReports = dto.employeeCanViewReports,
+                    employeeCanViewShifts = dto.employeeCanViewShifts,
+                    adminCanViewDashboard = dto.adminCanViewDashboard,
+                    adminCanViewAttendance = dto.adminCanViewAttendance,
+                    adminCanManageShifts = dto.adminCanManageShifts,
+                    adminCanRunPayroll = dto.adminCanRunPayroll,
+                    adminCanViewReports = dto.adminCanViewReports,
+                    adminCanManageEmployees = dto.adminCanManageEmployees,
+                    adminCanEditSettings = dto.adminCanEditSettings,
+                    adminCanManageEmployeePermissions = dto.adminCanManageEmployeePermissions,
+                    adminCanManagePunchApprovals = dto.adminCanManagePunchApprovals
+                )
+                renderFeatureSwitches()
+            }
+        }
     }
 
     private fun setupToolbar() {
@@ -174,8 +247,7 @@ class SettingsActivity : MotionBaseActivity() {
 
     private fun saveFeatureSettings() {
         val profile = sharedViewModel.userProfile.value
-        val settings = viewModel.featureSettings.value
-        val allowed = profile?.isSuperAdmin() == true || (profile?.isAdmin() == true && (settings?.enablePayroll == true)) // Using enablePayroll as proxy for admin perms check logic
+        val allowed = profile?.isSuperAdmin() == true || profile?.isAdmin() == true
         if (!allowed) {
             Toast.makeText(this, "You do not have permission to edit settings 🔒", Toast.LENGTH_LONG).show()
             return

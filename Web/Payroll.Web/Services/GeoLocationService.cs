@@ -448,7 +448,8 @@ public class GeoLocationService
                             safeDistance,
                             allowedRadiusMeters,
                             previousLocationState,
-                            stableLocationState.Value);
+                            stableLocationState.Value,
+                            captureTime); // MIRROR: Use original capture time for offline sync reconciliation
 
                     // Persist the SAME stable state that drove the attendance
                     // decision only when the evaluation completed safely.
@@ -661,12 +662,10 @@ public class GeoLocationService
         double distanceMeters,
         int allowedRadiusMeters,
         bool? previousLocationState,
-        bool currentLocationState)
+        bool currentLocationState,
+        DateTime? overridePunchTime = null)
     {
-        // Automatic geofence attendance requires BOTH Geo-Fencing and the
-        // dedicated Automatic Geofence Punching feature. Dual Attendance is
-        // independent: when enabled, biometric remains the highest-priority
-        // attendance source while automatic geofence punches are still saved.
+        // ...
         var features = await db.FeatureSettings
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == 1);
@@ -675,24 +674,11 @@ public class GeoLocationService
             features.EnableAutomaticGeofencePunching != true)
             return true;
 
-        // The GPS state is nullable because a session can begin before the
-        // first valid fix, after a browser reconnect, or after legacy data.
-        // A null state is therefore a bootstrap condition, not an automatic
-        // reason to suppress OUT. Attendance state below decides whether the
-        // first valid fix should create IN, OUT, or simply establish state.
-        // Do not use the previous GPS state as a hard gate. The previous
-        // state can be null or stale after reconnects, app suspension,
-        // legacy sessions, or a missed GPS transition. Attendance parity
-        // plus the CURRENT geofence state is the authoritative reconciliation
-        // decision, which makes the feature self-healing.
         if (allowedRadiusMeters <= 0)
             return true;
 
         try
         {
-            // Keep the attendance decision and fallback punch atomic.
-            // The surrounding GPS/session advisory lock prevents logout and
-            // stale GPS updates from interleaving with this operation.
             await using var transaction =
                 await db.Database.BeginTransactionAsync();
 
@@ -700,16 +686,21 @@ public class GeoLocationService
                 db,
                 employeeId);
 
-            var indiaNow = GetIndiaNow();
+            // MIRROR: Use original capture time for offline sync reconciliation.
+            // This ensures that if a phone reconnected after 30 mins, the punch
+            // is recorded at the EXACT time the geofence boundary was crossed.
+            var punchTime = overridePunchTime.HasValue
+                ? TimeZoneInfo.ConvertTimeFromUtc(overridePunchTime.Value, IndiaTimeZone)
+                : GetIndiaNow();
 
             var businessDayStart =
                 DateTime.SpecifyKind(
-                    indiaNow.Date,
+                    punchTime.Date,
                     DateTimeKind.Unspecified);
 
             var businessDayEnd =
                 DateTime.SpecifyKind(
-                    indiaNow.Date.AddDays(1),
+                    punchTime.Date.AddDays(1),
                     DateTimeKind.Unspecified);
 
             var todaysPunches =
@@ -759,7 +750,7 @@ public class GeoLocationService
                     .Where(IsAuthoritativeAttendancePunch)
                     .Where(x =>
                         Math.Abs(
-                            (x.PunchTime - indiaNow).TotalSeconds)
+                            (x.PunchTime - punchTime).TotalSeconds)
                         <= AuthoritativePunchProtectionSeconds)
                     .OrderByDescending(x => x.PunchTime)
                     .FirstOrDefault();
@@ -784,7 +775,7 @@ public class GeoLocationService
                 {
                     EmployeeID = employeeId,
                     BiometricID = "GEOFENCE_AUTO",
-                    PunchTime = indiaNow,
+                    PunchTime = punchTime,
                     DeviceID = "GeofenceAuto",
                     LogType = requiredPunchType,
                     Latitude = latitude,

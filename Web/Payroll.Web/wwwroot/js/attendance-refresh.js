@@ -262,44 +262,117 @@ window.attendanceRefresh = (function () {
         starting = true;
 
         try {
-            // SignalR initialization
-            if (!connection) {
-                connection = new signalR.HubConnectionBuilder()
-                    .withUrl("/hubs/attendance-refresh")
-                    .withAutomaticReconnect()
-                    .build();
+            /*
+             * ==========================================================
+             * SIGNALR IS OPTIONAL
+             * ==========================================================
+             *
+             * Firebase is the authoritative realtime transport for the
+             * current Firebase-SSOT architecture.
+             *
+             * Some deployments block the external SignalR JavaScript CDN
+             * (or the CDN can be temporarily unavailable). In that case
+             * window.signalR does not exist. The old implementation tried
+             * to execute:
+             *
+             *     new signalR.HubConnectionBuilder()
+             *
+             * which caused:
+             *
+             *     ReferenceError: signalR is not defined
+             *
+             * and prevented Firebase realtime from starting.
+             *
+             * Therefore SignalR is treated as an optional compatibility
+             * channel. Firebase must always be allowed to start independently.
+             */
+            if (!started) {
+                if (typeof window.signalR !== "undefined" &&
+                    window.signalR &&
+                    typeof window.signalR.HubConnectionBuilder === "function") {
 
-                connection.on("DataChanged", onDataChanged);
-                connection.on("AttendanceChanged", onAttendanceChanged);
-                connection.on("PunchChanged", onPunchChanged);
-                connection.on("LocationChanged", onLocationChanged);
-                connection.on("SessionStarted", onSessionStarted);
-                connection.on("SessionEnded", onSessionEnded);
-                connection.on("GeoSettingsChanged", onGeoSettingsChanged);
-                connection.on("ApplicationDataChanged", onApplicationDataChanged);
-                connection.on("RegularizationChanged", onRegularizationChanged);
-                connection.on("LeaveChanged", onLeaveChanged);
-                connection.on("AdvanceChanged", onAdvanceChanged);
-                connection.on("BonusChanged", onBonusChanged);
-                connection.on("TaxDeclarationChanged", onTaxDeclarationChanged);
-                connection.on("EmployeeChanged", onEmployeeChanged);
-                connection.on("ExitChanged", onExitChanged);
-                connection.on("GlobalRefresh", onGlobalRefresh);
-                connection.on("SessionInvalidated", onSessionInvalidated);
+                    try {
+                        if (!connection) {
+                            connection = new window.signalR.HubConnectionBuilder()
+                                .withUrl("/hubs/attendance-refresh")
+                                .withAutomaticReconnect()
+                                .build();
 
-                await connection.start();
+                            connection.on("DataChanged", onDataChanged);
+                            connection.on("AttendanceChanged", onAttendanceChanged);
+                            connection.on("PunchChanged", onPunchChanged);
+                            connection.on("LocationChanged", onLocationChanged);
+                            connection.on("SessionStarted", onSessionStarted);
+                            connection.on("SessionEnded", onSessionEnded);
+                            connection.on("GeoSettingsChanged", onGeoSettingsChanged);
+                            connection.on("ApplicationDataChanged", onApplicationDataChanged);
+                            connection.on("RegularizationChanged", onRegularizationChanged);
+                            connection.on("LeaveChanged", onLeaveChanged);
+                            connection.on("AdvanceChanged", onAdvanceChanged);
+                            connection.on("BonusChanged", onBonusChanged);
+                            connection.on("TaxDeclarationChanged", onTaxDeclarationChanged);
+                            connection.on("EmployeeChanged", onEmployeeChanged);
+                            connection.on("ExitChanged", onExitChanged);
+                            connection.on("GlobalRefresh", onGlobalRefresh);
+                            connection.on("SessionInvalidated", onSessionInvalidated);
+                        }
+
+                        if (connection.state !== window.signalR.HubConnectionState.Connected) {
+                            await connection.start();
+                        }
+
+                        console.log("SignalR compatibility transport connected.");
+                    } catch (signalRError) {
+                        /*
+                         * Do NOT abort realtime startup.
+                         * Firebase below is the primary realtime transport.
+                         */
+                        console.warn(
+                            "SignalR compatibility transport unavailable. Continuing with Firebase realtime.",
+                            signalRError
+                        );
+                    }
+                } else {
+                    /*
+                     * The SignalR CDN is unavailable/not loaded.
+                     * This is expected to be recoverable because Firebase
+                     * provides the realtime SSOT transport.
+                     */
+                    console.info(
+                        "SignalR JavaScript client is not loaded. Continuing with Firebase realtime."
+                    );
+                }
+
+                /*
+                 * Mark the realtime bootstrap as attempted. This prevents
+                 * every Blazor component registration from repeatedly trying
+                 * to construct a missing SignalR client.
+                 */
                 started = true;
-                console.log('SignalR connected.');
             }
 
-            // Firebase is the only realtime transport for the SSOT path.
-            // Once this page has authenticated with Firebase, it does not need
-            // SignalR/Render for subsequent realtime events.
-            if (!firebaseStarted)
+            /*
+             * Firebase must start independently of SignalR.
+             */
+            if (!firebaseStarted) {
                 await startFirebaseRealtime();
+            }
 
         } catch (err) {
-            console.error('Realtime connection failed:', err);
+            /*
+             * Firebase/auth/network failures are retryable. Do not create
+             * a tight retry loop when SignalR alone is unavailable.
+             */
+            console.warn(
+                "Realtime Firebase startup failed. Retrying automatically.",
+                err
+            );
+
+            /*
+             * Allow the next retry to attempt Firebase again.
+             * SignalR remains optional and is not allowed to block startup.
+             */
+            started = true;
             scheduleRetry();
         } finally {
             starting = false;

@@ -3,9 +3,14 @@
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared.Data
 @inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseUserManagementService FirebaseUsers
+
 @attribute [Authorize(Roles = "Admin,SuperAdmin")]
 
 <PageTitle>Attendance Event Monitoring</PageTitle>
+
+<AttendanceRefreshListener OnAttendanceChanged="LoadEvents" />
+<ApplicationRealtimeRefreshListener OnApplicationDataChanged="LoadEvents" />
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>

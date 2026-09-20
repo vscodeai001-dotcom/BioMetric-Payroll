@@ -368,98 +368,42 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
             await _attendanceMonitor.RecordAsync(
                 "LOGIN_ATTEMPT", user.Id, user.Email ?? email, deviceId, "Web", "PASSWORD_VERIFIED",
-                ForceLogoutExisting ? "FORCE_REPLACE_REQUEST" : "NORMAL_LOGIN_ATTEMPT",
+                "AUTOMATIC_SINGLE_SESSION_PROVISIONING",
                 new { CurrentDeviceOwnsSession = currentDeviceOwnsSession, ExistingSession = activeDeviceBeforeLogin != null },
                 activeDeviceBeforeLogin);
 
             _logger.LogInformation(
-                "LOGIN ATTEMPT. UserId={UserId}, ForceLogout={ForceLogout}",
-                user.Id,
-                ForceLogoutExisting);
+                "LOGIN ATTEMPT. UserId={UserId}, DeviceId={DeviceId}, Owns={Owns}",
+                user.Id, deviceId, currentDeviceOwnsSession);
 
 
             // ========================================================
-            // NORMAL LOGIN
+            // AUTOMATIC SINGLE-DEVICE SESSION ENFORCEMENT
+            // ========================================================
+            //
+            // REQUIREMENT: "no need to restrict login just logout existing login".
+            // If the password is correct, we establish the new session and
+            // invalidate any previous device cookies (via security stamp)
+            // and database locks immediately.
             // ========================================================
 
-            if (!ForceLogoutExisting &&
-                !currentDeviceOwnsSession)
+            if (!currentDeviceOwnsSession)
             {
-                var lockResult =
-                    await TryAcquireEmployeeLockAsync(
-                        user.Id,
-                        deviceId);
+                _logger.LogWarning("AUTOMATIC SESSION REPLACEMENT. UserId={UserId}, NewDevice={DeviceId}", user.Id, deviceId);
 
-
-                if (lockResult ==
-                    EmployeeLockResult.AlreadyActive)
+                if (!await ReplaceAndInvalidateEmployeeSessionAsync(user, deviceId))
                 {
-                    ShowForceLogout = true;
-                    ModelState.AddModelError(
-                        string.Empty,
-                        $"{AlreadyLoggedInMessage} {ForceLogoutInstruction}");
+                    ModelState.AddModelError(string.Empty, "Unable to establish employee session.");
+                    return Page();
+                }
 
+                if (activeDeviceBeforeLogin != null)
+                {
                     await _attendanceMonitor.RecordAsync(
-                        "SECOND_DEVICE_ATTEMPT", user.Id, user.Email ?? email, deviceId, "Web",
-                        "EXISTING_SESSION_FOUND", "SINGLE_DEVICE_POLICY",
-                        new { ExistingSession = true }, activeDeviceBeforeLogin);
-
-                    await NotifyBlockedLoginAsync(
-                        user,
-                        email);
-
-                    return Page();
+                        "FORCED_SESSION_LOGOUT", user.Id, user.Email ?? email, activeDeviceBeforeLogin, "Web",
+                        "TERMINATED", "REPLACED_BY_NEW_LOGIN",
+                        new { NewDeviceId = deviceId }, activeDeviceBeforeLogin);
                 }
-
-
-                if (lockResult !=
-                    EmployeeLockResult.Acquired)
-                {
-                    ModelState.AddModelError(
-                        string.Empty,
-                        "We could not start your employee session. Please try again.");
-
-                    return Page();
-                }
-            }
-
-
-            // ========================================================
-            // FORCE LOGOUT EXISTING SESSION
-            // ========================================================
-
-            else
-            {
-                await _attendanceMonitor.RecordAsync(
-                    "FORCE_LOGOUT_REQUESTED", user.Id, user.Email ?? email, deviceId, "Web",
-                    "REQUESTED", "EMPLOYEE_CONFIRMED_EXISTING_SESSION_REPLACEMENT",
-                    new { ForceLogoutExisting }, activeDeviceBeforeLogin);
-
-                _logger.LogWarning(
-                    "FORCE LOGIN REQUEST. UserId={UserId}",
-                    user.Id);
-
-
-                if (!await ReplaceAndInvalidateEmployeeSessionAsync(
-                        user,
-                        deviceId))
-                {
-                    ModelState.AddModelError(
-                        string.Empty,
-                        "The existing session could not be replaced. Please try again.");
-
-                    return Page();
-                }
-
-
-                await _attendanceMonitor.RecordAsync(
-                    "FORCED_SESSION_LOGOUT", user.Id, user.Email ?? email, activeDeviceBeforeLogin, "Web",
-                    "TERMINATED", "REPLACED_BY_NEW_DEVICE",
-                    new { NewDeviceId = deviceId }, activeDeviceBeforeLogin);
-
-                _logger.LogWarning(
-                    "EXISTING EMPLOYEE SESSION INVALIDATED. UserId={UserId}",
-                    user.Id);
             }
 
 
@@ -654,11 +598,10 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 return false;
 
             if (lockRecord.DeviceId != deviceId)
-            {
-                lockRecord.DeviceId = deviceId;
-                lockRecord.LastSeenAtUtc = DateTime.UtcNow;
-                await db.SaveChangesAsync();
-            }
+                return false;
+
+            lockRecord.LastSeenAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync();
 
             return true;
         }

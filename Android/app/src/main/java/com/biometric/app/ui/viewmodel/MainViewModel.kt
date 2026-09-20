@@ -62,8 +62,7 @@ private data class DashboardDataBundle(
 class MainViewModel @Inject constructor(
     private val repository: MainRepository,
     private val sharedViewModel: SharedViewModel,
-    private val sessionStore: MobileSessionStore,
-    private val firebaseSync: FirebaseSyncManager
+    private val sessionStore: MobileSessionStore
 ) : ViewModel() {
 
     private var workforceRecalcJob: Job? = null
@@ -91,18 +90,83 @@ class MainViewModel @Inject constructor(
     private val _isLoading = MutableStateFlow(value = true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private val _companySettings = MutableStateFlow<CompanySettingsResponse?>(null)
-    val companySettings = _companySettings.asStateFlow()
+    // MIRROR: CompanySettings and FeatureSettings are now sourced from Room 
+    // which is hydrated by FirebaseRoomHydrator. This ensures Dashboards 
+    // update immediately and work offline.
+    val companySettings: StateFlow<CompanySettingsResponse?> = repository.companySettingsFlow
+        .map { local ->
+            local?.let {
+                CompanySettingsResponse(
+                    companyName = it.companyName,
+                    officeLatitude = it.officeLatitude,
+                    officeLongitude = it.officeLongitude,
+                    geoRadiusMeters = it.geoRadiusMeters
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    private val _featureSettings = MutableStateFlow<AdminFeatureSettingsDto?>(null)
-    val featureSettings = _featureSettings.asStateFlow()
+    val featureSettings: StateFlow<AdminFeatureSettingsDto?> = repository.featureSettingsFlow
+        .map { local ->
+            local?.let {
+                AdminFeatureSettingsDto(
+                    enableEmployeeManagement = it.enableEmployeeManagement,
+                    enablePayroll = it.enablePayroll,
+                    // enableAttendance missing in DTO, skipping
+                    enableLeaveManagement = it.enableLeaveManagement,
+                    enableSalaryAdvance = it.enableSalaryAdvance,
+                    enableBonusManagement = it.enableBonusManagement,
+                    enableProfessionalTax = it.enableProfessionalTax,
+                    enableStatutoryCompliance = it.enableStatutoryCompliance,
+                    enableEmailNotifications = it.enableEmailNotifications,
+                    enableInAppNotifications = it.enableInAppNotifications,
+                    enableCustomReporting = it.enableCustomReporting,
+                    enableCompanyReports = it.enableCompanyReports,
+                    enableAuditLog = it.enableAuditLog,
+                    enableRecycleBin = it.enableRecycleBin,
+                    enableGeoFencing = it.enableGeoFencing,
+                    enableAutomaticGeofencePunching = it.enableAutomaticGeofencePunching,
+                    enableDualAttendance = it.enableDualAttendance,
+                    enablePunchCorrection = it.enablePunchCorrection,
+                    enableRegularizationRequest = it.enableRegularizationReq,
+                    enableResignationModule = it.enableResignationModule,
+                    enableYearEndSummary = it.enableYearEndSummary,
+                    enableTaxDeclarations = it.enableTaxDeclarations,
+                    enableFlexibleBenefits = it.enableFlexibleBenefits,
+                    enableTdsDeduction = it.enableTdsDeduction,
+                    enableAutoShiftRotation = it.enableAutoShiftRotation,
+                    enableShiftScheduling = it.enableShiftScheduling,
+                    enableSandwichRule = it.enableSandwichRule,
+                    enableLeaveAccrual = it.enableLeaveAccrual,
+                    showThemeToggle = it.showThemeToggle,
+                    employeeToolsVisible = it.employeeToolsVisible,
+                    employeeCanViewDashboard = it.employeeCanViewDashboard,
+                    employeeCanViewAttendance = it.employeeCanViewAttendance,
+                    employeeCanViewLeave = it.employeeCanViewLeave,
+                    employeeCanViewLeaveHistory = it.employeeCanViewLeaveHistory,
+                    employeeCanViewAdvance = it.employeeCanViewAdvance,
+                    employeeCanViewBonus = it.employeeCanViewBonus,
+                    employeeCanViewTax = it.employeeCanViewTax,
+                    employeeCanViewPayslip = it.employeeCanViewPayslip,
+                    employeeCanViewResignation = it.employeeCanViewResignation,
+                    employeeCanViewReports = it.employeeCanViewReports,
+                    employeeCanViewShifts = it.employeeCanViewShifts,
+                    adminCanViewDashboard = it.adminCanViewDashboard,
+                    adminCanViewAttendance = it.adminCanViewAttendance,
+                    adminCanManageShifts = it.adminCanManageShifts,
+                    adminCanRunPayroll = it.adminCanRunPayroll,
+                    adminCanViewReports = it.adminCanViewReports,
+                    adminCanManageEmployees = it.adminCanManageEmployees,
+                    adminCanEditSettings = it.adminCanEditSettings,
+                    adminCanManageEmployeePermissions = it.adminCanManageEmployeePermissions,
+                    adminCanManagePunchApprovals = it.adminCanManagePunchApprovals
+                )
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     init {
         restoreStatsCache()
         checkSubscription()
         ensureUserProfileExists()
-        loadCompanySettings()
-        loadFeatureSettings()
         
         viewModelScope.launch {
             sharedViewModel.refreshRequested.collect {
@@ -119,79 +183,9 @@ class MainViewModel @Inject constructor(
     }
 
     fun triggerRefresh() {
-        loadCompanySettings()
-        loadFeatureSettings()
         viewModelScope.launch {
             recalculateWorkforce(allShops.value, _currentPeriod.value, _currentDate.value, _customEndDate.value)
         }
-    }
-
-    private fun loadCompanySettings() {
-        val ownerRef = firebaseSync.getOwnerRef()
-        if (ownerRef != null) {
-            val settingsRef = ownerRef.child("company_settings").child("1")
-            settingsRef.addValueEventListener(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    val officeLat = snapshot.numberValue("officeLatitude", "OfficeLatitude")
-                    val officeLon = snapshot.numberValue("officeLongitude", "OfficeLongitude")
-                    val radius = snapshot.intValue("geoRadiusMeters", "GeoRadiusMeters")
-                    val companyName = snapshot.stringValue("companyName", "CompanyName")
-                    if (officeLat != null && officeLon != null && (officeLat != 0.0 || officeLon != 0.0)) {
-                        _companySettings.value = CompanySettingsResponse(
-                            companyName = companyName.orEmpty(),
-                            officeLatitude = officeLat,
-                            officeLongitude = officeLon,
-                            geoRadiusMeters = radius ?: 1000
-                        )
-                    }
-                }
-
-                override fun onCancelled(error: DatabaseError) {
-                    Log.w("MainViewModel", "Firebase company settings listener cancelled: ${error.message}")
-                }
-            })
-        }
-    }
-
-    private fun DataSnapshot.stringValue(vararg names: String): String? =
-        names.asSequence().mapNotNull { child(it).getValue(String::class.java) }.firstOrNull()
-
-    private fun DataSnapshot.numberValue(vararg names: String): Double? =
-        names.asSequence().mapNotNull { name ->
-            val value = child(name).value
-            when (value) {
-                is Number -> value.toDouble()
-                else -> value?.toString()?.toDoubleOrNull()
-            }
-        }.firstOrNull()
-
-    private fun DataSnapshot.intValue(vararg names: String): Int? =
-        names.asSequence().mapNotNull { name ->
-            val value = child(name).value
-            when (value) {
-                is Number -> value.toInt()
-                else -> value?.toString()?.toIntOrNull()
-            }
-        }.firstOrNull()
-
-    private fun loadFeatureSettings() {
-        val ownerRef = firebaseSync.getOwnerRef() ?: return
-        ownerRef.child("feature_settings").child("1")
-            .addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    if (!snapshot.exists()) return
-                    runCatching {
-                        val json = Gson().toJson(snapshot.value)
-                        _featureSettings.value = Gson().fromJson(json, AdminFeatureSettingsDto::class.java)
-                    }.onFailure {
-                        Log.e("MainViewModel", "Failed to decode Firebase feature settings", it)
-                    }
-                }
-
-                override fun onCancelled(error: DatabaseError) {
-                    Log.w("MainViewModel", "Firebase feature settings read cancelled: ${error.message}")
-                }
-            })
     }
 
     @OptIn(FlowPreview::class)
@@ -217,7 +211,7 @@ class MainViewModel @Inject constructor(
 
                 combine(
                     sharedViewModel.allEmployees,
-                    sharedViewModel.allAttendance,
+                    sharedViewModel.allAttendancePunches, // Use Punches (SSOT) instead of Sessions (Legacy)
                     repository.allRegularizationsFlow,
                     dashboardData
                 ) { employees, attendance, regularizations, bundle ->
@@ -227,14 +221,16 @@ class MainViewModel @Inject constructor(
                     val payrolls = bundle.payrolls
 
                     val activeStaff = employees.filter { it.isActive }
-                    val activeIds = activeStaff.map { it.employeeId }.toSet()
+                    val activeIds = activeStaff.map { it.employeeId.toString() }.toSet()
                     val today = System.currentTimeMillis()
                     val startOfToday = DateRangeUtil.getStartOfDay(today)
                     val dateTodayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(today))
                     
+                    // MIRROR: presentCount calculation now uses the authoritative punches
+                    // collection to ensure real-time parity with the Web dashboard.
                     val presentCount = attendance.filter { 
-                        it.checkInTime >= startOfToday && activeIds.contains(it.employeeId)
-                    }.distinctBy { it.employeeId }.size
+                        it.timestamp >= startOfToday && activeIds.contains(it.staffId)
+                    }.distinctBy { it.staffId }.size
 
                     val unpaidAdvAmount = advances.filter { !it.isRecovered }.sumOf { it.amount }
                     val recentAdvancesList = advances.filter { !it.isRecovered }.sortedByDescending { it.date }.take(4)
@@ -290,9 +286,13 @@ class MainViewModel @Inject constructor(
 
                     shops.map { shop ->
                         val shopEmployees = employees.filter { it.shopId == shop.shopId && it.isActive }
+                        val shopActiveIds = shopEmployees.map { it.employeeId }.toSet()
+                        
+                        // MIRROR: Shop-level present count now uses the authoritative punches
+                        // SSOT to match the behavior of the Web dashboard.
                         val shopPresent = attendance.filter { 
-                            it.shopId == shop.shopId && it.checkInTime >= startOfToday && activeIds.contains(it.employeeId)
-                        }.distinctBy { it.employeeId }.size
+                            it.timestamp >= startOfToday && shopActiveIds.contains(it.staffId)
+                        }.distinctBy { it.staffId }.size
                         
                         val pendingRegs = regularizations.filter { 
                             it.status == "Pending" 

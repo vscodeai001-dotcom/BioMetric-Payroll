@@ -110,8 +110,8 @@ object GlobalSwitcherDelegate {
                     .getString("user_role", "")
                     .orEmpty()
                 val isAdmin = profileRole.contains("Admin", true) ||
-                    storedRole == UserRole.ADMIN.name ||
-                    storedRole == UserRole.SUPER_ADMIN.name
+                    storedRole.equals(UserRole.Admin.name, true) ||
+                    storedRole.equals(UserRole.SuperAdmin.name, true)
                 
                 showQuickActionPopup(activity, actionView, extraActions, isAdmin)
                 return true

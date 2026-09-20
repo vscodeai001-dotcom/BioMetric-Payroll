@@ -26,9 +26,11 @@ import com.biometric.app.data.entity.*
         LocalBonusRecord::class,
         LocalTaxDeclaration::class,
         LocalFbpDeclaration::class,
-        LocalFbpComponent::class
+        LocalFbpComponent::class,
+        LocalCompanySettings::class,
+        LocalFeatureSettings::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -52,4 +54,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun localTaxDeclarationDao(): LocalTaxDeclarationDao
     abstract fun localFbpDeclarationDao(): LocalFbpDeclarationDao
     abstract fun localFbpComponentDao(): LocalFbpComponentDao
+    abstract fun localSettingsDao(): LocalSettingsDao
 }

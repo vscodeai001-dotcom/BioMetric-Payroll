@@ -438,7 +438,7 @@ class LoginActivity : MotionBaseActivity() {
 
                         applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)
-                            putString("user_role", UserRole.STAFF.name)
+                            putString("user_role", UserRole.Employee.name)
                             putInt("employee_id", firebaseEmployeeId)
                             putString("employee_name", displayName)
                             putString("user_uid", firebaseUser.uid)
@@ -446,7 +446,7 @@ class LoginActivity : MotionBaseActivity() {
                         applicationContext.getSharedPreferences("auth_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("has_logged_in_before", true)
                             putBoolean("is_locked", false)
-                            putString("user_role", UserRole.STAFF.name)
+                            putString("user_role", UserRole.Employee.name)
                             putString("user_uid", firebaseUser.uid)
                             putInt("employee_id", firebaseEmployeeId)
                             putString("employee_name", displayName)
@@ -460,16 +460,10 @@ class LoginActivity : MotionBaseActivity() {
                     }
 
                     if (sessionResult.conflict) {
-                        setLoading(false)
-                        firebaseSync.pushMobileAuthEvent("SECOND_DEVICE_ATTEMPT", firebaseUser.email ?: email, getAndroidDeviceId())
-                        AlertDialog.Builder(this@LoginActivity)
-                            .setTitle("Employee already logged in")
-                            .setMessage("This employee account is already active on another device. Replace that active session with this device?")
-                            .setPositiveButton("Replace & Login") { _, _ ->
-                                handleEmployeeLogin(email, pass, forceReplace = true)
-                            }
-                            .setNegativeButton("Cancel", null)
-                            .show()
+                        // REQUIREMENT: "no need to restrict login just logout existing login".
+                        // Automate the session replacement for a seamless login flow.
+                        firebaseSync.pushMobileAuthEvent("FORCED_SESSION_LOGOUT", firebaseUser.email ?: email, getAndroidDeviceId())
+                        handleEmployeeLogin(email, pass, forceReplace = true)
                         return@launch
                     }
 

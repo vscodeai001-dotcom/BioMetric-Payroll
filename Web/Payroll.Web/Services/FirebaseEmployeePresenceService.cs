@@ -55,7 +55,7 @@ public sealed class FirebaseEmployeePresenceService
             // that the employee is currently active on the Web Dashboard.
             var sessionRow = new Dictionary<string, object?>
             {
-                ["deviceId"] = "WEB_BROWSER_" + key.Take(8),
+                ["deviceId"] = "WEB_BROWSER_" + key.Substring(0, Math.Min(8, key.Length)),
                 ["employeeId"] = employeeId,
                 ["ownerUid"] = ownerUid,
                 ["uid"] = authUid,

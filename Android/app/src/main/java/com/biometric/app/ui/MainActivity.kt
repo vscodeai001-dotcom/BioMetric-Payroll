@@ -1573,12 +1573,29 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        val extraActions = listOf(
+        val profile = sharedViewModel.userProfile.value
+        val isAdmin = profile?.isAdmin() == true || profile?.isSuperAdmin() == true
+        val isSuperAdmin = profile?.isSuperAdmin() == true
+
+        val extraActions = mutableListOf(
             GlobalSwitcherDelegate.ActionItem("🔄", "Sync Data") {
                 triggerExclusiveRefresh()
                 Toast.makeText(this, "Real-time sync triggered... 🛰️", Toast.LENGTH_SHORT).show()
             }
         )
+
+        if (isAdmin) {
+            extraActions.add(GlobalSwitcherDelegate.ActionItem("⚙️", "Settings") {
+                startActivity(Intent(this, SettingsActivity::class.java))
+            })
+        }
+
+        if (isSuperAdmin) {
+            extraActions.add(GlobalSwitcherDelegate.ActionItem("👥", "Users") {
+                startActivity(Intent(this, UserManagementActivity::class.java))
+            })
+        }
+
         return if (GlobalSwitcherDelegate.handleOptionsItemSelected(this, item, sharedViewModel, extraActions)) true else super.onOptionsItemSelected(item)
     }
 

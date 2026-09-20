@@ -20,6 +20,7 @@ import com.biometric.app.data.dao.LocalShiftScheduleDao
 import com.biometric.app.data.dao.LocalShopClosedDayDao
 import com.biometric.app.data.dao.LocalShopDao
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
@@ -61,7 +62,8 @@ class FirebaseRoomHydrator @Inject constructor(
     private val bonusRecordDao: LocalBonusRecordDao,
     private val taxDeclarationDao: LocalTaxDeclarationDao,
     private val fbpComponentDao: LocalFbpComponentDao,
-    private val fbpDeclarationDao: LocalFbpDeclarationDao
+    private val fbpDeclarationDao: LocalFbpDeclarationDao,
+    private val settingsDao: LocalSettingsDao
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
@@ -128,6 +130,13 @@ class FirebaseRoomHydrator @Inject constructor(
             observe("fbp_declarations",
                 onUpsert = { fbpDeclarationDao.upsert(it.toLocalFbpDeclaration()) },
                 onDelete = { fbpDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+
+            observeValue("company_settings", existing = { emptyList() }, onDelete = { }) { 
+                if (it.key == "1") settingsDao.upsertCompanySettings(it.toLocalCompanySettings())
+            }
+            observeValue("feature_settings", existing = { emptyList() }, onDelete = { }) { 
+                if (it.key == "1") settingsDao.upsertFeatureSettings(it.toLocalFeatureSettings())
+            }
         }
     }
 
@@ -273,6 +282,100 @@ class FirebaseRoomHydrator @Inject constructor(
         requestId = s("requestId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(), submissionDate = l("submissionDate"),
         desiredLastWorkingDay = l("desiredLastWorkingDay"), reason = s("reason"), status = s("status") ?: "Pending",
         approvedLastWorkingDay = l("approvedLastWorkingDay").takeIf { it > 0 }, adminRemarks = s("adminRemarks"), isSettled = b("isSettled")
+    )
+
+    private fun DataSnapshot.toLocalCompanySettings() = LocalCompanySettings(
+        id = 1,
+        companyName = s("companyName") ?: "",
+        addressLine1 = s("addressLine1") ?: "",
+        cityStatePincode = s("cityStatePincode") ?: "",
+        salaryCalculationMethod = s("salaryCalculationMethod") ?: "Days in Month",
+        officeLatitude = d("officeLatitude"),
+        officeLongitude = d("officeLongitude"),
+        geoRadiusMeters = i("geoRadiusMeters").takeIf { it > 0 } ?: 1000,
+        zktecoIP = s("zktecoIP"),
+        zktecoPort = i("zktecoPort").takeIf { it > 0 } ?: 4370,
+        zktecoMachineNumber = i("zktecoMachineNumber").takeIf { it > 0 } ?: 1,
+        workDayCutoffHour = i("workDayCutoffHour"),
+        endTimeGraceMinutes = i("endTimeGraceMinutes"),
+        lateGraceMinutes = i("lateGraceMinutes"),
+        enablePfEsiSystem = b("enablePfEsiSystem"),
+        esiWageLimit = d("esiWageLimit"),
+        basicSalaryPercentage = d("basicSalaryPercentage"),
+        employeePfPercentage = d("employeePfPercentage"),
+        employeeEsiPercentage = d("employeeEsiPercentage"),
+        employerPfPercentage = d("employerPfPercentage"),
+        employerEsiPercentage = d("employerEsiPercentage"),
+        enableProfessionalTax = b("enableProfessionalTax"),
+        enableEmailNotifications = b("enableEmailNotifications"),
+        smtpHost = s("smtpHost"),
+        smtpPort = i("smtpPort"),
+        smtpUser = s("smtpUser"),
+        smtpPass = s("smtpPass"),
+        smtpFromEmail = s("smtpFromEmail"),
+        enableSsl = b("enableSsl", true),
+        enableShiftAllowance = b("enableShiftAllowance"),
+        enableLeaveAccrual = b("enableLeaveAccrual"),
+        leaveAccrualRate = d("leaveAccrualRate"),
+        enableSandwichRule = b("enableSandwichRule"),
+        enableLeaveManagement = b("enableLeaveManagement"),
+        enableTdsDeduction = b("enableTdsDeduction"),
+        syncState = 1
+    )
+
+    private fun DataSnapshot.toLocalFeatureSettings() = LocalFeatureSettings(
+        id = 1,
+        enableEmployeeManagement = b("enableEmployeeManagement", true),
+        enablePayroll = b("enablePayroll", true),
+        enableAttendance = b("enableAttendance", true),
+        enableLeaveManagement = b("enableLeaveManagement", true),
+        enableSalaryAdvance = b("enableSalaryAdvance", true),
+        enableBonusManagement = b("enableBonusManagement", true),
+        enableProfessionalTax = b("enableProfessionalTax", true),
+        enableStatutoryCompliance = b("enableStatutoryCompliance", true),
+        enableEmailNotifications = b("enableEmailNotifications", true),
+        enableInAppNotifications = b("enableInAppNotifications", true),
+        enableCustomReporting = b("enableCustomReporting", true),
+        enableCompanyReports = b("enableCompanyReports", true),
+        enableAuditLog = b("enableAuditLog", true),
+        enableRecycleBin = b("enableRecycleBin", true),
+        enableGeoFencing = b("enableGeoFencing"),
+        enableAutomaticGeofencePunching = b("enableAutomaticGeofencePunching"),
+        enableDualAttendance = b("enableDualAttendance"),
+        enablePunchCorrection = b("enablePunchCorrection"),
+        enableRegularizationReq = b("enableRegularizationReq"),
+        enableResignationModule = b("enableResignationModule"),
+        enableYearEndSummary = b("enableYearEndSummary"),
+        enableTaxDeclarations = b("enableTaxDeclarations"),
+        enableFlexibleBenefits = b("enableFlexibleBenefits"),
+        enableTdsDeduction = b("enableTdsDeduction"),
+        enableAutoShiftRotation = b("enableAutoShiftRotation"),
+        enableShiftScheduling = b("enableShiftScheduling"),
+        enableSandwichRule = b("enableSandwichRule"),
+        enableLeaveAccrual = b("enableLeaveAccrual"),
+        showThemeToggle = b("showThemeToggle", true),
+        employeeToolsVisible = b("employeeToolsVisible", true),
+        employeeCanViewDashboard = b("employeeCanViewDashboard", true),
+        employeeCanViewAttendance = b("employeeCanViewAttendance", true),
+        employeeCanViewLeave = b("employeeCanViewLeave", true),
+        employeeCanViewLeaveHistory = b("employeeCanViewLeaveHistory", true),
+        employeeCanViewAdvance = b("employeeCanViewAdvance", true),
+        employeeCanViewBonus = b("employeeCanViewBonus", true),
+        employeeCanViewTax = b("employeeCanViewTax", true),
+        employeeCanViewPayslip = b("employeeCanViewPayslip", true),
+        employeeCanViewResignation = b("employeeCanViewResignation", true),
+        employeeCanViewReports = b("employeeCanViewReports", true),
+        employeeCanViewShifts = b("employeeCanViewShifts", true),
+        adminCanViewDashboard = b("adminCanViewDashboard", true),
+        adminCanViewAttendance = b("adminCanViewAttendance", true),
+        adminCanManageShifts = b("adminCanManageShifts", true),
+        adminCanRunPayroll = b("adminCanRunPayroll", true),
+        adminCanViewReports = b("adminCanViewReports", true),
+        adminCanManageEmployees = b("adminCanManageEmployees", true),
+        adminCanEditSettings = b("adminCanEditSettings", true),
+        adminCanManageEmployeePermissions = b("adminCanManageEmployeePermissions", true),
+        adminCanManagePunchApprovals = b("adminCanManagePunchApprovals", true),
+        syncState = 1
     )
 
     private fun observePayrollHistory() {

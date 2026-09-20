@@ -44,10 +44,10 @@ class UserManagementActivity : MotionBaseActivity() {
 
         // Web parity: User/Role Management is a SuperAdmin-only governance function.
         val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", UserRole.STAFF.name)
+            .getString("user_role", UserRole.Employee.name)
             ?.trim()
             ?.uppercase()
-        if (role != UserRole.SUPER_ADMIN.name) {
+        if (role != UserRole.SuperAdmin.name.uppercase()) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Access Restricted 🛡️")
                 .setMessage("User and Role Management is available only to SuperAdmin.")

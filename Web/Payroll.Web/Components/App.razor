@@ -74,6 +74,9 @@
        REAL-TIME ATTENDANCE REFRESH
        ============================================================ *@
 
+    @* SignalR is an optional compatibility transport. Firebase realtime
+       remains the primary SSOT transport, so the application must continue
+       working even when this external CDN is blocked/unavailable. *@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.21/signalr.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.10.0/firebase-auth-compat.js"></script>
