@@ -28,6 +28,7 @@ class SignalRManager @Inject constructor(
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var applicationJob: Job? = null
     private var connectionJob: Job? = null
+    private var reconciliationJob: Job? = null
     private var locationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
     private val ownerEmployeeIds = mutableSetOf<Int>()
@@ -47,11 +48,11 @@ class SignalRManager @Inject constructor(
     val ownerEmployees = _ownerEmployees.asStateFlow()
 
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
-        // Authoritative tenant check: Render GPS nodes that belong to the 
+        // Authoritative tenant check: Render GPS nodes that belong to the
         // current owner. We prioritized the employee master directory before,
         // but now we trust all positive IDs from the owner's live tracking node.
         val filtered = raw.filterKeys { it > 0 }
-        
+
         _liveLocations.value = filtered
         _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
     }
@@ -101,9 +102,9 @@ class SignalRManager @Inject constructor(
                 // A single employee node is supported for Employee/Staff sessions.
                 val isSingleEmployeeNode =
                     snapshot.hasChild("EmployeeId") ||
-                    snapshot.hasChild("employeeId") ||
-                    snapshot.hasChild("Latitude") ||
-                    snapshot.hasChild("latitude")
+                            snapshot.hasChild("employeeId") ||
+                            snapshot.hasChild("Latitude") ||
+                            snapshot.hasChild("latitude")
 
                 val children = if (isSingleEmployeeNode) {
                     listOf(snapshot)
@@ -112,6 +113,18 @@ class SignalRManager @Inject constructor(
                 }
 
                 for (child in children) {
+                    val state = sequenceOf(
+                        child.child("State").value?.toString(),
+                        child.child("state").value?.toString()
+                    ).filterNotNull().firstOrNull { it.isNotBlank() }
+
+                    // Match Web Admin lifecycle filtering. Firebase can retain
+                    // a terminal compatibility node briefly after logout/end.
+                    if (state.equals("ENDED", true) ||
+                        state.equals("OFFLINE", true)) {
+                        continue
+                    }
+
                     val keyEmployeeId = child.key?.toIntOrNull()
 
                     val value = runCatching {
@@ -171,6 +184,30 @@ class SignalRManager @Inject constructor(
 
         locationListener = listener
         liveRef.addValueEventListener(listener)
+
+        // Primary channel: Firebase ValueEventListener.
+        // Safety net: periodically read the exact same owner-scoped Firebase
+        // node so the Android Admin map converges automatically after any
+        // listener/process/network edge case. No manual Refresh is required.
+        reconciliationJob?.cancel()
+        reconciliationJob = managerScope.launch {
+            while (isActive && activeOwnerUid == ownerUid) {
+                delay(5000L)
+                if (!isActive || activeOwnerUid != ownerUid) break
+
+                runCatching {
+                    val snapshot = liveRef.get().await()
+                    withContext(Dispatchers.Main.immediate) {
+                        listener.onDataChange(snapshot)
+                    }
+                }.onFailure { error ->
+                    Log.d(
+                        "SignalRManager",
+                        "Live-location reconciliation skipped: ${error.message}"
+                    )
+                }
+            }
+        }
 
         // Authoritative employee binding for the current tenant. Admin maps
         // must render only employees that actually exist under this owner.
@@ -333,6 +370,8 @@ class SignalRManager @Inject constructor(
     @Synchronized
     fun stop() {
         val ownerUid = activeOwnerUid
+        reconciliationJob?.cancel()
+        reconciliationJob = null
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
 

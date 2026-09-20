@@ -3318,37 +3318,68 @@
         if (string.IsNullOrWhiteSpace(ownerUid))
             return;
 
-        try
+        /*
+         * Firebase REST SSE is the primary Web realtime channel. Unlike the
+         * Android Firebase SDK, the REST stream does not automatically recreate
+         * itself after an EOF/network interruption. Keep one reconnect loop here
+         * so the Web Admin map always converges to the same owner-scoped
+         * tracking/live snapshot without requiring the Refresh button.
+         */
+        while (!token.IsCancellationRequested && !disposed)
         {
-            await FirebaseRealtime.StreamGlobalChangesAsync(
-                $"owners/{ownerUid.Trim()}/tracking",
-                async (path, data, ct) =>
-                {
-                    if (disposed || ct.IsCancellationRequested)
-                        return;
+            try
+            {
+                await FirebaseRealtime.StreamGlobalChangesAsync(
+                    $"owners/{ownerUid.Trim()}/tracking",
+                    async (path, data, ct) =>
+                    {
+                        if (disposed || ct.IsCancellationRequested)
+                            return;
 
-                    try
-                    {
-                        await ApplyFirebaseTrackingChange(path, data);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine(
-                            $"Firebase live-location event failed: {ex}");
-                    }
-                },
-                token);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine(
-                $"Firebase owner live-location stream ended: {ex}");
+                        try
+                        {
+                            await ApplyFirebaseTrackingChange(path, data);
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(
+                                $"Firebase live-location event failed: {ex}");
+                        }
+                    },
+                    token);
+
+                if (token.IsCancellationRequested || disposed)
+                    break;
+
+                // EOF without an exception. Reconcile before reconnecting.
+                await RefreshLocations();
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Firebase owner live-location stream ended: {ex}");
+            }
+
+            if (token.IsCancellationRequested || disposed)
+                break;
+
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(2),
+                    token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
@@ -3915,12 +3946,14 @@
                 if (token.IsCancellationRequested)
                     break;
 
-                // Live location membership and coordinates are pushed through
-                // SignalR. Do not poll the database every few seconds because
-                // that creates unnecessary redraws and makes the map feel noisy.
-                // This timer only ages the UI status and advances playback.
-                await InvokeAsync(StateHasChanged);
+                // Firebase is the authoritative live-location source. Keep
+                // the realtime stream as the primary transport, with this
+                // lightweight 5-second reconciliation as a safety net for
+                // silent SSE/network interruptions. This is not a manual
+                // refresh and does not use SQL as the live-location source.
+                await RefreshLocations();
 
+                await InvokeAsync(StateHasChanged);
                 await PollPlaybackState();
             }
         }
