@@ -28,7 +28,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
  */
 @Singleton
 class FirebaseReconnectCoordinator @Inject constructor(
-    @get:ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val firebaseSync: FirebaseSyncManager,
     private val hydrator: FirebaseRoomHydrator,
     private val sessionStore: MobileSessionStore

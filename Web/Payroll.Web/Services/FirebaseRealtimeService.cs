@@ -49,9 +49,14 @@ public sealed class FirebaseRealtimeService
         if (!string.IsNullOrWhiteSpace(configured))
             return configured.Trim();
 
-        // Backward-compatible fallback for a single-user installation.
-        // Multi-user/company installations should set FIREBASE_OWNER_UID.
-        return actorUid;
+        // REQUIREMENT: Standardize on a shared tenant UID if not explicitly
+        // configured. This ensures that employees (Suresh, Nevetha, etc.)
+        // and the Admin always read/write to the same Firebase nodes.
+        // SuperAdmin can retain their own UID for multi-tenant governance.
+        if (role?.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase) == true)
+            return actorUid;
+
+        return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
     }
 
     public async Task<FirebaseToken?> VerifyIdTokenAsync(

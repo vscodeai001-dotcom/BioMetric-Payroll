@@ -3520,6 +3520,8 @@ window.updateAdminLiveStaffMap =
                     ? staff
                     : [];
 
+            const displayPoints = [];
+
             let state =
                 window.adminLiveMaps[mapId];
 
@@ -3785,6 +3787,9 @@ window.updateAdminLiveStaffMap =
                             lng + Number(displayItem.offsetX || 0)
                         ]
                         : position.slice();
+
+                    displayPoints.push({ staff: x, pos: L.latLng(displayPosition) });
+
                     const hasCollisionOffset =
                         !!displayItem &&
                         (Math.abs(Number(displayItem.offsetX || 0)) > 0 ||
@@ -4279,8 +4284,14 @@ window.updateAdminLiveStaffMap =
             // Fit map bounds on initial load or selection change
             if (!state.hasInitialFit || membershipChanged) {
                 const points = [office];
-                displayPoints.forEach(p => {
-                    points.push(p.pos);
+
+                // Use the authoritative list of current live staff to calculate bounds.
+                liveStaff.forEach(function (x) {
+                    const lat = Number(x.latitude);
+                    const lng = Number(x.longitude);
+                    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                        points.push([lat, lng]);
+                    }
                 });
 
                 if (points.length > 1) {
