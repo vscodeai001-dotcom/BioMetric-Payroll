@@ -842,38 +842,20 @@ static async Task<(bool Recreated, string? BackupPath)> VerifyAndRepairSqliteCac
             $"SQLite integrity_check returned '{result ?? "null"}'.",
             11);
     }
-    catch (Exception ex)
+    catch (Exception ex) when (
+        ex is SqliteException ||
+        ex is IOException ||
+        ex is UnauthorizedAccessException)
     {
-        // REQUIREMENT: Distinguish between "File in Use" and "Physical Corruption".
-        // If the file is locked by the Attendance Service or another instance,
-        // it is NOT corrupted. Quarantining a busy file will fail with another
-        // IOException and crash the app.
-        bool isBusy = (ex is IOException ioEx && ioEx.Message.Contains("used by another process", StringComparison.OrdinalIgnoreCase)) ||
-                     (ex is SqliteException sqlEx && (sqlEx.SqliteErrorCode == 5 || sqlEx.SqliteExtendedErrorCode == 5));
-
-        if (isBusy)
-        {
-            logger.LogWarning(
-                "SQLite compatibility cache is busy or locked by another process. " +
-                "Skipping integrity check to avoid collision. DatabasePath={DatabasePath}",
-                sqlitePath);
-            return (false, null);
-        }
-
-        if (ex is not SqliteException && ex is not IOException && ex is not UnauthorizedAccessException)
-            throw;
-
         var backupPath =
             $"{sqlitePath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}.bak";
 
         try
         {
-            // Only attempt move if it looks like a database level error or access error
-            // that isn't a simple sharing violation.
             File.Move(sqlitePath, backupPath);
             logger.LogError(
                 ex,
-                "SQLite compatibility cache is corrupted or inaccessible. " +
+                "SQLite compatibility cache is corrupted. " +
                 "Quarantined {DatabasePath} as {BackupPath}.",
                 sqlitePath,
                 backupPath);
@@ -888,10 +870,9 @@ static async Task<(bool Recreated, string? BackupPath)> VerifyAndRepairSqliteCac
         {
             logger.LogCritical(
                 quarantineEx,
-                "SQLite compatibility cache appeared corrupted but could not be quarantined. " +
-                "Error: {Message}. Stop other Payroll Web/AttendanceService instances using {DatabasePath} " +
+                "SQLite compatibility cache is corrupted but could not be quarantined. " +
+                "Stop other Payroll Web/AttendanceService instances using {DatabasePath} " +
                 "and repair the file before restarting.",
-                ex.Message,
                 sqlitePath);
             throw;
         }
