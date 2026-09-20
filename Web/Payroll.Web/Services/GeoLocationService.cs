@@ -402,13 +402,80 @@ public class GeoLocationService
                         x.EmployeeId == employeeId &&
                         x.SessionId == sessionId);
 
+                // A Firebase GPS fix can arrive after another platform has
+                // already ended the incoming session. Never continue writing
+                // to that ended session. Rebind the current fix to an existing
+                // active session, or create a brand-new session when none exists.
+                // The old session remains immutable/ENDED for audit history.
+                var effectiveSessionId = sessionId;
+
                 if (session == null || session.EndedAtUtc.HasValue)
                 {
-                    // An old in-flight GPS request is no longer authoritative.
-                    // Remove only if this exact old session still owns the
-                    // in-memory entry. A newer session is never removed.
                     LiveLocationStore.Remove(employeeId, sessionId);
-                    return false;
+
+                    var activeSession = await db.EmployeeGpsSessions
+                        .Where(x =>
+                            x.EmployeeId == employeeId &&
+                            x.EndedAtUtc == null)
+                        .OrderByDescending(x => x.StartedAtUtc)
+                        .FirstOrDefaultAsync();
+
+                    if (activeSession != null)
+                    {
+                        session = activeSession;
+                        effectiveSessionId = activeSession.SessionId;
+                    }
+                    else
+                    {
+                        effectiveSessionId = Guid.NewGuid();
+                        var recoveryStart = DateTime.UtcNow;
+
+                        session = new EmployeeGpsSession
+                        {
+                            EmployeeId = employeeId,
+                            SessionId = effectiveSessionId,
+                            StartedAtUtc = recoveryStart,
+                            LastUpdateAtUtc = DateTime.MinValue,
+                            EndedAtUtc = null,
+                            EndReason = null,
+                            TotalPoints = 0,
+                            TotalDistanceMeters = 0,
+                            AverageAccuracyMeters = null
+                        };
+
+                        db.EmployeeGpsSessions.Add(session);
+                        await db.SaveChangesAsync();
+
+                        await _firebase.BindLiveLocationAsync(
+                            employeeId,
+                            effectiveSessionId,
+                            _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
+
+                        try
+                        {
+                            await _hubContext.Clients.All.SendAsync(
+                                "SessionStarted",
+                                new
+                                {
+                                    EmployeeId = employeeId,
+                                    SessionId = effectiveSessionId,
+                                    StartedAtUtc = recoveryStart
+                                });
+                        }
+                        catch (Exception signalREx)
+                        {
+                            _logger.LogWarning(
+                                signalREx,
+                                "Failed to broadcast recovered GPS session start for employee {EmployeeId}",
+                                employeeId);
+                        }
+
+                        _logger.LogInformation(
+                            "Recovered GPS session. EmployeeId={EmployeeId}, OldSessionId={OldSessionId}, NewSessionId={NewSessionId}",
+                            employeeId,
+                            sessionId,
+                            effectiveSessionId);
+                    }
                 }
 
                 var captureTime = capturedAtUtc.HasValue && capturedAtUtc.Value != default
@@ -418,11 +485,19 @@ public class GeoLocationService
                 // Do not let delayed/retried GPS packets overwrite the newer
                 // session position. This is a display/data-integrity guard;
                 // attendance rules continue to use the current server time.
+                if (captureTime < session.StartedAtUtc)
+                {
+                    _logger.LogDebug(
+                        "Ignoring GPS fix captured before effective session start. EmployeeId={EmployeeId}, IncomingSessionId={IncomingSessionId}, EffectiveSessionId={EffectiveSessionId}",
+                        employeeId, sessionId, effectiveSessionId);
+                    return false;
+                }
+
                 if (captureTime < session.LastUpdateAtUtc)
                 {
                     _logger.LogDebug(
                         "Ignoring out-of-order GPS fix. EmployeeId={EmployeeId}, SessionId={SessionId}, Capture={CaptureTime}, Current={CurrentTime}",
-                        employeeId, sessionId, captureTime, session.LastUpdateAtUtc);
+                        employeeId, effectiveSessionId, captureTime, session.LastUpdateAtUtc);
                     return true;
                 }
 
@@ -455,7 +530,7 @@ public class GeoLocationService
                     var attendanceEvaluationCompleted = await ProcessAutomaticGeofencePunchAsync(
                             db,
                             employeeId,
-                            sessionId,
+                            effectiveSessionId,
                             latitude,
                             longitude,
                             safeAccuracy,
@@ -477,7 +552,7 @@ public class GeoLocationService
                         _logger.LogWarning(
                             "Dual Attendance evaluation did not complete. Geofence state was not advanced. EmployeeId={EmployeeId}, SessionId={SessionId}",
                             employeeId,
-                            sessionId);
+                            effectiveSessionId);
                     }
 
                     if (radiusChanged)
@@ -485,7 +560,7 @@ public class GeoLocationService
                         _logger.LogInformation(
                             "Geofence radius changed during active GPS session; state re-baselined with immediate attendance evaluation. EmployeeId={EmployeeId}, SessionId={SessionId}, PreviousRadius={PreviousRadius}, NewRadius={NewRadius}, State={State}",
                             employeeId,
-                            sessionId,
+                            effectiveSessionId,
                             session.LastAllowedRadiusMeters,
                             allowedRadiusMeters,
                             stableLocationState.Value ? "INSIDE" : "OUTSIDE");
@@ -528,7 +603,7 @@ public class GeoLocationService
                     safeDistance,
                     allowedRadiusMeters,
                     session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,
-                    sessionId,
+                    effectiveSessionId,
                     captureTime);
 
                 if (!liveUpdated)
@@ -536,7 +611,7 @@ public class GeoLocationService
                     _logger.LogWarning(
                         "GPS live-store update rejected. EmployeeId={EmployeeId}, SessionId={SessionId}",
                         employeeId,
-                        sessionId);
+                        effectiveSessionId);
                     return false;
                 }
 
@@ -554,11 +629,11 @@ public class GeoLocationService
                     var speed = live?.SpeedMps ?? 0;
 
                     var clientEventId =
-                        $"web-{sessionId:N}-{session.TotalPoints}";
+                        $"web-{effectiveSessionId:N}-{session.TotalPoints}";
 
                     await _firebase.PublishLiveLocationAsync(
                         employeeId,
-                        sessionId,
+                        effectiveSessionId,
                         clientEventId,
                         session.TotalPoints,
                         latitude,
@@ -576,7 +651,7 @@ public class GeoLocationService
                         firebaseEx,
                         "Firebase live-location publish failed after committed GPS update. EmployeeId={EmployeeId}, SessionId={SessionId}",
                         employeeId,
-                        sessionId);
+                        effectiveSessionId);
                 }
 
                 try
@@ -592,7 +667,7 @@ public class GeoLocationService
                         new
                         {
                             EmployeeId = employeeId,
-                            SessionId = sessionId,
+                            SessionId = effectiveSessionId,
                             Latitude = latitude,
                             Longitude = longitude,
                             Timestamp = live?.LastUpdatedUtc ?? captureTime,
@@ -818,7 +893,7 @@ public class GeoLocationService
                 db,
                 employeeId,
                 sessionId,
-                DateTime.UtcNow,
+                overridePunchTime?.ToUniversalTime() ?? DateTime.UtcNow,
                 latitude,
                 longitude,
                 accuracyMeters,
@@ -1068,6 +1143,30 @@ public class GeoLocationService
 
                 await db.SaveChangesAsync();
 
+                // Keep the cross-platform Firebase session lifecycle aligned with
+                // the authoritative Web session. This prevents Android from
+                // continuing to publish against a session that Web has ended.
+                try
+                {
+                    var ownerUidForSession = _firebase.ResolveOwnerUid(
+                        $"employee-{employeeId}",
+                        "Employee");
+
+                    await _firebase.TerminateTrackingSessionAsync(
+                        employeeId,
+                        sessionId,
+                        ownerUidForSession,
+                        session.EndReason ?? "ENDED");
+                }
+                catch (Exception firebaseSessionEx)
+                {
+                    _logger.LogWarning(
+                        firebaseSessionEx,
+                        "Failed to publish GPS session end to Firebase. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                        employeeId,
+                        sessionId);
+                }
+
                 // Remove only the ended session from the process-local store.
                 // Before deleting the Firebase live marker, verify that no newer
                 // active session exists for the same employee.
@@ -1218,9 +1317,33 @@ public class GeoLocationService
                 // REQUIREMENT: Synchronize session termination to Firebase.
                 // This ensures map markers go offline immediately without
                 // waiting for a SignalR broadcast or browser refresh.
+                var ownerUidForSessions = _firebase.ResolveOwnerUid(
+                    $"employee-{employeeId}",
+                    "Employee");
+
+                foreach (var session in sessions)
+                {
+                    try
+                    {
+                        await _firebase.TerminateTrackingSessionAsync(
+                            session.EmployeeId,
+                            session.SessionId,
+                            ownerUidForSessions,
+                            session.EndReason ?? safeReason);
+                    }
+                    catch (Exception firebaseSessionEx)
+                    {
+                        _logger.LogWarning(
+                            firebaseSessionEx,
+                            "Failed to publish GPS session termination to Firebase. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                            session.EmployeeId,
+                            session.SessionId);
+                    }
+                }
+
                 await _firebase.TerminateLiveLocationAsync(
                     employeeId,
-                    _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
+                    ownerUidForSessions);
 
                 foreach (var session in sessions)
                 {
@@ -1901,6 +2024,102 @@ public class GeoLocationService
             fallback.LogID);
 
         await db.SaveChangesAsync();
+    }
+
+    // ================================================================
+    // RECONCILE OFFLINE GPS HISTORY INTO ATTENDANCE
+    // ================================================================
+    //
+    // History is normally an immutable ledger and must not resurrect a
+    // session. OfflineSync points are the one explicit recovery path:
+    // if a GPS fix was captured while the phone was offline, use that
+    // recorded capture time to repair a missed automatic IN/OUT punch.
+    // The existing attendance engine remains authoritative.
+    // ================================================================
+
+    public async Task<bool> ReconcileHistoricalGeofencePointAsync(
+        int employeeId,
+        Guid sessionId,
+        double latitude,
+        double longitude,
+        double accuracyMeters,
+        double distanceMeters,
+        int allowedRadiusMeters,
+        bool isWithinAllowedRadius,
+        DateTime capturedAtUtc)
+    {
+        if (employeeId <= 0 ||
+            sessionId == Guid.Empty ||
+            !IsValidCoordinate(latitude, longitude) ||
+            capturedAtUtc == default)
+        {
+            return false;
+        }
+
+        var capturedUtc = capturedAtUtc.ToUniversalTime();
+
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+
+            var session = await db.EmployeeGpsSessions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x =>
+                    x.EmployeeId == employeeId &&
+                    x.SessionId == sessionId);
+
+            if (session == null)
+            {
+                _logger.LogDebug(
+                    "Offline GPS attendance reconciliation skipped because session is unknown. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                    employeeId,
+                    sessionId);
+                return false;
+            }
+
+            // The GPS evidence must belong to the session. A small clock-skew
+            // allowance is permitted, but an unrelated post-logout point cannot
+            // reopen attendance.
+            if (capturedUtc < session.StartedAtUtc.AddMinutes(-5) ||
+                (session.EndedAtUtc.HasValue &&
+                 capturedUtc > session.EndedAtUtc.Value.AddMinutes(5)))
+            {
+                _logger.LogDebug(
+                    "Offline GPS attendance reconciliation skipped because capture is outside session window. EmployeeId={EmployeeId}, SessionId={SessionId}, Capture={CaptureTime}, Start={Start}, End={End}",
+                    employeeId,
+                    sessionId,
+                    capturedUtc,
+                    session.StartedAtUtc,
+                    session.EndedAtUtc);
+                return false;
+            }
+
+            var stableDistance = NormalizeDistance(distanceMeters);
+            var stableRadius = Math.Max(0, allowedRadiusMeters);
+            var stableAccuracy = NormalizeAccuracy(accuracyMeters);
+
+            return await ProcessAutomaticGeofencePunchAsync(
+                db,
+                employeeId,
+                sessionId,
+                latitude,
+                longitude,
+                stableAccuracy,
+                stableDistance,
+                stableRadius,
+                previousLocationState: null,
+                currentLocationState: isWithinAllowedRadius,
+                overridePunchTime: capturedUtc);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Offline GPS attendance reconciliation failed. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                employeeId,
+                sessionId);
+            return false;
+        }
     }
 
     // ================================================================

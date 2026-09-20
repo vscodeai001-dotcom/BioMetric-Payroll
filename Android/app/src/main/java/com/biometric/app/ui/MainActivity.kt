@@ -1004,12 +1004,20 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             }
                             is SignalRManager.SyncEvent.SessionStarted -> {
                                 Log.d("MainActivity", "New session detected: ${event.employeeId}. Pulling fresh data. 🛰️")
+                                signalR.reconcileLiveLocationsNow()
                                 triggerExclusiveRefresh()
                             }
-                            // Generic CRUD/application events are owned by the
-                            // application-scoped AdminRealtimeCoordinator. This
-                            // Activity keeps only its special low-latency GPS and
-                            // session handling here, avoiding duplicate database pulls.
+                            is SignalRManager.SyncEvent.GlobalRefresh -> {
+                                // Employee Android writes invalidation events to
+                                // client_events. This event must reach the visible
+                                // Admin Dashboard immediately. Reconcile the
+                                // authoritative owner-scoped live node first, then
+                                // refresh the existing dashboard data loaders.
+                                signalR.reconcileLiveLocationsNow()
+                                refreshFromCentralRealtime()
+                            }
+                            // LocationChanged is rendered directly by the
+                            // signalR.liveLocations StateFlow collector above.
                             else -> Unit
                         }
                     }

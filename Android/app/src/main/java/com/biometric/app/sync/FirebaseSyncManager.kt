@@ -537,6 +537,58 @@ class FirebaseSyncManager @Inject constructor(
      * Creates a GPS session once. A late retry after the session has ended must
      * never resurrect that session. This makes session start idempotent.
      */
+    /**
+     * Reads the durable Firebase session state without mutating it.
+     * null means Firebase/auth/network could not be read.
+     */
+    suspend fun getTrackingSessionState(
+        employeeId: Int,
+        sessionId: String
+    ): String? {
+        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return null
+
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return null
+
+        return try {
+            val snapshot = getGlobalRef()
+                .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+                .get()
+                .await()
+
+            if (!snapshot.exists()) {
+                "MISSING"
+            } else {
+                snapshot.child("State")
+                    .getValue(String::class.java)
+                    ?.trim()
+                    ?.uppercase()
+                    ?: "UNKNOWN"
+            }
+        } catch (e: Exception) {
+            Log.w(
+                "FirebaseSyncManager",
+                "Unable to read tracking session state. employee=$employeeId session=$sessionId",
+                e
+            )
+            null
+        }
+    }
+
+    suspend fun getTrackingLiveSessionId(employeeId: Int): String? {
+        if (employeeId <= 0 || !isAuthenticated()) return null
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val snapshot = getGlobalRef()
+                .child("owners/$ownerUid/tracking/live/$employeeId")
+                .get()
+                .await()
+            snapshot.child("SessionId").getValue(String::class.java)?.takeIf { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Unable to read current live session. employee=$employeeId", e)
+            null
+        }
+    }
+
     suspend fun pushTrackingSessionStarted(employeeId: Int, sessionId: String): Boolean {
         if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
@@ -736,14 +788,21 @@ class FirebaseSyncManager @Inject constructor(
                 .orEmpty()
 
             if (sessionState.equals("ENDED", ignoreCase = true)) {
-                // Offline points can arrive after logout. Preserve those points
-                // in immutable history, but NEVER resurrect the ended live
-                // marker or attendance session.
-                getGlobalRef()
-                    .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
-                    .setValue(payload + ("SessionState" to "ENDED"))
-                    .await()
-                return true
+                // Offline replay remains historical evidence. A current online
+                // GPS fix must instead force the caller to create a NEW session.
+                if (isOffline) {
+                    getGlobalRef()
+                        .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                        .setValue(payload + ("SessionState" to "ENDED"))
+                        .await()
+                    return true
+                }
+
+                Log.w(
+                    "FirebaseSyncManager",
+                    "Current GPS fix rejected because its session is ENDED; caller must rotate the session. employee=$employeeId session=$sessionId"
+                )
+                return false
             }
 
             if (!sessionState.equals("ACTIVE", ignoreCase = true)) {

@@ -1061,14 +1061,14 @@
         border-color: rgba(15,23,42,.08);
     }
 
-    @media(max-width:575px) {
+    @@media(max-width:575px) {
         .gps-playback-table-pager {
             align-items: flex-start;
             flex-direction: column;
         }
     }
 
-    @media(max-width:991px) {
+    @@media(max-width:991px) {
         .admin-gps-log-tab {
             min-width: 145px;
             padding-left: 13px;
@@ -1080,7 +1080,7 @@
         }
     }
 
-    @media(max-width:575px) {
+    @@media(max-width:575px) {
         .admin-gps-log-tab {
             min-width: 132px;
             font-size: .7rem;
@@ -2792,6 +2792,7 @@
     private DateTime historyDate = DateTime.Today;
 
     private DateTime? lastRefresh;
+    private DateTime _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
 
     private double playbackSpeed = 1;
 
@@ -3018,9 +3019,13 @@
 
         try
         {
-            // A new employee can start tracking after this admin page has
-            // already rendered. Refresh the authoritative membership once.
+            // A new/recovered session can start while this page is already
+            // open. Refresh live membership and the selected employee timeline
+            // without requiring logout/login or the manual Refresh button.
             await RefreshLocations();
+
+            if (selectedEmployeeId > 0)
+                await LoadSelectedEmployeeHistory();
         }
         catch (Exception ex)
         {
@@ -3542,6 +3547,7 @@
             return;
 
         var relative = path.Trim('/');
+        _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
 
         // Expected stream paths under owners/{ownerUid}/tracking:
         // live/{employeeId}
@@ -3631,11 +3637,21 @@
                 employeeId <= 0)
                 return;
 
+            /*
+             * IMPORTANT:
+             * A normal GPS coordinate update must never cause a full Blazor
+             * component render. The browser-side Leaflet listener moves the
+             * existing marker smoothly. Blazor only re-renders when the live
+             * membership/session boundary changes.
+             */
+            var membershipChanged = false;
+
             if (data is not JsonElement node ||
                 node.ValueKind == JsonValueKind.Null)
             {
-                locations.RemoveAll(
-                    x => x.EmployeeId == employeeId);
+                membershipChanged =
+                    locations.RemoveAll(
+                        x => x.EmployeeId == employeeId) > 0;
             }
             else
             {
@@ -3657,20 +3673,42 @@
                             x => x.EmployeeId == employeeId);
 
                     if (index >= 0)
+                    {
+                        var previous = locations[index];
+
+                        /*
+                         * Coordinate-only changes stay in the in-memory
+                         * collection and are rendered directly by Leaflet.
+                         * A different SessionId is a lifecycle boundary and
+                         * therefore deserves one Blazor render.
+                         */
+                        membershipChanged =
+                            previous.SessionId != location.SessionId;
+
                         locations[index] = location;
+                    }
                     else
+                    {
                         locations.Add(location);
+                        membershipChanged = true;
+                    }
                 }
                 else
                 {
-                    // If the parser rejected it (e.g. 24h timeout), only then remove it.
-                    locations.RemoveAll(x => x.EmployeeId == employeeId);
+                    membershipChanged =
+                        locations.RemoveAll(
+                            x => x.EmployeeId == employeeId) > 0;
                 }
             }
 
             lastRefresh = DateTime.Now;
             mapNeedsUpdate = true;
-            await InvokeAsync(StateHasChanged);
+
+            if (membershipChanged)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+
             return;
         }
 
@@ -3750,11 +3788,10 @@
                 "State",
                 "state");
 
-        if (state.Equals(
-                "ENDED",
-                StringComparison.OrdinalIgnoreCase) ||
-            state.Equals(
-                "OFFLINE",
+        // LIVE is valid only when the Firebase live marker itself is ACTIVE.
+        // A coordinate plus SessionId is not enough if that session is ended.
+        if (!state.Equals(
+                "ACTIVE",
                 StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -4048,6 +4085,9 @@
 
             await RefreshLocations();
 
+            if (selectedEmployeeId > 0)
+                await LoadSelectedEmployeeHistory();
+
             mapNeedsUpdate = true;
             await InvokeAsync(StateHasChanged);
         }
@@ -4067,21 +4107,32 @@
             while (!token.IsCancellationRequested)
             {
                 await Task.Delay(
-                    TimeSpan.FromSeconds(5),
+                    TimeSpan.FromSeconds(1),
                     token);
 
                 if (token.IsCancellationRequested)
                     break;
 
-                // Firebase is the authoritative live-location source. Keep
-                // the realtime stream as the primary transport, with this
-                // lightweight 5-second reconciliation as a safety net for
-                // silent SSE/network interruptions. This is not a manual
-                // refresh and does not use SQL as the live-location source.
-                await RefreshLocations();
+                // Firebase SSE already updates the map immediately. The old
+                // 5-second full RefreshLocations() rebuilt the component
+                // repeatedly and caused visible flicker. Reconcile only after
+                // 20 seconds without any Firebase tracking event.
+                if (DateTime.UtcNow - _lastFirebaseTrackingEventUtc >= TimeSpan.FromSeconds(20))
+                {
+                    await RefreshLocations();
+                    _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
+                }
 
-                await InvokeAsync(StateHasChanged);
-                await PollPlaybackState();
+                /*
+                 * Playback polling is only needed while the browser-side
+                 * playback animation is actually running. Polling an idle
+                 * player was causing unnecessary Blazor renders every second,
+                 * which made the screen appear to refresh/flicker.
+                 */
+                if (playbackStatus == "Playing")
+                {
+                    await PollPlaybackState();
+                }
             }
         }
         catch (OperationCanceledException)
@@ -4854,6 +4905,291 @@
         StartPlaybackPolling();
 
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PauseHistory()
+    {
+        if (!CanPlayback)
+            return;
+
+        StopPlaybackPolling();
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "pauseAdminHistoryPlayback",
+                mapId);
+        }
+        catch
+        {
+        }
+
+        playbackStatus = "Paused";
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ResetHistory()
+    {
+        if (!CanPlayback)
+            return;
+
+        StopPlaybackPolling();
+
+        playbackIndex = 0;
+        playbackStatus = "Ready";
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "resetAdminHistoryPlayback",
+                mapId);
+        }
+        catch
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ChangePlaybackSpeed(ChangeEventArgs args)
+    {
+        if (double.TryParse(
+                args.Value?.ToString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var speed))
+        {
+            playbackSpeed = Math.Clamp(speed, 0.25, 8.0);
+        }
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "setAdminHistoryPlaybackSpeed",
+                mapId,
+                playbackSpeed);
+        }
+        catch
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SeekHistoryFromSlider(ChangeEventArgs args)
+    {
+        if (!CanPlayback)
+            return;
+
+        if (!int.TryParse(
+                args.Value?.ToString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var requestedIndex))
+        {
+            return;
+        }
+
+        playbackIndex = Math.Clamp(
+            requestedIndex,
+            0,
+            Math.Max(0, PlaybackPoints.Count - 1));
+
+        playbackStatus = "Ready";
+        StopPlaybackPolling();
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "seekAdminHistoryPlayback",
+                mapId,
+                playbackIndex);
+        }
+        catch
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SelectHistoryPoint(int historyIndex)
+    {
+        if (historyIndex < 0 || historyIndex >= selectedHistory.Count)
+            return;
+
+        var point = selectedHistory[historyIndex];
+        var points = PlaybackPoints.ToList();
+        var targetIndex = points.FindIndex(x => ReferenceEquals(x, point));
+
+        if (targetIndex < 0)
+        {
+            targetIndex = points.FindIndex(
+                x => x.SessionId == point.SessionId &&
+                     x.RecordedAtUtc == point.RecordedAtUtc &&
+                     x.Latitude == point.Latitude &&
+                     x.Longitude == point.Longitude);
+        }
+
+        if (targetIndex < 0)
+            return;
+
+        StopPlaybackPolling();
+        playbackIndex = targetIndex;
+        playbackStatus = "Ready";
+
+        try
+        {
+            await JSRuntime.InvokeVoidAsync(
+                "seekAdminHistoryPlayback",
+                mapId,
+                playbackIndex);
+        }
+        catch
+        {
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void PreviousPlaybackTablePage()
+    {
+        if (playbackTablePage <= 0)
+            return;
+
+        playbackTablePage--;
+    }
+
+    private void NextPlaybackTablePage()
+    {
+        if (playbackTablePage >= PlaybackTablePageCount - 1)
+            return;
+
+        playbackTablePage++;
+    }
+
+    private void StartPlaybackPolling()
+    {
+        StopPlaybackPolling();
+
+        if (!CanPlayback || disposed)
+            return;
+
+        playbackStateCts = new CancellationTokenSource();
+        var token = playbackStateCts.Token;
+
+        _ = PlaybackPollingLoopAsync(token);
+    }
+
+    private async Task PlaybackPollingLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested && !disposed)
+            {
+                await Task.Delay(250, token);
+                if (token.IsCancellationRequested || disposed)
+                    break;
+
+                await PollPlaybackState();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Admin route playback polling failed: {ex}");
+        }
+    }
+
+    private async Task PollPlaybackState()
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            var state = await JSRuntime.InvokeAsync<PlaybackState?>(
+                "getAdminHistoryPlaybackState",
+                mapId);
+
+            if (state == null)
+                return;
+
+            var nextIndex = Math.Clamp(
+                state.Index,
+                0,
+                Math.Max(0, PlaybackPoints.Count - 1));
+
+            var nextSpeed = state.Speed > 0
+                ? state.Speed
+                : playbackSpeed;
+
+            var previousIndex = playbackIndex;
+            var previousSpeed = playbackSpeed;
+            var previousStatus = playbackStatus;
+
+            playbackIndex = nextIndex;
+            playbackSpeed = nextSpeed;
+
+            if (state.Completed)
+            {
+                playbackStatus = "Completed";
+                StopPlaybackPolling();
+            }
+            else if (state.Playing)
+            {
+                playbackStatus = "Playing";
+            }
+            else if (playbackStatus == "Playing")
+            {
+                playbackStatus = "Paused";
+                StopPlaybackPolling();
+            }
+
+            /*
+             * Do not rerender Blazor when the browser state has not changed.
+             * This keeps the rest of the page visually stable while playback
+             * continues.
+             */
+            if (previousIndex != playbackIndex ||
+                Math.Abs(previousSpeed - playbackSpeed) > 0.0001 ||
+                !String.Equals(previousStatus, playbackStatus, StringComparison.Ordinal))
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            StopPlaybackPolling();
+        }
+        catch
+        {
+            // The map can disappear during navigation/disposal. Playback
+            // controls must never break the rest of the admin screen.
+        }
+    }
+
+    private void StopPlaybackPolling()
+    {
+        try
+        {
+            playbackStateCts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            playbackStateCts?.Dispose();
+        }
+        catch
+        {
+        }
+
+        playbackStateCts = null;
     }
 
     private async Task StopPlayback()

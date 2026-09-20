@@ -374,6 +374,28 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             employeeId, sessionId, latitude, longitude, distance, radius, within,
             accuracy, captured, captureSource);
 
+        // OfflineSync history is durable recovery evidence. If the live branch
+        // could not complete attendance while the phone was offline, replay the
+        // captured point through the existing server attendance engine. This
+        // never resurrects the GPS session and is idempotent through attendance
+        // parity/authoritative-punch protection.
+        if (!evaluateAttendance &&
+            parts.Any(p => p.Equals("history", StringComparison.OrdinalIgnoreCase)) &&
+            captureSource.Equals("OfflineSync", StringComparison.OrdinalIgnoreCase) &&
+            captured.HasValue)
+        {
+            await geoLocationService.ReconcileHistoricalGeofencePointAsync(
+                employeeId,
+                sessionId,
+                latitude,
+                longitude,
+                accuracy,
+                distance,
+                radius,
+                within,
+                captured.Value);
+        }
+
         _logger.LogDebug(
             "Processed Firebase GPS event. EmployeeId={EmployeeId}, SessionId={SessionId}, Distance={Distance}m, Radius={Radius}m, Within={Within}",
             employeeId, sessionId, Math.Round(distance, 1), radius, within);
@@ -601,8 +623,34 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         if (!accepted)
         {
+            // SQL may already have ended this session while Firebase still
+            // carries an ACTIVE marker. Close only this stale session in
+            // Firebase. The next current Android GPS fix will then rotate to
+            // a NEW session instead of continuing an ended timeline.
+            var activeSession = await geoLocationService.GetActiveGpsSessionAsync(employeeId);
+
+            if (activeSession == null || activeSession.SessionId != sessionId)
+            {
+                try
+                {
+                    await _firebase.MarkTrackingSessionEndedAsync(
+                        employeeId,
+                        sessionId,
+                        _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"),
+                        "WEB_SESSION_RECOVERY");
+                }
+                catch (Exception recoveryEx)
+                {
+                    _logger.LogWarning(
+                        recoveryEx,
+                        "Failed to close stale Firebase GPS session during recovery. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                        employeeId,
+                        sessionId);
+                }
+            }
+
             _logger.LogDebug(
-                "Firebase GPS live event ignored because the session is inactive or stale. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                "Firebase GPS live event was not accepted for incoming session; recovery state reconciled. EmployeeId={EmployeeId}, SessionId={SessionId}",
                 employeeId,
                 sessionId);
             return;

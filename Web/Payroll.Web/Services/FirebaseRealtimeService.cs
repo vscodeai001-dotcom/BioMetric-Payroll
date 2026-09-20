@@ -727,6 +727,123 @@ public sealed class FirebaseRealtimeService
         return await UpdateAsync(updates, cancellationToken);
     }
 
+    /// <summary>
+    /// Closes the owner-scoped durable GPS session when Web is the platform
+    /// that ends the employee session. The session record is intentionally
+    /// separate from tracking/live so Android cannot continue using an old
+    /// session after another platform logs the employee out.
+    /// </summary>
+    public async Task<bool> TerminateTrackingSessionAsync(
+        int employeeId,
+        Guid sessionId,
+        string? ownerUid,
+        string endReason = "LOGGED_OUT",
+        CancellationToken cancellationToken = default)
+    {
+        if (employeeId <= 0 || sessionId == Guid.Empty)
+            return false;
+
+        var timestamp = DateTime.UtcNow.ToString("O");
+        var safeReason = string.IsNullOrWhiteSpace(endReason)
+            ? "ENDED"
+            : endReason.Length > 40
+                ? endReason[..40]
+                : endReason;
+
+        var updates = new Dictionary<string, object?>
+        {
+            [$"tracking/sessions/{employeeId}/{sessionId}/EmployeeId"] = employeeId,
+            [$"tracking/sessions/{employeeId}/{sessionId}/SessionId"] = sessionId.ToString(),
+            [$"tracking/sessions/{employeeId}/{sessionId}/EndedAtUtc"] = timestamp,
+            [$"tracking/sessions/{employeeId}/{sessionId}/EndReason"] = safeReason,
+            [$"tracking/sessions/{employeeId}/{sessionId}/State"] = "ENDED",
+            [$"tracking/sessions/{employeeId}/{sessionId}/Source"] = "WEB"
+        };
+
+        if (!string.IsNullOrWhiteSpace(ownerUid))
+        {
+            var ownerPath = $"owners/{ownerUid.Trim()}/tracking/sessions/{employeeId}/{sessionId}";
+            var current = await GetGlobalRecordAsync(ownerPath, cancellationToken);
+
+            if (current.HasValue &&
+                current.Value.ValueKind == JsonValueKind.Object &&
+                current.Value.TryGetProperty("SessionId", out var remoteSession) &&
+                remoteSession.ValueKind == JsonValueKind.String &&
+                !string.Equals(
+                    remoteSession.GetString(),
+                    sessionId.ToString(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                // A newer/different session owns the remote record. Never end it.
+                return false;
+            }
+
+            updates[$"{ownerPath}/EmployeeId"] = employeeId;
+            updates[$"{ownerPath}/SessionId"] = sessionId.ToString();
+            updates[$"{ownerPath}/EndedAtUtc"] = timestamp;
+            updates[$"{ownerPath}/EndReason"] = safeReason;
+            updates[$"{ownerPath}/State"] = "ENDED";
+            updates[$"{ownerPath}/Source"] = "WEB";
+        }
+
+        return await UpdateAsync(updates, cancellationToken);
+    }
+
+    /// <summary>
+    /// Ends only the specified owner-scoped GPS session when Web discovers
+    /// that Firebase is carrying an already-ended SQL session.
+    /// </summary>
+    public async Task<bool> MarkTrackingSessionEndedAsync(
+        int employeeId,
+        Guid sessionId,
+        string? ownerUid,
+        string endReason = "SESSION_RECOVERED",
+        CancellationToken cancellationToken = default)
+    {
+        if (employeeId <= 0 || sessionId == Guid.Empty)
+            return false;
+
+        var timestamp = DateTime.UtcNow.ToString("O");
+        var safeReason = string.IsNullOrWhiteSpace(endReason)
+            ? "SESSION_RECOVERED"
+            : endReason.Length > 40 ? endReason[..40] : endReason;
+
+        var updates = new Dictionary<string, object?>
+        {
+            [$"tracking/sessions/{employeeId}/{sessionId}/EmployeeId"] = employeeId,
+            [$"tracking/sessions/{employeeId}/{sessionId}/SessionId"] = sessionId.ToString(),
+            [$"tracking/sessions/{employeeId}/{sessionId}/EndedAtUtc"] = timestamp,
+            [$"tracking/sessions/{employeeId}/{sessionId}/EndReason"] = safeReason,
+            [$"tracking/sessions/{employeeId}/{sessionId}/State"] = "ENDED",
+            [$"tracking/sessions/{employeeId}/{sessionId}/Source"] = "WEB_RECOVERY"
+        };
+
+        if (!string.IsNullOrWhiteSpace(ownerUid))
+        {
+            var ownerPath = $"owners/{ownerUid.Trim()}/tracking/sessions/{employeeId}/{sessionId}";
+            updates[$"{ownerPath}/EmployeeId"] = employeeId;
+            updates[$"{ownerPath}/SessionId"] = sessionId.ToString();
+            updates[$"{ownerPath}/EndedAtUtc"] = timestamp;
+            updates[$"{ownerPath}/EndReason"] = safeReason;
+            updates[$"{ownerPath}/State"] = "ENDED";
+            updates[$"{ownerPath}/Source"] = "WEB_RECOVERY";
+
+            var livePath = $"owners/{ownerUid.Trim()}/tracking/live/{employeeId}";
+            var live = await GetGlobalRecordAsync(livePath, cancellationToken);
+            if (live.HasValue && live.Value.ValueKind == JsonValueKind.Object &&
+                live.Value.TryGetProperty("SessionId", out var liveSession) &&
+                liveSession.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(liveSession.GetString(), out var liveGuid) &&
+                liveGuid == sessionId)
+            {
+                updates[$"{livePath}/State"] = "ENDED";
+                updates[$"{livePath}/LastUpdatedUtc"] = timestamp;
+            }
+        }
+
+        return await UpdateAsync(updates, cancellationToken);
+    }
+
     public async Task<bool> TerminateLiveLocationAsync(
         int employeeId,
         string? ownerUid = null,
@@ -738,12 +855,27 @@ public sealed class FirebaseRealtimeService
 
         var timestamp = DateTime.UtcNow.ToString("O");
 
-        // This is a coarse update without a transaction as the REST API
-        // doesn't support complex conditional transactions as easily as
-        // the native SDKs. However, we can at least check the SessionId
-        // if provided.
-        var path = $"owners/{ownerUid}/tracking/live/{employeeId}";
-        if (string.IsNullOrWhiteSpace(ownerUid)) path = $"tracking/live/{employeeId}";
+        // The REST transport has no native transaction helper here, so when
+        // an expected session is supplied, first verify that the owner-scoped
+        // live marker still belongs to that exact session. Never terminate a
+        // newer session because an older logout arrived late.
+        if (expectedSessionId.HasValue && expectedSessionId.Value != Guid.Empty &&
+            !string.IsNullOrWhiteSpace(ownerUid))
+        {
+            var current = await GetGlobalRecordAsync(
+                $"owners/{ownerUid.Trim()}/tracking/live/{employeeId}",
+                cancellationToken);
+
+            if (current.HasValue &&
+                current.Value.ValueKind == JsonValueKind.Object &&
+                current.Value.TryGetProperty("SessionId", out var currentSession) &&
+                currentSession.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(currentSession.GetString(), out var parsedCurrent) &&
+                parsedCurrent != expectedSessionId.Value)
+            {
+                return false;
+            }
+        }
 
         var updates = new Dictionary<string, object?>
         {
@@ -774,7 +906,12 @@ public sealed class FirebaseRealtimeService
         {
             [$"tracking/live/{employeeId}/SessionId"] = sessionId.ToString(),
             [$"tracking/live/{employeeId}/State"] = "ACTIVE",
-            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp
+            [$"tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp,
+            [$"tracking/sessions/{employeeId}/{sessionId}/EmployeeId"] = employeeId,
+            [$"tracking/sessions/{employeeId}/{sessionId}/SessionId"] = sessionId.ToString(),
+            [$"tracking/sessions/{employeeId}/{sessionId}/StartedAtUtc"] = timestamp,
+            [$"tracking/sessions/{employeeId}/{sessionId}/State"] = "ACTIVE",
+            [$"tracking/sessions/{employeeId}/{sessionId}/Source"] = "WEB"
         };
 
         if (!string.IsNullOrWhiteSpace(ownerUid))
@@ -782,6 +919,11 @@ public sealed class FirebaseRealtimeService
             updates[$"owners/{ownerUid}/tracking/live/{employeeId}/SessionId"] = sessionId.ToString();
             updates[$"owners/{ownerUid}/tracking/live/{employeeId}/State"] = "ACTIVE";
             updates[$"owners/{ownerUid}/tracking/live/{employeeId}/LastUpdatedUtc"] = timestamp;
+            updates[$"owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}/EmployeeId"] = employeeId;
+            updates[$"owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}/SessionId"] = sessionId.ToString();
+            updates[$"owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}/StartedAtUtc"] = timestamp;
+            updates[$"owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}/State"] = "ACTIVE";
+            updates[$"owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}/Source"] = "WEB";
         }
 
         return await UpdateAsync(updates, cancellationToken);

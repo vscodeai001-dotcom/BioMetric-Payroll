@@ -219,6 +219,32 @@ class OfflineSyncWorker @AssistedInject constructor(
                         System.currentTimeMillis()
                     )
                 } else {
+                    // A queued SESSION_STARTED can belong to a previous local
+                    // session that another platform already ended. Do not let
+                    // that stale lifecycle event block the entire offline GPS
+                    // queue forever. It is safe to acknowledge it because an
+                    // ended session must never be resurrected.
+                    val staleStartedSession =
+                        event.eventType.equals(
+                            OfflineTrackingEvent.SESSION_STARTED,
+                            ignoreCase = true
+                        ) &&
+                        event.sessionId?.let { sessionId ->
+                            firebaseSync.getTrackingSessionState(
+                                sessionStore.employeeId(),
+                                sessionId
+                            )?.equals("ENDED", ignoreCase = true) == true
+                        } == true
+
+                    if (staleStartedSession) {
+                        eventDao.markSynced(
+                            event.eventId,
+                            OfflineTrackingEvent.SYNCED,
+                            System.currentTimeMillis()
+                        )
+                        continue
+                    }
+
                     eventDao.markSynced(
                         event.eventId,
                         OfflineTrackingEvent.SYNC_FAILED,

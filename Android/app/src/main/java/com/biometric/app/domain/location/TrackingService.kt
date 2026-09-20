@@ -213,36 +213,62 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                         }
                     }
 
-                    // Publish the GPS session before/alongside the first location.
-                    // Web's GeoLocationService uses this session boundary to accept
-                    // the Android GPS stream and run the exact existing geofence
-                    // attendance state machine. This avoids duplicating attendance
-                    // calculation logic on Android and prevents double punches.
-                    if (!serverSessionStarted) {
-                        runCatching {
-                            val started = firebaseSync.pushTrackingSessionStarted(
-                                employeeId = sessionStore.employeeId(),
-                                sessionId = sessionStore.gpsSessionId()
-                            )
-                            if (started) {
-                                serverSessionStarted = true
-                                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                                    putBoolean(KEY_SERVER_STARTED, true)
-                                }
-                            } else {
-                                queueTrackingLifecycleEvent(
-                                    OfflineTrackingEvent.SESSION_STARTED,
-                                    sessionStore.gpsSessionId(),
-                                    "Tracking session start deferred until Firebase reconnects"
-                                )
+                    // Publish/verify the GPS session before/alongside the first
+                    // location. Never trust the persisted KEY_SERVER_STARTED flag
+                    // by itself: Web/another device can end the same session while
+                    // this Android service is still alive. In that case a NEW
+                    // session ID is mandatory before GPS can be accepted again.
+                    runCatching {
+                        var sessionId = sessionStore.gpsSessionId()
+                        val remoteState = firebaseSync.getTrackingSessionState(
+                            employeeId = sessionStore.employeeId(),
+                            sessionId = sessionId
+                        )
+
+                        // An ended OR missing durable session must never be
+                        // reused as the current live session. Keep the old
+                        // session immutable for audit/history and create a new
+                        // session whenever live tracking resumes.
+                        if (remoteState.equals("ENDED", ignoreCase = true) ||
+                            remoteState.equals("MISSING", ignoreCase = true)) {
+                            sessionId = UUID.randomUUID().toString()
+                            sessionStore.setGpsSessionId(sessionId)
+                            serverSessionStarted = false
+
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                                putBoolean(KEY_SERVER_STARTED, false)
                             }
-                        }.onFailure {
-                            queueTrackingLifecycleEvent(
-                                OfflineTrackingEvent.SESSION_STARTED,
-                                sessionStore.gpsSessionId(),
-                                "Tracking session start failed: ${it.message ?: "Firebase unavailable"}"
+
+                            Log.i(
+                                "TrackingService",
+                                "Remote GPS session was ended; created new session $sessionId"
                             )
                         }
+
+                        val started = firebaseSync.pushTrackingSessionStarted(
+                            employeeId = sessionStore.employeeId(),
+                            sessionId = sessionId
+                        )
+
+                        if (started) {
+                            serverSessionStarted = true
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                                putBoolean(KEY_SERVER_STARTED, true)
+                            }
+                        } else {
+                            queueTrackingLifecycleEvent(
+                                OfflineTrackingEvent.SESSION_STARTED,
+                                sessionId,
+                                "Tracking session start deferred until Firebase reconnects"
+                            )
+                        }
+                    }.onFailure {
+                        val sessionId = sessionStore.gpsSessionId()
+                        queueTrackingLifecycleEvent(
+                            OfflineTrackingEvent.SESSION_STARTED,
+                            sessionId,
+                            "Tracking session start failed: ${it.message ?: "Firebase unavailable"}"
+                        )
                     }
 
                     // Firebase is the independent realtime transport. Tracking
@@ -664,22 +690,48 @@ else if (locationUpdatesStarted) {
         }
     }
 
-    private suspend fun ensureFirebaseGpsSessionStarted(sessionId: String): Boolean {
+    private suspend fun ensureFirebaseGpsSessionStarted(sessionId: String): String? {
         val employeeId = sessionStore.employeeId()
-        if (employeeId <= 0 || sessionId.isBlank()) return false
+        if (employeeId <= 0 || sessionId.isBlank()) return null
 
-        // Do not allow a GPS history/live event to outrun its Firebase session
-        // lifecycle. The Web compatibility worker uses the session boundary
-        // before accepting the GPS stream into GeoLocationService.
-        return firebaseSync.pushTrackingSessionStarted(
+        var effectiveSessionId = sessionId
+        val remoteState = firebaseSync.getTrackingSessionState(
             employeeId = employeeId,
-            sessionId = sessionId
+            sessionId = effectiveSessionId
         )
+        val liveSessionId = firebaseSync.getTrackingLiveSessionId(employeeId)
+
+        // Preserve ended history. If another platform ended this session, or
+        // a newer session already owns the live marker, start a NEW session.
+        if (remoteState.equals("ENDED", ignoreCase = true) ||
+            remoteState.equals("MISSING", ignoreCase = true) ||
+            (!liveSessionId.isNullOrBlank() && liveSessionId != effectiveSessionId)) {
+            effectiveSessionId = UUID.randomUUID().toString()
+            sessionStore.setGpsSessionId(effectiveSessionId)
+            serverSessionStarted = false
+
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                putBoolean(KEY_SERVER_STARTED, false)
+            }
+
+            Log.i(
+                "TrackingService",
+                "Rotating GPS session. EmployeeId=$employeeId oldSession=$sessionId newSession=$effectiveSessionId remoteState=$remoteState liveSession=$liveSessionId"
+            )
+        }
+
+        val started = firebaseSync.pushTrackingSessionStarted(
+            employeeId = employeeId,
+            sessionId = effectiveSessionId
+        )
+
+        return if (started) effectiveSessionId else null
     }
 
     private suspend fun uploadLocationToServer(location: LocalLocation) {
         try {
-            if (!ensureFirebaseGpsSessionStarted(location.sessionId)) {
+            val effectiveSessionId = ensureFirebaseGpsSessionStarted(location.sessionId)
+            if (effectiveSessionId.isNullOrBlank()) {
                 locationDao.markAttempt(
                     location.id,
                     LocalLocation.SYNC_FAILED,
@@ -691,7 +743,7 @@ else if (locationUpdatesStarted) {
                     OfflineTrackingMonitor.UPLOAD_FAILED,
                     OfflineTrackingMonitor.WARNING,
                     "GPS session lifecycle is not confirmed; location retained for retry",
-                    sessionId = location.sessionId,
+                    sessionId = effectiveSessionId ?: location.sessionId,
                     correlationId = location.clientEventId
                 )
                 return
@@ -708,7 +760,7 @@ else if (locationUpdatesStarted) {
 
             val uploaded = firebaseSync.pushLiveLocation(
                 employeeId = sessionStore.employeeId(),
-                sessionId = location.sessionId,
+                sessionId = effectiveSessionId,
                 clientEventId = location.clientEventId,
                 sequence = location.sequence,
                 latitude = location.latitude,
@@ -733,7 +785,7 @@ else if (locationUpdatesStarted) {
                     OfflineTrackingMonitor.UPLOAD_SUCCESS,
                     OfflineTrackingMonitor.INFO,
                     "GPS fix ${location.sequence} published to Firebase",
-                    sessionId = location.sessionId,
+                    sessionId = effectiveSessionId,
                     latitude = location.latitude,
                     longitude = location.longitude,
                     accuracy = location.accuracy,
@@ -752,7 +804,7 @@ else if (locationUpdatesStarted) {
                     OfflineTrackingMonitor.UPLOAD_FAILED,
                     OfflineTrackingMonitor.WARNING,
                     "Firebase unavailable; GPS evidence retained locally",
-                    sessionId = location.sessionId,
+                    sessionId = effectiveSessionId,
                     correlationId = location.clientEventId
                 )
             }

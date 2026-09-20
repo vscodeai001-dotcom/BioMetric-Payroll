@@ -44,8 +44,8 @@ class SignalRManager @Inject constructor(
     // Keep a process-wide auth bridge so realtime starts automatically when the
     // persisted Firebase user becomes available.
     private val authStateListener = FirebaseAuth.AuthStateListener {
-        val firebaseUser = FirebaseAuth.getInstance().currentUser
-        if (firebaseUser != null && sessionStore.isLoggedIn()) {
+        val firebaseUserUid = FirebaseAuth.getInstance().currentUser?.uid
+        if (!firebaseUserUid.isNullOrBlank() && sessionStore.isLoggedIn()) {
             managerScope.launch { start() }
         } else {
             stop()
@@ -207,8 +207,43 @@ class SignalRManager @Inject constructor(
                     )
                 }
 
-                lastOwnerLiveLocations = locations
-                publishOwnerScopedLocations(locations)
+                // LIVE is authoritative only when the corresponding durable
+                // Firebase GPS session is ACTIVE. A stale live node can survive
+                // briefly after logout/session termination, so never let the map
+                // infer LIVE from a GPS point alone. Validate every live marker
+                // against owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}.
+                val validationOwnerUid = ownerUid
+                managerScope.launch {
+                    val activeLocations = locations.mapNotNull { (employeeId, location) ->
+                        val state = runCatching {
+                            firebaseSync.getGlobalRef()
+                                .child("owners")
+                                .child(validationOwnerUid)
+                                .child("tracking")
+                                .child("sessions")
+                                .child(employeeId.toString())
+                                .child(location.sessionId)
+                                .get()
+                                .await()
+                                .child("State")
+                                .getValue(String::class.java)
+                                .orEmpty()
+                        }.getOrDefault("")
+
+                        if (state.equals("ACTIVE", ignoreCase = true)) {
+                            employeeId to location
+                        } else {
+                            null
+                        }
+                    }.toMap()
+
+                    if (activeOwnerUid == validationOwnerUid) {
+                        lastOwnerLiveLocations = activeLocations
+                        withContext(Dispatchers.Main.immediate) {
+                            publishOwnerScopedLocations(activeLocations)
+                        }
+                    }
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -307,8 +342,53 @@ class SignalRManager @Inject constructor(
         connectionJob = managerScope.launch {
             firebaseSync.syncStatus.collect { connected ->
                 if (connected) {
+                    // Network returned. Pull the canonical live node immediately
+                    // instead of waiting for the periodic reconciliation or a
+                    // new login. This is critical after Employee Android was
+                    // offline while Admin Android remained open.
+                    reconcileLiveLocationsNow()
                     _dataChangeEvents.emit(SyncEvent.GlobalRefresh)
                 }
+            }
+        }
+    }
+
+    /**
+     * Immediately re-read the authoritative owner-scoped live-location node.
+     * Firebase listeners normally reconnect automatically, but after a device
+     * loses internet the visible Admin Dashboard must not wait for a fresh
+     * Activity/login cycle. This method is deliberately idempotent and only
+     * updates the existing liveLocations StateFlow.
+     */
+    fun reconcileLiveLocationsNow() {
+        val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: return
+        val role = sessionStore.userRole().orEmpty()
+        val employeeId = sessionStore.employeeId()
+        val listener = locationListener ?: return
+        val liveRef = firebaseSync.getGlobalRef()
+            .child("owners")
+            .child(ownerUid)
+            .child("tracking")
+            .child("live")
+            .let { ref ->
+                if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) {
+                    ref.child(employeeId.toString())
+                } else {
+                    ref
+                }
+            }
+
+        managerScope.launch {
+            runCatching {
+                val snapshot = liveRef.get().await()
+                withContext(Dispatchers.Main.immediate) {
+                    listener.onDataChange(snapshot)
+                }
+            }.onFailure { error ->
+                Log.d(
+                    "SignalRManager",
+                    "Immediate live-location reconciliation skipped: ${error.message}"
+                )
             }
         }
     }

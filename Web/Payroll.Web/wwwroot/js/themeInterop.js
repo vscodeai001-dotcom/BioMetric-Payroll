@@ -3212,21 +3212,96 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 window.adminLiveMaps?.[mapId];
 
             if (!state?.map || !state.markers?.[employeeId]) {
-                // The Blazor listener remains responsible for adding a new
-                // employee marker or recovering an initial map snapshot.
+                // The Blazor lifecycle path will add a marker when a new
+                // employee/session first appears. Do not manufacture a marker
+                // from a coordinate-only browser event.
                 return;
             }
 
             const marker =
                 state.markers[employeeId];
 
-            const incomingSession = String(data.SessionId ?? data.sessionId ?? '');
-            const currentSession = String(state.markerSessions?.[employeeId] || '');
-            if (incomingSession && currentSession && incomingSession !== currentSession) {
-                // A session boundary must be reconciled by Blazor against the
-                // authoritative EmployeeGpsSessions table. Never move a marker
-                // using a late packet from an old session.
+            // A live marker is valid only when Firebase explicitly says the
+            // current record is ACTIVE and carries a real SessionId.
+            const liveState = String(
+                data.State ?? data.state ?? ''
+            ).trim().toUpperCase();
+
+            const incomingSession = String(
+                data.SessionId ?? data.sessionId ?? ''
+            ).trim();
+
+            if (liveState !== 'ACTIVE' || !incomingSession) {
+                try {
+                    if (state.map.hasLayer(marker)) {
+                        state.map.removeLayer(marker);
+                    }
+                } catch { }
+
+                try {
+                    if (state.lines?.[employeeId]) state.map.removeLayer(state.lines[employeeId]);
+                } catch { }
+                try {
+                    if (state.trails?.[employeeId]) state.map.removeLayer(state.trails[employeeId]);
+                } catch { }
+
+                delete state.markers[employeeId];
+                delete state.markerSessions?.[employeeId];
+                delete state.lastRealtimeAt?.[employeeId];
                 return;
+            }
+
+            const currentSession = String(
+                state.markerSessions?.[employeeId] || ''
+            ).trim();
+
+            /*
+             * A different ACTIVE SessionId is a legitimate lifecycle boundary.
+             * Adopt the new session immediately. The previous session remains
+             * historical; this browser fast path never rewrites it.
+             */
+            const sessionChanged =
+                !!currentSession && currentSession !== incomingSession;
+
+            if (sessionChanged) {
+                state.markerSessions[employeeId] = incomingSession;
+                state.realtimeLastAt = state.realtimeLastAt || {};
+                delete state.realtimeLastAt[employeeId];
+            } else {
+                state.markerSessions = state.markerSessions || {};
+                state.markerSessions[employeeId] = incomingSession;
+            }
+
+            const incomingTimestampRaw =
+                data.LastUpdatedUtc ??
+                data.lastUpdatedUtc ??
+                data.Timestamp ??
+                data.timestamp ??
+                '';
+
+            const incomingTimestamp =
+                Date.parse(String(incomingTimestampRaw));
+
+            const lastTimestamp =
+                Number(state.realtimeLastTimestamp?.[employeeId]) || 0;
+
+            /*
+             * Ignore an older GPS packet from a previous network queue. A new
+             * session is allowed to reset this timestamp fence.
+             */
+            if (!sessionChanged &&
+                Number.isFinite(incomingTimestamp) &&
+                lastTimestamp > 0 &&
+                incomingTimestamp < lastTimestamp) {
+                return;
+            }
+
+            state.realtimeLastTimestamp =
+                state.realtimeLastTimestamp || {};
+
+            if (Number.isFinite(incomingTimestamp)) {
+                state.realtimeLastTimestamp[employeeId] =
+                    incomingTimestamp;
             }
 
             const target = [
@@ -3248,17 +3323,25 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             const metaInitials = metaParts.length === 1
                 ? metaParts[0].slice(0, 1)
                 : (metaParts[0][0] + metaParts[metaParts.length - 1][0]);
-            const realtimeIcon = L.divIcon({
-                className: 'payroll-user-marker',
-                html: '<div class="payroll-map-user payroll-map-user-' +
-                    (realtimeWithin ? 'within' : 'outside') + '">' +
-                    '<span class="payroll-map-user-initials">' +
-                    window.escapeAdminHtml(metaInitials.toUpperCase()) + '</span>' +
-                    '<span class="payroll-map-user-status"></span></div>',
-                iconSize: [46, 54],
-                iconAnchor: [23, 54]
-            });
-            marker.setIcon(realtimeIcon);
+            const visualKey =
+                (realtimeWithin ? 'within' : 'outside') +
+                '|active';
+
+            if (marker._adminVisualKey !== visualKey) {
+                const realtimeIcon = L.divIcon({
+                    className: 'payroll-user-marker',
+                    html: '<div class="payroll-map-user payroll-map-user-' +
+                        (realtimeWithin ? 'within' : 'outside') + '">' +
+                        '<span class="payroll-map-user-initials">' +
+                        window.escapeAdminHtml(metaInitials.toUpperCase()) + '</span>' +
+                        '<span class="payroll-map-user-status"></span></div>',
+                    iconSize: [46, 54],
+                    iconAnchor: [23, 54]
+                });
+                marker.setIcon(realtimeIcon);
+                marker._adminVisualKey = visualKey;
+            }
+
             marker._adminWithinRange = realtimeWithin;
 
             const displayItems =
@@ -3926,11 +4009,17 @@ window.updateAdminLiveStaffMap =
                         }
                     }
                     else {
-                        state.markers[
-                            employeeId
-                        ].setIcon(
-                            icon
-                        );
+                        const markerRef =
+                            state.markers[employeeId];
+
+                        const iconVisualKey =
+                            (withinRange ? 'within' : 'outside') +
+                            '|' + status;
+
+                        if (markerRef._adminVisualKey !== iconVisualKey) {
+                            markerRef.setIcon(icon);
+                            markerRef._adminVisualKey = iconVisualKey;
+                        }
 
                         // The map may have been created before the Blazor
                         // reference was available. Ensure the click handler
@@ -4020,17 +4109,21 @@ window.updateAdminLiveStaffMap =
                             }
                         );
 
-                        // Smooth camera focus if this employee is selected
-                        // Triggered on every SignalR fix (Blazor render)
-                        const isPlaybackActive = typeof isPlayback !== 'undefined' ? isPlayback : false;
-                        if (isSelected && !isPlaybackActive) {
-                            const bounds = L.latLngBounds([office, position]);
-                            state.map.fitBounds(bounds, {
-                                padding: [80, 80],
-                                maxZoom: 17,
-                                animate: true,
-                                duration: 1.2
-                            });
+                        /*
+                         * Do not auto-fit the camera on every GPS sample.
+                         * Re-centering the Leaflet map for each point causes
+                         * visible screen movement and fights normal map usage.
+                         * The explicit Follow control remains the only automatic
+                         * camera-follow path.
+                         */
+                        if (isSelected && state.followSelected && !isPlayback) {
+                            try {
+                                state.map.panTo(displayPosition, {
+                                    animate: true,
+                                    duration: 0.65,
+                                    easeLinearity: 0.25
+                                });
+                            } catch { }
                         }
                     }
 

@@ -53,6 +53,16 @@ class MobileSessionStore @Inject constructor(
         return created
     }
 
+    /**
+     * Rebinds the durable local tracking session after the server/Firebase
+     * session has been ended by another device/platform. This prevents an old
+     * session ID from being reused after recovery.
+     */
+    fun setGpsSessionId(sessionId: String) {
+        if (sessionId.isBlank()) return
+        prefs.edit { putString(KEY_GPS_SESSION, sessionId) }
+    }
+
     fun clearGpsSession() { prefs.edit { remove(KEY_GPS_SESSION) } }
 
     fun saveDashboardCache(json: String) { prefs.edit { putString("dashboard_stats_cache", json) } }
