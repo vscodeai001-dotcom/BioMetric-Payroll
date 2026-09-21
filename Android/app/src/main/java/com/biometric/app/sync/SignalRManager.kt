@@ -73,15 +73,43 @@ class SignalRManager @Inject constructor(
     val ownerEmployees = _ownerEmployees.asStateFlow()
 
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
-        // Authoritative tenant check: Render GPS nodes that belong to the
-        // current owner. We prioritized the employee master directory before,
-        // but now we trust all positive IDs from the owner's live tracking node.
+        // Authoritative tenant check: render only valid owner-scoped GPS records.
         val filtered = raw
             .filterKeys { it > 0 }
             .filterValues { it.sessionId.isNotBlank() }
 
+        val previous = _liveLocations.value
+        if (liveLocationMapsEquivalent(previous, filtered)) {
+            // Do not emit another UI event for an identical snapshot. This is
+            // important for smooth Admin dashboards because Firebase can replay
+            // the same parent snapshot during reconnects.
+            return
+        }
+
         _liveLocations.value = filtered
         _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+    }
+
+    private fun liveLocationMapsEquivalent(
+        left: Map<Int, LiveLocation>,
+        right: Map<Int, LiveLocation>
+    ): Boolean {
+        if (left.size != right.size) return false
+        if (left.keys != right.keys) return false
+
+        return left.all { (id, a) ->
+            val b = right[id] ?: return@all false
+            a.sessionId == b.sessionId &&
+                a.latitude == b.latitude &&
+                a.longitude == b.longitude &&
+                a.accuracyMeters == b.accuracyMeters &&
+                a.distanceMeters == b.distanceMeters &&
+                a.allowedRadiusMeters == b.allowedRadiusMeters &&
+                a.isWithinAllowedRadius == b.isWithinAllowedRadius &&
+                a.timestamp == b.timestamp &&
+                a.speedMps == b.speedMps &&
+                a.movementState == b.movementState
+        }
     }
 
     @Synchronized
@@ -279,7 +307,19 @@ class SignalRManager @Inject constructor(
 
                     if (activeOwnerUid == validationOwnerUid &&
                         generation == liveSnapshotGeneration) {
-                        lastOwnerLiveLocations = activeLocations.toMap()
+                        // If current live nodes exist but all durable-session reads
+                        // failed transiently, retain the exact previous map rather
+                        // than flashing the Admin screen to zero live employees.
+                        // Confirmed ACTIVE/ENDED responses still win normally.
+                        val resolved = if (activeLocations.isEmpty() &&
+                            locations.isNotEmpty() &&
+                            previousKnown.isNotEmpty()) {
+                            previousKnown.filterKeys { locations.containsKey(it) }
+                        } else {
+                            activeLocations
+                        }
+
+                        lastOwnerLiveLocations = resolved.toMap()
                         withContext(Dispatchers.Main.immediate) {
                             publishOwnerScopedLocations(lastOwnerLiveLocations)
                         }
@@ -290,6 +330,12 @@ class SignalRManager @Inject constructor(
             override fun onCancelled(error: DatabaseError) {
                 if (error.code != DatabaseError.PERMISSION_DENIED) {
                     Log.w("SignalRManager", "Firebase live-location listener cancelled: ${error.message}")
+                    managerScope.launch {
+                        delay(1000L)
+                        if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
+                            reconcileLiveLocationsNow()
+                        }
+                    }
                 }
             }
         }
@@ -552,11 +598,32 @@ class SignalRManager @Inject constructor(
         }
 
         if (changes.isNotEmpty()) {
-            // Employee Android changes are invalidation events. Reconcile the
-            // canonical owner-scoped live node immediately so an already-open
-            // Admin dashboard converges without logout/login.
-            reconcileLiveLocationsNow()
-            _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
+            val gpsOrSessionChange = changes.any { item ->
+                val entity = item.entity.trim().lowercase()
+                entity in setOf(
+                    "location",
+                    "livelocation",
+                    "employee_location",
+                    "gps",
+                    "gpslocation",
+                    "tracking",
+                    "trackinglocation",
+                    "employeegpssession",
+                    "gpssession",
+                    "session"
+                ) || entity.contains("gps") || entity.contains("location")
+            }
+
+            if (gpsOrSessionChange) {
+                // GPS/session invalidations update only the live-location StateFlow.
+                // Do not request a whole-dashboard refresh, which can make the
+                // map or surrounding Admin UI visibly blink.
+                reconcileLiveLocationsNow()
+                _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+            } else {
+                reconcileLiveLocationsNow()
+                _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
+            }
         }
     }
 

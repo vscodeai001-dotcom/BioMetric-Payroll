@@ -571,11 +571,10 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             }
             binding.mapview.invalidate()
         }
-        binding.btnEmployeeMapFullscreen.setOnClickListener {
-            val intent = Intent(this, TrackingMapActivity::class.java)
-            intent.putExtra("EMPLOYEE_ID", sessionStore.employeeId())
-            startActivity(intent)
-        }
+        // Full-screen live staff tracking is an Admin/SuperAdmin-only capability.
+        // Employee screens retain the existing layout but do not expose this action.
+        binding.btnEmployeeMapFullscreen.visibility = View.GONE
+        binding.btnEmployeeMapFullscreen.setOnClickListener(null)
         binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             binding.mapview.post {
                 binding.mapview.invalidate()

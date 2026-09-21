@@ -34,7 +34,7 @@
 
         <div class="d-flex align-items-center gap-2">
 
-            <span class="live-count">
+            <span class="live-count" data-live-count-for="@mapId">
                 <span class="live-count-dot"></span>
                 @liveCount Live / @employees.Count
             </span>
@@ -71,7 +71,7 @@
 
             @if (liveCount == 0)
             {
-                <div class="map-empty-overlay">
+                <div class="map-empty-overlay" data-live-empty-overlay="@mapId">
                     <i class="bi bi-broadcast-pin display-6 text-muted"></i>
                     <span>No live staff locations</span>
                     <small>Live employee locations will appear automatically.</small>
@@ -2811,6 +2811,12 @@
     private DateTime _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
     private DateTime lastKnownGoodLiveSnapshotAt = DateTime.MinValue;
 
+    // Coalesce Firebase child-field GPS updates (e.g. live/{employee}/Latitude)
+    // into one authoritative employee-node read. This prevents the Web map from
+    // treating a partial SSE event as a missing/offline employee.
+    private readonly Dictionary<int, CancellationTokenSource> liveEmployeeReconcileCts = new();
+    private readonly object liveEmployeeReconcileGate = new();
+
     private double playbackSpeed = 1;
 
     // Null = full-day playback. A value = playback for one GPS session only.
@@ -3694,6 +3700,27 @@
                 var next =
                     nextByEmployee.Values.ToList();
 
+                // A root snapshot with data but no parseable ACTIVE/terminal
+                // employee entries is usually a partial reconnect payload.
+                // Never replace a healthy live set with an empty transient set.
+                // Explicit terminal child/session events remain authoritative and
+                // remove employees immediately through their dedicated path.
+                var rootObjectCount =
+                    root.ValueKind == JsonValueKind.Object
+                        ? root.EnumerateObject().Count()
+                        : root.ValueKind == JsonValueKind.Array
+                            ? root.EnumerateArray().Count()
+                            : 0;
+
+                if (rootObjectCount > 0 &&
+                    next.Count == 0 &&
+                    locations.Count > 0)
+                {
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = false;
+                    return;
+                }
+
                 var previousSignature = string.Join(
                     '|',
                     locations
@@ -3756,7 +3783,22 @@
              * component render. The browser-side Leaflet listener moves the
              * existing marker smoothly. Blazor only re-renders when the live
              * membership/session boundary changes.
+             *
+             * Firebase REST SSE can emit either:
+             *   live/{employeeId}                -> complete/partial object
+             *   live/{employeeId}/{field}        -> scalar field update
+             *
+             * For a nested field or an incomplete object, reconcile the complete
+             * authoritative employee node once after a tiny debounce window.
+             * This prevents a partial packet from making a healthy employee
+             * disappear until the user presses Refresh.
              */
+            if (parts.Length > 2)
+            {
+                QueueLiveEmployeeReconcile(employeeId);
+                return;
+            }
+
             var membershipChanged = false;
 
             if (data is not JsonElement node ||
@@ -3764,7 +3806,7 @@
             {
                 // Child-null can be a transient SSE deletion artifact. Verify
                 // the authoritative employee node before removing the marker.
-                _ = ReconcileSingleLiveEmployeeAsync(employeeId);
+                QueueLiveEmployeeReconcile(employeeId);
                 return;
             }
             else
@@ -3835,8 +3877,9 @@
                 }
                 else
                 {
-                    // Partial/malformed update. Keep the last known-good
-                    // marker and wait for the next authoritative event.
+                    // Partial/malformed update. Fetch the complete authoritative
+                    // employee node after coalescing any sibling field events.
+                    QueueLiveEmployeeReconcile(employeeId);
                     return;
                 }
             }
@@ -4155,7 +4198,7 @@
                 if (snapshot.Count == 0 &&
                     locations.Count > 0 &&
                     lastKnownGoodLiveSnapshotAt != DateTime.MinValue &&
-                    DateTime.UtcNow - lastKnownGoodLiveSnapshotAt < TimeSpan.FromSeconds(30))
+                    DateTime.UtcNow - lastKnownGoodLiveSnapshotAt < TimeSpan.FromSeconds(120))
                 {
                     lastRefresh = DateTime.Now;
                     mapNeedsUpdate = false;
@@ -4192,6 +4235,57 @@
         {
             isRefreshing = false;
         }
+    }
+
+
+    private void QueueLiveEmployeeReconcile(int employeeId)
+    {
+        if (disposed || employeeId <= 0)
+            return;
+
+        CancellationTokenSource cts;
+
+        lock (liveEmployeeReconcileGate)
+        {
+            if (liveEmployeeReconcileCts.TryGetValue(employeeId, out var previous))
+            {
+                try { previous.Cancel(); } catch { }
+                previous.Dispose();
+            }
+
+            cts = new CancellationTokenSource();
+            liveEmployeeReconcileCts[employeeId] = cts;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(180, cts.Token);
+                if (!cts.IsCancellationRequested && !disposed)
+                    await ReconcileSingleLiveEmployeeAsync(employeeId);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(
+                    $"Queued live employee reconciliation failed: {ex}");
+            }
+            finally
+            {
+                lock (liveEmployeeReconcileGate)
+                {
+                    if (liveEmployeeReconcileCts.TryGetValue(employeeId, out var current) &&
+                        ReferenceEquals(current, cts))
+                    {
+                        liveEmployeeReconcileCts.Remove(employeeId);
+                    }
+                }
+                cts.Dispose();
+            }
+        });
     }
 
 
@@ -5892,6 +5986,16 @@
         }
 
         refreshCts = null;
+
+        lock (liveEmployeeReconcileGate)
+        {
+            foreach (var cts in liveEmployeeReconcileCts.Values)
+            {
+                try { cts.Cancel(); } catch { }
+                cts.Dispose();
+            }
+            liveEmployeeReconcileCts.Clear();
+        }
 
         /*
          * Stop playback polling.

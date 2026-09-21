@@ -1095,9 +1095,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                 // bursts, so do not render a second time here.
                             }
                             is SignalRManager.SyncEvent.SessionStarted -> {
-                                Log.d("MainActivity", "New session detected: ${event.employeeId}. Pulling fresh data. 🛰️")
+                                Log.d("MainActivity", "New GPS session detected: ${event.employeeId}. Updating live map. 🛰️")
                                 signalR.reconcileLiveLocationsNow()
-                                triggerExclusiveRefresh()
+                                // The liveLocations StateFlow updates the map directly.
+                                // Avoid a whole-dashboard refresh for GPS session changes.
                             }
                             is SignalRManager.SyncEvent.GlobalRefresh -> {
                                 // Employee Android writes invalidation events to

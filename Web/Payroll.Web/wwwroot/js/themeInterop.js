@@ -3044,15 +3044,18 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
     // the same location are visible, regardless of selection.
     const useCollisionOffsets = true;
 
-    (Array.isArray(liveStaff) ? liveStaff : []).forEach(function (x) {
-        const employeeId = Number(x.employeeId);
-        const lat = Number(x.latitude);
-        const lng = Number(x.longitude);
-        if (!Number.isFinite(employeeId) || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-        const item = { employeeId, lat, lng, offsetX: 0, offsetY: 0 };
-        items.push(item);
-        byId[employeeId] = item;
-    });
+    (Array.isArray(liveStaff) ? liveStaff : [])
+        .slice()
+        .sort(function (a, b) { return Number(a.employeeId) - Number(b.employeeId); })
+        .forEach(function (x) {
+            const employeeId = Number(x.employeeId);
+            const lat = Number(x.latitude);
+            const lng = Number(x.longitude);
+            if (!Number.isFinite(employeeId) || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            const item = { employeeId, lat, lng, offsetX: 0, offsetY: 0 };
+            items.push(item);
+            byId[employeeId] = item;
+        });
 
     if (!useCollisionOffsets || items.length < 2) return byId;
 
@@ -3192,6 +3195,47 @@ window.ensureAdminLiveMapLayout = function (mapId) {
 // in LiveStaffLocationPanel and EmployeeGpsSessions.
 // ============================================================
 
+window.refreshAdminLiveMapSummary = function (mapId) {
+    try {
+        const state = window.adminLiveMaps?.[mapId];
+        if (!state?.map) return;
+
+        const now = Date.now();
+        let live = 0;
+
+        Object.keys(state.liveData || {}).forEach(function (key) {
+            const id = Number(key);
+            const last = Number(state.realtimeLastTimestamp?.[id]) ||
+                Number(state.realtimeLastAt?.[id]) || 0;
+            const age = last > 0 ? Math.max(0, now - last) : Infinity;
+            if (age <= 120000) live++;
+        });
+
+        const labels = document.querySelectorAll(
+            `[data-live-count-for="${mapId}"]`
+        );
+        labels.forEach(function (label) {
+            const current = String(label.textContent || '');
+            const match = current.match(/\/\s*(\d+)/);
+            const total = match ? match[1] : '';
+            const dot = label.querySelector('.live-count-dot');
+            label.innerHTML = '';
+            if (dot) label.appendChild(dot);
+            label.appendChild(document.createTextNode(` ${live} Live${total ? ' / ' + total : ''}`));
+        });
+
+        const overlays = document.querySelectorAll(
+            `[data-live-empty-overlay="${mapId}"]`
+        );
+        overlays.forEach(function (overlay) {
+            overlay.style.display = live === 0 ? '' : 'none';
+        });
+    } catch (error) {
+        // Summary updates are presentation-only and must never affect live GPS.
+        console.debug('Admin live summary update skipped:', error);
+    }
+};
+
 window.registerAdminLiveLocationRealtime = function (mapId) {
     if (!mapId) return;
 
@@ -3272,6 +3316,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 delete state.lastRealtimeAt?.[employeeId];
                 delete state.realtimeLastTimestamp?.[employeeId];
                 if (state.liveData) delete state.liveData[employeeId];
+                window.refreshAdminLiveMapSummary(mapId);
                 return;
             }
 
@@ -3557,6 +3602,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                         .setLatLngs(current);
                 }
             }
+            window.refreshAdminLiveMapSummary(mapId);
         }
         catch (error) {
             console.warn(
@@ -3797,13 +3843,19 @@ window.updateAdminLiveStaffMap =
                     markerSessions: {},
                     liveData: {},
                     office: office.slice(),
-                    lastOfficeRadius: 0
+                    lastOfficeRadius: 0,
+                    liveSummaryTimer: null
                 };
 
                 window.adminLiveMaps[mapId] =
                     state;
 
                 window.ensureAdminLiveMapLayout(mapId);
+                if (!state.liveSummaryTimer) {
+                    state.liveSummaryTimer = setInterval(function () {
+                        window.refreshAdminLiveMapSummary(mapId);
+                    }, 5000);
+                }
 
                 try {
                     if (!state._controlsToggleBound) {
@@ -4801,7 +4853,7 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                 '<button type="button" data-geo-action="route" title="Fit office and your location">⌖ <span>Route</span></button>' +
                 '<button type="button" data-geo-action="office" title="Focus office">⌂ <span>Office</span></button>' +
                 '<button type="button" data-geo-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
-                '<button type="button" data-geo-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                
                 '</div>' +
                 '<div class="payroll-employee-map-live">' +
                 '<span class="payroll-map-live-dot"></span><strong>GPS LIVE</strong>' +
@@ -4841,9 +4893,6 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                         );
                         if (!state.baseLayers.satellite) state.baseLayers.satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Tiles © Esri' });
                         Object.keys(state.baseLayers).forEach(function (k) { const l = state.baseLayers[k]; if (!l) return; if (k === state.baseLayer) l.addTo(map); else if (map.hasLayer(l)) map.removeLayer(l); });
-                    } else if (action === 'fullscreen') {
-                        if (!document.fullscreenElement) container.requestFullscreen?.(); else document.exitFullscreen?.();
-                        setTimeout(function () { try { map.invalidateSize({ animate: true }); } catch { } }, 250);
                     }
                 });
             });
@@ -5454,6 +5503,8 @@ window.destroyAdminLiveStaffMap =
         catch { }
 
         try { if (state?._layoutObserver) state._layoutObserver.disconnect(); } catch (_) { }
+        try { if (state?.liveSummaryTimer) clearInterval(state.liveSummaryTimer); } catch (_) { }
+        state.liveSummaryTimer = null;
 
         delete window.adminLiveMaps[
             mapId
