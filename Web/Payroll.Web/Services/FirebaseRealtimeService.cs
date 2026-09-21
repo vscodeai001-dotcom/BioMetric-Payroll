@@ -1627,10 +1627,32 @@ public sealed class FirebaseRealtimeService
         foreach (var entityName in RealtimeEntities)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var table = GetFirebaseTable(entityName);
-            if (string.IsNullOrWhiteSpace(table)) continue;
 
-            var remote = await GetOwnerTableAsync(ownerUid, table, cancellationToken);
+            // EmployeeLocationHistory is stored under tracking/history,
+            // which is an unbounded GPS collection.
+            //
+            // NEVER perform a generic whole-tree read here:
+            //
+            // owners/{ownerUid}/tracking/history
+            //
+            // GPS history is handled by employee-scoped, limited reads.
+            if (entityName == "EmployeeLocationHistory")
+            {
+                _logger.LogInformation(
+                    "Skipping generic Firebase seed for EmployeeLocationHistory. " +
+                    "GPS history uses employee-scoped limited reads.");
+
+                continue;
+            }
+
+            var table = GetFirebaseTable(entityName);
+            if (string.IsNullOrWhiteSpace(table))
+                continue;
+
+            var remote = await GetOwnerTableAsync(
+                ownerUid,
+                table,
+                cancellationToken);
             var existingKeys = new HashSet<string>(StringComparer.Ordinal);
             if (remote.HasValue)
             {
