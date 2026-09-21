@@ -60,4 +60,27 @@
     <color name="staff_nav_blue">#0284C7</color>
     <color name="staff_text_label">#475569</color>
     <color name="staff_metrics_bg">#F1F5F9</color>
+
+    <!-- Admin dashboard card surfaces -->
+    <color name="dashboard_kpi_primary_bg">#F5F3FF</color>
+    <color name="dashboard_kpi_primary_stroke">#C4B5FD</color>
+    <color name="dashboard_kpi_success_bg">#F0FDF4</color>
+    <color name="dashboard_kpi_success_stroke">#6EE7B7</color>
+    <color name="dashboard_kpi_warning_bg">#FFFBEB</color>
+    <color name="dashboard_kpi_warning_stroke">#FCD34D</color>
+    <color name="dashboard_kpi_danger_bg">#FEF2F2</color>
+    <color name="dashboard_kpi_danger_stroke">#FCA5A5</color>
+
+    <color name="dashboard_recent_bg">#FFF1F2</color>
+    <color name="dashboard_recent_stroke">#FECDD3</color>
+    <color name="dashboard_recent_title">#9F1239</color>
+    <color name="dashboard_recent_count_bg">#FEE2E2</color>
+    <color name="dashboard_recent_count_text">#EF4444</color>
+
+    <color name="dashboard_workforce_bg">#F8FAFC</color>
+    <color name="dashboard_workforce_stroke">#E2E8F0</color>
+
+    <color name="dashboard_tools_bg">#F1F5F9</color>
+    <color name="dashboard_tools_stroke">#CBD5E1</color>
+    <color name="dashboard_tools_icon_bg">#E2E8F0</color>
 </resources>

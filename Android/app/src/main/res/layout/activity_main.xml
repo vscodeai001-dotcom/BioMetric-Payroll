@@ -119,8 +119,8 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="130dp"
-                            app:cardBackgroundColor="#F5F3FF"
-                            app:strokeColor="#C4B5FD"
+                            app:cardBackgroundColor="@color/dashboard_kpi_primary_bg"
+                            app:strokeColor="@color/dashboard_kpi_primary_stroke"
                             app:strokeWidth="1dp"
                             app:cardElevation="2dp">
                             <RelativeLayout
@@ -172,8 +172,8 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="130dp"
-                            app:cardBackgroundColor="#F0FDF4"
-                            app:strokeColor="#6EE7B7"
+                            app:cardBackgroundColor="@color/dashboard_kpi_success_bg"
+                            app:strokeColor="@color/dashboard_kpi_success_stroke"
                             app:strokeWidth="1dp"
                             app:cardElevation="2dp">
                             <RelativeLayout
@@ -226,8 +226,8 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="130dp"
-                            app:cardBackgroundColor="#FFFBEB"
-                            app:strokeColor="#FCD34D"
+                            app:cardBackgroundColor="@color/dashboard_kpi_warning_bg"
+                            app:strokeColor="@color/dashboard_kpi_warning_stroke"
                             app:strokeWidth="1dp"
                             app:cardElevation="2dp">
                             <RelativeLayout
@@ -280,8 +280,8 @@
                             android:layout_width="0dp"
                             android:layout_columnWeight="1"
                             android:layout_height="130dp"
-                            app:cardBackgroundColor="#FEF2F2"
-                            app:strokeColor="#FCA5A5"
+                            app:cardBackgroundColor="@color/dashboard_kpi_danger_bg"
+                            app:strokeColor="@color/dashboard_kpi_danger_stroke"
                             app:strokeWidth="1dp"
                             app:cardElevation="2dp">
                             <RelativeLayout
@@ -719,8 +719,8 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        app:cardBackgroundColor="#FFF1F2"
-                        app:strokeColor="#FECDD3"
+                        app:cardBackgroundColor="@color/dashboard_recent_bg"
+                        app:strokeColor="@color/dashboard_recent_stroke"
                         app:strokeWidth="1dp"
                         android:layout_marginBottom="16dp">
                         <LinearLayout
@@ -737,7 +737,7 @@
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:text="Recent Advances"
-                                    android:textColor="#9F1239"
+                                    android:textColor="@color/dashboard_recent_title"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textStyle="bold" />
                                 <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1"/>
@@ -747,8 +747,8 @@
                                     android:layout_height="wrap_content"
                                     android:text="0"
                                     android:background="@drawable/bg_pill_small"
-                                    android:backgroundTint="#FEE2E2"
-                                    android:textColor="#EF4444"
+                                    android:backgroundTint="@color/dashboard_recent_count_bg"
+                                    android:textColor="@color/dashboard_recent_count_text"
                                     android:textSize="12sp"
                                     android:textStyle="bold"
                                     android:paddingHorizontal="8dp"
@@ -831,8 +831,8 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        app:cardBackgroundColor="#F8FAFC"
-                        app:strokeColor="#E2E8F0"
+                        app:cardBackgroundColor="@color/dashboard_workforce_bg"
+                        app:strokeColor="@color/dashboard_workforce_stroke"
                         app:strokeWidth="1dp"
                         android:layout_marginBottom="16dp">
                         <LinearLayout
@@ -899,8 +899,8 @@
                         style="@style/PremiumCardView"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        app:cardBackgroundColor="#F1F5F9"
-                        app:strokeColor="#CBD5E1"
+                        app:cardBackgroundColor="@color/dashboard_tools_bg"
+                        app:strokeColor="@color/dashboard_tools_stroke"
                         app:strokeWidth="1dp"
                         android:layout_marginBottom="24dp">
                         <LinearLayout
@@ -913,7 +913,7 @@
                                 android:layout_width="48dp"
                                 android:layout_height="48dp"
                                 android:background="@drawable/shape_circle"
-                                android:backgroundTint="#E2E8F0"
+                                android:backgroundTint="@color/dashboard_tools_icon_bg"
                                 android:gravity="center"
                                 android:text="🛠️"
                                 android:textSize="22sp" />

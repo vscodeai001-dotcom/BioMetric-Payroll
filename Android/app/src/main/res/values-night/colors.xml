@@ -60,4 +60,27 @@
     <color name="staff_nav_blue">#38BDF8</color>
     <color name="staff_text_label">#94A3B8</color>
     <color name="staff_metrics_bg">#0F172A</color>
+
+    <!-- Admin dashboard card surfaces -->
+    <color name="dashboard_kpi_primary_bg">#25214A</color>
+    <color name="dashboard_kpi_primary_stroke">#4C4190</color>
+    <color name="dashboard_kpi_success_bg">#142C22</color>
+    <color name="dashboard_kpi_success_stroke">#256D50</color>
+    <color name="dashboard_kpi_warning_bg">#302711</color>
+    <color name="dashboard_kpi_warning_stroke">#735A18</color>
+    <color name="dashboard_kpi_danger_bg">#351B21</color>
+    <color name="dashboard_kpi_danger_stroke">#7A3443</color>
+
+    <color name="dashboard_recent_bg">#321B27</color>
+    <color name="dashboard_recent_stroke">#743247</color>
+    <color name="dashboard_recent_title">#FDA4AF</color>
+    <color name="dashboard_recent_count_bg">#4A202B</color>
+    <color name="dashboard_recent_count_text">#FB7185</color>
+
+    <color name="dashboard_workforce_bg">#1E293B</color>
+    <color name="dashboard_workforce_stroke">#334155</color>
+
+    <color name="dashboard_tools_bg">#1E293B</color>
+    <color name="dashboard_tools_stroke">#334155</color>
+    <color name="dashboard_tools_icon_bg">#334155</color>
 </resources>
