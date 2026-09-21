@@ -3808,6 +3808,19 @@ window.updateAdminLiveStaffMap =
                         }
                     );
 
+                // Keep Leaflet's zoom +/- control outside the map viewport.
+                // The Web Admin dashboard renders a dedicated bottom control
+                // strip below the map, so the control never covers roads,
+                // employee markers, or the map's left edge.
+                const bottomZoomHost =
+                    document.getElementById(mapId + '-zoom-controls');
+
+                if (bottomZoomHost && map.zoomControl) {
+                    bottomZoomHost.appendChild(
+                        map.zoomControl.getContainer()
+                    );
+                }
+
                 const standardTileLayer = L.tileLayer(
                     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                     {

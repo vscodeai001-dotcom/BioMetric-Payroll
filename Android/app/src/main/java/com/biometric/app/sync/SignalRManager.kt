@@ -30,6 +30,20 @@ class SignalRManager @Inject constructor(
     private var applicationJob: Job? = null
     private var connectionJob: Job? = null
     private var reconciliationJob: Job? = null
+    private var realtimeHealthJob: Job? = null
+
+    // Firebase Realtime Database normally reconnects automatically. Keep an
+    // application-level health watchdog as a second safety net because an
+    // authenticated long-lived listener can occasionally remain connected at
+    // the transport layer while no longer delivering fresh snapshots.
+    @Volatile private var lastSuccessfulLiveReadAt: Long = 0L
+
+    // Firebase Auth ID tokens are short-lived. Proactively refresh the token
+    // before the normal expiry window so an Admin dashboard does not need a
+    // logout/login cycle to recover its live-location listener.
+    private val AUTH_TOKEN_REFRESH_INTERVAL_MS = 45L * 60L * 1000L
+    private val LIVE_READ_HEALTH_TIMEOUT_MS = 30L * 1000L
+
     // Firebase Auth can restore before the persisted owner UID is available.
     // Retry startup briefly so Admin realtime does not require logout/login.
     private var startRetryJob: Job? = null
@@ -160,6 +174,7 @@ class SignalRManager @Inject constructor(
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
+                lastSuccessfulLiveReadAt = System.currentTimeMillis()
                 val locations = mutableMapOf<Int, LiveLocation>()
 
                 // Never call getValue(FirebaseLiveLocation) on the parent
@@ -363,6 +378,73 @@ class SignalRManager @Inject constructor(
                         "SignalRManager",
                         "Live-location reconciliation skipped: ${error.message}"
                     )
+                }
+            }
+        }
+
+        // Long-lived Admin sessions must not depend on a manual logout/login to
+        // recover Firebase authentication or a stale realtime transport. Refresh
+        // the Firebase Auth token before its normal expiry window and force an
+        // immediate canonical live read. If the live read itself has stopped
+        // succeeding for a short period, restart the realtime manager so the
+        // listener is rebuilt with the refreshed credentials.
+        lastSuccessfulLiveReadAt = System.currentTimeMillis()
+        realtimeHealthJob?.cancel()
+        realtimeHealthJob = managerScope.launch {
+            var lastTokenRefreshAt = System.currentTimeMillis()
+
+            while (isActive && activeOwnerUid == ownerUid) {
+                delay(15_000L)
+
+                if (!isActive || activeOwnerUid != ownerUid)
+                    break
+
+                val now = System.currentTimeMillis()
+
+                if (now - lastTokenRefreshAt >= AUTH_TOKEN_REFRESH_INTERVAL_MS) {
+                    runCatching {
+                        FirebaseAuth.getInstance()
+                            .currentUser
+                            ?.getIdToken(true)
+                            ?.await()
+                    }.onFailure { error ->
+                        Log.w(
+                            "SignalRManager",
+                            "Firebase Auth token refresh failed; realtime health check will retry.",
+                            error
+                        )
+                    }
+                    lastTokenRefreshAt = now
+                }
+
+                // The 5-second reconciliation normally updates this timestamp.
+                // If it stops succeeding, rebuild the manager once instead of
+                // waiting for the user to log out and log in again.
+                if (now - lastSuccessfulLiveReadAt >= LIVE_READ_HEALTH_TIMEOUT_MS) {
+                    Log.w(
+                        "SignalRManager",
+                        "Firebase live-location read is unhealthy for ${now - lastSuccessfulLiveReadAt} ms. Restarting realtime listeners."
+                    )
+
+                    runCatching {
+                        FirebaseAuth.getInstance()
+                            .currentUser
+                            ?.getIdToken(true)
+                            ?.await()
+                    }.onFailure { error ->
+                        Log.w(
+                            "SignalRManager",
+                            "Forced Firebase Auth token refresh failed during realtime recovery.",
+                            error
+                        )
+                    }
+
+                    if (activeOwnerUid == ownerUid && isActive) {
+                        stop()
+                        start()
+                    }
+
+                    break
                 }
             }
         }
@@ -734,6 +816,8 @@ class SignalRManager @Inject constructor(
         val ownerUid = activeOwnerUid
         reconciliationJob?.cancel()
         reconciliationJob = null
+        realtimeHealthJob?.cancel()
+        realtimeHealthJob = null
         startRetryJob?.cancel()
         startRetryJob = null
         val role = sessionStore.userRole().orEmpty()
@@ -770,6 +854,7 @@ class SignalRManager @Inject constructor(
         connectionJob?.cancel()
         connectionJob = null
         _liveLocations.value = emptyMap()
+        lastSuccessfulLiveReadAt = 0L
         activeOwnerUid = null
     }
 

@@ -142,6 +142,13 @@
                  class="admin-live-map">
             </div>
 
+            <!-- Leaflet zoom controls are intentionally rendered outside the map
+                 viewport so the +/- control does not float over the map content. -->
+            <div id="@($"{mapId}-zoom-controls")"
+                 class="admin-map-bottom-controls"
+                 aria-label="Map zoom controls">
+            </div>
+
             @if (liveCount == 0)
             {
                 <div class="map-empty-overlay" data-live-empty-overlay="@mapId">
@@ -1218,6 +1225,66 @@
        PREMIUM ADMIN LIVE MAP VISUALS
        Presentation-only: no GPS, attendance, database, or layout flow changes.
        ============================================================ */
+
+    .admin-map-bottom-controls {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        padding: 6px 12px;
+        background: #f6f8fb;
+        border-top: 1px solid rgba(15,23,42,.08);
+        box-sizing: border-box;
+    }
+
+    .admin-map-bottom-controls:empty {
+        display: none;
+    }
+
+    .admin-map-bottom-controls .leaflet-control-zoom {
+        display: flex !important;
+        flex-direction: row !important;
+        margin: 0 !important;
+        border: 1px solid rgba(15,23,42,.14) !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(15,23,42,.10) !important;
+        background: #fff !important;
+    }
+
+    .admin-map-bottom-controls .leaflet-control-zoom a {
+        width: 36px !important;
+        height: 34px !important;
+        line-height: 34px !important;
+        font-size: 17px !important;
+        color: #334155 !important;
+        background: #fff !important;
+        border: 0 !important;
+    }
+
+    .admin-map-bottom-controls .leaflet-control-zoom a + a {
+        border-left: 1px solid rgba(15,23,42,.10) !important;
+        border-top: 0 !important;
+    }
+
+    body.dark .admin-map-bottom-controls {
+        background: #111a27 !important;
+        border-color: rgba(255,255,255,.09) !important;
+    }
+
+    body.dark .admin-map-bottom-controls .leaflet-control-zoom {
+        border-color: rgba(255,255,255,.14) !important;
+        background: #172235 !important;
+    }
+
+    body.dark .admin-map-bottom-controls .leaflet-control-zoom a {
+        color: #dbe7f5 !important;
+        background: #172235 !important;
+    }
+
+    body.dark .admin-map-bottom-controls .leaflet-control-zoom a + a {
+        border-left-color: rgba(255,255,255,.10) !important;
+    }
 
     .admin-map-wrapper {
         position: relative;
