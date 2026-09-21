@@ -321,6 +321,23 @@
             if (Guid.TryParse(sessionFilter, out var sessionId))
                 historyQuery = historyQuery.Where(x => x.SessionId == sessionId);
 
+            // Resolve the offline-scoped employee/session set from the full
+            // filtered database query before applying the 2000-point display cap.
+            var offlineEmployeeIds = (await historyQuery
+                    .Where(x => string.Equals(x.CaptureSource, "OfflineSync"))
+                    .Select(x => x.EmployeeId)
+                    .Distinct()
+                    .ToListAsync())
+                .ToHashSet();
+
+            var offlineSessionIds = (await historyQuery
+                    .Where(x => string.Equals(x.CaptureSource, "OfflineSync") &&
+                                x.SessionId != Guid.Empty)
+                    .Select(x => x.SessionId)
+                    .Distinct()
+                    .ToListAsync())
+                .ToHashSet();
+
             var rawPoints = await historyQuery
                 .OrderBy(p => p.CapturedAtUtc)
                 .Select(p => new PointRow
@@ -337,9 +354,27 @@
             foreach (var row in rawPoints)
                 row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
+            // This screen is scoped to employees that actually produced
+            // offline GPS evidence in the selected date/filter range.
+
+            // When no explicit employee was selected, exclude employees with
+            // no offline evidence from all secondary sections on this screen.
+            if (employeeFilter == 0)
+            {
+                rawPoints = rawPoints
+                    .Where(x => offlineEmployeeIds.Contains(x.EmployeeId))
+                    .ToList();
+            }
+
+            var scopedEmployeeIds = employeeFilter > 0
+                ? new HashSet<int> { employeeFilter }
+                : offlineEmployeeIds;
+
             points = BuildPointRows(rawPoints);
 
             var sessionQuery = db.EmployeeGpsSessions.AsNoTracking().AsQueryable();
+            if (employeeFilter == 0 && scopedEmployeeIds.Count > 0)
+                sessionQuery = sessionQuery.Where(x => scopedEmployeeIds.Contains(x.EmployeeId));
             if (employeeFilter > 0) sessionQuery = sessionQuery.Where(x => x.EmployeeId == employeeFilter);
             if (Guid.TryParse(sessionFilter, out var sessionId2)) sessionQuery = sessionQuery.Where(x => x.SessionId == sessionId2);
 
@@ -355,15 +390,42 @@
                     TotalPoints = s.TotalPoints, TotalDistanceMeters = s.TotalDistanceMeters
                 }).Take(500).ToListAsync();
 
+            // Session ledger on this page is also offline-scoped. Do not show
+            // unrelated online sessions merely because the same employee had
+            // one offline capture.
+            if (employeeFilter == 0)
+            {
+                rawSessions = rawSessions
+                    .Where(s => offlineSessionIds.Contains(s.SessionId))
+                    .ToList();
+            }
+            else if (offlineSessionIds.Count > 0)
+            {
+                rawSessions = rawSessions
+                    .Where(s => offlineSessionIds.Contains(s.SessionId) ||
+                                (s.EndReason ?? "").Contains("OFFLINE", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
             foreach (var row in rawSessions)
                 row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
             sessions = rawSessions;
 
+            if (employeeFilter == 0)
+            {
+                employees = employees
+                    .Where(e => offlineEmployeeIds.Contains(e.EmployeeID))
+                    .OrderBy(e => e.Name)
+                    .ToList();
+            }
+
             var live = LiveLocationStore.GetAll();
             var names = employees.ToDictionary(x => x.EmployeeID, x => x.Name);
             liveRows = live
-                .Where(x => employeeFilter == 0 || x.EmployeeId == employeeFilter)
+                .Where(x => employeeFilter == 0
+                    ? offlineEmployeeIds.Contains(x.EmployeeId)
+                    : x.EmployeeId == employeeFilter)
                 .Select(x => new LiveRow
                 {
                     EmployeeId = x.EmployeeId,
@@ -391,6 +453,20 @@
 
             if (employeeFilter > 0)
                 auditQuery = auditQuery.Where(x => x.EntityID == employeeFilter.ToString());
+            else if (offlineEmployeeIds.Count > 0)
+            {
+                var offlineEmployeeIdStrings = offlineEmployeeIds
+                    .Select(id => id.ToString())
+                    .ToHashSet();
+
+                auditQuery = auditQuery.Where(x =>
+                    x.EntityID != null &&
+                    offlineEmployeeIdStrings.Contains(x.EntityID));
+            }
+            else
+            {
+                auditQuery = auditQuery.Where(x => false);
+            }
 
             auditEvents = (await auditQuery
                 .OrderByDescending(x => x.Timestamp)

@@ -5560,7 +5560,13 @@ window.startAdminHistoryPlayback =
                         return null;
                     }
 
-                    const recordedRaw = x.recordedAtUtc ?? x.RecordedAtUtc;
+                    // Route playback follows the original device capture time.
+                    // Fall back to server record time only for legacy rows.
+                    const recordedRaw =
+                        x.capturedAtUtc ??
+                        x.CapturedAtUtc ??
+                        x.recordedAtUtc ??
+                        x.RecordedAtUtc;
                     const recordedAt = Date.parse(recordedRaw);
 
                     return {

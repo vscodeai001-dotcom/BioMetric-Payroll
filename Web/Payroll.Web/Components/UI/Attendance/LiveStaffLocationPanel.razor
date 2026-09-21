@@ -2826,10 +2826,13 @@
 
     private int playbackIndex;
 
-    // Keep large daily GPS histories lightweight in the browser. Playback itself
-    // still uses every GPS point; only the diagnostic table is paged.
+    // Keep large daily GPS histories lightweight in the browser.
+    // The historical ledger remains complete; Route Playback/Table use the
+    // administrator-configured capture interval as the presentation cadence.
     private const int PlaybackTablePageSize = 100;
     private int playbackTablePage;
+    private readonly List<EmployeeLocationHistory> playbackPoints = new();
+    private int playbackCaptureIntervalSeconds = 30;
 
     private CancellationTokenSource? playbackStateCts;
 
@@ -2851,12 +2854,7 @@
             employees.Count - liveCount - staleCount);
 
     private IReadOnlyList<EmployeeLocationHistory> PlaybackPoints =>
-        selectedPlaybackSessionId.HasValue
-            ? selectedHistory
-                .Where(x => x.SessionId == selectedPlaybackSessionId.Value)
-                .OrderBy(x => x.RecordedAtUtc)
-                .ToList()
-            : selectedHistory;
+        playbackPoints;
 
     private IReadOnlyList<EmployeeLocationHistory> PlaybackTablePoints =>
         PlaybackPoints
@@ -3450,9 +3448,111 @@
             : "Active";
     }
 
+    private async Task LoadPlaybackCaptureIntervalAsync()
+    {
+        try
+        {
+            var ownerUid = FirebaseEmployees.OwnerUid;
+            if (string.IsNullOrWhiteSpace(ownerUid))
+                return;
+
+            var data = await FirebaseRealtime.GetGlobalRecordAsync(
+                $"owners/{ownerUid}/tracking_configuration",
+                CancellationToken.None);
+
+            var next = 30;
+            if (data.HasValue &&
+                data.Value.ValueKind == JsonValueKind.Object &&
+                data.Value.TryGetProperty("intervalSeconds", out var interval))
+            {
+                if (interval.ValueKind == JsonValueKind.Number &&
+                    interval.TryGetInt32(out var numeric))
+                    next = numeric;
+                else if (interval.ValueKind == JsonValueKind.String &&
+                         int.TryParse(interval.GetString(), out var parsed))
+                    next = parsed;
+            }
+
+            playbackCaptureIntervalSeconds = NormalizePlaybackCaptureInterval(next);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Unable to load playback capture interval: {ex}");
+        }
+    }
+
+    private static int NormalizePlaybackCaptureInterval(int seconds) =>
+        seconds switch
+        {
+            30 or 60 or 120 or 300 => seconds,
+            _ => 60
+        };
+
+    private void RebuildPlaybackPoints()
+    {
+        playbackPoints.Clear();
+
+        IEnumerable<EmployeeLocationHistory> source =
+            selectedPlaybackSessionId.HasValue
+                ? selectedHistory.Where(x => x.SessionId == selectedPlaybackSessionId.Value)
+                : selectedHistory;
+
+        var groups = source
+            .Where(x => x.SessionId != Guid.Empty)
+            .GroupBy(x => x.SessionId);
+
+        foreach (var group in groups)
+        {
+            var ordered = group
+                .OrderBy(GetPlaybackTimestamp)
+                .ToList();
+
+            if (ordered.Count == 0)
+                continue;
+
+           EmployeeLocationHistory? lastKept = null;
+
+foreach (var point in ordered)
+{
+    if (lastKept == null ||
+        GetPlaybackTimestamp(point) - GetPlaybackTimestamp(lastKept) >=
+        TimeSpan.FromSeconds(playbackCaptureIntervalSeconds))
+    {
+        playbackPoints.Add(point);
+        lastKept = point;
+    }
+}
+
+            // Always preserve the true final recorded point so playback ends
+            // at the employee's actual final location.
+            var final = ordered[^1];
+            if (!ReferenceEquals(lastKept, final))
+                playbackPoints.Add(final);
+        }
+
+        // Histories should play chronologically across multiple sessions.
+        playbackPoints.Sort(
+            (a, b) => GetPlaybackTimestamp(a).CompareTo(GetPlaybackTimestamp(b)));
+    }
+
+    private static DateTime GetPlaybackTimestamp(EmployeeLocationHistory point)
+    {
+        var captured = DateTime.SpecifyKind(
+            point.CapturedAtUtc,
+            DateTimeKind.Utc);
+
+        return captured != default
+            ? captured
+            : DateTime.SpecifyKind(
+                point.RecordedAtUtc,
+                DateTimeKind.Utc);
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await LoadEmployees();
+        await LoadPlaybackCaptureIntervalAsync();
 
         /*
          * Firebase is the shared live-location wire for both Web and Android.
@@ -4765,6 +4865,7 @@
         if (selectedEmployeeId <= 0)
         {
             selectedHistory.Clear();
+            playbackPoints.Clear();
 
             selectedPlaybackSessionId = null;
 
@@ -4786,6 +4887,9 @@
         .GetDateAsync(
             selectedEmployeeId,
             historyDate);
+
+            await LoadPlaybackCaptureIntervalAsync();
+            RebuildPlaybackPoints();
 
             /*
              * Load the real GPS session records corresponding
@@ -4834,6 +4938,7 @@
                 $"Location history load failed: {ex}");
 
             selectedHistory.Clear();
+            playbackPoints.Clear();
 
             gpsSessionLookup.Clear();
             selectedPlaybackSessionId = null;
@@ -5212,6 +5317,7 @@
         await StopPlayback();
 
         selectedPlaybackSessionId = sessionId;
+        RebuildPlaybackPoints();
         playbackTablePage = 0;
         playbackIndex = 0;
         playbackStatus = "Ready";
@@ -5244,6 +5350,7 @@
         await StopPlayback();
 
         selectedPlaybackSessionId = null;
+        RebuildPlaybackPoints();
         playbackTablePage = 0;
         playbackIndex = 0;
         playbackStatus = "Ready";
@@ -5671,49 +5778,15 @@
     }
 
 
-    private string HistoryCaptureIntervalText
-    {
-        get
+    private string HistoryCaptureIntervalText =>
+        playbackCaptureIntervalSeconds switch
         {
-            var points = selectedHistory
-                .OrderBy(x => x.SessionId)
-                .ThenBy(x => x.RecordedAtUtc)
-                .ToList();
-
-            if (points.Count < 2)
-                return "-";
-
-            var gaps = new List<double>();
-
-            foreach (var group in points.GroupBy(x => x.SessionId))
-            {
-                var ordered = group
-                    .OrderBy(x => x.RecordedAtUtc)
-                    .ToList();
-
-                for (var i = 1; i < ordered.Count; i++)
-                {
-                    var gap = (ordered[i].RecordedAtUtc - ordered[i - 1].RecordedAtUtc).TotalSeconds;
-
-                    // Ignore duplicate timestamps and very long idle/session gaps.
-                    if (gap >= 5 && gap <= 600)
-                        gaps.Add(gap);
-                }
-            }
-
-            if (gaps.Count == 0)
-                return "-";
-
-            gaps.Sort();
-            var median = gaps.Count % 2 == 0
-                ? (gaps[gaps.Count / 2 - 1] + gaps[gaps.Count / 2]) / 2d
-                : gaps[gaps.Count / 2];
-
-            return median >= 60
-                ? $"{median / 60d:F1} min"
-                : $"{median:F0} sec";
-        }
-    }
+            30 => "30 sec",
+            60 => "1 min",
+            120 => "2 min",
+            300 => "5 min",
+            _ => $"{playbackCaptureIntervalSeconds} sec"
+        };
 
 
     private void ToggleLogTab(string tab)

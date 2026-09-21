@@ -122,6 +122,8 @@
                 .Select(e => new { e.EmployeeID, e.Name })
                 .ToList();
 
+            // This page is specifically an OFFLINE tracking investigation view.
+            // Do not populate it with employees who have no offline GPS evidence.
 
             // GPS capture metadata is already represented by the migration.
             // Keep the query read-only so this page never changes existing data.
@@ -146,10 +148,21 @@
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();
 
+            var offlineEmployeeIds = offlineSyncRows
+                .Select(x => x.EmployeeId)
+                .Distinct()
+                .ToHashSet();
+
+            // Only employees whose locations were actually captured offline
+            // belong on this screen. Live-only employees stay out of it.
+            var trackedEmployees = employeeList
+                .Where(e => offlineEmployeeIds.Contains(e.EmployeeID))
+                .ToList();
+
             var liveLocations = LiveLocationStore.GetAll()
                 .ToDictionary(x => x.EmployeeId);
 
-            rows = employeeList.Select(employee =>
+            rows = trackedEmployees.Select(employee =>
             {
                 if (!liveLocations.TryGetValue(employee.EmployeeID, out var location))
                 {
