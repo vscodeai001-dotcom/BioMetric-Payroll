@@ -4693,15 +4693,15 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
                 '<option value="within">Within range</option>' +
                 '<option value="outside">Outside range</option>' +
                 '</select>' +
-                '<button type="button" class="payroll-map-tool-toggle" data-map-action="toggle" title="Toggle map tools">⚙ <span>Tools</span></button>' +
+                '<button type="button" class="payroll-map-tool-toggle" data-map-action="toggle" title="Map tools" aria-label="Map tools"><i class="bi bi-tools"></i><span>Tools</span></button>' +
                 '<div class="payroll-map-tools-group">' +
-                '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff">⌖ <span>Fit</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office">⌂ <span>Office</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff">◉ <span>Follow</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence">◎ <span>Zone</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails">〰 <span>Trails</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer">▦ <span>Layers</span></button>' +
-                '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map">⛶ <span>Full</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="fit" title="Fit all staff" aria-label="Fit all staff"><i class="bi bi-arrows-fullscreen"></i><span>Fit</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="office" title="Focus office" aria-label="Focus office"><i class="bi bi-building"></i><span>Office</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="follow" title="Follow selected staff" aria-label="Follow selected staff"><i class="bi bi-crosshair"></i><span>Follow</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="geofence" title="Toggle geofence" aria-label="Toggle geofence"><i class="bi bi-bullseye"></i><span>Zone</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="trails" title="Toggle journey trails" aria-label="Toggle journey trails"><i class="bi bi-bezier2"></i><span>Trails</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="layer" title="Change map layer" aria-label="Change map layer"><i class="bi bi-layers"></i><span>Layers</span></button>' +
+                '<button type="button" class="payroll-map-tool" data-map-action="fullscreen" title="Full screen map" aria-label="Full screen map"><i class="bi bi-fullscreen"></i><span>Full</span></button>' +
                 '</div>' +
                 '</div>' +
                 '<div class="payroll-map-statusbar">' +
@@ -4923,16 +4923,13 @@ window.syncAdminSelectedRailFullscreen = function (state, rail, selectedId) {
             }, { passive: true });
         }
 
-        const previousScroll = clone.scrollLeft;
         clone.innerHTML = rail.innerHTML;
-        clone.scrollLeft = previousScroll;
         const track = clone.querySelector('.admin-selected-employee-rail-track');
         const firstSet = track?.children?.[0];
         const maxLoop = firstSet ? firstSet.offsetWidth : 0;
-        if (track && maxLoop > 0 && clone.scrollWidth > clone.clientWidth + 4 && !state.fullscreenSelectedRailPaused) {
-            clone.scrollLeft += 0.55;
-            if (clone.scrollLeft >= maxLoop) clone.scrollLeft = 0;
-        }
+        const needsAutoScroll = !!(track && maxLoop > 0 && clone.scrollWidth > clone.clientWidth + 4);
+        clone.classList.toggle('is-auto-scrolling', needsAutoScroll);
+        clone.classList.toggle('is-auto-scroll-paused', !!state.fullscreenSelectedRailPaused);
     } catch { }
 };
 
@@ -4956,8 +4953,8 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
             state.selectedRailPaused = false;
             state.selectedRailAddressKey = '';
 
-            const pause = () => { state.selectedRailPaused = true; };
-            const resume = () => { state.selectedRailPaused = false; };
+            const pause = () => { state.selectedRailPaused = true; rail.classList.add('is-auto-scroll-paused'); };
+            const resume = () => { state.selectedRailPaused = false; rail.classList.remove('is-auto-scroll-paused'); };
             rail.addEventListener('mouseenter', pause);
             rail.addEventListener('mouseleave', resume);
             rail.addEventListener('focusin', pause);
@@ -4977,10 +4974,9 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
         const track = rail.querySelector('.admin-selected-employee-rail-track');
         const firstSet = track?.children?.[0];
         const maxLoop = firstSet ? firstSet.offsetWidth : 0;
-        if (track && maxLoop > 0 && rail.scrollWidth > rail.clientWidth + 4 && !state.selectedRailPaused) {
-            rail.scrollLeft += 0.35;
-            if (rail.scrollLeft >= maxLoop) rail.scrollLeft = 0;
-        }
+        const needsAutoScroll = !!(track && maxLoop > 0 && rail.scrollWidth > rail.clientWidth + 4);
+        rail.classList.toggle('is-auto-scrolling', needsAutoScroll);
+        rail.classList.toggle('is-auto-scroll-paused', !!state.selectedRailPaused);
 
         const selected = (state.liveStaff || []).find(x => Number(x.employeeId) === Number(selectedId));
         if (selected) {
@@ -5040,7 +5036,6 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
         }
 
         window.syncAdminSelectedRailFullscreen?.(state, rail, selectedId);
-        state.selectedRailFrame = requestAnimationFrame(() => window.ensureAdminSelectedEmployeeRail(mapId, selectedId));
     } catch { }
 };
 

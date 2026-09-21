@@ -41,12 +41,13 @@ class SignalRManager @Inject constructor(
     // Firebase Auth ID tokens are short-lived. Proactively refresh the token
     // before the normal expiry window so an Admin dashboard does not need a
     // logout/login cycle to recover its live-location listener.
-    private val AUTH_TOKEN_REFRESH_INTERVAL_MS = 45L * 60L * 1000L
+    private val AUTH_TOKEN_REFRESH_INTERVAL_MS = 30L * 60L * 1000L
     private val LIVE_READ_HEALTH_TIMEOUT_MS = 30L * 1000L
 
     // Firebase Auth can restore before the persisted owner UID is available.
     // Retry startup briefly so Admin realtime does not require logout/login.
     private var startRetryJob: Job? = null
+    private var realtimeRecoveryJob: Job? = null
     private var locationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
 
@@ -343,12 +344,57 @@ class SignalRManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (error.code != DatabaseError.PERMISSION_DENIED) {
-                    Log.w("SignalRManager", "Firebase live-location listener cancelled: ${error.message}")
-                    managerScope.launch {
-                        delay(1000L)
-                        if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
-                            reconcileLiveLocationsNow()
+                // IMPORTANT: Firebase may cancel a long-lived listener with
+                // PERMISSION_DENIED when the ID token/claims used by the
+                // listener are no longer accepted. Do NOT permanently ignore
+                // that callback. Previously this branch ignored
+                // PERMISSION_DENIED, leaving Android Admin with an old
+                // liveLocations StateFlow until logout/login recreated the
+                // Firebase listener.
+                Log.w(
+                    "SignalRManager",
+                    "Firebase live-location listener cancelled: code=${error.code}, message=${error.message}"
+                )
+
+                if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return
+
+                realtimeRecoveryJob?.cancel()
+                realtimeRecoveryJob = managerScope.launch {
+                    delay(500L)
+
+                    if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return@launch
+
+                    // Refresh the Firebase ID token first. Firebase Database
+                    // listeners created with the old credentials are then
+                    // rebuilt so recovery does not require manual logout/login.
+                    runCatching {
+                        FirebaseAuth.getInstance()
+                            .currentUser
+                            ?.getIdToken(true)
+                            ?.await()
+                    }.onFailure { refreshError ->
+                        Log.w(
+                            "SignalRManager",
+                            "Firebase Auth token refresh failed during live listener recovery.",
+                            refreshError
+                        )
+                    }
+
+                    if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
+                        runCatching {
+                            // stop() intentionally cancels any queued recovery
+                            // job. Clear this reference first so the current
+                            // recovery coroutine can perform the restart.
+                            realtimeRecoveryJob = null
+                            stop()
+                            delay(250L)
+                            start()
+                        }.onFailure { restartError ->
+                            Log.w(
+                                "SignalRManager",
+                                "Firebase live listener restart failed; automatic retry will continue.",
+                                restartError
+                            )
                         }
                     }
                 }
@@ -407,6 +453,12 @@ class SignalRManager @Inject constructor(
                             .currentUser
                             ?.getIdToken(true)
                             ?.await()
+                    }.onSuccess {
+                        // The token refresh is deliberately followed by a
+                        // canonical live read. This catches a listener that
+                        // survived transport-level reconnect but stopped
+                        // delivering current owner-scoped GPS data.
+                        reconcileLiveLocationsNow()
                     }.onFailure { error ->
                         Log.w(
                             "SignalRManager",
@@ -820,6 +872,8 @@ class SignalRManager @Inject constructor(
         realtimeHealthJob = null
         startRetryJob?.cancel()
         startRetryJob = null
+        realtimeRecoveryJob?.cancel()
+        realtimeRecoveryJob = null
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
 

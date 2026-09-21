@@ -3050,6 +3050,126 @@
     }
 </style>
 
+<style>
+    /* FINAL MAP CONTROL / AUTO-SCROLL POLISH */
+    .payroll-map-commandbar {
+        overflow:hidden !important;
+        scrollbar-width:none !important;
+        -ms-overflow-style:none !important;
+        flex-wrap:nowrap !important;
+        gap:4px !important;
+        min-height:48px !important;
+        padding:5px 7px !important;
+    }
+    .payroll-map-commandbar::-webkit-scrollbar { display:none !important; width:0 !important; height:0 !important; }
+    .payroll-map-commandbar .payroll-map-search-wrap { display:none !important; }
+    .payroll-map-commandbar .payroll-map-filter {
+        flex:0 1 96px !important;
+        width:96px !important;
+        min-width:78px !important;
+        height:34px !important;
+        padding:0 7px !important;
+        font-size:.64rem !important;
+        border-radius:8px !important;
+    }
+    .payroll-map-commandbar .payroll-map-tool-toggle,
+    .payroll-map-commandbar .payroll-map-tool {
+        flex:0 0 34px !important;
+        width:34px !important;
+        min-width:34px !important;
+        height:34px !important;
+        padding:0 !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        border-radius:8px !important;
+        font-size:.82rem !important;
+        line-height:1 !important;
+    }
+    .payroll-map-commandbar .payroll-map-tool i,
+    .payroll-map-commandbar .payroll-map-tool-toggle i { margin:0 !important; font-size:.82rem !important; }
+    .payroll-map-commandbar .payroll-map-tool span,
+    .payroll-map-commandbar .payroll-map-tool-toggle span { display:none !important; }
+    .payroll-map-commandbar .payroll-map-tools-group {
+        display:flex !important;
+        flex:0 0 auto !important;
+        flex-direction:row !important;
+        align-items:center !important;
+        gap:4px !important;
+        min-width:0 !important;
+    }
+    .payroll-map-commandbar .payroll-map-statusbar {
+        flex:1 1 auto !important;
+        min-width:0 !important;
+        margin-left:3px !important;
+        padding:0 3px 0 7px !important;
+        gap:6px !important;
+        font-size:.58rem !important;
+        overflow:hidden !important;
+    }
+    .payroll-map-commandbar .payroll-map-statusbar span { gap:3px !important; }
+    .payroll-map-commandbar .payroll-map-statusbar i { width:6px !important; height:6px !important; flex:0 0 6px !important; }
+    .payroll-map-commandbar .payroll-bottom-zoom-control {
+        flex:0 0 68px !important;
+        width:68px !important;
+        min-width:68px !important;
+        margin-left:1px !important;
+        border-radius:8px !important;
+    }
+    .payroll-map-commandbar .payroll-bottom-zoom-control a {
+        width:34px !important;
+        height:32px !important;
+        line-height:32px !important;
+        font-size:15px !important;
+    }
+
+    /* Two identical Razor rail sets make a seamless CSS marquee. */
+    .admin-selected-employee-rail-track { transform:translate3d(0,0,0); }
+    .admin-selected-employee-rail.is-auto-scrolling .admin-selected-employee-rail-track {
+        animation:adminSelectedRailMarquee 28s linear infinite;
+        will-change:transform;
+    }
+    .admin-selected-employee-rail.is-auto-scroll-paused .admin-selected-employee-rail-track,
+    .admin-selected-employee-rail:hover .admin-selected-employee-rail-track,
+    .admin-selected-employee-rail:focus-within .admin-selected-employee-rail-track {
+        animation-play-state:paused !important;
+    }
+    @@keyframes adminSelectedRailMarquee {
+        from { transform:translate3d(0,0,0); }
+        to { transform:translate3d(-50%,0,0); }
+    }
+
+    @@media (max-width: 900px) {
+        .payroll-map-commandbar,
+        .payroll-map-commandbar.expanded {
+            position:relative !important;
+            left:auto !important; right:auto !important; top:auto !important; bottom:auto !important;
+            width:100% !important; max-width:100% !important;
+            min-height:46px !important; max-height:46px !important;
+            flex-direction:row !important; flex-wrap:nowrap !important;
+            overflow:hidden !important; transform:none !important;
+            padding:4px 6px !important; gap:3px !important;
+        }
+        .payroll-map-commandbar .payroll-map-filter { width:86px !important; min-width:70px !important; height:32px !important; }
+        .payroll-map-commandbar .payroll-map-tool-toggle,
+        .payroll-map-commandbar .payroll-map-tool { width:31px !important; min-width:31px !important; height:32px !important; }
+        .payroll-map-commandbar .payroll-map-tools-group { gap:3px !important; }
+        .payroll-map-commandbar .payroll-map-statusbar { gap:4px !important; font-size:.54rem !important; }
+        .payroll-map-commandbar .payroll-bottom-zoom-control { width:62px !important; min-width:62px !important; }
+        .payroll-map-commandbar .payroll-bottom-zoom-control a { width:31px !important; height:30px !important; line-height:30px !important; }
+    }
+    @@media (max-width: 600px) {
+        .payroll-map-commandbar .payroll-map-tool-toggle { display:none !important; }
+        .payroll-map-commandbar .payroll-map-filter { width:72px !important; min-width:62px !important; font-size:.58rem !important; }
+        .payroll-map-commandbar .payroll-map-tool { width:28px !important; min-width:28px !important; height:30px !important; }
+        .payroll-map-commandbar .payroll-map-tool i { font-size:.72rem !important; }
+        .payroll-map-commandbar .payroll-map-tools-group { gap:2px !important; }
+        .payroll-map-commandbar .payroll-map-statusbar { gap:3px !important; padding-left:4px !important; font-size:.50rem !important; }
+        .payroll-map-commandbar .payroll-map-status-updated { display:none !important; }
+        .payroll-map-commandbar .payroll-bottom-zoom-control { width:56px !important; min-width:56px !important; }
+        .payroll-map-commandbar .payroll-bottom-zoom-control a { width:28px !important; }
+    }
+</style>
 
 @code {
 
