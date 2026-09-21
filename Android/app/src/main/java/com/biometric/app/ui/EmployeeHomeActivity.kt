@@ -1,5 +1,3 @@
-```
-
 package com.biometric.app.ui
 
 import android.Manifest
@@ -1534,5 +1532,3 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
     }
 }
-
-```
