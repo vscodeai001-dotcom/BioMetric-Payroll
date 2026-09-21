@@ -167,7 +167,12 @@ builder.Services.AddAuthentication()
     .AddScheme<AuthenticationSchemeOptions, MobileTokenAuthenticationHandler>(
         "MobileBearer", _ => { });
 
-builder.Services.AddHttpClient("FirebaseRealtime");
+builder.Services.AddHttpClient(
+    "FirebaseRealtime",
+    client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
 builder.Services.AddSingleton<FirebaseRealtimeService>();
 builder.Services.AddSingleton<FirebaseAttendanceCalendarMutationService>();
 builder.Services.AddSingleton<FirebaseEmployeeManagementService>();

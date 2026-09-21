@@ -600,6 +600,33 @@ public sealed class FirebaseRealtimeService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Reads only the most recent GPS history records for one employee.
+    /// Never downloads the complete owner tracking/history tree.
+    /// </summary>
+    public async Task<JsonElement?> GetOwnerTrackingHistoryAsync(
+        string ownerUid,
+        int employeeId,
+        int limit = 2000,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid) || employeeId <= 0)
+            return null;
+
+        limit = Math.Clamp(limit, 1, 5000);
+
+        var path =
+            $"owners/{ownerUid.Trim()}/tracking/history/{employeeId}";
+
+        var queryString =
+            $"?orderBy=%22Timestamp%22&limitToLast={limit}";
+
+        return await GetJsonAsync(
+            path,
+            cancellationToken,
+            queryString);
+    }
+
     public async Task<bool> SetGlobalRecordAsync(
         string path,
         object value,

@@ -856,54 +856,185 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         return await UpsertTableAsync(entityName, json.Value, ct);
     }
 
-    private async Task<bool> SyncTrackingHistoryAsync(string ownerUid, CancellationToken ct)
+    private async Task<bool> SyncTrackingHistoryAsync(
+    string ownerUid,
+    CancellationToken ct)
     {
-        var json = await _firebase.GetOwnerTableAsync(ownerUid, "tracking/history", ct);
-        if (json is null ||
-            (json.Value.ValueKind != JsonValueKind.Object &&
-             json.Value.ValueKind != JsonValueKind.Array))
+        if (string.IsNullOrWhiteSpace(ownerUid))
             return false;
+
+        const int bootstrapHistoryLimitPerEmployee = 2000;
 
         var changed = false;
 
-        async Task ProcessEmployeeNode(JsonElement employeeNode)
-        {
-            if (employeeNode.ValueKind != JsonValueKind.Object)
-                return;
+        /*
+         * IMPORTANT:
+         *
+         * Do NOT read:
+         *
+         * owners/{ownerUid}/tracking/history
+         *
+         * as one giant Firebase REST response.
+         *
+         * GPS history grows continuously and can become very large.
+         *
+         * Instead:
+         *   1. Read the owner employee directory.
+         *   2. Read each employee's history independently.
+         *   3. Limit each employee to the latest 2000 points.
+         *
+         * New history continues through the realtime tracking stream,
+         * so the Web application does not lose future GPS events.
+         */
 
-            foreach (var eventNode in employeeNode.EnumerateObject())
+        var employeesJson =
+            await _firebase.GetOwnerTableAsync(
+                ownerUid,
+                "employees",
+                ct);
+
+        if (!employeesJson.HasValue)
+        {
+            _logger.LogWarning(
+                "Firebase employee directory unavailable during GPS history bootstrap for owner {OwnerUid}.",
+                ownerUid);
+
+            return false;
+        }
+
+        var employeeIds = new HashSet<int>();
+
+        if (employeesJson.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var employeeNode in employeesJson.Value.EnumerateObject())
             {
                 ct.ThrowIfCancellationRequested();
 
-                if (eventNode.Value.ValueKind != JsonValueKind.Object)
+                if (employeeNode.Value.ValueKind != JsonValueKind.Object)
                     continue;
 
-                // Use the same authoritative history pipeline as the realtime
-                // stream. This avoids trying to map Android's ClientEventId
-                // onto the SQL identity Id and also gives startup hydration the
-                // same idempotent duplicate protection as reconnect replay.
-                await ProcessFirebaseTrackingEventAsync(
-                    $"/history/{eventNode.Name}",
-                    eventNode.Value.Clone(),
-                    ct,
-                    evaluateAttendance: false);
+                if (int.TryParse(
+                        employeeNode.Name,
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var keyId) &&
+                    keyId > 0)
+                {
+                    employeeIds.Add(keyId);
+                    continue;
+                }
 
-                changed = true;
+                var payloadId =
+                    GetInt(
+                        employeeNode.Value,
+                        "EmployeeId",
+                        "employeeId");
+
+                if (payloadId > 0)
+                    employeeIds.Add(payloadId);
+            }
+        }
+        else if (employeesJson.Value.ValueKind == JsonValueKind.Array)
+        {
+            var index = 0;
+
+            foreach (var employeeNode in employeesJson.Value.EnumerateArray())
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (employeeNode.ValueKind != JsonValueKind.Object)
+                {
+                    index++;
+                    continue;
+                }
+
+                var payloadId =
+                    GetInt(
+                        employeeNode,
+                        "EmployeeId",
+                        "employeeId");
+
+                if (payloadId > 0)
+                    employeeIds.Add(payloadId);
+                else if (index > 0)
+                    employeeIds.Add(index);
+
+                index++;
             }
         }
 
-        if (json.Value.ValueKind == JsonValueKind.Object)
+        if (employeeIds.Count == 0)
         {
-            foreach (var employeeNode in json.Value.EnumerateObject())
-            {
-                await ProcessEmployeeNode(employeeNode.Value);
-            }
+            _logger.LogInformation(
+                "No employees found for GPS history bootstrap for owner {OwnerUid}.",
+                ownerUid);
+
+            return false;
         }
-        else
+
+        foreach (var employeeId in employeeIds.OrderBy(x => x))
         {
-            foreach (var employeeNode in json.Value.EnumerateArray())
+            ct.ThrowIfCancellationRequested();
+
+            try
             {
-                await ProcessEmployeeNode(employeeNode);
+                var json =
+                    await _firebase.GetOwnerTrackingHistoryAsync(
+                        ownerUid,
+                        employeeId,
+                        bootstrapHistoryLimitPerEmployee,
+                        ct);
+
+                if (!json.HasValue)
+                    continue;
+
+                async Task ProcessHistoryEvent(
+                    JsonElement eventNode)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    if (eventNode.ValueKind != JsonValueKind.Object)
+                        return;
+
+                    await ProcessFirebaseTrackingEventAsync(
+                        $"/history/{employeeId}",
+                        eventNode.Clone(),
+                        ct,
+                        evaluateAttendance: false);
+
+                    changed = true;
+                }
+
+                if (json.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var eventNode in json.Value.EnumerateObject())
+                    {
+                        await ProcessHistoryEvent(eventNode.Value);
+                    }
+                }
+                else if (json.Value.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var eventNode in json.Value.EnumerateArray())
+                    {
+                        await ProcessHistoryEvent(eventNode);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                /*
+                 * One employee's oversized/malformed history must not prevent
+                 * all other employees from synchronizing.
+                 */
+                _logger.LogWarning(
+                    ex,
+                    "GPS history bootstrap skipped for EmployeeId={EmployeeId}, Owner={OwnerUid}.",
+                    employeeId,
+                    ownerUid);
             }
         }
 
