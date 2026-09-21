@@ -3058,7 +3058,7 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
 
     // Group staff whose map markers would visually collide.
     // REQUIREMENT: Increase collision threshold for more distinct markers.
-    const collisionMeters = 75;
+    const collisionMeters = 18;
     const parent = items.map(function (_, i) { return i; });
     function find(i) {
         while (parent[i] !== i) {
@@ -3253,7 +3253,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 data.SessionId ?? data.sessionId ?? ''
             ).trim();
 
-            if (liveState !== 'ACTIVE' || !incomingSession) {
+            if (liveState === 'ENDED' || liveState === 'OFFLINE') {
                 try {
                     if (state.map.hasLayer(marker)) {
                         state.map.removeLayer(marker);
@@ -3270,6 +3270,14 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 delete state.markers[employeeId];
                 delete state.markerSessions?.[employeeId];
                 delete state.lastRealtimeAt?.[employeeId];
+                delete state.realtimeLastTimestamp?.[employeeId];
+                if (state.liveData) delete state.liveData[employeeId];
+                return;
+            }
+
+            // An incomplete browser/Firebase event is not an authoritative
+            // removal signal. Preserve the last known-good live marker.
+            if (liveState !== 'ACTIVE' || !incomingSession) {
                 return;
             }
 
@@ -3331,6 +3339,16 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 longitude
             ];
 
+            // Keep the complete set of currently known live coordinates so a
+            // single realtime GPS update cannot accidentally drop collision
+            // offsets for neighbouring employees. These remain exact GPS points.
+            state.liveData = state.liveData || {};
+            state.liveData[employeeId] = {
+                employeeId: employeeId,
+                latitude: latitude,
+                longitude: longitude
+            };
+
             const office = state.office;
             const radius = Number(state.lastOfficeRadius) || 0;
             let realtimeWithin = Boolean(data.IsWithinAllowedRadius ?? data.isWithinAllowedRadius);
@@ -3366,15 +3384,15 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
 
             marker._adminWithinRange = realtimeWithin;
 
+            const collisionStaff = Object.keys(state.liveData || {}).map(function (key) {
+                return state.liveData[key];
+            });
+
             const displayItems =
                 typeof window.payrollBuildAdminMarkerDisplayPositions === 'function'
                     ? window.payrollBuildAdminMarkerDisplayPositions(
                         state.map,
-                        [{
-                            employeeId: employeeId,
-                            latitude: latitude,
-                            longitude: longitude
-                        }],
+                        collisionStaff,
                         state.lastSelectedId || 0)
                     : {};
 
@@ -3627,6 +3645,30 @@ window.updateAdminLiveStaffMap =
                     ? staff
                     : [];
 
+            // Keep a presentation-only cache of exact live GPS coordinates so
+            // direct realtime updates can calculate collision offsets against
+            // all currently visible employees rather than only the employee
+            // that generated the latest event.
+            const existingStateForCollision = window.adminLiveMaps[mapId];
+            if (existingStateForCollision) {
+                existingStateForCollision.liveData = {};
+                liveStaff.forEach(function (x) {
+                    const id = Number(x.employeeId);
+                    const lat = Number(x.latitude);
+                    const lng = Number(x.longitude);
+                    const status = String(x.status || '').toLowerCase();
+                    const sessionId = String(x.sessionId || x.SessionId || '').trim();
+                    if (id > 0 && Number.isFinite(lat) && Number.isFinite(lng) &&
+                        status === 'live' && sessionId) {
+                        existingStateForCollision.liveData[id] = {
+                            employeeId: id,
+                            latitude: lat,
+                            longitude: lng
+                        };
+                    }
+                });
+            }
+
             // Default view shows every live employee. Once an employee is
             // selected, the live map becomes employee-scoped and renders
             // only that employee. Playback/detail routes therefore cannot
@@ -3753,6 +3795,7 @@ window.updateAdminLiveStaffMap =
                     journeyStartedAt: {},
                     realtimeLastAt: {},
                     markerSessions: {},
+                    liveData: {},
                     office: office.slice(),
                     lastOfficeRadius: 0
                 };
@@ -3761,6 +3804,18 @@ window.updateAdminLiveStaffMap =
                     state;
 
                 window.ensureAdminLiveMapLayout(mapId);
+
+                try {
+                    if (!state._controlsToggleBound) {
+                        const mapContainer = map.getContainer();
+                        mapContainer.addEventListener('click', function () {
+                            const wrapper = mapContainer.parentElement;
+                            if (!wrapper) return;
+                            wrapper.classList.toggle('controls-open');
+                        });
+                        state._controlsToggleBound = true;
+                    }
+                } catch { }
             }
 
             state.officeMarker

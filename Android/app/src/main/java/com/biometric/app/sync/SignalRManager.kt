@@ -58,6 +58,7 @@ class SignalRManager @Inject constructor(
     private val ownerEmployeeIds = mutableSetOf<Int>()
     private var lastOwnerLiveLocations: Map<Int, LiveLocation> = emptyMap()
     @Volatile private var activeOwnerUid: String? = null
+    @Volatile private var liveSnapshotGeneration: Long = 0L
 
     private val _dataChangeEvents = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 64)
     val dataChangeEvents = _dataChangeEvents.asSharedFlow()
@@ -223,9 +224,16 @@ class SignalRManager @Inject constructor(
                 // infer LIVE from a GPS point alone. Validate every live marker
                 // against owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}.
                 val validationOwnerUid = ownerUid
+                val generation = ++liveSnapshotGeneration
+                val previousKnown = lastOwnerLiveLocations
+
                 managerScope.launch {
-                    val activeLocations = locations.mapNotNull { (employeeId, location) ->
-                        val state = runCatching {
+                    val activeLocations = mutableMapOf<Int, LiveLocation>()
+
+                    for ((employeeId, location) in locations) {
+                        if (!isActive) break
+
+                        val stateResult = runCatching {
                             firebaseSync.getGlobalRef()
                                 .child("owners")
                                 .child(validationOwnerUid)
@@ -237,20 +245,43 @@ class SignalRManager @Inject constructor(
                                 .await()
                                 .child("State")
                                 .getValue(String::class.java)
-                                .orEmpty()
-                        }.getOrDefault("")
-
-                        if (state.equals("ACTIVE", ignoreCase = true)) {
-                            employeeId to location
-                        } else {
-                            null
                         }
-                    }.toMap()
 
-                    if (activeOwnerUid == validationOwnerUid) {
-                        lastOwnerLiveLocations = activeLocations
+                        val state = stateResult.getOrNull()
+
+                        when {
+                            state.equals("ACTIVE", ignoreCase = true) -> {
+                                activeLocations[employeeId] = location
+                            }
+
+                            state.equals("ENDED", ignoreCase = true) ||
+                                state.equals("OFFLINE", ignoreCase = true) -> {
+                                // Confirmed terminal state. Remove from LIVE.
+                            }
+
+                            else -> {
+                                // Transient read/auth/network failure. Preserve
+                                // the last known-good ACTIVE session when the
+                                // employee/session still match.
+                                val previous = previousKnown[employeeId]
+
+                                if (previous != null &&
+                                    previous.sessionId.equals(
+                                        location.sessionId,
+                                        ignoreCase = true
+                                    )
+                                ) {
+                                    activeLocations[employeeId] = previous
+                                }
+                            }
+                        }
+                    }
+
+                    if (activeOwnerUid == validationOwnerUid &&
+                        generation == liveSnapshotGeneration) {
+                        lastOwnerLiveLocations = activeLocations.toMap()
                         withContext(Dispatchers.Main.immediate) {
-                            publishOwnerScopedLocations(activeLocations)
+                            publishOwnerScopedLocations(lastOwnerLiveLocations)
                         }
                     }
                 }
@@ -521,6 +552,10 @@ class SignalRManager @Inject constructor(
         }
 
         if (changes.isNotEmpty()) {
+            // Employee Android changes are invalidation events. Reconcile the
+            // canonical owner-scoped live node immediately so an already-open
+            // Admin dashboard converges without logout/login.
+            reconcileLiveLocationsNow()
             _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
         }
     }

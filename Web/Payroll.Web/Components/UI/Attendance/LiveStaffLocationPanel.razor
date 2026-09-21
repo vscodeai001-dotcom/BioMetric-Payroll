@@ -2704,6 +2704,22 @@
         pointer-events:auto;
         overflow:visible;
     }
+    /* Keep monitoring maps visually clean. Controls reveal on desktop hover/
+       focus and on tap/click via the controls-open class. */
+    .payroll-map-commandbar {
+        opacity:0;
+        transform:translateY(-6px) scale(.99);
+        pointer-events:none;
+        transition:opacity .18s ease, transform .18s ease;
+    }
+    .admin-map-wrapper:hover .payroll-map-commandbar,
+    .admin-map-wrapper:focus-within .payroll-map-commandbar,
+    .admin-map-wrapper.controls-open .payroll-map-commandbar {
+        opacity:1;
+        transform:none;
+        pointer-events:auto;
+    }
+
     .payroll-map-search-wrap { position:relative; min-width:150px; flex:1 1 180px; height:34px; }
     .payroll-map-search { width:100%; height:34px; box-sizing:border-box; border-radius:10px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.09); color:#fff; outline:0; padding:0 10px 0 30px; font-size:.72rem; }
     .payroll-map-search::placeholder { color:rgba(255,255,255,.58); }
@@ -2793,6 +2809,7 @@
 
     private DateTime? lastRefresh;
     private DateTime _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
+    private DateTime lastKnownGoodLiveSnapshotAt = DateTime.MinValue;
 
     private double playbackSpeed = 1;
 
@@ -3568,7 +3585,12 @@
             if (data is not JsonElement root ||
                 root.ValueKind == JsonValueKind.Null)
             {
-                locations.Clear();
+                // A transient SSE/root transport gap is not proof that all
+                // employees became offline. Preserve the last known-good live
+                // state and verify it against the authoritative Firebase node.
+                _ = ReconcileLiveSnapshotAfterTransientGapAsync();
+                mapNeedsUpdate = false;
+                return;
             }
             else if (root.ValueKind == JsonValueKind.Object || root.ValueKind == JsonValueKind.Array)
             {
@@ -3576,24 +3598,70 @@
                     .Select(e => e.EmployeeID)
                     .ToHashSet();
 
-                var next = new List<LiveEmployeeLocation>();
+                var previousByEmployee =
+                    locations.ToDictionary(
+                        x => x.EmployeeId);
+
+                var nextByEmployee =
+                    new Dictionary<int, LiveEmployeeLocation>();
+
+                void ApplyLiveNode(
+                    int employeeId,
+                    JsonElement node)
+                {
+                    if (employeeId <= 0 ||
+                        !validEmployeeIds.Contains(employeeId) ||
+                        node.ValueKind != JsonValueKind.Object)
+                        return;
+
+                    var stateValue =
+                        GetJsonStringValue(
+                            node,
+                            "State",
+                            "state");
+
+                    if (stateValue.Equals(
+                            "ENDED",
+                            StringComparison.OrdinalIgnoreCase) ||
+                        stateValue.Equals(
+                            "OFFLINE",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Explicit terminal state is authoritative.
+                        return;
+                    }
+
+                    if (TryParseLiveEmployeeLocation(
+                        employeeId,
+                        node,
+                        out var parsed))
+                    {
+                        nextByEmployee[employeeId] = parsed;
+                        return;
+                    }
+
+                    // Firebase can briefly expose a partial child while a
+                    // multi-field live update is settling. Preserve the last
+                    // known-good ACTIVE marker rather than making it disappear.
+                    if (previousByEmployee.TryGetValue(
+                            employeeId,
+                            out var previous))
+                    {
+                        nextByEmployee[employeeId] = previous;
+                    }
+                }
 
                 if (root.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var node in root.EnumerateObject())
                     {
-                        if (!int.TryParse(node.Name, out var employeeId) ||
-                            employeeId <= 0 ||
-                            !validEmployeeIds.Contains(employeeId) ||
-                            node.Value.ValueKind != JsonValueKind.Object)
-                            continue;
-
-                        if (TryParseLiveEmployeeLocation(
-                            employeeId,
-                            node.Value,
-                            out var location))
+                        if (int.TryParse(
+                                node.Name,
+                                out var employeeId))
                         {
-                            next.Add(location);
+                            ApplyLiveNode(
+                                employeeId,
+                                node.Value);
                         }
                     }
                 }
@@ -3608,21 +3676,23 @@
                         if (node.ValueKind != JsonValueKind.Object)
                             continue;
 
-                        var employeeId = GetJsonInt(node, "EmployeeId", "employeeId");
-                        if (employeeId <= 0) employeeId = fallbackId;
+                        var employeeId =
+                            GetJsonInt(
+                                node,
+                                "EmployeeId",
+                                "employeeId");
 
-                        if (employeeId <= 0 || !validEmployeeIds.Contains(employeeId))
-                            continue;
+                        if (employeeId <= 0)
+                            employeeId = fallbackId;
 
-                        if (TryParseLiveEmployeeLocation(
+                        ApplyLiveNode(
                             employeeId,
-                            node,
-                            out var location))
-                        {
-                            next.Add(location);
-                        }
+                            node);
                     }
                 }
+
+                var next =
+                    nextByEmployee.Values.ToList();
 
                 var previousSignature = string.Join(
                     '|',
@@ -3692,9 +3762,10 @@
             if (data is not JsonElement node ||
                 node.ValueKind == JsonValueKind.Null)
             {
-                membershipChanged =
-                    locations.RemoveAll(
-                        x => x.EmployeeId == employeeId) > 0;
+                // Child-null can be a transient SSE deletion artifact. Verify
+                // the authoritative employee node before removing the marker.
+                _ = ReconcileSingleLiveEmployeeAsync(employeeId);
+                return;
             }
             else
             {
@@ -3704,6 +3775,38 @@
 
                 if (!validEmployee ||
                     node.ValueKind != JsonValueKind.Object)
+                    return;
+
+                var incomingState =
+                    GetJsonStringValue(node, "State", "state");
+
+                // Only an explicit terminal state is allowed to remove an
+                // employee from this child-event path. Missing/partial fields
+                // must preserve the last known-good live state.
+                if (incomingState.Equals(
+                        "ENDED",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    incomingState.Equals(
+                        "OFFLINE",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    membershipChanged =
+                        locations.RemoveAll(
+                            x => x.EmployeeId == employeeId) > 0;
+
+                    if (membershipChanged)
+                    {
+                        lastRefresh = DateTime.Now;
+                        mapNeedsUpdate = true;
+                        await InvokeAsync(StateHasChanged);
+                    }
+
+                    return;
+                }
+
+                if (!incomingState.Equals(
+                        "ACTIVE",
+                        StringComparison.OrdinalIgnoreCase))
                     return;
 
                 if (TryParseLiveEmployeeLocation(
@@ -3719,12 +3822,6 @@
                     {
                         var previous = locations[index];
 
-                        /*
-                         * Coordinate-only changes stay in the in-memory
-                         * collection and are rendered directly by Leaflet.
-                         * A different SessionId is a lifecycle boundary and
-                         * therefore deserves one Blazor render.
-                         */
                         membershipChanged =
                             previous.SessionId != location.SessionId;
 
@@ -3738,9 +3835,9 @@
                 }
                 else
                 {
-                    membershipChanged =
-                        locations.RemoveAll(
-                            x => x.EmployeeId == employeeId) > 0;
+                    // Partial/malformed update. Keep the last known-good
+                    // marker and wait for the next authoritative event.
+                    return;
                 }
             }
 
@@ -4048,7 +4145,26 @@
                  * Replace the complete live collection atomically from the
                  * owner-scoped Firebase snapshot. This removes stale SQL-only
                  * employees and guarantees Web map membership matches Android.
+                 *
+                 * A short-lived empty snapshot can occur while the Firebase
+                 * transport is reconnecting. Do not turn that transient gap
+                 * into a visible empty map. Explicit SESSION_ENDED/OFFLINE
+                 * events still remove employees immediately through the
+                 * authoritative lifecycle path.
                  */
+                if (snapshot.Count == 0 &&
+                    locations.Count > 0 &&
+                    lastKnownGoodLiveSnapshotAt != DateTime.MinValue &&
+                    DateTime.UtcNow - lastKnownGoodLiveSnapshotAt < TimeSpan.FromSeconds(30))
+                {
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = false;
+                    return;
+                }
+
+                if (snapshot.Count > 0)
+                    lastKnownGoodLiveSnapshotAt = DateTime.UtcNow;
+
                 locations.Clear();
                 locations.AddRange(
                     snapshot
@@ -4078,6 +4194,125 @@
         }
     }
 
+
+    private async Task ReconcileSingleLiveEmployeeAsync(int employeeId)
+    {
+        if (disposed || employeeId <= 0)
+            return;
+
+        try
+        {
+            await Task.Delay(350);
+
+            var snapshot =
+                await FirebaseRealtime.GetOwnerTrackingLiveAsync(
+                    FirebaseEmployees.OwnerUid);
+
+            if (!snapshot.HasValue)
+                return;
+
+            JsonElement? employeeNode = null;
+            var root = snapshot.Value;
+
+            if (root.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty(
+                    employeeId.ToString(CultureInfo.InvariantCulture),
+                    out var objectNode))
+            {
+                employeeNode = objectNode;
+            }
+            else if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var node in root.EnumerateArray())
+                {
+                    if (GetJsonInt(node, "EmployeeId", "employeeId") == employeeId)
+                    {
+                        employeeNode = node;
+                        break;
+                    }
+                }
+            }
+
+            if (employeeNode.HasValue &&
+                employeeNode.Value.ValueKind == JsonValueKind.Object &&
+                TryParseLiveEmployeeLocation(
+                    employeeId,
+                    employeeNode.Value,
+                    out var location))
+            {
+                var index =
+                    locations.FindIndex(
+                        x => x.EmployeeId == employeeId);
+
+                var membershipChanged = false;
+
+                if (index >= 0)
+                {
+                    membershipChanged =
+                        locations[index].SessionId != location.SessionId;
+                    locations[index] = location;
+                }
+                else
+                {
+                    locations.Add(location);
+                    membershipChanged = true;
+                }
+
+                lastRefresh = DateTime.Now;
+                mapNeedsUpdate = true;
+
+                if (membershipChanged)
+                    await InvokeAsync(StateHasChanged);
+
+                return;
+            }
+
+            // Only the confirmed authoritative absence/terminal state removes
+            // the employee after a child-null event.
+            var removed =
+                locations.RemoveAll(
+                    x => x.EmployeeId == employeeId) > 0;
+
+            if (removed)
+            {
+                lastRefresh = DateTime.Now;
+                mapNeedsUpdate = true;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Live employee reconciliation failed: {ex}");
+        }
+    }
+
+    private async Task ReconcileLiveSnapshotAfterTransientGapAsync()
+    {
+        if (disposed)
+            return;
+
+        try
+        {
+            await Task.Delay(500);
+
+            var snapshot =
+                await FirebaseRealtime.GetOwnerTrackingLiveAsync(
+                    FirebaseEmployees.OwnerUid);
+
+            if (!snapshot.HasValue)
+                return;
+
+            await ApplyFirebaseTrackingChange(
+                "live",
+                snapshot.Value);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"Live snapshot recovery failed: {ex}");
+        }
+    }
 
     private static int GetJsonInt(
         JsonElement json,

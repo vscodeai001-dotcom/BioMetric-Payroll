@@ -122,6 +122,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private val roadCasings = mutableMapOf<Int, Polyline>()
     private val roadLines2 = mutableMapOf<Int, Polyline>()
     private val roadCasings2 = mutableMapOf<Int, Polyline>()
+    private val collisionConnectors = mutableMapOf<Int, Polyline>()
+    private val collisionConnectors2 = mutableMapOf<Int, Polyline>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
     private var lastRenderedLiveSignature: String? = null
@@ -145,6 +147,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     
     private val approvalFilter = MutableStateFlow("All")
     private val workforceSearchQuery = MutableStateFlow("")
+
+    private val mapControlsHandler = Handler(Looper.getMainLooper())
+    private var adminMapControlsVisible = false
+    private var adminMapControlsHideRunnable: Runnable? = null
+    private var adminMapTouchDownX = 0f
+    private var adminMapTouchDownY = 0f
+    private var adminMapTouchDownAt = 0L
 
     private val driveManager by lazy { GoogleDriveManager(this) }
     private var tvLastSynced: TextView? = null
@@ -322,7 +331,29 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let { b ->
                 b.llAdminMapLoading.visibility = View.GONE
                 observeLiveLocations()
+                setAdminMapControlsVisible(false)
             }
+        }
+    }
+
+    private fun setAdminMapControlsVisible(visible: Boolean) {
+        val controls = _binding?.adminMapControls ?: return
+        adminMapControlsVisible = visible
+        controls.visibility = if (visible) View.VISIBLE else View.GONE
+
+        adminMapControlsHideRunnable?.let {
+            mapControlsHandler.removeCallbacks(it)
+        }
+
+        if (visible) {
+            val hide = Runnable {
+                if (!isFinishing && !isDestroyed) {
+                    adminMapControlsVisible = false
+                    _binding?.adminMapControls?.visibility = View.GONE
+                }
+            }
+            adminMapControlsHideRunnable = hide
+            mapControlsHandler.postDelayed(hide, 5000L)
         }
     }
 
@@ -341,8 +372,28 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         // REQUIREMENT: Robustly prevent parent NestedScrollView from intercepting map touches (pinch-to-zoom fix)
         map.setOnTouchListener { v, event ->
             v.parent.requestDisallowInterceptTouchEvent(true)
-            if (event.action == MotionEvent.ACTION_UP) {
-                v.parent.requestDisallowInterceptTouchEvent(false)
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    adminMapTouchDownX = event.x
+                    adminMapTouchDownY = event.y
+                    adminMapTouchDownAt = SystemClock.elapsedRealtime()
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.parent.requestDisallowInterceptTouchEvent(false)
+
+                    if (map.id == R.id.adminMapView) {
+                        val moved = kotlin.math.hypot(
+                            (event.x - adminMapTouchDownX).toDouble(),
+                            (event.y - adminMapTouchDownY).toDouble()
+                        )
+                        val quickTap =
+                            SystemClock.elapsedRealtime() - adminMapTouchDownAt < 600L
+
+                        if (moved < 18.0 && quickTap) {
+                            setAdminMapControlsVisible(!adminMapControlsVisible)
+                        }
+                    }
+                }
             }
             false
         }
@@ -531,9 +582,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         lifecycleScope.launch {
             signalR.liveLocations
                 .collectLatest { liveMap ->
-                    // Stable Flow API: wait briefly for a burst to settle.
-                    // Reduced delay for more responsive live tracking.
-                    delay(200L)
+                    // StateFlow already publishes the authoritative Firebase
+                    // snapshot. Render immediately for responsive Admin updates.
                     _binding?.let { updateAdminMarkers(liveMap.values.toList()) }
                 }
         }
@@ -729,10 +779,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 dashboardMap.overlays.remove(markers[id]); markers.remove(id)
                 dashboardMap.overlays.remove(roadLines[id]); roadLines.remove(id)
                 dashboardMap.overlays.remove(roadCasings[id]); roadCasings.remove(id)
+                dashboardMap.overlays.remove(collisionConnectors[id]); collisionConnectors.remove(id)
             }
             markers2.keys.filter { !currentIds.contains(it) }.forEach { id ->
                 commandMap.overlays.remove(markers2[id]); markers2.remove(id)
                 roadLines2.remove(id); roadCasings2.remove(id)
+                commandMap.overlays.remove(collisionConnectors2[id]); collisionConnectors2.remove(id)
             }
 
             locations.forEach { loc ->
@@ -746,6 +798,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 
                 if (isFilteredOut) {
                     markers[loc.employeeId]?.alpha = 0f; markers2[loc.employeeId]?.alpha = 0f
+                    collisionConnectors[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                    collisionConnectors2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadLines2[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
@@ -753,20 +807,53 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     return@forEach
                 }
 
-                // Apply spiral offset for overlapping markers
+                // Preserve the canonical GPS coordinate exactly. When multiple
+                // employees occupy the same point, fan the visual pins and connect
+                // each pin back to its true GPS coordinate.
+                val actualPoint = GeoPoint(loc.latitude, loc.longitude)
                 val coordKey = "%.5f:%.5f".format(Locale.US, loc.latitude, loc.longitude)
                 val group = locationsByCoord[coordKey] ?: emptyList()
                 val point = if (group.size > 1) {
                     val index = group.indexOf(loc)
                     val angle = 2.0 * Math.PI * index / group.size
-                    // REQUIREMENT: Match TrackingMapActivity offset for visual consistency.
-                    val radius = 0.00015 // ~15-18 meters offset
+                    val radius = 0.00008 // visual fan only, data remains actualPoint
                     GeoPoint(
                         loc.latitude + radius * Math.cos(angle),
                         loc.longitude + radius * Math.sin(angle)
                     )
                 } else {
-                    GeoPoint(loc.latitude, loc.longitude)
+                    actualPoint
+                }
+
+                if (group.size > 1) {
+                    val connector = collisionConnectors.getOrPut(loc.employeeId) {
+                        Polyline(dashboardMap).apply {
+                            outlinePaint.color = "#94A3B8".toColorInt()
+                            outlinePaint.strokeWidth = 2f
+                            outlinePaint.alpha = 190
+                            dashboardMap.overlays.add(0, this)
+                        }
+                    }
+                    connector.setPoints(listOf(actualPoint, point))
+
+                    if (isTrackingHubActive) {
+                        val connector2 = collisionConnectors2.getOrPut(loc.employeeId) {
+                            Polyline(commandMap).apply {
+                                outlinePaint.color = "#94A3B8".toColorInt()
+                                outlinePaint.strokeWidth = 2f
+                                outlinePaint.alpha = 190
+                                commandMap.overlays.add(0, this)
+                            }
+                        }
+                        connector2.setPoints(listOf(actualPoint, point))
+                    }
+                } else {
+                    collisionConnectors.remove(loc.employeeId)?.let {
+                        dashboardMap.overlays.remove(it)
+                    }
+                    collisionConnectors2.remove(loc.employeeId)?.let {
+                        commandMap.overlays.remove(it)
+                    }
                 }
 
                 val m1 = markers.getOrPut(loc.employeeId) {
@@ -781,7 +868,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             clicked.showInfoWindow()
                             
                             // Immediately trigger route for selected employee
-                            updateAdminRoadRoute(loc.employeeId, point)
+                            updateAdminRoadRoute(loc.employeeId, actualPoint)
                             true
                         }
                     }
@@ -816,6 +903,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     // Sync both maps for extreme continuity
                     dashboardMap.invalidate()
                     if (isTrackingHubActive) commandMap.invalidate()
+
+                    collisionConnectors[loc.employeeId]?.setPoints(
+                        listOf(actualPoint, animatedPoint))
+                    collisionConnectors2[loc.employeeId]?.setPoints(
+                        listOf(actualPoint, animatedPoint))
 
                     // Update road lines synchronously with marker movement
                     runCatching {
@@ -903,7 +995,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
                 // REQUIREMENT: Only show route for selected employee
                 if (adminFollowingEmployeeId == loc.employeeId) {
-                    updateAdminRoadRoute(loc.employeeId, point)
+                    updateAdminRoadRoute(loc.employeeId, actualPoint)
                 } else {
                     roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                     roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
@@ -1219,6 +1311,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         adminRoadRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }
         markerAnimations.clear()
+        collisionConnectors.clear()
+        collisionConnectors2.clear()
+        mapControlsHandler.removeCallbacksAndMessages(null)
         refreshJob?.cancel()
         iconCache.clear()
 

@@ -18,6 +18,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
 import android.view.View
+import android.view.MotionEvent
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import java.text.SimpleDateFormat
@@ -78,6 +79,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val markers = mutableMapOf<Int, Marker>()
     private val roadLines = mutableMapOf<Int, Polyline>()
     private val roadCasings = mutableMapOf<Int, Polyline>()
+    private val collisionConnectors = mutableMapOf<Int, Polyline>()
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val roadRouteJobs = mutableMapOf<Int, Job>()
@@ -151,6 +153,12 @@ class TrackingMapActivity : MotionBaseActivity() {
     private var mapLayerIndex = 0
     private var adminZoneVisible = true
     private var adminTrailsVisible = true
+    private var mapControlsVisible = false
+    private val mapControlsHandler = Handler(Looper.getMainLooper())
+    private var hideMapControlsRunnable: Runnable? = null
+    private var mapTouchDownX = 0f
+    private var mapTouchDownY = 0f
+    private var mapTouchDownAt = 0L
 
     private fun setupPremiumMapControls() {
         binding.btnMapFit.setOnClickListener {
@@ -233,6 +241,28 @@ class TrackingMapActivity : MotionBaseActivity() {
             mapView.invalidate()
         }
         binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
+        setMapControlsVisible(false)
+    }
+
+    private fun setMapControlsVisible(visible: Boolean) {
+        mapControlsVisible = visible
+        binding.mapCommandRailScroll.visibility =
+            if (visible) View.VISIBLE else View.GONE
+
+        hideMapControlsRunnable?.let {
+            mapControlsHandler.removeCallbacks(it)
+        }
+
+        if (visible) {
+            val hide = Runnable {
+                if (!isFinishing && !isDestroyed) {
+                    mapControlsVisible = false
+                    _binding?.mapCommandRailScroll?.visibility = View.GONE
+                }
+            }
+            hideMapControlsRunnable = hide
+            mapControlsHandler.postDelayed(hide, 5000L)
+        }
     }
 
     private fun applyDarkThemeFilter(mapView: MapView) {
@@ -303,6 +333,33 @@ class TrackingMapActivity : MotionBaseActivity() {
             maxZoomLevel = 20.0
             controller.setZoom(16.0)
             applyCurrentThemeToMap(this)
+
+            setOnTouchListener { v, event ->
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        mapTouchDownX = event.x
+                        mapTouchDownY = event.y
+                        mapTouchDownAt = SystemClock.elapsedRealtime()
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        val moved = kotlin.math.hypot(
+                            (event.x - mapTouchDownX).toDouble(),
+                            (event.y - mapTouchDownY).toDouble()
+                        )
+                        val quickTap =
+                            SystemClock.elapsedRealtime() - mapTouchDownAt < 600L
+
+                        if (moved < 18.0 && quickTap) {
+                            setMapControlsVisible(!mapControlsVisible)
+                        }
+                    }
+                }
+
+                v.parent?.requestDisallowInterceptTouchEvent(
+                    event.action != MotionEvent.ACTION_UP
+                )
+                false
+            }
         }
     }
 
@@ -482,9 +539,11 @@ class TrackingMapActivity : MotionBaseActivity() {
             mapView.overlays.remove(markers[id])
             mapView.overlays.remove(roadLines[id])
             mapView.overlays.remove(roadCasings[id])
+            mapView.overlays.remove(collisionConnectors[id])
             markers.remove(id)
             roadLines.remove(id)
             roadCasings.remove(id)
+            collisionConnectors.remove(id)
         }
 
         locations.forEach { loc ->
@@ -503,26 +562,43 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             if (!isVisible) {
                 markers[loc.employeeId]?.alpha = 0f
+                collisionConnectors[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 return@forEach
             }
 
-            // Apply spiral offset for overlapping markers
+            // Preserve the exact GPS coordinate. Only the visual pin fans out
+            // when multiple employees share the same coordinate.
+            val actualPoint = GeoPoint(loc.latitude, loc.longitude)
             val coordKey = "%.5f:%.5f".format(Locale.US, loc.latitude, loc.longitude)
             val group = locationsByCoord[coordKey] ?: emptyList()
             val point = if (group.size > 1) {
                 val index = group.indexOf(loc)
                 val angle = 2.0 * Math.PI * index / group.size
-                // REQUIREMENT: Increase radius so markers are clearly visible 
-                // even when at the exact same coordinate.
-                val radius = 0.00015 // ~15-18 meters offset
+                val radius = 0.00008 // visual fan only
                 GeoPoint(
                     loc.latitude + radius * Math.cos(angle),
                     loc.longitude + radius * Math.sin(angle)
                 )
             } else {
-                GeoPoint(loc.latitude, loc.longitude)
+                actualPoint
+            }
+
+            if (group.size > 1) {
+                val connector = collisionConnectors.getOrPut(loc.employeeId) {
+                    Polyline(mapView).apply {
+                        outlinePaint.color = "#94A3B8".toColorInt()
+                        outlinePaint.strokeWidth = 2f
+                        outlinePaint.alpha = 190
+                        mapView.overlays.add(0, this)
+                    }
+                }
+                connector.setPoints(listOf(actualPoint, point))
+            } else {
+                collisionConnectors.remove(loc.employeeId)?.let {
+                    mapView.overlays.remove(it)
+                }
             }
 
             // Current company office/radius are the source of truth.
@@ -557,7 +633,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                         clicked.showInfoWindow()
                         
                         // Immediately trigger route for selected employee
-                        updateActivityRoadRoute(loc.employeeId, point)
+                        updateActivityRoadRoute(loc.employeeId, actualPoint)
                         true
                     }
                 }
@@ -571,6 +647,10 @@ class TrackingMapActivity : MotionBaseActivity() {
                 loc.bearing.toFloat(), 
                 loc.employeeId
             ) { animatedPoint ->
+                collisionConnectors[loc.employeeId]?.setPoints(
+                    listOf(actualPoint, animatedPoint)
+                )
+
                 // Update road lines synchronously with marker movement
                 runCatching {
                     val isSelected = followingEmployeeId == loc.employeeId
@@ -791,6 +871,8 @@ class TrackingMapActivity : MotionBaseActivity() {
         roadRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }
         markerAnimations.clear()
+        collisionConnectors.clear()
+        hideMapControlsRunnable?.let { mapControlsHandler.removeCallbacks(it) }
         iconCache.clear()
         
         _binding?.mapview?.onDetach()
