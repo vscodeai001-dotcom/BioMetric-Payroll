@@ -2744,52 +2744,59 @@ window.ensurePayrollPremiumMapStyles = function () {
       .payroll-map-commandbar,
       .payroll-employee-map-tools {
         display:flex;
-        align-items:center;
+        align-items:stretch;
+        flex-direction:column;
         flex-wrap:nowrap;
         gap:7px;
-        width:fit-content;
-        max-width:100%;
-        padding:7px;
+        width:44px;
+        max-width:44px;
+        padding:6px;
         border:1px solid rgba(255,255,255,.18);
         border-radius:14px;
-        background:rgba(15,23,42,.88);
-        box-shadow:0 10px 28px rgba(0,0,0,.28);
+        background:rgba(255,255,255,.94);
+        box-shadow:0 10px 28px rgba(15,23,42,.14);
         backdrop-filter:blur(14px);
         -webkit-backdrop-filter:blur(14px);
         pointer-events:auto;
-        transition: width .3s ease, padding .3s ease;
+        transition:width .2s ease, max-width .2s ease, padding .2s ease;
+      }
+
+      .payroll-map-commandbar {
+        position:absolute;
+        top:50%;
+        left:0;
+        transform:translateY(-50%);
+      }
+
+      .payroll-map-commandbar .payroll-map-search-wrap,
+      .payroll-map-commandbar .payroll-map-filter {
+        display:none;
+      }
+
+      .payroll-map-commandbar.expanded {
+        width:226px;
+        max-width:226px;
+      }
+
+      .payroll-map-commandbar.expanded .payroll-map-search-wrap,
+      .payroll-map-commandbar.expanded .payroll-map-filter {
+        display:flex;
+      }
+
+      .payroll-map-commandbar.expanded .payroll-map-tools-group {
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      .payroll-map-commandbar.is-fullscreen-hidden {
+        display:none !important;
       }
 
       .payroll-map-tools-group {
         display:none;
         gap:7px;
-        align-items:center;
-      }
-
-      .payroll-map-commandbar.expanded .payroll-map-tools-group {
-        display:flex;
-      }
-
-      @media (hover:hover) and (pointer:fine) {
-        .payroll-map-commandbar .payroll-map-tool-toggle {
-          opacity:0;
-          pointer-events:none;
-          transform:translateY(-2px);
-        }
-        .payroll-map-commandbar:hover .payroll-map-tool-toggle,
-        .payroll-map-commandbar:focus-within .payroll-map-tool-toggle,
-        .payroll-map-commandbar.expanded .payroll-map-tool-toggle {
-          opacity:1;
-          pointer-events:auto;
-          transform:translateY(0);
-        }
-      }
-
-      @media (hover:none) {
-        .payroll-map-commandbar .payroll-map-tool-toggle {
-          opacity:1;
-          pointer-events:auto;
-        }
+        align-items:stretch;
       }
 
       .payroll-map-search-wrap {
@@ -2806,7 +2813,7 @@ window.ensurePayrollPremiumMapStyles = function () {
 
       .payroll-map-search-icon {
         margin-right:7px;
-        color:#cbd5e1;
+        color:#64748b;
         font-size:16px;
       }
 
@@ -2815,7 +2822,7 @@ window.ensurePayrollPremiumMapStyles = function () {
         min-width:0;
         border:0;
         outline:0;
-        color:#f8fafc;
+        color:#172238;
         background:transparent;
         font-size:12px;
       }
@@ -2827,8 +2834,8 @@ window.ensurePayrollPremiumMapStyles = function () {
         border:1px solid rgba(255,255,255,.16);
         border-radius:10px;
         padding:0 10px;
-        color:#f8fafc;
-        background:#1e293b;
+        color:#172238;
+        background:#f8fafc;
         font-size:12px;
         pointer-events:auto;
       }
@@ -2838,11 +2845,12 @@ window.ensurePayrollPremiumMapStyles = function () {
       .payroll-employee-map-tools button {
         height:36px;
         min-width:72px;
+        width:100%;
         padding:0 11px;
         border:1px solid rgba(148,163,184,.28);
         border-radius:10px;
-        color:#e2e8f0;
-        background:rgba(30,41,59,.88);
+        color:#334155;
+        background:rgba(248,250,252,.96);
         font:600 11px/1 inherit;
         cursor:pointer;
         transition:transform .15s ease,background .15s ease,border-color .15s ease;
@@ -2851,7 +2859,7 @@ window.ensurePayrollPremiumMapStyles = function () {
       .payroll-map-tool:hover,
       .payroll-map-tool-toggle:hover,
       .payroll-employee-map-tools button:hover {
-        background:rgba(51,65,85,.98);
+        background:rgba(226,232,240,.98);
         border-color:rgba(96,165,250,.7);
         transform:translateY(-1px);
       }
@@ -2862,16 +2870,6 @@ window.ensurePayrollPremiumMapStyles = function () {
         background:rgba(37,99,235,.92);
         border-color:rgba(147,197,253,.85);
         color:white;
-      }
-
-      .payroll-map-tools-group {
-        display:none;
-        gap:7px;
-        align-items:center;
-      }
-
-      .payroll-map-commandbar.expanded .payroll-map-tools-group {
-        display:flex;
       }
 
       .payroll-map-statusbar,
@@ -2885,7 +2883,7 @@ window.ensurePayrollPremiumMapStyles = function () {
         padding:6px 10px;
         border-radius:10px;
         background:rgba(15,23,42,.78);
-        color:#cbd5e1;
+        color:#64748b;
         font-size:10px;
         box-shadow:0 6px 18px rgba(0,0,0,.20);
         pointer-events:none;
@@ -2921,6 +2919,64 @@ window.ensurePayrollPremiumMapStyles = function () {
         transform:translateX(-50%);
       }
 
+      /* The map controls follow the application's light/dark theme. A manually
+         selected map layer is still respected by the map runtime. */
+      [data-theme="dark"] .payroll-map-commandbar,
+      [data-bs-theme="dark"] .payroll-map-commandbar,
+      body.dark .payroll-map-commandbar,
+      [data-theme="dark"] .payroll-employee-map-tools,
+      [data-bs-theme="dark"] .payroll-employee-map-tools,
+      body.dark .payroll-employee-map-tools {
+        background:rgba(15,23,42,.90);
+        border-color:rgba(255,255,255,.18);
+        box-shadow:0 10px 28px rgba(0,0,0,.28);
+      }
+      [data-theme="dark"] .payroll-map-search-wrap,
+      [data-bs-theme="dark"] .payroll-map-search-wrap,
+      body.dark .payroll-map-search-wrap {
+        background:rgba(255,255,255,.10);
+        border-color:rgba(255,255,255,.16);
+      }
+      [data-theme="dark"] .payroll-map-search,
+      [data-bs-theme="dark"] .payroll-map-search,
+      body.dark .payroll-map-search { color:#f8fafc; }
+      [data-theme="dark"] .payroll-map-filter,
+      [data-bs-theme="dark"] .payroll-map-filter,
+      body.dark .payroll-map-filter {
+        color:#f8fafc; background:#1e293b; border-color:rgba(255,255,255,.16);
+      }
+      [data-theme="dark"] .payroll-map-tool,
+      [data-bs-theme="dark"] .payroll-map-tool,
+      body.dark .payroll-map-tool,
+      [data-theme="dark"] .payroll-map-tool-toggle,
+      [data-bs-theme="dark"] .payroll-map-tool-toggle,
+      body.dark .payroll-map-tool-toggle,
+      [data-theme="dark"] .payroll-employee-map-tools button,
+      [data-bs-theme="dark"] .payroll-employee-map-tools button,
+      body.dark .payroll-employee-map-tools button {
+        color:#e2e8f0; background:rgba(30,41,59,.88);
+        border-color:rgba(148,163,184,.28);
+      }
+      [data-theme="dark"] .payroll-map-tool:hover,
+      [data-bs-theme="dark"] .payroll-map-tool:hover,
+      body.dark .payroll-map-tool:hover,
+      [data-theme="dark"] .payroll-map-tool-toggle:hover,
+      [data-bs-theme="dark"] .payroll-map-tool-toggle:hover,
+      body.dark .payroll-map-tool-toggle:hover,
+      [data-theme="dark"] .payroll-employee-map-tools button:hover,
+      [data-bs-theme="dark"] .payroll-employee-map-tools button:hover,
+      body.dark .payroll-employee-map-tools button:hover {
+        background:rgba(51,65,85,.98);
+      }
+      [data-theme="dark"] .payroll-map-statusbar,
+      [data-bs-theme="dark"] .payroll-map-statusbar,
+      body.dark .payroll-map-statusbar,
+      [data-theme="dark"] .payroll-employee-map-live,
+      [data-bs-theme="dark"] .payroll-employee-map-live,
+      body.dark .payroll-employee-map-live {
+        background:rgba(15,23,42,.82); color:#cbd5e1;
+      }
+
       @media (max-width: 900px) {
         .payroll-premium-map-ui {
           left:8px;
@@ -2928,12 +2984,17 @@ window.ensurePayrollPremiumMapStyles = function () {
           top:8px;
         }
         .payroll-map-commandbar {
-          width:100%;
-          overflow-x:auto;
-          flex-wrap:nowrap;
+          left:0;
+          right:auto;
+          top:50%;
+          width:42px;
+          max-width:42px;
+          overflow:visible;
         }
-        .payroll-map-search-wrap { min-width:145px; }
-        .payroll-map-tool { min-width:62px; }
+        .payroll-map-commandbar.expanded { width:210px; max-width:210px; }
+        .payroll-map-search-wrap { min-width:0; width:100%; }
+        .payroll-map-filter { width:100%; }
+        .payroll-map-tool { min-width:62px; width:100%; }
       }
 
       @media (max-width: 600px) {
@@ -2944,10 +3005,15 @@ window.ensurePayrollPremiumMapStyles = function () {
           white-space:nowrap;
         }
         .payroll-map-commandbar {
+          left:0;
+          top:50%;
+          width:40px;
+          max-width:40px;
           padding:5px;
           gap:5px;
         }
-        .payroll-map-filter { max-width:105px; }
+        .payroll-map-commandbar.expanded { width:196px; max-width:196px; }
+        .payroll-map-filter { max-width:none; width:100%; }
         .payroll-map-tool span,
         .payroll-map-tool-toggle span { display:none; }
         .payroll-map-tool,
@@ -4368,34 +4434,17 @@ window.updateAdminLiveStaffMap =
                             x.name
                         );
 
-                    const routeStateForTooltip = state.routeStates[employeeId] || {};
-                    const cachedRouteForTooltip = routeStateForTooltip.route;
-                    const tooltipDistance = cachedRouteForTooltip?.distanceMeters > 0
-                        ? window.payrollFormatRouteDistance(cachedRouteForTooltip.distanceMeters)
-                        : distance;
-                    const tooltipEta = cachedRouteForTooltip?.durationSeconds > 0
-                        ? window.payrollFormatRouteDuration(cachedRouteForTooltip.durationSeconds)
-                        : 'Calculating…';
-                    const tooltipSpeed = window.payrollFormatSpeed(x.speedMps || state.markers[employeeId]._speedMps || 0);
-                    const tooltipAccuracy = Number(x.accuracyMeters) > 0
-                        ? `±${Math.round(Number(x.accuracyMeters))} m`
-                        : 'Unknown';
-                    const tooltipHtml = window.payrollCreateAdminTooltipHtml(
-                        x, initials.toUpperCase(), withinRange, distance, tooltipDistance, tooltipEta, tooltipSpeed
-                    );
-
-                    if (state.markers[employeeId].getTooltip()) {
-                        state.markers[employeeId].setTooltipContent(tooltipHtml);
-                    } else {
-                        state.markers[employeeId].bindTooltip(tooltipHtml, {
-                            permanent: false,
-                            direction: 'top',
-                            offset: [0, -24],
-                            sticky: true,
-                            opacity: .98,
-                            className: 'admin-live-hover-tooltip'
-                        });
-                    }
+                    // Employee markers stay visually clean. Detailed employee
+                    // information is presented only in the selected-employee rail
+                    // and the selected details card, never as a floating marker popup.
+                    try {
+                        if (state.markers[employeeId].getTooltip()) {
+                            state.markers[employeeId].unbindTooltip();
+                        }
+                        if (state.markers[employeeId].isPopupOpen?.()) {
+                            state.markers[employeeId].closePopup();
+                        }
+                    } catch { }
 
                     // Road routing is a selected-employee detail only.
                     // The default live map shows every employee marker but does
@@ -4592,6 +4641,28 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
 
         if (!state.premiumControls) {
             const esc = window.payrollEscapeHtml || (v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])));
+            if (!window.__payrollAdminMapFullscreenBound) {
+                document.addEventListener('fullscreenchange', function () {
+                    document.querySelectorAll('.payroll-map-commandbar.is-fullscreen-hidden').forEach(function (bar) {
+                        const map = bar.closest('.leaflet-container');
+                        if (!document.fullscreenElement || document.fullscreenElement !== map) {
+                            bar.classList.remove('is-fullscreen-hidden');
+                        }
+                    });
+                    Object.values(window.adminLiveMaps || {}).forEach(function (state) {
+                        if (!state?.map) return;
+                        const rail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(state.mapId || '')) + '"]');
+                        if (document.fullscreenElement !== state.map.getContainer()) {
+                            if (state.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
+                            state.fullscreenSelectedRail = null;
+                        } else if (rail) {
+                            window.syncAdminSelectedRailFullscreen?.(state, rail, state.selectedId);
+                        }
+                        try { state.map.invalidateSize({ animate: true }); } catch { }
+                    });
+                });
+                window.__payrollAdminMapFullscreenBound = true;
+            }
             const panel = document.createElement('div');
             panel.className = 'payroll-premium-map-ui';
             panel.innerHTML =
@@ -4674,7 +4745,7 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
 
         // Respect the application's current theme on first creation.
         if (!state.baseLayerInitialized) {
-            state.baseLayer = document.body.classList.contains('dark') ? 'dark' : 'standard';
+            state.baseLayer = (document.body.classList.contains('dark') || document.body.getAttribute('data-theme') === 'dark' || document.body.getAttribute('data-bs-theme') === 'dark') ? 'dark' : 'standard';
             state.baseLayerInitialized = true;
         }
         window.setPremiumAdminMapLayer(mapId, state.baseLayer);
@@ -4687,13 +4758,14 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
         if (!state.themeObserver) {
             state.themeObserver = new MutationObserver(function () {
                 if (!state.userSelectedLayer) {
-                    window.setPremiumAdminMapLayer(mapId, document.body.classList.contains('dark') ? 'dark' : 'standard');
+                    window.setPremiumAdminMapLayer(mapId, (document.body.classList.contains('dark') || document.body.getAttribute('data-theme') === 'dark' || document.body.getAttribute('data-bs-theme') === 'dark') ? 'dark' : 'standard');
                 }
             });
-            state.themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+            state.themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-theme', 'data-bs-theme'] });
         }
 
         window.applyPremiumAdminMapFilter(mapId);
+        window.ensureAdminSelectedEmployeeRail?.(mapId, state.selectedId);
     } catch (error) {
         console.debug('Premium admin map controls deferred:', error);
     }
@@ -4782,6 +4854,174 @@ window.applyPremiumAdminMapFilter = function (mapId) {
     }
 };
 
+window.syncAdminSelectedRailFullscreen = function (state, rail, selectedId) {
+    try {
+        const mapContainer = state?.map?.getContainer?.();
+        if (!mapContainer || !rail || Number(selectedId || 0) <= 0 || document.fullscreenElement !== mapContainer) {
+            if (state?.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
+            if (state) state.fullscreenSelectedRail = null;
+            return;
+        }
+
+        let clone = state.fullscreenSelectedRail;
+        if (!clone || !clone.isConnected) {
+            clone = rail.cloneNode(true);
+            clone.classList.add('admin-selected-employee-rail-fullscreen');
+            clone.removeAttribute('data-admin-selected-rail');
+            clone.setAttribute('aria-label', 'Selected employee location details fullscreen');
+            mapContainer.appendChild(clone);
+            state.fullscreenSelectedRail = clone;
+
+            const pause = () => { state.fullscreenSelectedRailPaused = true; };
+            const resume = () => { state.fullscreenSelectedRailPaused = false; };
+            clone.addEventListener('mouseenter', pause);
+            clone.addEventListener('mouseleave', resume);
+            clone.addEventListener('focusin', pause);
+            clone.addEventListener('focusout', resume);
+            clone.addEventListener('touchstart', pause, { passive: true });
+            clone.addEventListener('touchend', () => {
+                window.clearTimeout(state.fullscreenRailResumeTimer);
+                state.fullscreenRailResumeTimer = window.setTimeout(resume, 650);
+            }, { passive: true });
+            clone.addEventListener('wheel', () => {
+                pause();
+                window.clearTimeout(state.fullscreenRailResumeTimer);
+                state.fullscreenRailResumeTimer = window.setTimeout(resume, 650);
+            }, { passive: true });
+        }
+
+        const previousScroll = clone.scrollLeft;
+        clone.innerHTML = rail.innerHTML;
+        clone.scrollLeft = previousScroll;
+        const track = clone.querySelector('.admin-selected-employee-rail-track');
+        const firstSet = track?.children?.[0];
+        const maxLoop = firstSet ? firstSet.offsetWidth : 0;
+        if (track && maxLoop > 0 && clone.scrollWidth > clone.clientWidth + 4 && !state.fullscreenSelectedRailPaused) {
+            clone.scrollLeft += 0.55;
+            if (clone.scrollLeft >= maxLoop) clone.scrollLeft = 0;
+        }
+    } catch { }
+};
+
+window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
+    try {
+        const state = window.adminLiveMaps?.[mapId];
+        if (!state?.map) return;
+        const mapContainer = state.map.getContainer();
+        const wrapper = mapContainer.closest('.admin-map-wrapper') || mapContainer.parentElement;
+        const rail = document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(mapId)) + '"]');
+
+        if (!rail || Number(selectedId || 0) <= 0) {
+            if (state.selectedRailFrame) cancelAnimationFrame(state.selectedRailFrame);
+            state.selectedRailFrame = null;
+            state.selectedRailElement = null;
+            return;
+        }
+
+        if (state.selectedRailElement !== rail) {
+            state.selectedRailElement = rail;
+            state.selectedRailPaused = false;
+            state.selectedRailAddressKey = '';
+
+            const pause = () => { state.selectedRailPaused = true; };
+            const resume = () => { state.selectedRailPaused = false; };
+            rail.addEventListener('mouseenter', pause);
+            rail.addEventListener('mouseleave', resume);
+            rail.addEventListener('focusin', pause);
+            rail.addEventListener('focusout', resume);
+            rail.addEventListener('touchstart', pause, { passive: true });
+            rail.addEventListener('touchend', () => {
+                window.clearTimeout(state.selectedRailResumeTimer);
+                state.selectedRailResumeTimer = window.setTimeout(resume, 650);
+            }, { passive: true });
+            rail.addEventListener('wheel', () => {
+                pause();
+                window.clearTimeout(state.selectedRailResumeTimer);
+                state.selectedRailResumeTimer = window.setTimeout(resume, 650);
+            }, { passive: true });
+        }
+
+        const track = rail.querySelector('.admin-selected-employee-rail-track');
+        const firstSet = track?.children?.[0];
+        const maxLoop = firstSet ? firstSet.offsetWidth : 0;
+        if (track && maxLoop > 0 && rail.scrollWidth > rail.clientWidth + 4 && !state.selectedRailPaused) {
+            rail.scrollLeft += 0.35;
+            if (rail.scrollLeft >= maxLoop) rail.scrollLeft = 0;
+        }
+
+        const selected = (state.liveStaff || []).find(x => Number(x.employeeId) === Number(selectedId));
+        if (selected) {
+            const lat = Number(selected.latitude);
+            const lon = Number(selected.longitude);
+            const key = Number(selected.employeeId) + ':' + lat.toFixed(6) + ':' + lon.toFixed(6);
+            const addresses = Array.from(document.querySelectorAll('[data-selected-address]'));
+            const detailAddress = document.querySelector('[data-selected-detail-address]');
+            if (addresses.length && key !== state.selectedRailAddressKey && Number.isFinite(lat) && Number.isFinite(lon)) {
+                state.selectedRailAddressKey = key;
+                addresses.forEach(function (address) {
+                    const strong = address.querySelector('strong');
+                    const coords = address.querySelector('[data-selected-coords]');
+                    if (coords) coords.textContent = lat.toFixed(6) + ' · ' + lon.toFixed(6);
+                    if (strong) strong.textContent = 'Resolving current address...';
+                });
+                if (detailAddress) detailAddress.textContent = 'Resolving current address...';
+                const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon) + '&zoom=18&addressdetails=1';
+                const fallbackUrl = 'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + encodeURIComponent(lat) + '&longitude=' + encodeURIComponent(lon) + '&localityLanguage=en';
+                const renderAddress = function (data) {
+                    const a = data?.address || {};
+                    const b = data?.localityInfo?.administrative || [];
+                    const adminNames = b.map(x => x?.name).filter(Boolean);
+                    const parts = [
+                        a.road || data?.locality || data?.localityInfo?.informative?.find?.(x => x?.description === 'road')?.name,
+                        a.neighbourhood || a.suburb || data?.localityInfo?.administrative?.find?.(x => /district|county/i.test(x?.description || ''))?.name,
+                        a.city || a.town || a.village || data?.city || data?.locality,
+                        a.state_district,
+                        a.state || data?.principalSubdivision,
+                        a.postcode || data?.postcode,
+                        data?.countryName || a.country
+                    ].filter(Boolean);
+                    const unique = [...new Set(parts.map(String))];
+                    return unique.length ? unique.join(', ') : '';
+                };
+                const applyAddress = function (text, displayName) {
+                    if (state.selectedRailElement !== rail || state.selectedRailAddressKey !== key) return;
+                    const finalText = text || displayName || ('GPS ' + lat.toFixed(6) + ', ' + lon.toFixed(6));
+                    addresses.forEach(function (address) {
+                        const strong = address.querySelector('strong');
+                        const coords = address.querySelector('[data-selected-coords]');
+                        if (strong) strong.textContent = finalText;
+                        if (coords) coords.textContent = displayName || (lat.toFixed(6) + ' · ' + lon.toFixed(6));
+                    });
+                    if (detailAddress) detailAddress.textContent = finalText;
+                };
+                fetch(reverseUrl, { headers: { 'Accept': 'application/json' } })
+                    .then(r => r.ok ? r.json() : Promise.reject(new Error('primary reverse geocoder failed')))
+                    .then(data => applyAddress(renderAddress(data), data?.display_name))
+                    .catch(() => fetch(fallbackUrl, { headers: { 'Accept': 'application/json' } }))
+                    .then(r => r ? (r.ok ? r.json() : Promise.reject(new Error('fallback reverse geocoder failed'))) : null)
+                    .then(data => {
+                        if (data) applyAddress(renderAddress(data), data?.localityInfo ? [data.locality, data.principalSubdivision, data.countryName].filter(Boolean).join(', ') : null);
+                    })
+                    .catch(() => applyAddress('', ''));
+            }
+        }
+
+        window.syncAdminSelectedRailFullscreen?.(state, rail, selectedId);
+        state.selectedRailFrame = requestAnimationFrame(() => window.ensureAdminSelectedEmployeeRail(mapId, selectedId));
+    } catch { }
+};
+
+window.focusAdminLiveEmployee = function (mapId, employeeId) {
+    const state = window.adminLiveMaps?.[mapId];
+    if (!state?.map) return;
+    const id = Number(employeeId);
+    const marker = state.markers?.[id];
+    if (marker) {
+        state.map.setView(marker.getLatLng(), Math.max(16, state.map.getZoom()), { animate: true });
+        try { marker.openTooltip(); } catch { }
+    }
+};
+
 window.handlePremiumAdminMapAction = function (mapId, action) {
     const state = window.adminLiveMaps?.[mapId];
     if (!state?.map) return;
@@ -4792,6 +5032,7 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         if (bar && btn) {
             const expanded = bar.classList.toggle('expanded');
             btn.classList.toggle('active', expanded);
+            btn.innerHTML = expanded ? '⚙ <span>Hide</span>' : '⚙ <span>Tools</span>';
         }
         return;
     }
@@ -4824,12 +5065,19 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         window.setPremiumAdminMapLayer(mapId, next);
     } else if (action === 'fullscreen') {
         const el = state.map.getContainer();
+        const bar = state.premiumControls?.querySelector('.payroll-map-commandbar');
         if (!document.fullscreenElement) {
             if (el.requestFullscreen) el.requestFullscreen();
             el.classList.add('payroll-map-fullscreen');
+            if (bar) bar.classList.remove('is-fullscreen-hidden');
+            const selectedRail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(mapId)) + '"]');
+            if (selectedRail) window.syncAdminSelectedRailFullscreen?.(state, selectedRail, state.selectedId);
         } else {
             document.exitFullscreen?.();
             el.classList.remove('payroll-map-fullscreen');
+            if (bar) bar.classList.remove('is-fullscreen-hidden');
+            if (state.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
+            state.fullscreenSelectedRail = null;
         }
         setTimeout(function () { try { state.map.invalidateSize({ animate: true }); } catch { } }, 250);
     }
@@ -6419,3 +6667,181 @@ window.getAdminHistoryPlaybackState =
                 playback.speed
         };
     };
+
+// ============================================================================
+// LOCATION TRACKING HISTORY / >10 MINUTE STAY MAP
+// Presentation-only map for the dedicated Admin location history screen.
+// It reads derived stay records from the page and never changes GPS data.
+// ============================================================================
+window.locationStayHistoryMaps = window.locationStayHistoryMaps || {};
+
+window.initializeLocationStayHistoryMap = async function (mapId, payload) {
+    try {
+        await window.loadPayrollLeaflet();
+        const element = document.getElementById(mapId);
+        if (!element || !window.L) return;
+
+        const existing = window.locationStayHistoryMaps[mapId];
+        if (existing?.map) {
+            try { existing.map.remove(); } catch { }
+            delete window.locationStayHistoryMaps[mapId];
+        }
+
+        const map = L.map(element, { zoomControl: true, attributionControl: true });
+        const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        const points = Array.isArray(payload?.points) ? payload.points : [];
+        const stays = Array.isArray(payload?.stays) ? payload.stays : [];
+        const bounds = [];
+        const state = { map, stayMarkers: {}, stayData: stays };
+        window.locationStayHistoryMaps[mapId] = state;
+
+        const path = points
+            .map(p => [Number(p.latitude ?? p.Latitude), Number(p.longitude ?? p.Longitude)])
+            .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+        if (path.length > 1) {
+            L.polyline(path, {
+                color: '#0d6efd',
+                weight: 4,
+                opacity: .72,
+                lineCap: 'round',
+                lineJoin: 'round'
+            }).addTo(map);
+            path.forEach(p => bounds.push(p));
+        }
+
+        stays.forEach((stay, index) => {
+            const lat = Number(stay.lat), lng = Number(stay.lng);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+            const icon = L.divIcon({
+                className: 'location-stay-marker-wrap',
+                html: '<div class="location-stay-marker"><span>' + (index + 1) + '</span></div>',
+                iconSize: [38, 38],
+                iconAnchor: [19, 19]
+            });
+
+            const marker = L.marker([lat, lng], { icon }).addTo(map);
+            marker.bindPopup(
+                '<div class="stay-map-popup">' +
+                '<strong>' + escapeStayMapHtml(stay.employee || 'Employee') + '</strong>' +
+                '<div>' + escapeStayMapHtml(stay.location || 'Unknown / Other Location') + '</div>' +
+                '<div class="popup-meta">' +
+                '<span>Start<br><b>' + formatStayMapTime(stay.start) + '</b></span>' +
+                '<span>End<br><b>' + formatStayMapTime(stay.end) + '</b></span>' +
+                '<span>Duration<br><b>' + Number(stay.durationMinutes || 0).toFixed(0) + ' min</b></span>' +
+                '<span>Accuracy<br><b>' + Number(stay.accuracy || 0).toFixed(1) + ' m</b></span>' +
+                '</div>' +
+                '<div class="small mt-2">' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '</div>' +
+                '</div>'
+            );
+            marker.on('click', function () {
+                window.highlightLocationStayReport(mapId, Number(stay.id));
+            });
+            state.stayMarkers[Number(stay.id)] = marker;
+            bounds.push([lat, lng]);
+        });
+
+        if (bounds.length) {
+            map.fitBounds(bounds, { padding: [28, 28], maxZoom: 17 });
+        } else {
+            map.setView([20.5937, 78.9629], 5);
+        }
+
+        setTimeout(() => map.invalidateSize(), 120);
+    } catch (error) {
+        console.warn('Location stay history map initialization failed.', error);
+    }
+};
+
+window.focusLocationStayHistory = async function (mapId, stayId) {
+    const state = window.locationStayHistoryMaps?.[mapId];
+    if (!state?.map) return;
+    const marker = state.stayMarkers?.[Number(stayId)];
+    if (marker) {
+        state.map.setView(marker.getLatLng(), Math.max(state.map.getZoom(), 17), { animate: true });
+        marker.openPopup();
+    }
+    window.highlightLocationStayReport(mapId, Number(stayId));
+};
+
+window.highlightLocationStayReport = function (mapId, stayId) {
+    document.querySelectorAll('[id^="stay-row-"], [id^="stay-detail-row-"]').forEach(function (el) {
+        el.classList.remove('selected');
+    });
+    const compact = document.getElementById('stay-row-' + stayId);
+    const detail = document.getElementById('stay-detail-row-' + stayId);
+    if (compact) {
+        compact.classList.add('selected');
+        compact.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    if (detail) detail.classList.add('selected');
+};
+
+window.resolveLocationStayAddresses = async function (mapId, stays) {
+    const state = window.locationStayHistoryMaps?.[mapId];
+    const items = Array.isArray(stays) ? stays : [];
+    for (const item of items) {
+        const lat = Number(item.lat), lon = Number(item.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        const nodes = document.querySelectorAll('[data-stay-address="' + String(item.id) + '"]');
+        try {
+            const response = await fetch(
+                'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon) + '&zoom=18&addressdetails=1',
+                { headers: { 'Accept': 'application/json' } }
+            );
+            const data = response.ok ? await response.json() : null;
+            const address = data?.address || {};
+            const parts = [
+                address.road,
+                address.neighbourhood || address.suburb,
+                address.city || address.town || address.village,
+                address.state_district,
+                address.state,
+                address.postcode,
+                address.amenity || address.tourism || address.attraction
+            ].filter(Boolean);
+            const text = parts.length ? parts.join(', ') : 'Address unavailable';
+            nodes.forEach(n => { n.textContent = text; });
+        } catch {
+            nodes.forEach(n => { n.textContent = 'Address unavailable'; });
+        }
+        await new Promise(resolve => setTimeout(resolve, 350));
+    }
+};
+
+window.destroyLocationStayHistoryMap = function (mapId) {
+    const state = window.locationStayHistoryMaps?.[mapId];
+    if (state?.map) {
+        try { state.map.remove(); } catch { }
+    }
+    if (window.locationStayHistoryMaps) delete window.locationStayHistoryMaps[mapId];
+};
+
+function formatStayMapTime(value) {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function escapeStayMapHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, function (c) {
+        return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c];
+    });
+}
+
+(function ensureLocationStayHistoryStyles() {
+    if (document.getElementById('location-stay-history-map-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'location-stay-history-map-styles';
+    style.textContent = `
+        .location-stay-marker-wrap{background:transparent!important;border:0!important}
+        .location-stay-marker{width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:grid;place-items:center;background:#dc3545;border:3px solid #fff;box-shadow:0 5px 16px rgba(0,0,0,.32)}
+        .location-stay-marker span{transform:rotate(45deg);color:#fff;font-size:11px;font-weight:900}
+    `;
+    document.head.appendChild(style);
+})();

@@ -116,7 +116,8 @@
             app:strokeColor="@color/divider"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/filterScroll">
+            app:layout_constraintTop_toTopOf="@id/mapview"
+            android:translationZ="12dp">
 
             <HorizontalScrollView
                 android:id="@+id/selectedLocationRailScroll"
@@ -178,11 +179,21 @@
                                     android:id="@+id/tvSelectedEmployeeStatus"
                                     android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginTop="3dp"
+                                    android:layout_marginTop="2dp"
                                     android:text="● LIVE"
                                     android:textColor="@color/green_700"
-                                    android:textSize="9sp"
+                                    android:textSize="8sp"
                                     android:textStyle="bold" />
+                                <TextView
+                                    android:id="@+id/tvSelectedEmployeeMeta"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="#0 · Staff"
+                                    android:textColor="@color/text_secondary"
+                                    android:textSize="7sp" />
                             </LinearLayout>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
@@ -203,6 +214,21 @@
                             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CURRENT LOCATION" android:textColor="?attr/colorPrimary" android:textSize="8sp" android:textStyle="bold" android:letterSpacing="0.08" />
                             <TextView android:id="@+id/tvSelectedLocationAddress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:ellipsize="end" android:maxLines="1" android:text="GPS location selected" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold" />
                             <TextView android:id="@+id/tvSelectedLocationCoords" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:ellipsize="end" android:maxLines="1" android:text="Lat / Long" android:textColor="@color/text_secondary" android:textSize="8sp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="130dp"
+                        android:layout_height="68dp"
+                        android:layout_marginEnd="7dp"
+                        app:cardCornerRadius="12dp"
+                        app:cardElevation="2dp"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="@color/divider">
+                        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="9dp">
+                            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SPEED" android:textColor="?attr/colorPrimary" android:textSize="8sp" android:textStyle="bold" android:letterSpacing="0.08" />
+                            <TextView android:id="@+id/tvSelectedSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:text="0 km/h" android:textColor="?attr/colorOnSurface" android:textSize="15sp" android:textStyle="bold" />
+                            <TextView android:id="@+id/tvSelectedMovementState" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Stopped" android:textColor="@color/text_secondary" android:textSize="8sp" />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
@@ -275,8 +301,23 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:background="@android:color/transparent"
-            app:layout_constraintTop_toBottomOf="@id/cardSelectedLocationRail"
+            app:layout_constraintTop_toBottomOf="@id/filterScroll"
             app:layout_constraintBottom_toBottomOf="parent" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnMapToolsToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_margin="12dp"
+            android:minWidth="0dp"
+            android:text="⚙ Tools"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:elevation="16dp"
+            app:cornerRadius="12dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/mapview"
+            style="@style/Widget.Material3.Button.TonalButton" />
 
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardLiveStats"
@@ -314,7 +355,8 @@
             android:elevation="12dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"
-            android:visibility="gone">
+            android:visibility="gone"
+            android:translationZ="14dp">
 
             <LinearLayout
                 android:layout_width="wrap_content"

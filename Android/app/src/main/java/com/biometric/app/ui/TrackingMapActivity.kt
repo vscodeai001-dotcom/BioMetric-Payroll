@@ -63,6 +63,8 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.Polygon
 import javax.inject.Inject
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 @AndroidEntryPoint
 class TrackingMapActivity : MotionBaseActivity() {
@@ -165,6 +167,9 @@ class TrackingMapActivity : MotionBaseActivity() {
     private var mapTouchDownX = 0f
     private var mapTouchDownY = 0f
     private var mapTouchDownAt = 0L
+    private val selectedRailHandler = Handler(Looper.getMainLooper())
+    private var selectedRailPaused = false
+    private var selectedRailRunnable: Runnable? = null
 
     private fun setupSelectedLocationRail() {
         binding.cardSelectedLocationRail.visibility = View.GONE
@@ -178,6 +183,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         status: String
     ) {
         binding.cardSelectedLocationRail.visibility = View.VISIBLE
+        startSelectedRailAutoScroll()
         binding.tvSelectedEmployeeName.text = employeeName
         binding.tvSelectedEmployeeInitials.text = getInitials(employeeName)
         binding.tvSelectedEmployeeStatus.text = "● ${status.uppercase(Locale.getDefault())}"
@@ -188,6 +194,8 @@ class TrackingMapActivity : MotionBaseActivity() {
                 else -> "#64748B".toColorInt()
             }
         )
+        val employee = sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == loc.employeeId.toString() }
+        binding.tvSelectedEmployeeMeta.text = "#${loc.employeeId} · ${employee?.role?.takeIf { it.isNotBlank() } ?: "Staff"}"
 
         binding.tvSelectedLocationCoords.text =
             "Lat ${String.format(Locale.US, "%.6f", loc.latitude)}  •  Long ${String.format(Locale.US, "%.6f", loc.longitude)}"
@@ -202,6 +210,8 @@ class TrackingMapActivity : MotionBaseActivity() {
             if (withinCurrentRadius) "#16A34A".toColorInt() else "#DC2626".toColorInt()
         )
         binding.tvSelectedLastUpdated.text = formatLocationTime(loc.timestamp)
+        binding.tvSelectedSpeed.text = formatSpeed(loc.speedMps)
+        binding.tvSelectedMovementState.text = loc.movementState.ifBlank { "Stopped" }
 
         // The live DTO does not contain a session-start timestamp, so never
         // fabricate a stay duration. Show the authoritative movement state in
@@ -217,7 +227,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             selectedAddressEmployeeId = loc.employeeId
             selectedAddressLat = loc.latitude
             selectedAddressLon = loc.longitude
-            binding.tvSelectedLocationAddress.text = "Resolving current address…"
+            binding.tvSelectedLocationAddress.text = "Address unavailable"
             selectedAddressJob?.cancel()
             selectedAddressJob = lifecycleScope.launch(Dispatchers.IO) {
                 val result = reverseGeocode(loc.latitude, loc.longitude)
@@ -244,30 +254,120 @@ class TrackingMapActivity : MotionBaseActivity() {
         }
     }
 
-    private fun reverseGeocode(latitude: Double, longitude: Double): String {
+    private suspend fun reverseGeocode(latitude: Double, longitude: Double): String {
         return try {
-            if (!Geocoder.isPresent()) return "GPS ${String.format(Locale.US, "%.6f, %.6f", latitude, longitude)}"
-            val geocoder = Geocoder(this, Locale.getDefault())
-            val addresses = geocoder.getFromLocation(latitude, longitude, 1).orEmpty()
-            val address = addresses.firstOrNull()
-            if (address == null) {
-                "GPS ${String.format(Locale.US, "%.6f, %.6f", latitude, longitude)}"
-            } else {
-                val road = address.thoroughfare?.takeIf { it.isNotBlank() }
-                val area = address.subLocality?.takeIf { it.isNotBlank() }
-                    ?: address.locality?.takeIf { it.isNotBlank() }
-                val city = address.locality?.takeIf { it.isNotBlank() }
-                    ?: address.subAdminArea?.takeIf { it.isNotBlank() }
-                val state = address.adminArea?.takeIf { it.isNotBlank() }
-                val pin = address.postalCode?.takeIf { it.isNotBlank() }
-                val parts = listOfNotNull(road, area, city, state, pin).distinct()
-                if (parts.isNotEmpty()) parts.joinToString(", ")
-                else address.getAddressLine(0)?.takeIf { it.isNotBlank() }
-                    ?: "GPS ${String.format(Locale.US, "%.6f, %.6f", latitude, longitude)}"
+            if (!Geocoder.isPresent()) {
+                return "Address unavailable"
+            }
+
+            val geocoder = Geocoder(this@TrackingMapActivity, Locale.getDefault())
+
+            suspendCancellableCoroutine { continuation ->
+                try {
+                    geocoder.getFromLocation(
+                        latitude,
+                        longitude,
+                        1,
+                        object : Geocoder.GeocodeListener {
+
+                            override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                                val address = addresses.firstOrNull()
+
+                                if (address == null) {
+                                    continuation.resume("Address unavailable")
+                                    return
+                                }
+
+                                val road = address.thoroughfare
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val area = address.subLocality
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: address.locality
+                                        ?.takeIf { it.isNotBlank() }
+
+                                val city = address.locality
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: address.subAdminArea
+                                        ?.takeIf { it.isNotBlank() }
+
+                                val state = address.adminArea
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val pin = address.postalCode
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val parts = listOfNotNull(
+                                    road,
+                                    area,
+                                    city,
+                                    state,
+                                    pin
+                                ).distinct()
+
+                                val result =
+                                    if (parts.isNotEmpty()) {
+                                        parts.joinToString(", ")
+                                    } else {
+                                        address.getAddressLine(0)
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: "Address unavailable"
+                                    }
+
+                                continuation.resume(result)
+                            }
+
+                            override fun onError(errorMessage: String?) {
+                                continuation.resume("Address unavailable")
+                            }
+                        }
+                    )
+                } catch (_: Exception) {
+                    if (continuation.isActive) {
+                        continuation.resume("Address unavailable")
+                    }
+                }
             }
         } catch (_: Exception) {
-            "GPS ${String.format(Locale.US, "%.6f, %.6f", latitude, longitude)}"
+            "Address unavailable"
         }
+    }
+
+    private fun startSelectedRailAutoScroll() {
+        if (selectedRailRunnable != null) return
+        selectedRailRunnable = object : Runnable {
+            override fun run() {
+                val scroll = _binding?.selectedLocationRailScroll ?: return
+                if (!selectedRailPaused && scroll.visibility == View.VISIBLE) {
+                    val child = scroll.getChildAt(0)
+                    val max = (child?.width ?: 0) - scroll.width
+                    if (max > 4) {
+                        val next = scroll.scrollX + 2
+                        scroll.scrollTo(if (next >= max) 0 else next, 0)
+                    }
+                }
+                selectedRailHandler.postDelayed(this, 32L)
+            }
+        }
+        binding.selectedLocationRailScroll.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    selectedRailPaused = true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    selectedRailPaused = true
+                    selectedRailHandler.postDelayed({ selectedRailPaused = false }, 700L)
+                }
+            }
+            false
+        }
+        selectedRailHandler.post(selectedRailRunnable!!)
+    }
+
+    private fun stopSelectedRailAutoScroll() {
+        selectedRailRunnable?.let { selectedRailHandler.removeCallbacks(it) }
+        selectedRailRunnable = null
+        selectedRailPaused = false
     }
 
     private fun setupPremiumMapControls() {
@@ -351,15 +451,20 @@ class TrackingMapActivity : MotionBaseActivity() {
             mapView.invalidate()
         }
         binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
-        // Controls are persistent. They expand/minimize only by click/tap,
-        // never by hover and never by an automatic timeout.
-        setMapControlsVisible(true)
+        binding.btnMapToolsToggle.setOnClickListener {
+            setMapControlsVisible(!mapControlsVisible)
+        }
+        // Controls are explicitly expanded/minimized by the persistent Tools
+        // button. They never appear because of hover or disappear by timeout.
+        setMapControlsVisible(false)
     }
 
     private fun setMapControlsVisible(visible: Boolean) {
         mapControlsVisible = visible
         binding.mapCommandRailScroll.visibility =
             if (visible) View.VISIBLE else View.GONE
+        binding.btnMapToolsToggle.text = if (visible) "− Hide" else "⚙ Tools"
+        binding.btnMapToolsToggle.isSelected = visible
 
         hideMapControlsRunnable?.let {
             mapControlsHandler.removeCallbacks(it)
@@ -389,9 +494,14 @@ class TrackingMapActivity : MotionBaseActivity() {
             binding.filterScroll.visibility = View.GONE
             binding.cardLegend.visibility = View.GONE
             binding.cardLiveStats.visibility = View.GONE
-            binding.cardSelectedLocationRail.visibility = View.GONE
+            if (followingEmployeeId != null) {
+                binding.cardSelectedLocationRail.visibility = View.VISIBLE
+                binding.cardSelectedLocationRail.bringToFront()
+            }
 
-            // Extend map to cover the entire screen
+            // Extend the existing map to cover the entire screen. The selected
+            // employee rail remains attached to the map itself.
+
             binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
                 topToTop = ConstraintLayout.LayoutParams.PARENT_ID
                 bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
@@ -405,13 +515,18 @@ class TrackingMapActivity : MotionBaseActivity() {
             binding.filterScroll.visibility = View.VISIBLE
             binding.cardLegend.visibility = View.VISIBLE
             binding.cardLiveStats.visibility = View.VISIBLE
-            binding.cardSelectedLocationRail.visibility = if (followingEmployeeId != null) View.VISIBLE else View.GONE
+            if (followingEmployeeId == null) {
+                binding.cardSelectedLocationRail.visibility = View.GONE
+            } else {
+                binding.cardSelectedLocationRail.visibility = View.VISIBLE
+                binding.cardSelectedLocationRail.bringToFront()
+            }
 
-            // Restore map to its bounded position. The selected-location rail
-            // remains above the map when an employee is selected.
+            // Restore the existing map below the existing filter row. The
+            // selected-location rail remains over the map, never above it.
             binding.mapview.updateLayoutParams<ConstraintLayout.LayoutParams> {
                 topToTop = -1
-                topToBottom = binding.cardSelectedLocationRail.id
+                topToBottom = binding.filterScroll.id
                 bottomToBottom = ConstraintLayout.LayoutParams.PARENT_ID
             }
 
@@ -447,16 +562,8 @@ class TrackingMapActivity : MotionBaseActivity() {
                         mapTouchDownAt = SystemClock.elapsedRealtime()
                     }
                     MotionEvent.ACTION_UP -> {
-                        val moved = kotlin.math.hypot(
-                            (event.x - mapTouchDownX).toDouble(),
-                            (event.y - mapTouchDownY).toDouble()
-                        )
-                        val quickTap =
-                            SystemClock.elapsedRealtime() - mapTouchDownAt < 600L
-
-                        if (moved < 18.0 && quickTap) {
-                            setMapControlsVisible(!mapControlsVisible)
-                        }
+                        // A tap on the map itself must never hide/show controls.
+                        // Controls are changed only through the explicit Tools button.
                     }
                 }
 
@@ -642,6 +749,7 @@ class TrackingMapActivity : MotionBaseActivity() {
 
         if (followingEmployeeId != null && followingEmployeeId !in currentIds) {
             binding.cardSelectedLocationRail.visibility = View.GONE
+            stopSelectedRailAutoScroll()
             selectedAddressJob?.cancel()
             selectedAddressEmployeeId = null
         }
@@ -748,11 +856,12 @@ class TrackingMapActivity : MotionBaseActivity() {
                     mapView.overlays.add(this)
 
                     setOnMarkerClickListener { clicked, map ->
+                        // Marker selection is handled by the selected-details rail.
+                        // Never open an information popup/snippet above the marker.
+                        clicked.closeInfoWindow()
                         followingEmployeeId = loc.employeeId
                         isAutoFocusEnabled = true
                         map.controller.animateTo(clicked.position)
-                        clicked.showInfoWindow()
-
                         val selectedDistance = if (officeLat != 0.0 && officeLon != 0.0) {
                             distanceMeters(officeLat, officeLon, loc.latitude, loc.longitude)
                         } else {
@@ -829,13 +938,10 @@ class TrackingMapActivity : MotionBaseActivity() {
                 )
             }
 
-            val speedText = formatSpeed(loc.speedMps)
-            marker.snippet =
-                "Status: $status | Speed: $speedText\n" +
-                "Dist: ${formatDistance(distanceFromOffice)} | " +
-                "Radius: ${officeRadiusMeters}m | " +
-                "${if (withinCurrentRadius) "Within range" else "Outside range"} | " +
-                "Accuracy: ±${loc.accuracyMeters.toInt()}m"
+            // Keep employee markers clean. Detailed information belongs only
+            // in the selected-employee rail, including fullscreen mode.
+            marker.snippet = ""
+            marker.title = ""
 
             // REQUIREMENT: Only show route for selected employee
             if (followingEmployeeId == loc.employeeId) {
@@ -1009,6 +1115,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         markerAnimations.clear()
         collisionConnectors.clear()
         hideMapControlsRunnable?.let { mapControlsHandler.removeCallbacks(it) }
+        stopSelectedRailAutoScroll()
         iconCache.clear()
         
         _binding?.mapview?.onDetach()

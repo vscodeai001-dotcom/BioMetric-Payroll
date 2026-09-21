@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.content.Intent
 import android.location.Location
+import android.location.Geocoder
 import android.util.Log
 import com.biometric.app.data.entity.*
 import com.airbnb.lottie.LottieAnimationView
@@ -49,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.text.SimpleDateFormat
+import java.util.TimeZone
 import java.util.*
 import javax.inject.Inject
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -99,6 +101,8 @@ import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import java.text.NumberFormat
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @AndroidEntryPoint
@@ -155,6 +159,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var adminMapTouchDownY = 0f
     private var adminMapTouchDownAt = 0L
 
+    private val adminSelectedRailHandler = Handler(Looper.getMainLooper())
+    private var adminSelectedRailPaused = false
+    private var adminSelectedRailRunnable: Runnable? = null
+    // Address-resolution state for the selected employee rail.
+    private var selectedRailAddressEmployeeId: Int? = null
+    private var selectedRailAddressLat: Double? = null
+    private var selectedRailAddressLon: Double? = null
+    private var selectedRailAddressJob: Job? = null
+
     private val driveManager by lazy { GoogleDriveManager(this) }
     private var tvLastSynced: TextView? = null
     private var refreshJob: Job? = null
@@ -203,6 +216,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             setupRealTimeSync()
             setupAdminMap()
             setupAdminFilters()
+            setupAdminSelectedEmployeeRail()
             setupWorkforceSearch()
             setupApprovalFilters()
 
@@ -543,6 +557,187 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
     }
 
+    private fun setupAdminSelectedEmployeeRail() {
+        binding.cardAdminSelectedEmployeeRail.visibility = View.GONE
+        binding.adminSelectedEmployeeRailScroll.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> adminSelectedRailPaused = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    adminSelectedRailPaused = true
+                    adminSelectedRailHandler.postDelayed({ adminSelectedRailPaused = false }, 500L)
+                }
+            }
+            false
+        }
+    }
+
+    private fun startAdminSelectedRailAutoScroll() {
+        if (adminSelectedRailRunnable != null) return
+        adminSelectedRailRunnable = object : Runnable {
+            override fun run() {
+                val scroll = _binding?.adminSelectedEmployeeRailScroll
+                if (scroll != null && !adminSelectedRailPaused && scroll.visibility == View.VISIBLE) {
+                    val child = scroll.getChildAt(0)
+                    val max = ((child?.width ?: 0) - scroll.width).coerceAtLeast(0)
+                    if (max > 8) {
+                        val next = scroll.scrollX + 2
+                        scroll.scrollTo(if (next >= max) 0 else next, 0)
+                    }
+                }
+                adminSelectedRailHandler.postDelayed(this, 24L)
+            }
+        }
+        adminSelectedRailHandler.post(adminSelectedRailRunnable!!)
+    }
+
+    private fun stopAdminSelectedRailAutoScroll() {
+        adminSelectedRailRunnable?.let { adminSelectedRailHandler.removeCallbacks(it) }
+        adminSelectedRailRunnable = null
+        adminSelectedRailPaused = false
+    }
+
+    private fun updateAdminSelectedEmployeeRail(
+        loc: SignalRManager.LiveLocation,
+        employeeName: String,
+        distanceFromOffice: Double,
+        withinCurrentRadius: Boolean,
+        status: String
+    ) {
+        val employee = sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == loc.employeeId.toString() }
+        binding.cardAdminSelectedEmployeeRail.visibility = View.VISIBLE
+        binding.tvAdminRailEmployee.text = employeeName
+        binding.tvAdminRailEmployeeMeta.text = "#${loc.employeeId} · ${employee?.role?.takeIf { it.isNotBlank() } ?: "Staff"}"
+        binding.tvAdminRailLocation.text = "Address unavailable"
+        binding.tvAdminRailLocationMeta.text = "Lat ${String.format(Locale.US, "%.6f", loc.latitude)} · Long ${String.format(Locale.US, "%.6f", loc.longitude)} • ${status.uppercase(Locale.getDefault())}"
+        val needsAddress = selectedRailAddressEmployeeId != loc.employeeId ||
+            selectedRailAddressLat == null || selectedRailAddressLon == null ||
+            distanceBetween(GeoPoint(selectedRailAddressLat ?: loc.latitude, selectedRailAddressLon ?: loc.longitude), GeoPoint(loc.latitude, loc.longitude)).toDouble() >= 80.0
+        if (needsAddress) {
+            selectedRailAddressEmployeeId = loc.employeeId
+            selectedRailAddressLat = loc.latitude
+            selectedRailAddressLon = loc.longitude
+            selectedRailAddressJob?.cancel()
+            selectedRailAddressJob = lifecycleScope.launch(Dispatchers.IO) {
+                val address = reverseGeocodeAdminRail(loc.latitude, loc.longitude)
+                withContext(Dispatchers.Main) {
+                    if (adminFollowingEmployeeId == loc.employeeId &&
+                        selectedRailAddressLat == loc.latitude && selectedRailAddressLon == loc.longitude) {
+                        binding.tvAdminRailLocation.text = address
+                    }
+                }
+            }
+        }
+        binding.tvAdminRailSpeed.text = formatSpeed(loc.speedMps)
+        binding.tvAdminRailMovement.text = loc.movementState.ifBlank { "Stopped" }
+        binding.tvAdminRailAccuracy.text = if (loc.accuracyMeters > 0) "±${loc.accuracyMeters.toInt()} m" else "Unknown"
+        binding.tvAdminRailDistance.text = formatDistance(distanceFromOffice)
+        binding.tvAdminRailRadius.text = if (withinCurrentRadius) "Within ${currentGeofenceRadiusMeters} m" else "Outside ${currentGeofenceRadiusMeters} m"
+        binding.tvAdminRailRadius.setTextColor(if (withinCurrentRadius) "#16A34A".toColorInt() else "#DC2626".toColorInt())
+        binding.tvAdminRailUpdated.text = formatAdminLocationTime(loc.timestamp)
+        binding.tvAdminRailStatus.text = status
+        startAdminSelectedRailAutoScroll()
+    }
+
+    private fun formatAdminLocationTime(timestamp: String?): String {
+        if (timestamp.isNullOrBlank()) return "No timestamp"
+        return try {
+            val instant = java.time.Instant.parse(timestamp)
+            val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = TimeZone.getDefault() }
+            formatter.format(Date.from(instant))
+        } catch (_: Exception) { timestamp }
+    }
+
+    private fun clearAdminSelectedEmployeeRail() {
+        binding.cardAdminSelectedEmployeeRail.visibility = View.GONE
+        binding.adminSelectedEmployeeRailScroll.scrollTo(0, 0)
+        stopAdminSelectedRailAutoScroll()
+        selectedRailAddressJob?.cancel()
+        selectedRailAddressJob = null
+        selectedRailAddressEmployeeId = null
+        selectedRailAddressLat = null
+        selectedRailAddressLon = null
+    }
+
+    private suspend fun reverseGeocodeAdminRail(latitude: Double, longitude: Double): String {
+        return try {
+            if (!Geocoder.isPresent()) {
+                return "Address unavailable"
+            }
+
+            val geocoder = Geocoder(this@MainActivity, Locale.getDefault())
+
+            suspendCancellableCoroutine { continuation ->
+                try {
+                    geocoder.getFromLocation(
+                        latitude,
+                        longitude,
+                        1,
+                        object : Geocoder.GeocodeListener {
+
+                            override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                                val address = addresses.firstOrNull()
+
+                                if (address == null) {
+                                    continuation.resume("Address unavailable")
+                                    return
+                                }
+
+                                val road = address.thoroughfare
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val area = address.subLocality
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val city = address.locality
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: address.subAdminArea
+                                        ?.takeIf { it.isNotBlank() }
+
+                                val district = address.subAdminArea
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val state = address.adminArea
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val pin = address.postalCode
+                                    ?.takeIf { it.isNotBlank() }
+
+                                val parts = listOfNotNull(
+                                    road,
+                                    area,
+                                    city,
+                                    district,
+                                    state,
+                                    pin
+                                ).distinct()
+
+                                val result = parts
+                                    .joinToString(", ")
+                                    .ifBlank {
+                                        address.getAddressLine(0)
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: "Address unavailable"
+                                    }
+
+                                continuation.resume(result)
+                            }
+
+                            override fun onError(errorMessage: String?) {
+                                continuation.resume("Address unavailable")
+                            }
+                        }
+                    )
+                } catch (_: Exception) {
+                    if (continuation.isActive) {
+                        continuation.resume("Address unavailable")
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            "Address unavailable"
+        }
+    }
+
     private fun setupAdminFilters() {
         val listener = { id: Int ->
             statusFilter = when(id) {
@@ -865,9 +1060,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             adminFollowingEmployeeId = loc.employeeId
                             isAdminAutoFocusEnabled = true
                             map.controller.animateTo(clicked.position)
-                            clicked.showInfoWindow()
-                            
-                            // Immediately trigger route for selected employee
+                            val selectedDistance = officeMarker?.position?.let { office ->
+                                distanceBetween(office, actualPoint).toDouble()
+                            } ?: loc.distanceMeters.coerceAtLeast(0.0)
+                            val selectedWithin = currentGeofenceRadiusMeters > 0 && selectedDistance <= currentGeofenceRadiusMeters.toDouble()
+                            updateAdminSelectedEmployeeRail(loc, employeeName, selectedDistance, selectedWithin, status)
                             updateAdminRoadRoute(loc.employeeId, actualPoint)
                             true
                         }
@@ -975,7 +1172,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
                 m1.icon = icon
                 
-                m1.snippet = "Status: $status | Dist: ${formatDistance(liveDistanceMeters)}\nRadius: ${currentGeofenceRadiusMeters}m"
+                // Employee selection is represented only by the rail. Do not show an info window above the marker.
+                m1.snippet = ""
 
                 // ONLY update the second map if the tracking hub is actually active.
                 // This significantly reduces graphics pressure and layout contention.
@@ -984,13 +1182,27 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                         Marker(commandMap).apply {
                             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                             commandMap.overlays.add(this)
+                            setOnMarkerClickListener { clicked, map ->
+                                adminFollowingEmployeeId = loc.employeeId
+                                isAdminAutoFocusEnabled = true
+                                map.controller.animateTo(clicked.position)
+                                updateAdminSelectedEmployeeRail(
+                                    loc,
+                                    employeeName,
+                                    liveDistanceMeters,
+                                    withinCurrentRadius,
+                                    status
+                                )
+                                updateAdminRoadRoute(loc.employeeId, actualPoint)
+                                true
+                            }
                         }
                     }
                     m2.alpha = 1f
-                    m2.title = employeeName
+                    m2.title = ""
                     m2.position = point
                     m2.icon = icon
-                    m2.snippet = m1.snippet
+                    m2.snippet = ""
                 }
 
                 // REQUIREMENT: Only show route for selected employee
@@ -1020,6 +1232,23 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val liveOpCount = locations.count { getLocStatus(it) == "Live" }
             b.tvCommandLiveCount.text = getString(R.string.label_live_operators_format, liveOpCount)
             b.tvAdminMapLiveCount.text = "$liveOpCount Live / ${employeeData.size}"
+
+            val selectedRailLoc = adminFollowingEmployeeId?.let { id -> locations.firstOrNull { it.employeeId == id } }
+            if (selectedRailLoc != null) {
+                val railStatus = getLocStatus(selectedRailLoc)
+                val railDistance = officeMarker?.position?.let { distanceBetween(it, GeoPoint(selectedRailLoc.latitude, selectedRailLoc.longitude)).toDouble() }
+                    ?: selectedRailLoc.distanceMeters.coerceAtLeast(0.0)
+                val railWithin = currentGeofenceRadiusMeters > 0 && railDistance <= currentGeofenceRadiusMeters.toDouble()
+                updateAdminSelectedEmployeeRail(
+                    selectedRailLoc,
+                    employeeData.firstOrNull { it.employeeId == selectedRailLoc.employeeId.toString() }?.name ?: "Staff #${selectedRailLoc.employeeId}",
+                    railDistance,
+                    railWithin,
+                    railStatus
+                )
+            } else {
+                clearAdminSelectedEmployeeRail()
+            }
             
             dashboardMap.invalidate()
             if (isTrackingHubActive) commandMap.invalidate()
