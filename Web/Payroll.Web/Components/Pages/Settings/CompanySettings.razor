@@ -11,6 +11,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject Payroll.Web.Services.GeoLocationService GeoService
+@inject Payroll.Web.Services.FirebaseRealtimeService FirebaseRealtime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Company Settings</PageTitle>
@@ -71,7 +72,7 @@ else
         <div class="card-body p-3">
 
             <div class="@(activeTab == "general" ? "" : "d-none")">
-                <GeneralTab Settings="settings" />
+                <GeneralTab Settings="settings" TrackingIntervalSeconds="trackingIntervalSeconds" TrackingIntervalSecondsChanged="OnTrackingIntervalChanged" />
             </div>
 
             <div class="@(activeTab == "statutory" ? "" : "d-none")">
@@ -131,6 +132,8 @@ else
     private bool isSaving = false;
     private bool isSuperAdmin = false;
     private string activeTab = "general";
+    private int trackingIntervalSeconds = 30;
+    private string? firebaseOwnerUid;
 
     protected override async Task OnInitializedAsync()
     {
@@ -149,6 +152,11 @@ else
             toastService.ShowError($"Error loading settings: {ex.Message}");
         }
         if (settings == null) settings = new CompanySetting();
+
+        firebaseOwnerUid = FirebaseRealtime.ResolveOwnerUid(
+            authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "web-admin",
+            isSuperAdmin ? "SuperAdmin" : "Admin");
+        await LoadTrackingIntervalAsync();
     }
 
     private async Task SaveSettings()
@@ -175,11 +183,81 @@ else
                 settings.OfficeLongitude,
                 settings.GeoRadiusMeters);
 
+            await SaveTrackingIntervalAsync();
+
             toastService.ShowSuccess("Settings saved!");
         }
         catch (Exception ex) { _logger.LogError(ex, "Error saving."); toastService.ShowError("Save failed."); }
         finally { isSaving = false; }
     }
+    private async Task LoadTrackingIntervalAsync()
+    {
+        if (string.IsNullOrWhiteSpace(firebaseOwnerUid)) return;
+        try
+        {
+            var data = await FirebaseRealtime.GetGlobalRecordAsync(
+                $"owners/{firebaseOwnerUid}/tracking_configuration",
+                CancellationToken.None);
+            trackingIntervalSeconds = ReadIntervalSeconds(data);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unable to load Firebase tracking interval; keeping {Interval}s", trackingIntervalSeconds);
+        }
+    }
+
+    private async Task SaveTrackingIntervalAsync()
+    {
+        if (string.IsNullOrWhiteSpace(firebaseOwnerUid)) return;
+        trackingIntervalSeconds = NormalizeTrackingInterval(trackingIntervalSeconds);
+        var existing = await FirebaseRealtime.GetGlobalRecordAsync(
+            $"owners/{firebaseOwnerUid}/tracking_configuration",
+            CancellationToken.None);
+        await FirebaseRealtime.SetGlobalRecordAsync(
+            $"owners/{firebaseOwnerUid}/tracking_configuration",
+            new Dictionary<string, object?>
+            {
+                ["mode"] = ReadString(existing, "mode") ?? "24/7",
+                ["customStart"] = ReadString(existing, "customStart") ?? string.Empty,
+                ["customEnd"] = ReadString(existing, "customEnd") ?? string.Empty,
+                ["intervalSeconds"] = trackingIntervalSeconds,
+                ["enabled"] = ReadBool(existing, "enabled") ?? true,
+                ["updatedAt"] = DateTime.UtcNow.ToString("O"),
+                ["updatedBy"] = firebaseOwnerUid
+            });
+    }
+
+    private async Task OnTrackingIntervalChanged(int seconds)
+    {
+        trackingIntervalSeconds = NormalizeTrackingInterval(seconds);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static int NormalizeTrackingInterval(int value) =>
+        value switch { 30 or 60 or 120 or 300 => value, _ => 30 };
+
+    private static int ReadIntervalSeconds(System.Text.Json.JsonElement? data)
+    {
+        if (!data.HasValue || data.Value.ValueKind != System.Text.Json.JsonValueKind.Object) return 30;
+        if (data.Value.TryGetProperty("intervalSeconds", out var p))
+        {
+            if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n)) return NormalizeTrackingInterval(n);
+            if (p.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(p.GetString(), out n)) return NormalizeTrackingInterval(n);
+        }
+        return 30;
+    }
+
+    private static string? ReadString(System.Text.Json.JsonElement? data, string name) =>
+        data.HasValue && data.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+        data.Value.TryGetProperty(name, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String
+            ? p.GetString() : null;
+
+    private static bool? ReadBool(System.Text.Json.JsonElement? data, string name) =>
+        data.HasValue && data.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+        data.Value.TryGetProperty(name, out var p)
+            ? p.ValueKind == System.Text.Json.JsonValueKind.True ? true : p.ValueKind == System.Text.Json.JsonValueKind.False ? false : null
+            : null;
+
     private async Task HandleRealtimeRefresh()
     {
         try

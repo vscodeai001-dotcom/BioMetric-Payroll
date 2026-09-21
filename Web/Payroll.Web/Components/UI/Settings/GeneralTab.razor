@@ -1,4 +1,4 @@
-﻿@using global::Payroll.Shared.Data
+@using global::Payroll.Shared.Data
 
 <div class="row">
     <div class="col-md-6 border-end">
@@ -31,6 +31,18 @@
             <div class="col-4">
                 <label class="small fw-bold">Early Grace</label>
                 <input type="number" class="form-control form-control-sm" @bind="Settings.EndTimeGraceMinutes" placeholder="Mins" />
+            </div>
+            <div class="col-12">
+                <div class="border rounded p-2 bg-body-tertiary">
+                    <label class="small fw-bold text-primary">GPS Playback Capture Interval</label>
+                    <select class="form-select form-select-sm" value="@TrackingIntervalSeconds" @onchange="OnTrackingIntervalChanged">
+                        <option value="30">30 seconds</option>
+                        <option value="60">1 minute</option>
+                        <option value="120">2 minutes</option>
+                        <option value="300">5 minutes</option>
+                    </select>
+                    <small class="text-muted">Controls recorded GPS history/playback sampling. Live map updates remain independent.</small>
+                </div>
             </div>
             <div class="row g-2 border-top pt-2 mt-2">
                 <div class="col-12 mb-1">
@@ -71,4 +83,12 @@
 
 @code {
     [Parameter] public CompanySetting Settings { get; set; } = new();
+    [Parameter] public int TrackingIntervalSeconds { get; set; } = 30;
+    [Parameter] public EventCallback<int> TrackingIntervalSecondsChanged { get; set; }
+
+    private async Task OnTrackingIntervalChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var seconds))
+            await TrackingIntervalSecondsChanged.InvokeAsync(seconds);
+    }
 }

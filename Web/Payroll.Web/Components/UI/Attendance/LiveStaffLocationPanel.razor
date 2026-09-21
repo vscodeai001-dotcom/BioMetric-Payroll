@@ -3947,6 +3947,23 @@
                     await FirebaseRealtime.GetOwnerTrackingLiveAsync(
                         FirebaseEmployees.OwnerUid);
 
+                // A null result from GetOwnerTrackingLiveAsync means the
+                // Firebase REST read was unavailable, unauthorized, timed out,
+                // or returned no JSON. It is NOT safe to interpret that as
+                // "no live staff" because the helper intentionally collapses
+                // transport failures and an empty Firebase node into null.
+                // Preserve the currently visible live employees and let the
+                // Firebase SSE child events/reconnect path converge the map.
+                // This prevents a transient 401/network read during a periodic
+                // reconciliation from wiping the live staff list until the user
+                // presses Refresh.
+                if (!liveSnapshot.HasValue)
+                {
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = false;
+                    return;
+                }
+
                 var snapshot = new List<LiveEmployeeLocation>();
 
                 // REQUIREMENT: Ensure new employees added on Android or through

@@ -1,5 +1,7 @@
 package com.biometric.app.util
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.view.animation.LinearInterpolator
 import org.osmdroid.util.GeoPoint
@@ -36,6 +38,19 @@ object MarkerAnimationHelper {
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 2000L // 2 second transition for extreme smoothness
             interpolator = LinearInterpolator()
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (activeAnimators[empId] === animation) {
+                        activeAnimators.remove(empId)
+                    }
+                }
+
+                override fun onAnimationCancel(animation: Animator) {
+                    if (activeAnimators[empId] === animation) {
+                        activeAnimators.remove(empId)
+                    }
+                }
+            })
             addUpdateListener { anim ->
                 val t = anim.animatedValue as Float
                 
@@ -57,7 +72,12 @@ object MarkerAnimationHelper {
     }
 
     fun cancel(empId: Int) {
-        activeAnimators[empId]?.cancel()
-        activeAnimators.remove(empId)
+        activeAnimators.remove(empId)?.cancel()
+    }
+
+    fun cancelAll() {
+        val snapshot = activeAnimators.values.toList()
+        activeAnimators.clear()
+        snapshot.forEach { animator -> runCatching { animator.cancel() } }
     }
 }

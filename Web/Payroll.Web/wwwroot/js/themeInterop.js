@@ -2221,10 +2221,10 @@ window.updateGeoMap = async function (
             // ROUTE LINE (Hidden by default)
             // ------------------------------------------------
 
-            const routeLine = L.polyline([office, user], { color: "#0d6efd", weight: 3, opacity: 0, dashArray: "7,7" }).addTo(map);
+            const routeLine = L.polyline([], { color: "#0d6efd", weight: 3, opacity: 0, dashArray: "7,7" }).addTo(map);
 
-            const roadRouteCasing = L.polyline([office, user], { color: '#ffffff', weight: 8, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-            const roadRouteLine = L.polyline([office, user], { color: '#1688ff', weight: 5, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+            const roadRouteCasing = L.polyline([], { color: '#ffffff', weight: 8, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+            const roadRouteLine = L.polyline([], { color: '#1688ff', weight: 5, opacity: 0, lineCap: 'round', lineJoin: 'round' }).addTo(map);
             const journeyOverlay = window.payrollCreateJourneyOverlay(mapElement, 'payroll-employee-journey-overlay');
 
             // ------------------------------------------------
@@ -2360,7 +2360,7 @@ window.updateGeoMap = async function (
                 }
             } else {
                 if (mapData.showRouteToOffice) {
-                    mapData.routeLine.setStyle({ opacity: .9 });
+                    mapData.routeLine.setLatLngs([]); mapData.routeLine.setStyle({ opacity: 0 });
                 } else {
                     mapData.routeLine.setStyle({ opacity: 0 });
                 }
@@ -2388,7 +2388,7 @@ window.updateGeoMap = async function (
 
         if (!mapData.hasInitialView) {
             mapData.userMarker.setLatLng(user);
-            mapData.routeLine.setLatLngs([office, user]);
+            mapData.routeLine.setLatLngs([]);
         }
         else {
             window.payrollSmoothMoveMarker(
@@ -2647,7 +2647,7 @@ window.updateEmployeeLiveGeoMap =
                     mapData.routeLine?.setStyle({ opacity: 0 });
                 }
             } else if (mapData.showRouteToOffice) {
-                mapData.routeLine?.setStyle({ opacity: .9 });
+                mapData.routeLine?.setLatLngs([]); mapData.routeLine?.setStyle({ opacity: 0 });
             } else {
                 mapData.routeLine?.setStyle({ opacity: 0 });
             }
@@ -2666,7 +2666,7 @@ window.updateEmployeeLiveGeoMap =
             duration,
             function (position) {
                 try {
-                    mapData.routeLine.setLatLngs([office, position]);
+                    mapData.routeLine.setLatLngs([]);
                     const route = mapData.routeState?.route;
                     const remaining = route?.distanceMeters || window.payrollHaversineMeters(position, office);
                     window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
@@ -2768,6 +2768,28 @@ window.ensurePayrollPremiumMapStyles = function () {
 
       .payroll-map-commandbar.expanded .payroll-map-tools-group {
         display:flex;
+      }
+
+      @media (hover:hover) and (pointer:fine) {
+        .payroll-map-commandbar .payroll-map-tool-toggle {
+          opacity:0;
+          pointer-events:none;
+          transform:translateY(-2px);
+        }
+        .payroll-map-commandbar:hover .payroll-map-tool-toggle,
+        .payroll-map-commandbar:focus-within .payroll-map-tool-toggle,
+        .payroll-map-commandbar.expanded .payroll-map-tool-toggle {
+          opacity:1;
+          pointer-events:auto;
+          transform:translateY(0);
+        }
+      }
+
+      @media (hover:none) {
+        .payroll-map-commandbar .payroll-map-tool-toggle {
+          opacity:1;
+          pointer-events:auto;
+        }
       }
 
       .payroll-map-search-wrap {
@@ -4742,7 +4764,7 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                         // Force immediate route visibility update
                         state.roadRouteCasing?.setStyle({ opacity: .78 });
                         state.roadRouteLine?.setStyle({ opacity: .98 });
-                        state.routeLine?.setStyle({ opacity: .9 });
+                        state.routeLine?.setLatLngs([]); state.routeLine?.setStyle({ opacity: 0 });
                     } else if (action === 'office') {
                         state.showRouteToOffice = true;
                         map.setView(state.office, Math.max(15, map.getZoom()), { animate: true });
@@ -4750,7 +4772,7 @@ window.enhanceEmployeeGeoMap = function (mapId) {
                         // Force immediate route visibility update
                         state.roadRouteCasing?.setStyle({ opacity: .78 });
                         state.roadRouteLine?.setStyle({ opacity: .98 });
-                        state.routeLine?.setStyle({ opacity: .9 });
+                        state.routeLine?.setLatLngs([]); state.routeLine?.setStyle({ opacity: 0 });
                     } else if (action === 'layer') {
                         state.baseLayer = state.baseLayer === 'standard' ? 'dark' : state.baseLayer === 'dark' ? 'satellite' : 'standard';
                         if (!state.baseLayers) state.baseLayers = {};

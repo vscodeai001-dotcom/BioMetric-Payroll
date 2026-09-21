@@ -55,11 +55,12 @@ public sealed class EmployeeLocationController : ControllerBase
     public async Task<IActionResult> UpdateLocation(
         [FromBody] LocationUpdateRequest request)
     {
-        _logger.LogDebug("Received GPS update: EmployeeId={EmployeeId}, SessionId={SessionId}", request.EmployeeId, request.SessionId);
         if (request == null)
         {
             return BadRequest("Location data is required.");
         }
+
+        _logger.LogDebug("Received GPS update: EmployeeId={EmployeeId}, SessionId={SessionId}", request.EmployeeId, request.SessionId);
 
         try
         {
@@ -119,6 +120,17 @@ public sealed class EmployeeLocationController : ControllerBase
                 ? DateTime.SpecifyKind(request.Timestamp, DateTimeKind.Utc)
                 : request.Timestamp.ToUniversalTime();
 
+            var serverNowUtc = DateTime.UtcNow;
+            var captureAge = serverNowUtc - capturedAtUtc;
+            if (captureAge < TimeSpan.Zero) captureAge = TimeSpan.Zero;
+
+            // A current GPS packet may establish/recover an ACTIVE session.
+            // Offline/historical evidence may be stored for audit/reconciliation
+            // but can never create or resurrect an ACTIVE session.
+            var historicalOrOffline = request.IsOfflineCapture ||
+                                      captureAge > TimeSpan.FromMinutes(2);
+            var allowSessionRecovery = !historicalOrOffline;
+
             // Log authenticated user information for diagnostics
             try
             {
@@ -154,13 +166,54 @@ public sealed class EmployeeLocationController : ControllerBase
             }
 
             // ============================================================
-            // AUTHORITATIVE GPS SESSION UPDATE
-            //
-            // GeoLocationService validates the active DB session before
-            // updating LiveLocationStore. This prevents an in-flight GPS
-            // request from resurrecting a logged-out employee.
+            // HISTORICAL/OFFLINE GPS NEVER MUTATES LIVE SESSION STATE
             // ============================================================
+            if (historicalOrOffline)
+            {
+                if (request.PersistHistory)
+                {
+                    await _geoLocationService.SaveLocationHistoryAsync(
+                        request.EmployeeId,
+                        sessionId,
+                        request.Latitude,
+                        request.Longitude,
+                        distanceResult.DistanceMeters,
+                        distanceResult.AllowedRadiusMeters,
+                        distanceResult.IsWithinAllowedRadius,
+                        accuracy,
+                        capturedAtUtc,
+                        "OfflineSync",
+                        Guid.NewGuid());
 
+                    // Use historical GPS evidence to repair missing geofence
+                    // attendance inside the original session window. This does
+                    // not reopen or create an ACTIVE GPS session.
+                    await _geoLocationService.ReconcileHistoricalGeofencePointAsync(
+                        request.EmployeeId,
+                        sessionId,
+                        request.Latitude,
+                        request.Longitude,
+                        accuracy,
+                        distanceResult.DistanceMeters,
+                        distanceResult.AllowedRadiusMeters,
+                        distanceResult.IsWithinAllowedRadius,
+                        capturedAtUtc);
+                }
+
+                return Ok(new LocationUpdateResponse
+                {
+                    Success = true,
+                    HistoricalOnly = true,
+                    Live = false,
+                    SessionId = sessionId.ToString("D"),
+                    Message = "Offline GPS evidence stored for reconciliation.",
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+
+            // ============================================================
+            // CURRENT GPS SESSION UPDATE
+            // ============================================================
             var sessionUpdated =
                 await _geoLocationService.UpdateGpsSessionAsync(
                     request.EmployeeId,
@@ -171,43 +224,55 @@ public sealed class EmployeeLocationController : ControllerBase
                     distanceResult.DistanceMeters,
                     distanceResult.AllowedRadiusMeters,
                     distanceResult.IsWithinAllowedRadius,
-                    capturedAtUtc);
+                    capturedAtUtc,
+                    allowSessionRecovery: true);
 
             if (!sessionUpdated)
             {
                 _logger.LogDebug(
-                    "GPS update ignored because the session is no longer active. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                    "Current GPS update rejected because the session is not active. EmployeeId={EmployeeId}, SessionId={SessionId}",
                     request.EmployeeId,
                     sessionId);
 
                 return Conflict("GPS session is no longer active.");
             }
 
+            var effectiveActiveSession =
+                await _geoLocationService.GetActiveGpsSessionAsync(request.EmployeeId);
+
+            var effectiveSessionId =
+                effectiveActiveSession?.SessionId ?? sessionId;
+
             // ============================================================
             // SAVE LOCATION HISTORY
             // ============================================================
 
-            try
+            if (request.PersistHistory)
             {
-                await _geoLocationService.SaveLocationHistoryAsync(
-                    request.EmployeeId,
-                    sessionId,
-                    request.Latitude,
-                    request.Longitude,
-                    distanceResult.DistanceMeters,
-                    distanceResult.AllowedRadiusMeters,
-                    distanceResult.IsWithinAllowedRadius,
-                    accuracy);
-            }
-            catch (Exception historyEx)
-            {
-                _logger.LogError(
-                    historyEx,
-                    "GPS history save failed. " +
-                    "EmployeeId={EmployeeId}",
-                    request.EmployeeId);
+                try
+                {
+                    await _geoLocationService.SaveLocationHistoryAsync(
+                        request.EmployeeId,
+                        effectiveSessionId,
+                        request.Latitude,
+                        request.Longitude,
+                        distanceResult.DistanceMeters,
+                        distanceResult.AllowedRadiusMeters,
+                        distanceResult.IsWithinAllowedRadius,
+                        accuracy,
+                        capturedAtUtc,
+                        "Online");
+                }
+                catch (Exception historyEx)
+                {
+                    _logger.LogError(
+                        historyEx,
+                        "GPS history save failed. " +
+                        "EmployeeId={EmployeeId}",
+                        request.EmployeeId);
 
-                // Continue anyway - session update succeeded
+                    // Continue anyway - session update succeeded
+                }
             }
 
             _logger.LogInformation(
@@ -224,6 +289,9 @@ public sealed class EmployeeLocationController : ControllerBase
             return Ok(new LocationUpdateResponse
             {
                 Success = true,
+                Live = true,
+                HistoricalOnly = false,
+                SessionId = effectiveSessionId.ToString("D"),
                 Message = "Location updated successfully.",
                 Timestamp = DateTime.UtcNow
             });
@@ -290,11 +358,23 @@ public sealed class EmployeeLocationController : ControllerBase
         /// Timestamp when location was captured
         /// </summary>
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+        /// <summary>True when the point was captured while offline or is a queued historical replay.</summary>
+        public bool IsOfflineCapture { get; set; }
+
+        /// <summary>True when this point should be persisted into GPS playback/history.</summary>
+        public bool PersistHistory { get; set; } = true;
     }
 
     public class LocationUpdateResponse
     {
         public bool Success { get; set; }
+
+        public bool Live { get; set; }
+
+        public bool HistoricalOnly { get; set; }
+
+        public string SessionId { get; set; } = string.Empty;
 
         public string Message { get; set; } = string.Empty;
 

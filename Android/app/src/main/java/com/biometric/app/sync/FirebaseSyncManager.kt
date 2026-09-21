@@ -769,13 +769,31 @@ class FirebaseSyncManager @Inject constructor(
         )
 
         return try {
+            // Offline/replayed GPS is immutable historical evidence. It must
+            // never advance the live marker, even when the previous session is
+            // still ACTIVE, because its capture time is in the past.
+            if (isOffline) {
+                val sessionState = getGlobalRef()
+                    .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+                    .get()
+                    .await()
+                    .child("State")
+                    .getValue(String::class.java)
+                    .orEmpty()
+                getGlobalRef()
+                    .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                    .setValue(payload + ("SessionState" to if (sessionState.isBlank()) "OFFLINE_UNBOUND" else sessionState))
+                    .await()
+                return true
+            }
+
             val sessionRef = getGlobalRef()
                 .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
             val sessionSnapshot = sessionRef.get().await()
 
             if (!sessionSnapshot.exists()) {
-                // A GPS point without a durable session boundary is never
-                // accepted. The caller will retry the session-start lifecycle.
+                // Offline/historical evidence must never create an ACTIVE session.
+                // Keep it as immutable history and wait for a fresh current GPS fix.
                 Log.w(
                     "FirebaseSyncManager",
                     "GPS point rejected because Firebase session does not exist. employee=$employeeId session=$sessionId"
@@ -790,14 +808,6 @@ class FirebaseSyncManager @Inject constructor(
             if (sessionState.equals("ENDED", ignoreCase = true)) {
                 // Offline replay remains historical evidence. A current online
                 // GPS fix must instead force the caller to create a NEW session.
-                if (isOffline) {
-                    getGlobalRef()
-                        .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
-                        .setValue(payload + ("SessionState" to "ENDED"))
-                        .await()
-                    return true
-                }
-
                 Log.w(
                     "FirebaseSyncManager",
                     "Current GPS fix rejected because its session is ENDED; caller must rotate the session. employee=$employeeId session=$sessionId"

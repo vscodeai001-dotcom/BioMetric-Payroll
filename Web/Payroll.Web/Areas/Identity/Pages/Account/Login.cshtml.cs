@@ -67,6 +67,9 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
         private readonly FirebaseEmployeePresenceService
             _firebasePresence;
 
+        private readonly FirebaseRealtimeService
+            _firebaseRealtime;
+
 
         // ============================================================
         // CONSTRUCTOR
@@ -81,7 +84,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             GeoLocationService geoLocationService,
             AttendanceEventMonitorService attendanceMonitor,
             FirebaseEmployeeManagementService firebaseEmployees,
-            FirebaseEmployeePresenceService firebasePresence)
+            FirebaseEmployeePresenceService firebasePresence,
+            FirebaseRealtimeService firebaseRealtime)
         {
             _signInManager = signInManager;
             _userManager = userManager;
@@ -92,6 +96,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             _attendanceMonitor = attendanceMonitor;
             _firebaseEmployees = firebaseEmployees;
             _firebasePresence = firebasePresence;
+            _firebaseRealtime = firebaseRealtime;
         }
 
 
@@ -378,23 +383,85 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
 
             // ========================================================
-            // AUTOMATIC SINGLE-DEVICE SESSION ENFORCEMENT
+            // EXPLICIT CROSS-DEVICE SESSION ENFORCEMENT
             // ========================================================
-            //
-            // REQUIREMENT: "no need to restrict login just logout existing login".
-            // If the password is correct, we establish the new session and
-            // invalidate any previous device cookies (via security stamp)
-            // and database locks immediately.
+            // Only an explicit user confirmation may replace an existing
+            // employee login on another device/platform. Network loss, GPS
+            // loss and airplane mode never end a login session.
             // ========================================================
+
+            var firebaseActiveDevice = string.Empty;
+            if (isEmployee && !string.IsNullOrWhiteSpace(firebaseUid))
+            {
+                try
+                {
+                    var firebaseSession = await _firebaseRealtime.GetGlobalRecordAsync(
+                        $"employee_sessions/{firebaseUid}",
+                        HttpContext.RequestAborted);
+
+                    if (firebaseSession.HasValue &&
+                        firebaseSession.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        firebaseSession.Value.TryGetProperty("deviceId", out var deviceProp) &&
+                        deviceProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        firebaseActiveDevice = deviceProp.GetString() ?? string.Empty;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not inspect Firebase employee session for {EmployeeId}", firebaseEmployee?.EmployeeID);
+                }
+            }
+
+            var firebaseOtherDeviceActive =
+                !string.IsNullOrWhiteSpace(firebaseActiveDevice) &&
+                !(firebaseActiveDevice.StartsWith("WEB_BROWSER_", StringComparison.OrdinalIgnoreCase) &&
+                  firebaseActiveDevice.EndsWith(deviceId[..Math.Min(8, deviceId.Length)], StringComparison.OrdinalIgnoreCase));
+
+            if (isEmployee &&
+                (activeDeviceBeforeLogin != null || firebaseOtherDeviceActive) &&
+                !currentDeviceOwnsSession &&
+                !ForceLogoutExisting)
+            {
+                ShowForceLogout = true;
+                ModelState.AddModelError(string.Empty, AlreadyLoggedInMessage + " " + ForceLogoutInstruction);
+
+                await _attendanceMonitor.RecordAsync(
+                    "LOGIN_BLOCKED_EXISTING_SESSION",
+                    user.Id,
+                    user.Email ?? email,
+                    deviceId,
+                    "Web",
+                    "BLOCKED",
+                    "EXPLICIT_FORCE_LOGOUT_REQUIRED",
+                    new { FirebaseActiveDevice = firebaseActiveDevice, ActiveDevice = activeDeviceBeforeLogin },
+                    activeDeviceBeforeLogin ?? firebaseActiveDevice);
+
+                return Page();
+            }
 
             if (!currentDeviceOwnsSession)
             {
-                _logger.LogWarning("AUTOMATIC SESSION REPLACEMENT. UserId={UserId}, NewDevice={DeviceId}", user.Id, deviceId);
+                _logger.LogWarning("FORCED SESSION REPLACEMENT. UserId={UserId}, NewDevice={DeviceId}", user.Id, deviceId);
 
                 if (!await ReplaceAndInvalidateEmployeeSessionAsync(user, deviceId))
                 {
                     ModelState.AddModelError(string.Empty, "Unable to establish employee session.");
                     return Page();
+                }
+
+                if (isEmployee && firebaseOtherDeviceActive && !string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    try
+                    {
+                        await _firebaseRealtime.DeleteGlobalRecordAsync(
+                            $"employee_sessions/{firebaseUid}",
+                            HttpContext.RequestAborted);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to clear prior Firebase employee session for forced replacement. EmployeeId={EmployeeId}", firebaseEmployee?.EmployeeID);
+                    }
                 }
 
                 if (activeDeviceBeforeLogin != null)

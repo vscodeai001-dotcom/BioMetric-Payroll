@@ -345,7 +345,8 @@ public class GeoLocationService
         double distanceMeters,
         int allowedRadiusMeters,
         bool isWithinAllowedRadius,
-        DateTime? capturedAtUtc = null)
+        DateTime? capturedAtUtc = null,
+        bool allowSessionRecovery = true)
     {
         if (employeeId <= 0 ||
             sessionId == Guid.Empty ||
@@ -356,34 +357,13 @@ public class GeoLocationService
 
         try
         {
-            // The first update after login can race the session-start call.
-            // Recover the session before taking the lifecycle lock, then
-            // re-read it under the lock before touching LiveLocationStore.
+            // Session lookup is repeated under the advisory lock below. Do
+            // not create a session before the lock is held: a concurrent newer
+            // session could otherwise be ended by a stale GPS request.
             await using var db =
                 await _dbFactory.CreateDbContextAsync();
 
-            var session = await db.EmployeeGpsSessions
-                .FirstOrDefaultAsync(x =>
-                    x.EmployeeId == employeeId &&
-                    x.SessionId == sessionId);
-
-            if (session == null)
-            {
-                var created = await StartGpsSessionAsync(
-                    employeeId,
-                    sessionId);
-
-                if (!created)
-                    return false;
-
-                session = await db.EmployeeGpsSessions
-                    .FirstOrDefaultAsync(x =>
-                        x.EmployeeId == employeeId &&
-                        x.SessionId == sessionId);
-
-                if (session == null)
-                    return false;
-            }
+            EmployeeGpsSession? session = null;
 
             // legacy database advisory lock coordinates GPS updates
             // and logout/session-end operations across Web/Worker instances.
@@ -402,16 +382,18 @@ public class GeoLocationService
                         x.EmployeeId == employeeId &&
                         x.SessionId == sessionId);
 
-                // A Firebase GPS fix can arrive after another platform has
-                // already ended the incoming session. Never continue writing
-                // to that ended session. Rebind the current fix to an existing
-                // active session, or create a brand-new session when none exists.
-                // The old session remains immutable/ENDED for audit history.
+                // A GPS fix can arrive after another platform has ended the
+                // incoming session. Never resurrect that session. For a current
+                // event, first attach to the newest already-active session. Only
+                // when there is no active session may we create a new one.
                 var effectiveSessionId = sessionId;
 
                 if (session == null || session.EndedAtUtc.HasValue)
                 {
                     LiveLocationStore.Remove(employeeId, sessionId);
+
+                    if (!allowSessionRecovery)
+                        return false;
 
                     var activeSession = await db.EmployeeGpsSessions
                         .Where(x =>
@@ -1523,76 +1505,12 @@ public class GeoLocationService
 
     public async Task MarkTimedOutSessionsAsync()
     {
-        try
-        {
-            await using var db =
-                await _dbFactory.CreateDbContextAsync();
-
-            // Only timeout sessions with NO updates for 30 minutes
-            var timeoutBefore =
-                DateTime.UtcNow.AddSeconds(-1800);
-
-            var sessions = await db.EmployeeGpsSessions
-                .Where(x =>
-                    x.EndedAtUtc == null &&
-                    x.LastUpdateAtUtc <= timeoutBefore)
-                .ToListAsync();
-
-            if (sessions.Count == 0)
-                return;
-
-            var now = DateTime.UtcNow;
-
-            foreach (var session in sessions)
-            {
-                session.EndedAtUtc = now;
-                session.EndReason = "TIMED_OUT";
-
-                // Remove only the timed-out session. A newer session for the
-                // same employee can never be removed by this cleanup pass.
-                LiveLocationStore.Remove(session.EmployeeId, session.SessionId);
-
-                try
-                {
-                    await _hubContext.Clients.All.SendAsync(
-                        "SessionEnded",
-                        new
-                        {
-                            EmployeeId = session.EmployeeId,
-                            SessionId = session.SessionId,
-                            EndedAtUtc = now,
-                            EndReason = session.EndReason
-                        });
-                }
-                catch (Exception signalREx)
-                {
-                    _logger.LogWarning(
-                        signalREx,
-                        "Failed to broadcast timed-out GPS session for employee {EmployeeId}",
-                        session.EmployeeId);
-                }
-
-                _logger.LogInformation(
-                    "GPS session timed out. EmployeeId={EmployeeId}, SessionId={SessionId}, " +
-                    "LastUpdate={LastUpdate}, Age={Age} minutes",
-                    session.EmployeeId,
-                    session.SessionId,
-                    session.LastUpdateAtUtc,
-                    (int)(now - session.LastUpdateAtUtc).TotalMinutes);
-            }
-
-            await db.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Marked {Count} GPS sessions as timed out.",
-                sessions.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Failed to mark timed-out GPS sessions.");
-        }
+        // Network loss, airplane mode, browser suspension and temporary GPS
+        // outages are NOT logout events. A GPS session may only end through
+        // explicit logout or an explicit force-login replacement. Keep this
+        // method for hosted-service compatibility, but never mutate session
+        // state merely because LastUpdateAtUtc is old.
+        await Task.CompletedTask;
     }
 
     // ================================================================

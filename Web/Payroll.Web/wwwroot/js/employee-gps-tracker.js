@@ -32,6 +32,8 @@ window.EmployeeGpsTracker = (function () {
     let isWatching = false;
     let lastBroadcastTime = 0;
     let lastLocationData = null;
+    let historyIntervalMs = 30000;
+    let lastHistoryPersistAt = 0;
     let visibilityCheckInterval = null;
     let keepaliveInterval = null;
     let beforeUnloadHandler = null;
@@ -512,13 +514,23 @@ window.EmployeeGpsTracker = (function () {
                 'Accuracy=' + Math.round(coords.accuracy) + 'm'
             );
 
+            const shouldPersistHistory =
+                lastHistoryPersistAt === 0 ||
+                (now - lastHistoryPersistAt) >= historyIntervalMs;
+
+            if (shouldPersistHistory) {
+                lastHistoryPersistAt = now;
+            }
+
             const locationData = {
                 latitude: coords.latitude,
                 longitude: coords.longitude,
                 accuracy: coords.accuracy,
                 timestamp: Number.isFinite(Number(position.timestamp))
                     ? Number(position.timestamp)
-                    : (lastLocationData?.timestamp || now)
+                    : (lastLocationData?.timestamp || now),
+                isOfflineCapture: navigator.onLine === false,
+                persistHistory: shouldPersistHistory
             };
 
             // IMPORTANT:
@@ -554,7 +566,9 @@ window.EmployeeGpsTracker = (function () {
             latitude: locationData.latitude,
             longitude: locationData.longitude,
             accuracy: locationData.accuracy,
-            timestamp: new Date(Number(locationData.timestamp) || Date.now()).toISOString()
+            timestamp: new Date(Number(locationData.timestamp) || Date.now()).toISOString(),
+            isOfflineCapture: locationData.isOfflineCapture === true,
+            persistHistory: locationData.persistHistory !== false
         };
 
         const attemptSend = function (attempt) {
@@ -568,6 +582,17 @@ window.EmployeeGpsTracker = (function () {
             })
             .then(response => {
                 if (response.ok) {
+                    response.clone().json().then(function (result) {
+                        if (result && result.sessionId) {
+                            gpsSessionId = result.sessionId;
+                            try { localStorage.setItem(GPS_SESSION_STORAGE_KEY, gpsSessionId); } catch (e) { }
+                            try {
+                                if (dotNetReference && dotNetReference.invokeMethodAsync) {
+                                    dotNetReference.invokeMethodAsync('UpdateEmployeeGpsSessionId', gpsSessionId).catch(function () { });
+                                }
+                            } catch (e) { }
+                        }
+                    }).catch(function () { });
                     console.log('GPS location sent via HTTP API');
                     // reset attempts
                     if (retryAttemptsMap && retryAttemptsMap[payload.timestamp]) {
@@ -649,7 +674,11 @@ window.EmployeeGpsTracker = (function () {
                 latitude: locationData.latitude,
                 longitude: locationData.longitude,
                 accuracy: locationData.accuracy,
-                timestamp: new Date().toISOString()
+                timestamp: Number.isFinite(Number(locationData.timestamp))
+                    ? Number(locationData.timestamp)
+                    : Date.now(),
+                isOfflineCapture: true,
+                persistHistory: locationData.persistHistory !== false
             };
 
             idbAddLocation(record).then(function () {
@@ -816,6 +845,17 @@ window.EmployeeGpsTracker = (function () {
     }
 
     // ============================================================
+    // CONFIGURE PLAYBACK/HISTORY CAPTURE INTERVAL
+    // ============================================================
+
+    function setEmployeeGpsHistoryInterval(seconds) {
+        const allowed = [30, 60, 120, 300];
+        const value = Number(seconds);
+        historyIntervalMs = (allowed.indexOf(value) >= 0 ? value : 30) * 1000;
+        lastHistoryPersistAt = 0;
+    }
+
+    // ============================================================
     // CLEAR SESSION ID (on logout)
     // ============================================================
 
@@ -892,6 +932,7 @@ window.EmployeeGpsTracker = (function () {
         getOrCreateEmployeeGpsSessionId: getOrCreateEmployeeGpsSessionId,
         createNewEmployeeGpsSessionId: createNewEmployeeGpsSessionId,
         clearEmployeeGpsSessionId: clearEmployeeGpsSessionId,
+        setEmployeeGpsHistoryInterval: setEmployeeGpsHistoryInterval,
         sendLocationViaHttpApi: sendLocationViaHttpApi,
         processQueuedLocations: processQueuedLocations,
         forceLocationUpdate: forceLocationUpdate,
@@ -1008,3 +1049,7 @@ window.getPersistentEmployeeGpsLocation =
     };
 
 console.log('Employee GPS Tracker module loaded');
+
+
+window.setEmployeeGpsHistoryInterval =
+    window.EmployeeGpsTracker.setEmployeeGpsHistoryInterval;

@@ -1,3 +1,4 @@
+```
 
 package com.biometric.app.ui
 
@@ -89,7 +90,18 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class EmployeeHomeActivity : MotionBaseActivity() {
     private var _binding: ActivityEmployeeHomeBinding? = null
-    private val binding get() = _binding!!
+    /**
+     * Binding is accessed directly only from lifecycle-safe UI methods.
+     * Asynchronous callbacks use _binding?. / lifecycle guards.
+     *
+     * Keeping this getter non-null preserves all existing direct binding calls
+     * and prevents the Kotlin nullable-receiver compiler cascade introduced
+     * by a nullable binding property.
+     */
+    private val binding: ActivityEmployeeHomeBinding
+        get() = checkNotNull(_binding) {
+            "EmployeeHomeActivity binding is not available"
+        }
 
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
     @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
@@ -128,6 +140,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var dashboardAuthRecoveryInProgress = false
     private var sessionStartTime: Long = 0L
     private var isPermissionDialogShowing = false
+    private var isActivityUiActive = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -656,10 +669,16 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 val etaSec = (distance / 1.4).toInt()
                 b.tvEta.text = if (etaSec < 60) "Soon" else "${etaSec / 60} min"
 
-                try {
-                    val list = listOf(officePoint, userPoint)
-                    createBoundingBox(list)?.let { mapView.zoomToBoundingBox(it, true, 180) }
-                } catch (_: Exception) {}
+                // Do not refit the map on every GPS sample. Auto-follow already
+                // moves the camera smoothly when enabled; repeated fitBounds-style
+                // zooming causes visual jumping/flicker.
+                if (isAutoFocusEnabled && isActivityUiActive) {
+                    try {
+                        mapView.controller.animateTo(userPoint)
+                    } catch (_: Exception) {
+                        // Ignore a lifecycle/map transition race.
+                    }
+                }
             }
 
             mapView.invalidate()
@@ -746,17 +765,25 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun animateMarkerMovement(marker: Marker, toPosition: GeoPoint) {
-        val bearing = getSharedPreferences("tracking_prefs", MODE_PRIVATE).getFloat("last_bearing", 0f)
+        if (!isActivityUiActive || isFinishing || isDestroyed || _binding == null) return
+
+        val bearing = getSharedPreferences(
+            "tracking_prefs",
+            MODE_PRIVATE
+        ).getFloat("last_bearing", 0f)
+
         MarkerAnimationHelper.animateMarker(
-            marker, 
-            toPosition, 
-            bearing, 
+            marker,
+            toPosition,
+            bearing,
             sessionStore.employeeId()
         ) { animatedPoint ->
-            // Update UI on every frame for extreme smoothness
-            binding.mapview.invalidate()
+            // Animation frames can race Activity teardown. Never dereference
+            // the ViewBinding unless the Activity is still active and attached.
+            if (!isActivityUiActive || isFinishing || isDestroyed) return@animateMarker
 
-            // Sync polyline starting point with animated marker
+            val b = _binding ?: return@animateMarker
+
             runCatching {
                 routePolyline?.let { line ->
                     val pts = line.actualPoints.toMutableList()
@@ -765,6 +792,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                         line.setPoints(pts)
                     }
                 }
+
                 routeCasing?.let { line ->
                     val pts = line.actualPoints.toMutableList()
                     if (pts.size >= 2) {
@@ -772,15 +800,16 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                         line.setPoints(pts)
                     }
                 }
+
+                b.mapview.invalidate()
+            }.onFailure {
+                // A lifecycle transition can still race the animation frame.
+                Log.d("EmployeeHome", "Marker animation frame ignored: ${it.message}")
             }
-            binding.mapview.invalidate()
         }
 
-        // Smooth camera follow. Using animateTo() only on actual GPS updates
-        // from the provider (not every animation frame) creates the premium
-        // "gliding" effect seen in Swiggy/Uber.
-        if (isAutoFocusEnabled) {
-            binding.mapview.controller.animateTo(toPosition)
+        if (isActivityUiActive && isAutoFocusEnabled && !isFinishing && !isDestroyed) {
+            _binding?.mapview?.controller?.animateTo(toPosition)
         }
     }
 
@@ -829,6 +858,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     if (encoded != null) {
                         val decoded = PolylineDecoder.decode(encoded)
                         withContext(Dispatchers.Main) {
+                            if (!isActivityUiActive || isFinishing || isDestroyed) return@withContext
                             _binding?.let { b ->
                                 routeCasing?.setPoints(decoded)
                                 routePolyline?.setPoints(decoded)
@@ -846,12 +876,12 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 }
             } catch (e: Exception) {
                 Log.e("EmployeeHome", "Road routing failed: ${e.message}")
-                // Fallback to straight line if API fails
+                // Never render an office-to-employee straight-line fallback.
+                // Hide the route until authentic road geometry is available.
                 withContext(Dispatchers.Main) {
                     _binding?.let { b ->
-                        val pts = listOf(office, user)
-                        routeCasing?.setPoints(pts)
-                        routePolyline?.setPoints(pts)
+                        routeCasing?.setPoints(emptyList())
+                        routePolyline?.setPoints(emptyList())
                         b.mapview.invalidate()
                     }
                 }
@@ -938,45 +968,65 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     private fun updateRangeStatus() {
+        val b = _binding ?: return
+
         if (currentLat == 0.0 || currentLon == 0.0) {
-            binding.tvRangeStatus.text = "Locating device... 🛰️"
-            binding.btnPunch.isEnabled = false
+            b.tvRangeStatus.text = "Locating device... 🛰️"
+            b.btnPunch.isEnabled = false
             return
         }
 
         if (officeLat == 0.0 || officeLon == 0.0 || geoRadius <= 0) {
-            binding.tvRangeStatus.text = "Configuring office... 🏢"
-            binding.btnPunch.isEnabled = false
+            b.tvRangeStatus.text = "Configuring office... 🏢"
+            b.btnPunch.isEnabled = false
             return
         }
 
         val distanceResults = FloatArray(1)
-        Location.distanceBetween(officeLat, officeLon, currentLat, currentLon, distanceResults)
+        Location.distanceBetween(
+            officeLat,
+            officeLon,
+            currentLat,
+            currentLon,
+            distanceResults
+        )
         val distance = distanceResults[0]
 
+        val prefs = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
         val featureState = EmployeeAttendanceStateMachine.FeatureState(
-            geoFencingEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
-                .getBoolean("enable_geo_fencing", true),
-            dualAttendanceEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
-                .getBoolean("enable_dual_attendance", false),
-            automaticGeofencePunchingEnabled = getSharedPreferences("tracking_prefs", MODE_PRIVATE)
-                .getBoolean("enable_auto_punch", false)
+            geoFencingEnabled = prefs.getBoolean("enable_geo_fencing", true),
+            dualAttendanceEnabled = prefs.getBoolean("enable_dual_attendance", false),
+            automaticGeofencePunchingEnabled = prefs.getBoolean("enable_auto_punch", false)
         )
+
         val locationState = EmployeeAttendanceStateMachine.LocationState(
             hasLocation = currentLat != 0.0 && currentLon != 0.0,
             distanceMeters = distance.toDouble(),
             allowedRadiusMeters = geoRadius
         )
+
         val withinRange = locationState.withinRadius
 
-        binding.tvRangeStatus.text = if (withinRange) "Within allowed range ✅ 💎" else "Outside allowed range ⚠️ ❌"
-        binding.tvRangeStatus.setBackgroundColor(if (withinRange) "#2010B981".toColorInt() else "#20EF4444".toColorInt())
-        binding.tvRangeStatus.setTextColor(if (withinRange) "#10B981".toColorInt() else "#EF4444".toColorInt())
-        binding.tvRangeStatus.setCompoundDrawablesWithIntrinsicBounds(
-            if (withinRange) R.drawable.ic_check_circle else R.drawable.ic_cancel, 0, 0, 0
+        b.tvRangeStatus.text =
+            if (withinRange) "Within allowed range ✅ 💎"
+            else "Outside allowed range ⚠️ ❌"
+
+        b.tvRangeStatus.setBackgroundColor(
+            if (withinRange) "#2010B981".toColorInt()
+            else "#20EF4444".toColorInt()
+        )
+        b.tvRangeStatus.setTextColor(
+            if (withinRange) "#10B981".toColorInt()
+            else "#EF4444".toColorInt()
+        )
+        b.tvRangeStatus.setCompoundDrawablesWithIntrinsicBounds(
+            if (withinRange) R.drawable.ic_check_circle else R.drawable.ic_cancel,
+            0,
+            0,
+            0
         )
 
-        binding.btnPunch.isEnabled = EmployeeAttendanceStateMachine.ManualPunchState(
+        b.btnPunch.isEnabled = EmployeeAttendanceStateMachine.ManualPunchState(
             feature = featureState,
             location = locationState
         ).canPunch
@@ -1245,6 +1295,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     override fun onResume() {
         super.onResume()
+        isActivityUiActive = true
         _binding?.mapview?.onResume()
         startUIUpdateLoop()
         applyCurrentThemeToMap()
@@ -1265,12 +1316,16 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     }
 
     override fun onPause() {
-        super.onPause()
+        isActivityUiActive = false
+        MarkerAnimationHelper.cancelAll()
         _binding?.mapview?.onPause()
         uiUpdateJob?.cancel()
+        super.onPause()
     }
 
     override fun onDestroy() {
+        isActivityUiActive = false
+        MarkerAnimationHelper.cancelAll()
         initJob?.cancel()
         roadRouteJob?.cancel()
         dashboardJob?.cancel()
@@ -1479,3 +1534,5 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
     }
 }
+
+```

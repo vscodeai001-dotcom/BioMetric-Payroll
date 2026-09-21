@@ -468,10 +468,25 @@ class LoginActivity : MotionBaseActivity() {
                     }
 
                     if (sessionResult.conflict) {
-                        // REQUIREMENT: "no need to restrict login just logout existing login".
-                        // Automate the session replacement for a seamless login flow.
-                        firebaseSync.pushMobileAuthEvent("FORCED_SESSION_LOGOUT", firebaseUser.email ?: email, getAndroidDeviceId())
-                        handleEmployeeLogin(email, pass, forceReplace = true)
+                        setLoading(false)
+                        MaterialAlertDialogBuilder(this@LoginActivity)
+                            .setTitle("Employee already logged in")
+                            .setMessage(
+                                "This employee account is already active on another device or platform. " +
+                                    "Continuing will log out the existing device and create a new login here."
+                            )
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Log out & Continue") { _, _ ->
+                                lifecycleScope.launch {
+                                    firebaseSync.pushMobileAuthEvent(
+                                        "FORCED_SESSION_LOGOUT",
+                                        firebaseUser.email ?: email,
+                                        getAndroidDeviceId()
+                                    )
+                                    handleEmployeeLogin(email, pass, forceReplace = true)
+                                }
+                            }
+                            .show()
                         return@launch
                     }
 
