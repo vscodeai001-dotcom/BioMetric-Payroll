@@ -4665,7 +4665,8 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
                     Object.values(window.adminLiveMaps || {}).forEach(function (state) {
                         if (!state?.map) return;
                         const rail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(state.mapId || '')) + '"]');
-                        if (document.fullscreenElement !== state.map.getContainer()) {
+                        const fullscreenHost = state.map.getContainer().closest('.admin-map-wrapper') || state.map.getContainer();
+                        if (document.fullscreenElement !== fullscreenHost) {
                             if (state.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
                             state.fullscreenSelectedRail = null;
                         } else if (rail) {
@@ -4709,7 +4710,8 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
                 '<span class="payroll-map-status-out"><i></i><strong data-map-out>0</strong> outside</span>' +
                 '<span class="payroll-map-status-updated">● realtime</span>' +
                 '</div>';
-            container.appendChild(panel);
+            const panelHost = container.closest('.admin-map-wrapper') || container.parentElement || container;
+            panelHost.appendChild(panel);
 
             const search = panel.querySelector('.payroll-map-search');
             const filter = panel.querySelector('.payroll-map-filter');
@@ -4732,6 +4734,23 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
             });
 
             state.premiumControls = panel;
+
+            // Move Leaflet's native +/- controls into the same horizontal
+            // toolbar that sits below the map. This keeps the map viewport
+            // clean and prevents a second grey control strip.
+            const zoomHost = document.getElementById(mapId + '-zoom-controls');
+            const zoomContainer = map.zoomControl?.getContainer?.();
+            const commandbar = panel.querySelector('.payroll-map-commandbar');
+            const statusbar = panel.querySelector('.payroll-map-statusbar');
+            if (statusbar && commandbar) {
+                commandbar.appendChild(statusbar);
+            }
+            if (zoomContainer && commandbar) {
+                zoomContainer.classList.add('payroll-bottom-zoom-control');
+                commandbar.appendChild(zoomContainer);
+            } else if (zoomHost && commandbar) {
+                commandbar.appendChild(zoomHost);
+            }
         }
 
         // Base layers are created once and selected without replacing the map.
@@ -4870,7 +4889,8 @@ window.applyPremiumAdminMapFilter = function (mapId) {
 window.syncAdminSelectedRailFullscreen = function (state, rail, selectedId) {
     try {
         const mapContainer = state?.map?.getContainer?.();
-        if (!mapContainer || !rail || Number(selectedId || 0) <= 0 || document.fullscreenElement !== mapContainer) {
+        const fullscreenHost = mapContainer?.closest('.admin-map-wrapper') || mapContainer;
+        if (!mapContainer || !rail || Number(selectedId || 0) <= 0 || document.fullscreenElement !== fullscreenHost) {
             if (state?.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
             if (state) state.fullscreenSelectedRail = null;
             return;
@@ -4882,7 +4902,7 @@ window.syncAdminSelectedRailFullscreen = function (state, rail, selectedId) {
             clone.classList.add('admin-selected-employee-rail-fullscreen');
             clone.removeAttribute('data-admin-selected-rail');
             clone.setAttribute('aria-label', 'Selected employee location details fullscreen');
-            mapContainer.appendChild(clone);
+            fullscreenHost.appendChild(clone);
             state.fullscreenSelectedRail = clone;
 
             const pause = () => { state.fullscreenSelectedRailPaused = true; };
@@ -5078,9 +5098,10 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         window.setPremiumAdminMapLayer(mapId, next);
     } else if (action === 'fullscreen') {
         const el = state.map.getContainer();
+        const fullscreenHost = el.closest('.admin-map-wrapper') || el;
         const bar = state.premiumControls?.querySelector('.payroll-map-commandbar');
         if (!document.fullscreenElement) {
-            if (el.requestFullscreen) el.requestFullscreen();
+            if (fullscreenHost.requestFullscreen) fullscreenHost.requestFullscreen();
             el.classList.add('payroll-map-fullscreen');
             if (bar) bar.classList.remove('is-fullscreen-hidden');
             const selectedRail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(mapId)) + '"]');

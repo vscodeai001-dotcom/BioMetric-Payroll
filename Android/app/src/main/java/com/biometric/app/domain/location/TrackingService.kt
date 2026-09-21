@@ -38,7 +38,6 @@ import java.util.UUID
 import com.biometric.app.ui.EmployeeHomeActivity
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.firstOrNull
 import javax.inject.Inject
@@ -69,10 +68,6 @@ class TrackingService : Service() {
     private var lastLocation: Location? = null
     private var currentInterval = 30_000L
     private var serverSessionStarted = false
-    // Keep only the newest GPS fix for server upload. This prevents callback bursts
-    // from building an unbounded queue of network coroutines and starving the app.
-    private val latestLocationChannel = Channel<LocalLocation>(Channel.CONFLATED)
-    private var gpsUploadJob: Job? = null
     private var heartbeatJob: Job? = null
     private var sessionJob: Job? = null
     private var policyJob: Job? = null
@@ -108,6 +103,10 @@ class TrackingService : Service() {
         private const val KEY_SEQUENCE_SESSION = "gps_sequence_session"
         const val ACTION_REFRESH_WINDOW = "ACTION_REFRESH_WINDOW"
         private const val SHIFT_BOUNDARY_REQUEST = 9913
+        // A live GPS fix gets a bounded chance to reach Firebase/SSOT directly.
+        // If Firebase does not acknowledge within this window, the same stable
+        // event is durably queued in Room for automatic retry.
+        private const val DIRECT_GPS_DELIVERY_TIMEOUT_MS = 15_000L
     }
 
     override fun onCreate() {
@@ -527,7 +526,7 @@ else if (locationUpdatesStarted) {
             putFloat("last_bearing", location.bearing)
         }
         
-        saveLocationToLocalQueue(location)
+        processLocationCapture(location)
     }
 
     private fun nextGpsSequence(sessionId: String): Long {
@@ -544,63 +543,148 @@ else if (locationUpdatesStarted) {
         }
     }
 
-    private fun saveLocationToLocalQueue(location: Location) {
+    private fun processLocationCapture(location: Location) {
         val battery = (getSystemService(BATTERY_SERVICE) as BatteryManager)
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val sessionId = sessionStore.gpsSessionId()
         val clientEventId = UUID.randomUUID().toString()
 
         serviceScope.launch {
-            runCatching {
-                val nextSequence = nextGpsSequence(sessionId)
-                val local = LocalLocation(
-                    clientEventId = clientEventId,
-                    sessionId = sessionId,
-                    sequence = nextSequence,
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    accuracy = location.accuracy,
-                    speed = location.speed,
-                    bearing = location.bearing,
-                    batteryLevel = battery,
-                    // Preserve the GPS event time, not the upload time.
-                    timestamp = location.time,
-                    capturedElapsedRealtime = android.os.SystemClock.elapsedRealtime(),
-                    isOfflineCapture = !offlineMonitor.isOnline()
+            val nextSequence = nextGpsSequence(sessionId)
+            val capture = LocalLocation(
+                clientEventId = clientEventId,
+                sessionId = sessionId,
+                sequence = nextSequence,
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracy = location.accuracy,
+                speed = location.speed,
+                bearing = location.bearing,
+                batteryLevel = battery,
+                // CRITICAL: preserve the original GPS event time.
+                timestamp = location.time,
+                capturedElapsedRealtime = android.os.SystemClock.elapsedRealtime(),
+                // A capture is only marked offline when it must enter the local
+                // retry queue. Room is a temporary delivery queue, never SSOT.
+                isOfflineCapture = false
+            )
+
+            val delivered = try {
+                withTimeoutOrNull(DIRECT_GPS_DELIVERY_TIMEOUT_MS) {
+                    deliverLocationDirectToSsot(capture)
+                } ?: false
+            } catch (e: Exception) {
+                Log.w(
+                    "TrackingService",
+                    "Direct Firebase GPS delivery failed; queueing for retry",
+                    e
                 )
-                val insertedId = locationDao.insert(local)
-                if (insertedId > 0L) {
-                    offlineMonitor.record(
-                        OfflineTrackingMonitor.QUEUE_ENQUEUED,
-                        if (local.isOfflineCapture) OfflineTrackingMonitor.WARNING else OfflineTrackingMonitor.INFO,
-                        if (local.isOfflineCapture) "GPS fix captured offline and durably queued" else "GPS fix durably queued for authoritative upload",
-                        sessionId = sessionId,
-                        latitude = location.latitude,
-                        longitude = location.longitude,
-                        accuracy = location.accuracy,
-                        correlationId = clientEventId
-                    )
-                    latestLocationChannel.trySend(local)
-                    startGpsUploadWorker()
-                    // The foreground uploader is fast, while this durable WorkManager
-                    // path guarantees that background/queued points are also routed
-                    // through Firebase and therefore the server attendance engine.
-                    syncManager.scheduleImmediateSync()
-                }
-            }.onFailure { ex ->
-                Log.d("TrackingService", "Local GPS save deferred: ${ex.message}")
-                offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.ERROR, "Unable to persist GPS fix locally: ${ex.message}")
+                false
             }
+
+            if (delivered) {
+                // Firebase/SSOT acknowledged the stable ClientEventId.
+                // Do not route successful online GPS records through Room.
+                return@launch
+            }
+
+            queueLocationForRetry(capture)
         }
     }
 
-    private fun startGpsUploadWorker() {
-        if (gpsUploadJob?.isActive == true) return
+    /**
+     * Primary GPS delivery path.
+     *
+     * Normal flow is always:
+     * GPS -> Firebase/SSOT -> dashboards.
+     * Room is entered only after this method fails to receive an acknowledgement.
+     */
+    private suspend fun deliverLocationDirectToSsot(location: LocalLocation): Boolean {
+        val effectiveSessionId = ensureFirebaseGpsSessionStarted(location.sessionId)
+            ?: return false
 
-        gpsUploadJob = serviceScope.launch {
-            for (location in latestLocationChannel) {
-                uploadLocationToServer(location)
+        val uploaded = firebaseSync.pushLiveLocation(
+            employeeId = sessionStore.employeeId(),
+            sessionId = effectiveSessionId,
+            clientEventId = location.clientEventId,
+            sequence = location.sequence,
+            latitude = location.latitude,
+            longitude = location.longitude,
+            accuracy = location.accuracy.toDouble(),
+            speed = location.speed.toDouble(),
+            bearing = location.bearing.toDouble(),
+            batteryLevel = location.batteryLevel,
+            timestamp = location.timestamp,
+            isOffline = false
+        )
+
+        if (uploaded) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit {
+                putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
+                putString(KEY_LAST_STATUS, "Active")
             }
+
+            offlineMonitor.record(
+                OfflineTrackingMonitor.UPLOAD_SUCCESS,
+                OfflineTrackingMonitor.INFO,
+                "GPS fix ${location.sequence} published directly to Firebase/SSOT",
+                sessionId = effectiveSessionId,
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracy = location.accuracy,
+                correlationId = location.clientEventId
+            )
+        }
+
+        return uploaded
+    }
+
+    /**
+     * Called only after Firebase/SSOT did not acknowledge the GPS record.
+     * The same ClientEventId is retained so retrying is idempotent.
+     */
+    private suspend fun queueLocationForRetry(capture: LocalLocation) {
+        val pending = capture.copy(
+            syncState = LocalLocation.SYNC_PENDING,
+            isOfflineCapture = true,
+            lastError = "SSOT_NOT_ACKNOWLEDGED",
+            createdAt = System.currentTimeMillis()
+        )
+
+        runCatching {
+            val insertedId = locationDao.insert(pending)
+            if (insertedId > 0L) {
+                offlineMonitor.record(
+                    OfflineTrackingMonitor.QUEUE_ENQUEUED,
+                    OfflineTrackingMonitor.WARNING,
+                    "Firebase/SSOT did not acknowledge GPS fix; temporarily queued in Room",
+                    sessionId = pending.sessionId,
+                    latitude = pending.latitude,
+                    longitude = pending.longitude,
+                    accuracy = pending.accuracy,
+                    correlationId = pending.clientEventId
+                )
+
+                // WorkManager has the network constraint and automatic retry.
+                // New GPS capture continues independently while this queue drains.
+                OfflineSyncWorker.schedule(this@TrackingService)
+            }
+        }.onFailure { ex ->
+            Log.e(
+                "TrackingService",
+                "CRITICAL: unable to persist undelivered GPS fix in temporary Room queue",
+                ex
+            )
+            offlineMonitor.record(
+                OfflineTrackingMonitor.DATA_INTEGRITY_WARNING,
+                OfflineTrackingMonitor.ERROR,
+                "Unable to persist undelivered GPS fix locally: ${ex.message}",
+                sessionId = capture.sessionId,
+                latitude = capture.latitude,
+                longitude = capture.longitude,
+                accuracy = capture.accuracy,
+                correlationId = capture.clientEventId
+            )
         }
     }
 
@@ -666,117 +750,6 @@ else if (locationUpdatesStarted) {
         )
 
         return if (started) effectiveSessionId else null
-    }
-
-    private suspend fun uploadLocationToServer(location: LocalLocation) {
-        try {
-            val uploadAgeMs = (android.os.SystemClock.elapsedRealtime() - location.capturedElapsedRealtime).coerceAtLeast(0L)
-            val currentEventWindowMs = maxOf(currentInterval * 2L, 90_000L)
-            val genuinelyCurrent = !location.isOfflineCapture && uploadAgeMs <= currentEventWindowMs
-
-            // Historical/offline evidence never starts or resurrects a session.
-            // Only a genuinely current online GPS fix can establish a new ACTIVE
-            // session when no active session exists.
-            val effectiveSessionId = if (genuinelyCurrent) {
-                ensureFirebaseGpsSessionStarted(location.sessionId)
-            } else {
-                location.sessionId.takeIf { it.isNotBlank() }
-            }
-
-            if (effectiveSessionId.isNullOrBlank()) {
-                locationDao.markAttempt(
-                    location.id,
-                    LocalLocation.SYNC_FAILED,
-                    location.attemptCount + 1,
-                    System.currentTimeMillis(),
-                    "GPS_SESSION_START_DEFERRED"
-                )
-                offlineMonitor.record(
-                    OfflineTrackingMonitor.UPLOAD_FAILED,
-                    OfflineTrackingMonitor.WARNING,
-                    "GPS session lifecycle is not confirmed; location retained for retry",
-                    sessionId = effectiveSessionId ?: location.sessionId,
-                    correlationId = location.clientEventId
-                )
-                return
-            }
-
-
-            locationDao.markAttempt(
-                location.id,
-                LocalLocation.SYNC_IN_FLIGHT,
-                location.attemptCount + 1,
-                System.currentTimeMillis(),
-                null
-            )
-
-            val uploaded = firebaseSync.pushLiveLocation(
-                employeeId = sessionStore.employeeId(),
-                sessionId = effectiveSessionId,
-                clientEventId = location.clientEventId,
-                sequence = location.sequence,
-                latitude = location.latitude,
-                longitude = location.longitude,
-                accuracy = location.accuracy.toDouble(),
-                speed = location.speed.toDouble(),
-                bearing = location.bearing.toDouble(),
-                batteryLevel = location.batteryLevel,
-                timestamp = location.timestamp,
-                isOffline = location.isOfflineCapture || !genuinelyCurrent
-            )
-
-            if (uploaded) {
-                locationDao.markSynced(location.id, System.currentTimeMillis())
-
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit {
-                    putLong(KEY_LAST_SERVER_AT, System.currentTimeMillis())
-                    putString(KEY_LAST_STATUS, "Active")
-                }
-
-                offlineMonitor.record(
-                    OfflineTrackingMonitor.UPLOAD_SUCCESS,
-                    OfflineTrackingMonitor.INFO,
-                    "GPS fix ${location.sequence} published to Firebase",
-                    sessionId = effectiveSessionId,
-                    latitude = location.latitude,
-                    longitude = location.longitude,
-                    accuracy = location.accuracy,
-                    correlationId = location.clientEventId
-                )
-            } else {
-                locationDao.markAttempt(
-                    location.id,
-                    LocalLocation.SYNC_FAILED,
-                    location.attemptCount + 1,
-                    System.currentTimeMillis(),
-                    "FIREBASE_UNAVAILABLE"
-                )
-
-                offlineMonitor.record(
-                    OfflineTrackingMonitor.UPLOAD_FAILED,
-                    OfflineTrackingMonitor.WARNING,
-                    "Firebase unavailable; GPS evidence retained locally",
-                    sessionId = effectiveSessionId,
-                    correlationId = location.clientEventId
-                )
-            }
-        } catch (e: Exception) {
-            locationDao.markAttempt(
-                location.id,
-                LocalLocation.SYNC_FAILED,
-                location.attemptCount + 1,
-                System.currentTimeMillis(),
-                e.message?.take(500)
-            )
-
-            offlineMonitor.record(
-                OfflineTrackingMonitor.UPLOAD_FAILED,
-                OfflineTrackingMonitor.WARNING,
-                "Firebase GPS upload deferred: ${e.message ?: "network unavailable"}",
-                sessionId = location.sessionId,
-                correlationId = location.clientEventId
-            )
-        }
     }
 
     private fun queueTrackingLifecycleEvent(
@@ -898,7 +871,6 @@ else if (locationUpdatesStarted) {
         locationUpdatesStarted = false
         locationHandlerThread?.quitSafely()
         locationHandlerThread = null
-        latestLocationChannel.close()
         offlineMonitor.record(OfflineTrackingMonitor.TRACKING_STOPPED, OfflineTrackingMonitor.INFO, "Tracking service destroyed")
         offlineMonitor.stop()
         serviceScope.cancel()

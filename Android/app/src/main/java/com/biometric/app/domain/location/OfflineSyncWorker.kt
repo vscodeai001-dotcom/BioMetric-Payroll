@@ -14,6 +14,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.TimeUnit
 
 /**
@@ -81,20 +82,28 @@ class OfflineSyncWorker @AssistedInject constructor(
             )
 
             try {
-                val uploaded = firebaseSync.pushLiveLocation(
-                    employeeId = sessionStore.employeeId(),
-                    sessionId = loc.sessionId,
-                    clientEventId = loc.clientEventId,
-                    sequence = loc.sequence,
-                    latitude = loc.latitude,
-                    longitude = loc.longitude,
-                    accuracy = loc.accuracy.toDouble(),
-                    speed = loc.speed.toDouble(),
-                    bearing = loc.bearing.toDouble(),
-                    batteryLevel = loc.batteryLevel,
-                    timestamp = loc.timestamp,
-                    isOffline = loc.isOfflineCapture
-                )
+                // A queue retry must also have a bounded Firebase attempt.
+                // A reachable network does not guarantee that Firebase itself is
+                // responsive. Timeout simply leaves this same stable event in
+                // the queue for WorkManager's next retry.
+                val uploaded = withTimeoutOrNull(15_000L) {
+                    firebaseSync.pushLiveLocation(
+                        employeeId = sessionStore.employeeId(),
+                        sessionId = loc.sessionId,
+                        clientEventId = loc.clientEventId,
+                        sequence = loc.sequence,
+                        latitude = loc.latitude,
+                        longitude = loc.longitude,
+                        accuracy = loc.accuracy.toDouble(),
+                        speed = loc.speed.toDouble(),
+                        bearing = loc.bearing.toDouble(),
+                        batteryLevel = loc.batteryLevel,
+                        timestamp = loc.timestamp,
+                        // Queued records are historical evidence. They must
+                        // never overwrite the current live marker.
+                        isOffline = true
+                    )
+                } ?: false
 
                 if (uploaded) {
                     locationDao.markSynced(

@@ -6,8 +6,10 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Durable GPS ledger. Rows are retained after sync so an offline route can be
- * audited/replayed locally; syncState identifies what still needs transmission.
+ * Temporary GPS delivery queue. Firebase/SSOT is always authoritative.
+ * A row is created only when the direct Firebase delivery does not receive an
+ * acknowledgement; syncState identifies the retry lifecycle. Existing local
+ * retention/pruning behavior is preserved for diagnostics.
  */
 @Entity(
     tableName = "offline_locations",
