@@ -67,7 +67,6 @@ class FirebaseRoomHydrator @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
-    private var reconnectJob: Job? = null
     private val writeMutex = Mutex()
     private val listeners = mutableListOf<Pair<Query, ChildEventListener>>()
     private val valueListeners = mutableListOf<Pair<Query, ValueEventListener>>()
@@ -79,7 +78,7 @@ class FirebaseRoomHydrator @Inject constructor(
 
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
 
-        if (activeOwnerUid == ownerUid && listeners.isNotEmpty()) return
+        if (hydrationJob?.isActive == true && activeOwnerUid == ownerUid) return
 
         if (activeOwnerUid != null && activeOwnerUid != ownerUid) {
             stop()
@@ -172,11 +171,10 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
 
             override fun onCancelled(error: DatabaseError) {
-                // Firebase listeners can be cancelled by an expired/rotated auth
-                // token or a transient permission/connection boundary. Do not
-                // require logout/login. Rebind the existing realtime listener
-                // automatically while the authenticated owner session remains active.
-                scheduleRebind("$table cancelled: ${error.message}")
+                // Defensive: Permission denial during logout is expected and should not be logged as a severe error.
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Hydration listener cancelled for $table: ${error.message}")
+                }
             }
         }
         ref.addChildEventListener(listener)
@@ -542,7 +540,9 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
-                scheduleRebind("payroll_history cancelled: ${error.message}")
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Payroll history hydration cancelled: ${error.message}")
+                }
             }
         }
         query.addChildEventListener(listener)
@@ -579,7 +579,9 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
-                scheduleRebind("shift_schedules cancelled: ${error.message}")
+                if (error.code != DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Shift schedule hydration cancelled: ${error.message}")
+                }
             }
         }
         query.addChildEventListener(listener)
@@ -603,51 +605,14 @@ class FirebaseRoomHydrator @Inject constructor(
                 scope.launch { runCatching { onDelete(snapshot) } }
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
-            override fun onCancelled(error: DatabaseError) {
-                scheduleRebind("realtime table cancelled: ${error.message}")
-            }
+            override fun onCancelled(error: DatabaseError) = Unit
         }
         ref.addChildEventListener(listener)
         listeners += ref to listener
     }
 
-    /** Rebind all Firebase -> Room realtime listeners without logout/login. */
-    @Synchronized
-    fun forceRebind(reason: String = "connection/auth recovery") {
-        if (!sessionStore.isLoggedIn() || !firebaseSync.isAuthenticated()) return
-        val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
-        Log.i("FirebaseRoomHydrator", "Rebinding realtime Room hydration: $reason")
-        reconnectJob?.cancel()
-        listeners.forEach { (query, listener) -> query.removeEventListener(listener) }
-        listeners.clear()
-        valueListeners.forEach { (query, listener) -> query.removeEventListener(listener) }
-        valueListeners.clear()
-        hydrationJob?.cancel()
-        hydrationJob = null
-        activeOwnerUid = null
-        reconnectJob = scope.launch {
-            delay(250L)
-            if (sessionStore.isLoggedIn() && firebaseSync.isAuthenticated() && firebaseSync.getOwnerUid() == ownerUid) {
-                start()
-            }
-        }
-    }
-
-    private fun scheduleRebind(reason: String) {
-        if (!sessionStore.isLoggedIn() || !firebaseSync.isAuthenticated()) return
-        synchronized(this) {
-            if (reconnectJob?.isActive == true) return
-            reconnectJob = scope.launch {
-                delay(1500L)
-                forceRebind(reason)
-            }
-        }
-    }
-
     @Synchronized
     fun stop() {
-        reconnectJob?.cancel()
-        reconnectJob = null
         hydrationJob?.cancel()
         hydrationJob = null
 

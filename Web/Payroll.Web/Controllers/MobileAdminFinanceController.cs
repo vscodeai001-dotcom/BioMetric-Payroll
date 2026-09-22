@@ -104,19 +104,6 @@ public sealed class MobileAdminFinanceController : ControllerBase
     public async Task<IActionResult> FbpDeclarations([FromQuery] int employeeId, [FromQuery] int financialYear)
         => Ok(await _fbp.GetDeclarationsAsync(employeeId, financialYear));
 
-    [HttpPost("fbp/declarations/approve")]
-    public async Task<IActionResult> ApproveFbpDeclarations([FromQuery] int employeeId, [FromQuery] int financialYear)
-    {
-        var approved = await _fbp.ApproveDeclarationsAsync(employeeId, financialYear);
-        if (!approved)
-            return BadRequest(new { success = false, message = "Cannot approve: employee allocation exceeds available allowance or no submitted declarations exist." });
-        return Ok(new { success = true });
-    }
-
-    [HttpPost("fbp/declarations/reject")]
-    public async Task<IActionResult> RejectFbpDeclarations([FromQuery] int employeeId, [FromQuery] int financialYear, [FromBody] AdminRemarkRequest request)
-    { await _fbp.RejectDeclarationsAsync(employeeId, financialYear, request.Remarks ?? "Rejected by Admin"); return Ok(new { success = true }); }
-
     [HttpGet("exit")]
     public async Task<IActionResult> ExitRequests()
     {

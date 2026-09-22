@@ -1520,13 +1520,8 @@
                         s =>
                             s.ShiftDate >= dStart &&
                             s.ShiftDate <= dEnd)
-                    .GroupBy(s => $"{s.EmployeeID}:{s.ShiftDate:yyyy-MM-dd}")
-                    // Legacy/compatibility data can contain duplicate summaries
-                    // for the same employee/day. Keep the newest SummaryID rather
-                    // than failing the entire attendance synchronization pass.
                     .ToDictionaryAsync(
-                        g => g.Key,
-                        g => g.OrderByDescending(s => s.SummaryID).First());
+                        s => $"{s.EmployeeID}:{s.ShiftDate:yyyy-MM-dd}");
 
             foreach (
                 var group in

@@ -108,9 +108,6 @@ import kotlin.coroutines.resume
 @AndroidEntryPoint
 class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
-    private companion object {
-        private const val ACTION_ADMIN_MODULES = 0x4D01
-    }
     private var _binding: ActivityMainBinding? = null
     private val binding get() = _binding!!
 
@@ -1530,10 +1527,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let {
                 triggerExclusiveRefresh()
                 signalR.start()
-                // Force a canonical Firebase/SSOT live-location read whenever
-                // Admin returns to the foreground. start() also reconciles when
-                // the realtime manager is already running.
-                signalR.reconcileLiveLocationsNow()
             }
         }
     }
@@ -1869,10 +1862,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     b.btnRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
                     b.btnAuditTrail.isVisible = isSuperAdmin || s.enableAuditLog
 
-                    // The profile/role can arrive after the toolbar is first created.
-                    // Rebuild the toolbar so Admin Modules becomes visible immediately.
-                    invalidateOptionsMenu()
-
                     // Map Visibility
                     b.cvLiveMapCard.isVisible = isSuperAdmin || (s.enableGeoFencing && s.adminCanViewAttendance)
                 }
@@ -1914,18 +1903,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         GlobalSwitcherDelegate.inflateMenu(menuInflater, menu, showShopSwitcher = false, activity = this)
-
-        val profile = sharedViewModel.userProfile.value
-        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", UserRole.Employee.name)
-        val isAdmin = profile?.isAdmin() == true || profile?.isSuperAdmin() == true ||
-            role == UserRole.Admin.name || role == UserRole.SuperAdmin.name
-        if (isAdmin) {
-            menu?.add(Menu.NONE, ACTION_ADMIN_MODULES, Menu.NONE, "📱 Admin Modules")?.apply {
-                setIcon(R.drawable.ic_people)
-                setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            }
-        }
         return true
     }
 
@@ -1933,11 +1910,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         val profile = sharedViewModel.userProfile.value
         val isAdmin = profile?.isAdmin() == true || profile?.isSuperAdmin() == true
         val isSuperAdmin = profile?.isSuperAdmin() == true
-
-        if (isAdmin && item.itemId == ACTION_ADMIN_MODULES) {
-            startActivity(Intent(this, WebParityHubActivity::class.java))
-            return true
-        }
 
         val extraActions = mutableListOf(
             GlobalSwitcherDelegate.ActionItem("🔄", "Sync Data") {

@@ -1099,9 +1099,6 @@ class TrackingMapActivity : MotionBaseActivity() {
     override fun onResume() {
         super.onResume()
         binding.mapview.onResume()
-        // Re-read Firebase/SSOT immediately when the map returns to foreground.
-        // Do not require Admin logout/login to recover a stale live snapshot.
-        signalR.reconcileLiveLocationsNow()
     }
 
     override fun onPause() {

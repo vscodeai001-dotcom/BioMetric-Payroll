@@ -72,10 +72,10 @@
                             </div>
                             <div class="admin-selected-rail-item address" data-selected-address>
                                 <span class="rail-label">Current Location</span>
-                                <strong>Resolving current address...</strong>
+                                <strong>Address unavailable</strong>
                                 <small data-selected-coords>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small>
                             </div>
-                            <div class="admin-selected-rail-item speed" data-selected-speed>
+                            <div class="admin-selected-rail-item">
                                 <span class="rail-label">Speed</span>
                                 <strong>@FormatSpeed(selectedLocation.SpeedMps)</strong>
                                 <small>@selectedLocation.MovementState</small>
@@ -93,17 +93,12 @@
                             <div class="admin-selected-rail-item">
                                 <span class="rail-label">Shop Distance</span>
                                 <strong>@FormatDistance(selectedLocation.DistanceMeters)</strong>
-                                <small>Distance from shop</small>
+                                <small>@selectedLocation.AllowedRadiusMeters m radius</small>
                             </div>
-                            <div class="admin-selected-rail-item allowed-radius" data-selected-radius>
-                                <span class="rail-label">Allowed Radius</span>
-                                <strong>@selectedLocation.AllowedRadiusMeters m</strong>
-                                <small>Configured geofence</small>
-                            </div>
-                            <div class="admin-selected-rail-item range-status" data-selected-range>
-                                <span class="rail-label">Range</span>
-                                <strong class="@(selectedLocation.IsWithinAllowedRadius ? "text-success" : "text-danger")">@(selectedLocation.IsWithinAllowedRadius ? "Inside range" : "Outside range")</strong>
-                                <small>@FormatDistance(selectedLocation.DistanceMeters) from shop</small>
+                            <div class="admin-selected-rail-item">
+                                <span class="rail-label">Status</span>
+                                <strong class="@(selectedStatus == LocationStatus.Live ? "text-success" : selectedStatus == LocationStatus.Stale ? "text-warning" : "text-muted")">● @GetStatusText(selectedStatus)</strong>
+                                <small>@(selectedLocation.IsWithinAllowedRadius ? "Inside configured radius" : "Outside configured radius")</small>
                             </div>
                             <div class="admin-selected-rail-item">
                                 <span class="rail-label">Last Updated</span>
@@ -118,13 +113,12 @@
                         </div>
                         <div class="admin-selected-employee-rail-set" aria-hidden="true">
                             <div class="admin-selected-rail-item identity"><span class="rail-label">Employee</span><strong>@selectedEmployee.Name</strong><small>#@selectedEmployee.EmployeeID · @(selectedEmployee.Role ?? "Staff")</small></div>
-                            <div class="admin-selected-rail-item address" data-selected-address><span class="rail-label">Current Location</span><strong>Resolving current address...</strong><small data-selected-coords>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small></div>
-                            <div class="admin-selected-rail-item speed" data-selected-speed><span class="rail-label">Speed</span><strong>@FormatSpeed(selectedLocation.SpeedMps)</strong><small>@selectedLocation.MovementState</small></div>
+                            <div class="admin-selected-rail-item address"><span class="rail-label">Current Location</span><strong>Address unavailable</strong><small>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small></div>
+                            <div class="admin-selected-rail-item"><span class="rail-label">Speed</span><strong>@FormatSpeed(selectedLocation.SpeedMps)</strong><small>@selectedLocation.MovementState</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">GPS Accuracy</span><strong>@FormatAccuracy(selectedLocation.AccuracyMeters)</strong><small>Precision</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">Tracking / Stay</span><strong>@FormatDuration(GetSessionDuration(selectedLocation))</strong><small>Current GPS session</small></div>
-                            <div class="admin-selected-rail-item"><span class="rail-label">Shop Distance</span><strong>@FormatDistance(selectedLocation.DistanceMeters)</strong><small>Distance from shop</small></div>
-                            <div class="admin-selected-rail-item allowed-radius" data-selected-radius><span class="rail-label">Allowed Radius</span><strong>@selectedLocation.AllowedRadiusMeters m</strong><small>Configured geofence</small></div>
-                            <div class="admin-selected-rail-item range-status" data-selected-range><span class="rail-label">Range</span><strong class="@(selectedLocation.IsWithinAllowedRadius ? "text-success" : "text-danger")">@(selectedLocation.IsWithinAllowedRadius ? "Inside range" : "Outside range")</strong><small>@FormatDistance(selectedLocation.DistanceMeters) from shop</small></div>
+                            <div class="admin-selected-rail-item"><span class="rail-label">Shop Distance</span><strong>@FormatDistance(selectedLocation.DistanceMeters)</strong><small>@selectedLocation.AllowedRadiusMeters m radius</small></div>
+                            <div class="admin-selected-rail-item"><span class="rail-label">Status</span><strong>● @GetStatusText(selectedStatus)</strong><small>@(selectedLocation.IsWithinAllowedRadius ? "Inside configured radius" : "Outside configured radius")</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">Last Updated</span><strong>@ToLocalTime(selectedLocation.LastUpdatedUtc).ToString("HH:mm:ss")</strong><small>@selectedLocation.LastUpdatedUtc.ToLocalTime().ToString("dd MMM yyyy")</small></div>
                             <div class="admin-selected-rail-item coordinates"><span class="rail-label">Exact GPS</span><strong>@selectedLocation.Latitude.ToString("F6"), @selectedLocation.Longitude.ToString("F6")</strong><small>Actual GPS point</small></div>
                         </div>
@@ -2987,11 +2981,8 @@
         overflow:hidden;
     }
     .admin-selected-rail-item.identity { min-width:180px; }
-    .admin-selected-rail-item.address { min-width:270px; max-width:340px; }
+    .admin-selected-rail-item.address { min-width:270px; }
     .admin-selected-rail-item.coordinates { min-width:220px; }
-    .admin-selected-rail-item.speed { min-width:145px; }
-    .admin-selected-rail-item.allowed-radius { min-width:150px; }
-    .admin-selected-rail-item.range-status { min-width:160px; }
     .admin-selected-rail-item .rail-label {
         font-size:.58rem;
         line-height:1;

@@ -156,22 +156,7 @@ public sealed class FirebaseAttendanceService
     {
         if (from > to) return new();
 
-        var indiaZone = TimeZoneInfo.FindSystemTimeZoneById(GetIndiaTimeZoneId());
-        var startLocal = from.ToDateTime(TimeOnly.MinValue);
-        var endLocal = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
-        var startUtcMs = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(startLocal, indiaZone)).ToUnixTimeMilliseconds();
-        var endUtcMs = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(endLocal, indiaZone)).ToUnixTimeMilliseconds() - 1;
-
-        // Attendance punches are an unbounded ledger. Read only the requested
-        // date window from the indexed timestamp field.
-        var json = await _firebase.GetOwnerTableByChildRangeAsync(
-            OwnerUid,
-            "attendance_punches",
-            "timestamp",
-            startUtcMs,
-            endUtcMs,
-            limitToLast: 10000,
-            cancellationToken: ct);
+        var json = await _firebase.GetOwnerTableAsync(OwnerUid, "attendance_punches", ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<AttendanceLog>();

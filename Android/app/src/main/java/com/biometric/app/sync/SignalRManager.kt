@@ -38,10 +38,10 @@ class SignalRManager @Inject constructor(
     // the transport layer while no longer delivering fresh snapshots.
     @Volatile private var lastSuccessfulLiveReadAt: Long = 0L
 
-    // Firebase Auth ID tokens are short-lived. Proactively refresh well before
-    // expiry so an Admin dashboard does not need a logout/login cycle to recover
-    // its live-location listener.
-    private val AUTH_TOKEN_REFRESH_INTERVAL_MS = 20L * 60L * 1000L
+    // Firebase Auth ID tokens are short-lived. Proactively refresh the token
+    // before the normal expiry window so an Admin dashboard does not need a
+    // logout/login cycle to recover its live-location listener.
+    private val AUTH_TOKEN_REFRESH_INTERVAL_MS = 30L * 60L * 1000L
     private val LIVE_READ_HEALTH_TIMEOUT_MS = 30L * 1000L
 
     // Firebase Auth can restore before the persisted owner UID is available.
@@ -146,14 +146,7 @@ class SignalRManager @Inject constructor(
 
         startRetryJob?.cancel()
         startRetryJob = null
-        if (applicationJob?.isActive == true && activeOwnerUid == ownerUid) {
-            // Main/Admin Activity can remain alive for hours. Calling start()
-            // again must still force a canonical Firebase read; otherwise a
-            // long-lived UI can keep showing an old live snapshot until the
-            // user logs out/in and recreates the manager.
-            reconcileLiveLocationsNow()
-            return
-        }
+        if (applicationJob?.isActive == true && activeOwnerUid == ownerUid) return
         if (activeOwnerUid != null && activeOwnerUid != ownerUid) stop()
 
         firebaseSync.startSync()
@@ -179,11 +172,6 @@ class SignalRManager @Inject constructor(
                     ref.child(employeeId.toString())
                 } else ref
             }
-
-        // Keep the canonical live collection synchronized while Admin is open.
-        // This is still Firebase/SSOT data, not Room, and prevents a long-lived
-        // Android Admin process from relying on an old local snapshot.
-        liveRef.keepSynced(true)
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -898,9 +886,6 @@ class SignalRManager @Inject constructor(
                     } else ref
                 }
             locationListener?.let { liveRef.removeEventListener(it) }
-            // Release the Firebase SSOT live sync when Admin stops/logs out.
-            // While the Admin session is active this path remains keepSynced(true).
-            liveRef.keepSynced(false)
             employeeListener?.let { employeesRefForStop(ownerUid).removeEventListener(it) }
 
             clientEventsRootListener?.let {

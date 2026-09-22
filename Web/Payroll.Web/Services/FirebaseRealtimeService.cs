@@ -573,48 +573,6 @@ public sealed class FirebaseRealtimeService
             $"?orderBy={orderBy}&equalTo={encodedValue}");
     }
 
-    /// <summary>
-    /// Reads an owner table using an indexed child range. This keeps large
-    /// time-series collections bounded and avoids owner-wide snapshots.
-    /// </summary>
-    public async Task<JsonElement?> GetOwnerTableByChildRangeAsync(
-        string ownerUid,
-        string table,
-        string child,
-        object? startAt,
-        object? endAt,
-        int? limitToLast = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(ownerUid) ||
-            string.IsNullOrWhiteSpace(table) ||
-            string.IsNullOrWhiteSpace(child) ||
-            !IsFirebaseSsotTable(table))
-            return null;
-
-        static string EncodeValue(object? value)
-        {
-            if (value is null) return string.Empty;
-            return value switch
-            {
-                bool b => b ? "true" : "false",
-                string text => Uri.EscapeDataString($"\"{text}\""),
-                _ => Uri.EscapeDataString(Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty)
-            };
-        }
-
-        var orderBy = Uri.EscapeDataString($"\"{child.Trim()}\"");
-        var parameters = new List<string> { $"orderBy={orderBy}" };
-        if (startAt is not null) parameters.Add($"startAt={EncodeValue(startAt)}");
-        if (endAt is not null) parameters.Add($"endAt={EncodeValue(endAt)}");
-        if (limitToLast.HasValue) parameters.Add($"limitToLast={Math.Clamp(limitToLast.Value, 1, 10000)}");
-
-        return await GetJsonAsync(
-            $"owners/{ownerUid.Trim()}/{table.Trim()}",
-            cancellationToken,
-            "?" + string.Join("&", parameters));
-    }
-
     public async Task<JsonElement?> GetGlobalRecordAsync(
         string path,
         CancellationToken cancellationToken = default)
@@ -1678,17 +1636,11 @@ public sealed class FirebaseRealtimeService
             // owners/{ownerUid}/tracking/history
             //
             // GPS history is handled by employee-scoped, limited reads.
-            if (entityName == "EmployeeLocationHistory" ||
-                entityName == "AttendanceLog")
+            if (entityName == "EmployeeLocationHistory")
             {
-                // Both branches are potentially unbounded collections. GPS history
-                // already uses employee-scoped limited reads. AttendanceLog is
-                // published through the canonical attendance_punches path and must
-                // never be downloaded as one owner-wide snapshot during startup.
                 _logger.LogInformation(
-                    "Skipping generic Firebase seed for {EntityName}. " +
-                    "The collection uses scoped/realtime synchronization instead.",
-                    entityName);
+                    "Skipping generic Firebase seed for EmployeeLocationHistory. " +
+                    "GPS history uses employee-scoped limited reads.");
 
                 continue;
             }
@@ -1801,24 +1753,10 @@ public sealed class FirebaseRealtimeService
 
             if (!response.IsSuccessStatusCode)
             {
-                var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                {
-                    _logger.LogWarning(
-                        "Firebase REST 401 for {Path}. The Firebase OAuth credential was rejected. " +
-                        "Ensure the same service-account JSON used by the Firebase Admin SDK is available " +
-                        "through Firebase:ServiceAccountPath or GOOGLE_APPLICATION_CREDENTIALS. Response: {Body}",
-                        path,
-                        body.Length > 300 ? body[..300] : body);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Firebase realtime read failed with HTTP {Status} for {Path}: {Body}",
-                        (int)response.StatusCode,
-                        path,
-                        body.Length > 300 ? body[..300] : body);
-                }
+                _logger.LogWarning(
+                    "Firebase realtime read failed with HTTP {Status} for {Path}",
+                    (int)response.StatusCode,
+                    path);
                 return null;
             }
 

@@ -13,11 +13,6 @@
         android:icon="@drawable/ic_sync"
         app:showAsAction="never" />
     <item
-        android:id="@+id/action_web_modules"
-        android:title="📱 Web Modules"
-        android:icon="@drawable/ic_people"
-        app:showAsAction="never" />
-    <item
         android:id="@+id/action_logout"
         android:title="Logout"
         android:icon="@android:drawable/ic_lock_power_off"

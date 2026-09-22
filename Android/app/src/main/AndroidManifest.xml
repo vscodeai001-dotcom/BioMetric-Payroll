@@ -401,15 +401,9 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDxIsBW8bq31gG7LqOm8-lwhmRFMsRu5CE" />
 
-        <activity android:name=".ui.WebParityHubActivity" android:exported="false" />
         <activity android:name=".ui.AdminPayrollActivity" android:exported="false" />
         <activity android:name=".ui.AdminAttendanceActivity" android:exported="false" />
         <activity android:name=".ui.PunchCorrectionApprovalActivity" android:exported="false" />
-        <activity android:name=".ui.FbpComponentsActivity" android:exported="false" />
-        <activity android:name=".ui.FbpDeclarationApprovalActivity" android:exported="false" />
-        <activity android:name=".ui.YearEndSummaryActivity" android:exported="false" />
-        <activity android:name=".ui.LocationStaysActivity" android:exported="false" />
-        <activity android:name=".ui.AttendanceEventMonitoringActivity" android:exported="false" />
     </application>
 
 </manifest>

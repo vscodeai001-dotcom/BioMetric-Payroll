@@ -6,8 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import android.widget.ArrayAdapter
-import android.widget.Spinner
 import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.appcompat.app.AppCompatActivity
@@ -43,14 +41,6 @@ class AdminAttendanceActivity : MotionBaseActivity() {
     private lateinit var progress: View
     private lateinit var empty: TextView
     private lateinit var summary: TextView
-    private lateinit var spEmployee: Spinner
-    private lateinit var tvScheduled: TextView
-    private lateinit var tvWorked: TextView
-    private lateinit var tvOvertime: TextView
-    private lateinit var tvPenalty: TextView
-    private lateinit var tvLateness: TextView
-    private lateinit var tvBreakPenalty: TextView
-    private var employeeFilterId: Int? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,13 +54,6 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         progress = findViewById(R.id.progress)
         empty = findViewById(R.id.empty)
         summary = findViewById(R.id.tvSummary)
-        spEmployee = findViewById(R.id.spEmployee)
-        tvScheduled = findViewById(R.id.tvScheduled)
-        tvWorked = findViewById(R.id.tvWorked)
-        tvOvertime = findViewById(R.id.tvOvertime)
-        tvPenalty = findViewById(R.id.tvPenalty)
-        tvLateness = findViewById(R.id.tvLateness)
-        tvBreakPenalty = findViewById(R.id.tvBreakPenalty)
         tvFrom.text = fmt.format(from.time)
         tvTo.text = fmt.format(to.time)
         tvFrom.setOnClickListener { pick(from) { from = it; tvFrom.text = fmt.format(from.time); render() } }
@@ -84,20 +67,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             sharedViewModel.allDailySummaries.collectLatest { render() }
         }
         lifecycleScope.launch {
-            sharedViewModel.allEmployees.collectLatest {
-                val items = mutableListOf("All Employees")
-                items += sharedViewModel.allEmployees.value.sortedBy { it.name }.map { "${it.name} (#${it.employeeId})" }
-                spEmployee.adapter = ArrayAdapter(this@AdminAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, items)
-                spEmployee.setSelection(0)
-                render()
-            }
-        }
-        spEmployee.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { employeeFilterId = null; render() }
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                employeeFilterId = sharedViewModel.allEmployees.value.sortedBy { it.name }.getOrNull(position - 1)?.employeeId?.toIntOrNull()
-                render()
-            }
+            sharedViewModel.allEmployees.collectLatest { render() }
         }
         lifecycleScope.launch {
             sharedViewModel.allAttendancePunches.collectLatest { render() }
@@ -129,9 +99,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val f = fmt.format(from.time)
         val t = fmt.format(to.time)
         val employees = sharedViewModel.allEmployees.value.associateBy { it.employeeId.toIntOrNull() ?: -1 }
-        val summaries = sharedViewModel.allDailySummaries.value.filter {
-            it.shiftDate >= f && it.shiftDate <= t && (employeeFilterId == null || it.employeeId == employeeFilterId)
-        }
+        val summaries = sharedViewModel.allDailySummaries.value.filter { it.shiftDate >= f && it.shiftDate <= t }
         val punches = sharedViewModel.allAttendancePunches.value.groupBy { it.date }
         val rows = summaries.map { s ->
             val emp = employees[s.employeeId]
@@ -167,15 +135,9 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val lateness = company.sumOf { it.totalLatenessMs } / 60000.0
         val breakPenalty = company.sumOf { it.totalBreakPenaltyMs } / 60000.0
 
-        tvScheduled.text = "Scheduled\n${minutes(scheduled)}"
-        tvWorked.text = "Worked\n${String.format(Locale.US, "%.2f", worked)}h"
-        tvOvertime.text = "OT\n${minutes(ot)}"
-        tvPenalty.text = "Penalty\n${minutes(penalty)}"
-        tvLateness.text = "Lateness\n${minutes(lateness)}"
-        tvBreakPenalty.text = "Break Pen.\n${minutes(breakPenalty)}"
-
         summary.text = if (company.isEmpty()) "" else
-            "👥 $employeesProcessed employees  •  ⏱️ Worked ${String.format(Locale.US, "%.2f", worked)}h  •  📅 Scheduled ${minutes(scheduled)}"
+            "👥 $employeesProcessed employees  •  ⏱️ Worked ${String.format(Locale.US, "%.2f", worked)}h  •  📅 Sch ${String.format(Locale.US, "%.1f", scheduled / 60)}h\n" +
+            "🚀 OT ${minutes(ot)}  •  ⚠️ Pen ${minutes(penalty)}  •  ⏰ Late ${minutes(lateness)}  •  🥪 Break ${minutes(breakPenalty)}"
     }
 
     private fun minutes(v: Double) = String.format(Locale.US, "%dh %02dm", (v / 60).toInt(), (v % 60).toInt())

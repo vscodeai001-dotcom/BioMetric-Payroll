@@ -300,11 +300,6 @@ interface MobileApiService {
 
     @GET("api/mobile/admin/finance/fbp/declarations")
     suspend fun adminFbpDeclarations(@Header("Authorization") authorization: String, @Query("employeeId") employeeId: Int, @Query("financialYear") financialYear: Int): Response<List<FbpDto>>
-    @POST("api/mobile/admin/finance/fbp/declarations/approve")
-    suspend fun approveAdminFbp(@Header("Authorization") authorization: String, @Query("employeeId") employeeId: Int, @Query("financialYear") financialYear: Int): Response<Unit>
-
-    @POST("api/mobile/admin/finance/fbp/declarations/reject")
-    suspend fun rejectAdminFbp(@Header("Authorization") authorization: String, @Query("employeeId") employeeId: Int, @Query("financialYear") financialYear: Int, @Body request: AdminRemarkRequest): Response<Unit>
 
     @GET("api/mobile/admin/finance/exit")
     suspend fun adminExitRequests(@Header("Authorization") authorization: String): Response<List<ResignationDto>>

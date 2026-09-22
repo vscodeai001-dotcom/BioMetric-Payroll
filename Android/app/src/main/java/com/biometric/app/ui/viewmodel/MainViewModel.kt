@@ -16,7 +16,6 @@ import com.biometric.app.util.DateRangeUtil
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -57,13 +56,6 @@ private data class DashboardDataBundle(
     val summaries: List<LocalDailySummary>,
     val schedules: List<LocalShiftSchedule>,
     val payrolls: List<LocalPayrollHistory>
-)
-
-private data class WorkforceTrigger(
-    val shops: List<Shop>,
-    val period: String,
-    val date: Long,
-    val endDate: Long?
 )
 
 @HiltViewModel
@@ -184,19 +176,9 @@ class MainViewModel @Inject constructor(
 
         viewModelScope.launch {
             combine(allShops, _currentPeriod, _currentDate, _customEndDate) { shops, period, date, endDate ->
-                WorkforceTrigger(shops, period, date, endDate)
-            }
-                // Firebase hydration can emit several related snapshots during startup.
-                // Recalculate once after the burst instead of repeatedly cancelling the
-                // previous calculation and reopening the full-screen loader.
-                .debounce(500)
-                .collectLatest { trigger ->
-                    recalculateWorkforce(
-                        trigger.shops,
-                        trigger.period,
-                        trigger.date,
-                        trigger.endDate)
-                }
+                recalculateWorkforce(shops, period, date, endDate)
+            }.catch { e -> Log.e("MainViewModel", "Error in workforce trigger flow", e) }
+            .collect()
         }
     }
 
@@ -212,11 +194,7 @@ class MainViewModel @Inject constructor(
         
         // The Web dashboard is company-wide. Shops are a legacy Android cache
         // dimension and must never prevent employee/attendance KPIs from loading.
-        // The full-screen loader is for the first dashboard calculation only.
-        // Realtime Firebase updates must never blank the dashboard while they settle.
-        if (_globalStats.value == GlobalDashboardStats()) {
-            _isLoading.value = true
-        }
+        _isLoading.value = true
 
         workforceRecalcJob = viewModelScope.launch(Dispatchers.Default) {
             try {
@@ -332,11 +310,6 @@ class MainViewModel @Inject constructor(
                     _shopsWorkforceState.value = states
                     _isLoading.value = false
                 }
-            } catch (_: CancellationException) {
-                // A newer Firebase snapshot may cancel this calculation. This is
-                // normal flow-control, not an application failure, and must never
-                // leave a visible loading/error state behind.
-                return@launch
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Workforce recalculation failed", e)
                 _isLoading.value = false
@@ -393,8 +366,7 @@ class MainViewModel @Inject constructor(
     }
 
     fun setFilter(period: String, date: Long = System.currentTimeMillis(), endDate: Long? = null) {
-        // Keep the existing dashboard visible while the selected period is recalculated.
-        // A filter change must not trigger the startup/full-screen loader.
+        _isLoading.value = true
         _currentPeriod.value = period
         _currentDate.value = date
         _customEndDate.value = endDate
