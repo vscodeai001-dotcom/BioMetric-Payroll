@@ -109,7 +109,8 @@
         "attendance_punches": {
           ".indexOn": [
             "staffId",
-            "date"
+            "date",
+            "timestamp"
           ],
           ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'staffId' && query.equalTo == auth.token.employee_id))",
           "$recordId": {

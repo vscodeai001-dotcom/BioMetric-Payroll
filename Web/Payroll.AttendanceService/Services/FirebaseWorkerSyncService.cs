@@ -59,7 +59,12 @@ public sealed class FirebaseWorkerSyncService
             await UpsertFeatureSettingsAsync(db, await GetJsonAsync($"owners/{ownerUid}/feature_settings", cancellationToken), cancellationToken);
             await UpsertCompanySettingsAsync(db, await GetJsonAsync($"owners/{ownerUid}/company_settings", cancellationToken), cancellationToken);
             await UpsertEmployeesAsync(db, await GetJsonAsync($"owners/{ownerUid}/employees", cancellationToken), cancellationToken);
-            await UpsertAttendanceLogsAsync(db, await GetJsonAsync($"owners/{ownerUid}/attendance", cancellationToken), cancellationToken);
+
+            // Attendance is an unbounded biometric ledger. The worker's physical
+            // ZKTeco database remains its operational punch source and every new
+            // punch is published to Firebase. Never download the entire owner
+            // attendance tree during startup/hydration.
+            _logger.LogDebug("Skipping owner-wide Firebase attendance hydration; biometric punches remain local and are published incrementally.");
 
             await db.SaveChangesAsync(cancellationToken);
             return true;

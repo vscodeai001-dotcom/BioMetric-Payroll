@@ -233,7 +233,7 @@ builder.Services.AddDbContextFactory<AppDbContext>((sp, options) =>
         sp.GetRequiredService<ApplicationDataChangeInterceptor>());
 
     options.UseSqlite(
-        $"Data Source={sqlitePath}");
+        $"Data Source={sqlitePath};Cache=Shared;Default Timeout=30");
 });
 
 
