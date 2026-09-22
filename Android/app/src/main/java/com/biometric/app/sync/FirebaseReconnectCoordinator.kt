@@ -59,7 +59,7 @@ class FirebaseReconnectCoordinator @Inject constructor(
                 scope.launch {
                     runCatching {
                         firebaseSync.startSync()
-                        hydrator.start()
+                        hydrator.forceRebind("Firebase connection restored")
                         OfflineSyncWorker.schedule(context)
                     }.onFailure {
                         Log.w("FirebaseReconnect", "Reconnect recovery scheduling failed", it)

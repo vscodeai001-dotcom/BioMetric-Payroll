@@ -8,9 +8,10 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.*
+import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.MobileSessionStore
-import com.biometric.app.sync.AdminRealtimeCoordinator
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.database.DataSnapshot
@@ -24,7 +25,6 @@ import javax.inject.Inject
 class AdminPayrollActivity : MotionBaseActivity() {
     @Inject lateinit var api: MobileApiService
     private lateinit var session: MobileSessionStore
-    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var firebaseSync: com.biometric.app.sync.FirebaseSyncManager
     private lateinit var month: Spinner
     private lateinit var year: Spinner
@@ -51,16 +51,69 @@ class AdminPayrollActivity : MotionBaseActivity() {
         year.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, (now.get(Calendar.YEAR)-1..now.get(Calendar.YEAR)+1).toList())
         year.setSelection(1)
         findViewById<Button>(R.id.btnPreview).setOnClickListener { loadPreview() }
-        findViewById<Button>(R.id.btnHistory).setOnClickListener { loadHistory() }
+        findViewById<Button>(R.id.btnHistory).setOnClickListener {
+            status.text = "History is live from Firebase / SSOT"
+        }
         findViewById<Button>(R.id.btnFinalize).setOnClickListener { confirmFinalize() }
-        loadHistory()
-        realtimeCoordinator.start { if (!isFinishing && !isDestroyed) loadHistory() }
+        observePayrollHistoryRealtime()
     }
 
-    override fun onDestroy() {
-        realtimeCoordinator.stop()
-        super.onDestroy()
+    private fun observePayrollHistoryRealtime() {
+        lifecycleScope.launch {
+            val payrollFlow = firebaseSync.getDataFlow<RealtimePayrollRow>("payroll_history")
+            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            kotlinx.coroutines.flow.combine(payrollFlow, employeeFlow) { payroll, employees ->
+                val names = employees.associateBy { it.employeeId.toIntOrNull() ?: -1 }.mapValues { it.value.name }
+                payroll.filter { it.payYear == (year.selectedItem as? Int ?: Calendar.getInstance().get(Calendar.YEAR)) &&
+                        it.payMonth == month.selectedItemPosition + 1 } to names
+            }.collectLatest { (rows, names) ->
+                val mapped = rows.sortedBy { it.employeeId }.map { row ->
+                    AdminPayrollHistoryRowDto(
+                        payrollID = row.payrollId, employeeID = row.employeeId, employeeName = names[row.employeeId] ?: "Unknown",
+                        payMonth = row.payMonth, payYear = row.payYear, baseSalary = row.baseSalary,
+                        totalHoursWorked = row.totalHoursWorked, totalOvertimeMinutes = row.totalOvertimeMs / 60000.0,
+                        totalPenaltyMinutes = row.totalPenaltyMs / 60000.0, deductionsHours = row.deductionsHours,
+                        deductionsAdvance = row.deductionsAdvance, bonus = row.bonus, tdsDeduction = row.tdsDeduction,
+                        totalShiftAllowance = row.totalShiftAllowance, basicComponent = row.basicComponent,
+                        pfDeduction = row.pfDeduction, esiDeduction = row.esiDeduction, ptDeduction = row.ptDeduction,
+                        absentDays = row.absentDays, manualLeaveDays = row.manualLeaveDays, netSalary = row.netSalary
+                    )
+                }
+                renderHistory(mapped)
+                status.text = "History • ${mapped.size} employees • realtime"
+                findViewById<Button>(R.id.btnFinalize).isEnabled = false
+            }
+        }
     }
+
+
+
+    private data class RealtimePayrollRow(
+        var payrollId: Int = 0,
+        var employeeId: Int = 0,
+        var payMonth: Int = 0,
+        var payYear: Int = 0,
+        var baseSalary: Double = 0.0,
+        var totalHoursWorked: Double = 0.0,
+        var overtimePay: Double = 0.0,
+        var deductionsHours: Double = 0.0,
+        var deductionsAdvance: Double = 0.0,
+        var bonus: Double = 0.0,
+        var netSalary: Double = 0.0,
+        var manualLeaveDays: Int = 0,
+        var absentDays: Int = 0,
+        var totalPenaltyMs: Long = 0L,
+        var totalOvertimeMs: Long = 0L,
+        var hourlyRate: Double = 0.0,
+        var basicComponent: Double = 0.0,
+        var pfDeduction: Double = 0.0,
+        var esiDeduction: Double = 0.0,
+        var employerPfContribution: Double = 0.0,
+        var employerEsiContribution: Double = 0.0,
+        var ptDeduction: Double = 0.0,
+        var tdsDeduction: Double = 0.0,
+        var totalShiftAllowance: Double = 0.0
+    )
 
     private fun auth() = "Bearer ${session.token().orEmpty()}"
     private fun period() = Pair(year.selectedItem as Int, month.selectedItemPosition + 1)
@@ -73,26 +126,6 @@ class AdminPayrollActivity : MotionBaseActivity() {
             if (!r.isSuccessful || r.body()?.success != true) throw Exception(r.body()?.message ?: "Unable to generate preview")
             preview=r.body()!!.rows; renderPreview(); status.text="Preview • ${preview.size} employees"; findViewById<Button>(R.id.btnFinalize).isEnabled=preview.isNotEmpty()
         } catch(e:Exception){ status.text="Payroll preview failed"; toast(e.message ?: "Request failed") } finally { busy(false) }
-    }
-
-    private fun loadHistory() = lifecycleScope.launch {
-        busy(true); status.text="Loading payroll history…"; list.removeAllViews()
-        try {
-            val (y,m)=period()
-            val ref = firebaseSync.getOwnerRef()?.child("payroll_history")
-                ?: throw Exception("Firebase session is not initialized")
-            val snapshot = ref.get().await()
-            val employeeSnapshot = firebaseSync.getOwnerRef()?.child("employees")?.get()?.await()
-            val names = employeeSnapshot?.children?.associate {
-                val id = it.child("employeeId").value?.toString()?.toIntOrNull() ?: it.key?.toIntOrNull() ?: 0
-                id to (it.child("name").value?.toString() ?: "Unknown")
-            }.orEmpty()
-            val rows = snapshot.children.mapNotNull { it.toAdminPayrollHistoryRow() }
-                .filter { it.payYear == y && it.payMonth == m }
-                .map { it.copy(employeeName = names[it.employeeID] ?: it.employeeName ?: "Unknown") }
-                .sortedBy { it.employeeID }
-            renderHistory(rows); status.text="History • ${rows.size} employees"; findViewById<Button>(R.id.btnFinalize).isEnabled=false
-        } catch(e:Exception){ status.text="History load failed"; toast(e.message ?: "Request failed") } finally { busy(false) }
     }
 
     private fun DataSnapshot.toAdminPayrollHistoryRow(): AdminPayrollHistoryRowDto? {
@@ -148,6 +181,6 @@ class AdminPayrollActivity : MotionBaseActivity() {
     }
     private fun addRow(title:String, line:String, meta:String){ val v=layoutInflater.inflate(R.layout.item_admin_payroll_row,list,false); v.findViewById<TextView>(R.id.tvTitle).text=title; v.findViewById<TextView>(R.id.tvLine).text=line; v.findViewById<TextView>(R.id.tvMeta).text=meta; list.addView(v) }
     private fun confirmFinalize(){ if(preview.isEmpty()){toast("Generate a preview first.");return}; AlertDialog.Builder(this).setTitle("Finalize Payroll 💰").setMessage("Save ${preview.size} payroll entries? This follows the Web payroll finalization logic.").setNegativeButton("Cancel ❌",null).setPositiveButton("Finalize ✅"){_,_-> finalizePayroll()}.show() }
-    private fun finalizePayroll()=lifecycleScope.launch { busy(true); status.text="Saving to database…"; try{ val(y,m)=period(); val r=api.adminPayrollFinalize(auth(),AdminPayrollFinalizeRequest(y,m,preview)); if(!r.isSuccessful||r.body()?.success!=true)throw Exception(r.body()?.message?:"Finalization failed"); toast("Payroll finalized successfully"); loadHistory() }catch(e:Exception){status.text="Finalization failed";toast(e.message?:"Request failed")}finally{busy(false)} }
+    private fun finalizePayroll()=lifecycleScope.launch { busy(true); status.text="Saving to database…"; try{ val(y,m)=period(); val r=api.adminPayrollFinalize(auth(),AdminPayrollFinalizeRequest(y,m,preview)); if(!r.isSuccessful||r.body()?.success!=true)throw Exception(r.body()?.message?:"Finalization failed"); toast("Payroll finalized successfully"); }catch(e:Exception){status.text="Finalization failed";toast(e.message?:"Request failed")}finally{busy(false)} }
     private fun toast(s:String)=Toast.makeText(this,s,Toast.LENGTH_LONG).show()
 }

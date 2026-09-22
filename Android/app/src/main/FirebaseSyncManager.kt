@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -84,10 +85,16 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     private var hasInitializedSync = false
+    private var activeSyncOwnerUid: String? = null
 
     fun startSync() {
-        if (hasInitializedSync) return
-        val ref = getOwnerRef() ?: return
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
+        if (hasInitializedSync && activeSyncOwnerUid == ownerUid) return
+        if (hasInitializedSync && activeSyncOwnerUid != null && activeSyncOwnerUid != ownerUid) {
+            val previous = database.child("owners").child(activeSyncOwnerUid!!)
+            listOf("employees", "shops", "attendance", "attendance_punches", "advance_payments", "employee_history", "shop_closed_days", "regularizations", "leave_requests", "resignation_requests", "salary_snapshots", "audit_logs", "daily_summaries", "shift_schedules", "payroll_history", "bonus_records", "tax_declarations", "fbp_components", "fbp_declarations").forEach { previous.child(it).keepSynced(false) }
+        }
+        val ref = database.child("owners").child(ownerUid)
 
         ref.child("employees").keepSynced(true)
         ref.child("shops").keepSynced(true)
@@ -110,6 +117,7 @@ class FirebaseSyncManager @Inject constructor(
         ref.child("fbp_declarations").keepSynced(true)
 
         hasInitializedSync = true
+        activeSyncOwnerUid = ownerUid
     }
 
     inline fun <reified T : Any> getDataFlow(table: String): Flow<List<T>> = callbackFlow {
@@ -118,6 +126,7 @@ class FirebaseSyncManager @Inject constructor(
             close()
             return@callbackFlow
         }
+        val active = AtomicBoolean(true)
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -139,14 +148,21 @@ class FirebaseSyncManager @Inject constructor(
             }
             override fun onCancelled(error: DatabaseError) {
                 trySend(emptyList())
-                this@callbackFlow.close()
+                // Do not close the flow on transient Firebase/auth cancellation.
+                // Rebind automatically so a long-lived screen never requires
+                // logout/login or a manual refresh to recover realtime data.
+                syncScope.launch {
+                    delay(1500L)
+                    if (active.get() && auth.currentUser != null) runCatching { ref.addValueEventListener(listener) }
+                }
             }
         }
         ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+        awaitClose { active.set(false); ref.removeEventListener(listener) }
     }
 
     inline fun <reified T : Any> getQueryFlow(query: Query): Flow<List<T>> = callbackFlow {
+        val active = AtomicBoolean(true)
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSyncTime.value = System.currentTimeMillis()
@@ -165,11 +181,14 @@ class FirebaseSyncManager @Inject constructor(
             }
             override fun onCancelled(error: DatabaseError) {
                 trySend(emptyList())
-                this@callbackFlow.close()
+                syncScope.launch {
+                    delay(1500L)
+                    if (active.get() && auth.currentUser != null) runCatching { query.addValueEventListener(listener) }
+                }
             }
         }
         query.addValueEventListener(listener)
-        awaitClose { query.removeEventListener(listener) }
+        awaitClose { active.set(false); query.removeEventListener(listener) }
     }
 
     data class RealtimeChangedItem(
@@ -199,6 +218,7 @@ class FirebaseSyncManager @Inject constructor(
             .orderByChild("timestamp")
             .limitToLast(200)
         val deliveredEventIds = Collections.synchronizedSet(mutableSetOf<String>())
+        val active = AtomicBoolean(true)
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 val eventId = snapshot.child("eventId").getValue(String::class.java) ?: snapshot.key.orEmpty()
@@ -220,15 +240,20 @@ class FirebaseSyncManager @Inject constructor(
             override fun onChildRemoved(snapshot: DataSnapshot) {}
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
             override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseSyncManager", "Owner realtime event listener cancelled", error.toException())
+                Log.w("FirebaseSyncManager", "Owner realtime event listener cancelled; rebinding automatically", error.toException())
+                syncScope.launch {
+                    delay(1500L)
+                    if (active.get() && auth.currentUser != null) runCatching { ref.addChildEventListener(listener) }
+                }
             }
         }
         ref.addChildEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+        awaitClose { active.set(false); ref.removeEventListener(listener) }
     }
 
     inline fun <reified T : Any> getGlobalItemFlow(path: String): Flow<T?> = callbackFlow {
         val ref = getGlobalRef().child(path)
+        val active = AtomicBoolean(true)
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSyncTime.value = System.currentTimeMillis()
@@ -236,11 +261,14 @@ class FirebaseSyncManager @Inject constructor(
             }
             override fun onCancelled(error: DatabaseError) {
                 trySend(null)
-                this@callbackFlow.close()
+                syncScope.launch {
+                    delay(1500L)
+                    if (active.get() && auth.currentUser != null) runCatching { ref.addValueEventListener(listener) }
+                }
             }
         }
         ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+        awaitClose { active.set(false); ref.removeEventListener(listener) }
     }
 
     fun notifyRealtimeChanged(entity: String, action: String = "MODIFIED", recordId: String? = null) {

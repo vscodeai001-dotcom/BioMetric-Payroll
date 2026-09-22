@@ -1527,6 +1527,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             _binding?.let {
                 triggerExclusiveRefresh()
                 signalR.start()
+                // Force a canonical Firebase/SSOT live-location read whenever
+                // Admin returns to the foreground. start() also reconciles when
+                // the realtime manager is already running.
+                signalR.reconcileLiveLocationsNow()
             }
         }
     }
@@ -1919,6 +1923,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         )
 
         if (isAdmin) {
+            extraActions.add(GlobalSwitcherDelegate.ActionItem("📱", "Web Modules") {
+                startActivity(Intent(this, WebParityHubActivity::class.java))
+            })
             extraActions.add(GlobalSwitcherDelegate.ActionItem("⚙️", "Settings") {
                 startActivity(Intent(this, SettingsActivity::class.java))
             })

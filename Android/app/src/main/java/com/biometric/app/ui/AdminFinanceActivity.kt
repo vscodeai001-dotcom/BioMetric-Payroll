@@ -22,10 +22,10 @@ import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.databinding.ActivityAdminFinanceBinding
 import com.biometric.app.databinding.DialogAdminMoneyEntryBinding
-import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
@@ -41,7 +41,7 @@ class AdminFinanceActivity : MotionBaseActivity() {
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
     @Inject lateinit var firebaseFinance: FirebaseAdminFinanceRepository
-    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var firebaseSync: com.biometric.app.sync.FirebaseSyncManager
     
     private val advances = mutableListOf<MoneyEntryDto>()
     private val bonuses = mutableListOf<MoneyEntryDto>()
@@ -62,18 +62,50 @@ class AdminFinanceActivity : MotionBaseActivity() {
 
         setupTabs()
         setupRecyclerView()
-        loadFinanceData()
+        observeFinanceRealtime()
 
         binding.fabAddEntry.setOnClickListener { showAddEntryDialog() }
-
-        realtimeCoordinator.start {
-            if (!isFinishing && !isDestroyed) loadFinanceData()
-        }
     }
 
-    override fun onDestroy() {
-        realtimeCoordinator.stop()
-        super.onDestroy()
+    private fun observeFinanceRealtime() {
+        lifecycleScope.launch {
+            combine(
+                firebaseSync.getDataFlow<com.biometric.app.data.entity.AdvancePayment>("advance_payments"),
+                firebaseSync.getDataFlow<com.biometric.app.data.entity.LocalBonusRecord>("bonus_records"),
+                firebaseSync.getDataFlow<com.biometric.app.data.entity.LocalTaxDeclaration>("tax_declarations")
+            ) { advanceRows, bonusRows, taxRows -> Triple(advanceRows, bonusRows, taxRows) }
+                .collectLatest { (advanceRows, bonusRows, taxRows) ->
+                    advances.clear()
+                    advances.addAll(advanceRows.map {
+                        MoneyEntryDto(
+                            id = it.advanceId.hashCode() and Int.MAX_VALUE,
+                            date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it.date)),
+                            amount = it.amount, type = "Salary Advance", description = null,
+                            paid = it.isRecovered, employeeId = it.employeeId.toIntOrNull() ?: 0
+                        )
+                    }.sortedByDescending { it.date })
+                    bonuses.clear()
+                    bonuses.addAll(bonusRows.map {
+                        MoneyEntryDto(
+                            id = it.bonusId,
+                            date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(it.bonusDate)),
+                            amount = it.amount, type = "Performance Bonus", description = it.description,
+                            paid = (it.payrollIdPaid ?: 0) > 0, employeeId = it.employeeId
+                        )
+                    }.sortedByDescending { it.date })
+                    taxDeclarations.clear()
+                    val year = Calendar.getInstance().get(Calendar.YEAR)
+                    taxDeclarations.addAll(taxRows.filter { it.financialYear == year }.map {
+                        TaxDeclarationDto(
+                            declarationId = it.declarationId, financialYear = it.financialYear, regime = it.regime,
+                            section80C = it.section80C, section80D = it.section80D, hraRentPaid = it.hraRentPaid,
+                            otherExemptions = it.otherExemptions, status = it.status, adminRemarks = it.adminRemarks,
+                            employeeId = it.employeeId
+                        )
+                    }.sortedByDescending { it.declarationId })
+                    updateList()
+                }
+        }
     }
 
     private fun setupTabs() {
@@ -95,28 +127,6 @@ class AdminFinanceActivity : MotionBaseActivity() {
     private fun setupRecyclerView() {
         binding.rvFinanceList.layoutManager = LinearLayoutManager(this)
         binding.rvFinanceList.adapter = FinanceAdapter()
-    }
-
-    private fun loadFinanceData() {
-        lifecycleScope.launch {
-            try {
-                // Finance records are now read from the shared Firebase source.
-                // Tax approval still uses the Web TaxDeclarationService because
-                // approval has payroll-lock/business side effects that must not be
-                // duplicated in Android until independently verified.
-                advances.clear()
-                advances.addAll(firebaseFinance.advances(false))
-                bonuses.clear()
-                bonuses.addAll(firebaseFinance.bonuses())
-                val year = Calendar.getInstance().get(Calendar.YEAR)
-                taxDeclarations.clear()
-                taxDeclarations.addAll(firebaseFinance.taxDeclarations(year))
-                updateList()
-            } catch (e: Exception) {
-                Log.e("AdminFinance", "Firebase load failed", e)
-                Toast.makeText(this@AdminFinanceActivity, e.message ?: "Unable to load finance data", Toast.LENGTH_SHORT).show()
-            }
-        }
     }
 
     private fun updateList() {
@@ -166,7 +176,6 @@ class AdminFinanceActivity : MotionBaseActivity() {
             try {
                 firebaseFinance.createAdvance(empId, amount, type, date)
                 Toast.makeText(this@AdminFinanceActivity, "Advance recorded ✅", Toast.LENGTH_SHORT).show()
-                loadFinanceData()
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -178,7 +187,6 @@ class AdminFinanceActivity : MotionBaseActivity() {
             try {
                 firebaseFinance.createBonus(empId, amount, desc, date)
                 Toast.makeText(this@AdminFinanceActivity, "Bonus recorded ✅", Toast.LENGTH_SHORT).show()
-                loadFinanceData()
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
@@ -204,8 +212,7 @@ class AdminFinanceActivity : MotionBaseActivity() {
                 val res = if (approve) mobileApi.approveAdminTax(token, id, req) else mobileApi.rejectAdminTax(token, id, req)
                 if (res.isSuccessful) {
                     Toast.makeText(this@AdminFinanceActivity, "Tax status updated", Toast.LENGTH_SHORT).show()
-                    loadFinanceData()
-                }
+                    }
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
             }
