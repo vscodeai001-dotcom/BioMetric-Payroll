@@ -15,6 +15,7 @@ import com.google.firebase.database.ValueEventListener
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -25,6 +26,7 @@ import javax.inject.Inject
  * business rules are not duplicated or bypassed.
  */
 @AndroidEntryPoint
+@OptIn(ExperimentalCoroutinesApi::class)
 class WebParityModuleActivity : MotionBaseActivity() {
 
     @Inject

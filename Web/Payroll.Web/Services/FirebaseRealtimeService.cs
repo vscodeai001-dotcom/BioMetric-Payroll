@@ -1753,10 +1753,24 @@ public sealed class FirebaseRealtimeService
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning(
-                    "Firebase realtime read failed with HTTP {Status} for {Path}",
-                    (int)response.StatusCode,
-                    path);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                {
+                    _logger.LogWarning(
+                        "Firebase REST 401 for {Path}. The Firebase OAuth credential was rejected. " +
+                        "Ensure the same service-account JSON used by the Firebase Admin SDK is available " +
+                        "through Firebase:ServiceAccountPath or GOOGLE_APPLICATION_CREDENTIALS. Response: {Body}",
+                        path,
+                        body.Length > 300 ? body[..300] : body);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Firebase realtime read failed with HTTP {Status} for {Path}: {Body}",
+                        (int)response.StatusCode,
+                        path,
+                        body.Length > 300 ? body[..300] : body);
+                }
                 return null;
             }
 

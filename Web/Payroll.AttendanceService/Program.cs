@@ -24,7 +24,19 @@ IHost host = Host.CreateDefaultBuilder(args)
             Directory.CreateDirectory(sqliteDirectory);
 
         services.AddDbContext<AppDbContext>(options =>
-            options.UseSqlite($"Data Source={sqlitePath}"), ServiceLifetime.Transient);
+        {
+            options.UseSqlite($"Data Source={sqlitePath}");
+
+            // The shared model targets PostgreSQL/SQL Server and therefore
+            // contains the `public` schema metadata. SQLite has no schemas,
+            // so EF Core emits model-validation warnings for those mappings.
+            // This worker intentionally uses SQLite only as a local cache.
+            // Suppress only EF model-validation warnings for this provider;
+            // database command/error logging remains unchanged.
+            options.ConfigureWarnings(warnings =>
+                warnings.Ignore(
+                    Microsoft.EntityFrameworkCore.Diagnostics.SqliteEventId.SchemaConfiguredWarning));
+        }, ServiceLifetime.Transient);
 
         // 4. Register Firebase worker bridge and background services
         services.AddSingleton<FirebaseWorkerSyncService>();
