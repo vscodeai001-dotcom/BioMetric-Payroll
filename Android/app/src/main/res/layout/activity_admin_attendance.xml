@@ -6,14 +6,121 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/window_background">
-<com.google.android.material.appbar.MaterialToolbar android:id="@+id/toolbar" android:layout_width="match_parent" android:layout_height="?attr/actionBarSize" app:title="Attendance Logs &amp; Reports 📊" app:navigationIcon="@drawable/ic_arrow_back"/>
-<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="12dp">
-<TextView android:id="@+id/tvFrom" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:gravity="center" android:textStyle="bold" android:background="@drawable/bg_premium_card" android:layout_marginEnd="6dp"/>
-<TextView android:id="@+id/tvTo" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1" android:gravity="center" android:textStyle="bold" android:background="@drawable/bg_premium_card" android:layout_marginStart="6dp"/>
-</LinearLayout>
-<com.google.android.material.button.MaterialButton android:id="@+id/btnGenerate" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginHorizontal="12dp" android:text="Generate Attendance Report"/>
-<TextView android:id="@+id/tvSummary" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="16dp" android:textStyle="bold" android:textColor="@color/text_primary"/>
-<ProgressBar android:id="@+id/progress" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center_horizontal" android:visibility="gone"/>
-<TextView android:id="@+id/empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="24dp" android:gravity="center" android:text="No attendance summaries found." android:visibility="gone"/>
-<androidx.recyclerview.widget.RecyclerView android:id="@+id/rvAttendance" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:padding="12dp" android:clipToPadding="false"/>
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:title="Attendance Log Summary"
+        app:subtitle="Daily breakdown of punches and calculated hours"
+        app:navigationIcon="@drawable/ic_arrow_back" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingTop="10dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvFrom"
+                android:layout_width="132dp"
+                android:layout_height="46dp"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:text="From"
+                android:drawableStart="@drawable/ic_calendar"
+                android:drawablePadding="6dp"
+                android:background="@drawable/bg_premium_card" />
+
+            <TextView
+                android:id="@+id/tvTo"
+                android:layout_width="132dp"
+                android:layout_height="46dp"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:textStyle="bold"
+                android:text="To"
+                android:drawableStart="@drawable/ic_calendar"
+                android:drawablePadding="6dp"
+                android:background="@drawable/bg_premium_card" />
+
+            <Spinner
+                android:id="@+id/spEmployee"
+                android:layout_width="180dp"
+                android:layout_height="46dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_premium_card" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnGenerate"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:text="🔎 Search / Recalculate" />
+
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:padding="12dp">
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <TextView android:id="@+id/tvScheduled" android:layout_width="130dp" android:layout_height="82dp" android:gravity="center" android:text="Scheduled
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+            <TextView android:id="@+id/tvWorked" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Worked
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+            <TextView android:id="@+id/tvOvertime" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="OT
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+            <TextView android:id="@+id/tvPenalty" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Penalty
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+            <TextView android:id="@+id/tvLateness" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Lateness
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+            <TextView android:id="@+id/tvBreakPenalty" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Break Pen.
+--" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <TextView
+        android:id="@+id/tvSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp"
+        android:textStyle="bold"
+        android:textColor="@color/text_primary" />
+
+    <ProgressBar
+        android:id="@+id/progress"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="24dp"
+        android:gravity="center"
+        android:text="No attendance logs found for the selected filters."
+        android:visibility="gone" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvAttendance"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:padding="12dp"
+        android:clipToPadding="false" />
 </LinearLayout>

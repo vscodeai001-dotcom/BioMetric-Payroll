@@ -435,10 +435,9 @@ else
     {
         try
         {
-            await LoadAdminDashboard();
+            ScheduleDashboardRefresh();
 
-            await InvokeAsync(
-                StateHasChanged);
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
@@ -458,12 +457,11 @@ else
 
     private async Task HandleLiveLocationChanged()
     {
+        // High-frequency GPS events belong to LiveStaffLocationPanel. Do not
+        // reload the full KPI dashboard for every location point.
         try
         {
-            await LoadAdminDashboard();
-
-            await InvokeAsync(
-                StateHasChanged);
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
@@ -481,10 +479,9 @@ else
     {
         try
         {
-            await LoadAdminDashboard();
+            ScheduleDashboardRefresh();
 
-            await InvokeAsync(
-                StateHasChanged);
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
@@ -494,8 +491,57 @@ else
         }
     }
     private CancellationTokenSource? _dashboardCts;
+    private CancellationTokenSource? _dashboardRefreshDebounceCts;
     private Task? _dashboardOwnerStream;
     private Task? _dashboardTrackingStream;
+    private DateTime _lastDashboardLoadUtc = DateTime.MinValue;
+    private readonly SemaphoreSlim _dashboardLoadGate = new(1, 1);
+
+    private void ScheduleDashboardRefresh()
+    {
+        _dashboardRefreshDebounceCts?.Cancel();
+        _dashboardRefreshDebounceCts?.Dispose();
+        _dashboardRefreshDebounceCts = new CancellationTokenSource();
+        var token = _dashboardRefreshDebounceCts.Token;
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                // Coalesce bursts of Firebase child events. A single attendance
+                // operation can update several Firebase nodes; refreshing all
+                // dashboard KPIs for each child event causes a read storm.
+                await Task.Delay(TimeSpan.FromMilliseconds(750), token);
+
+                // Never refresh the KPI snapshot more often than once per 2s.
+                var elapsed = DateTime.UtcNow - _lastDashboardLoadUtc;
+                if (elapsed < TimeSpan.FromSeconds(2))
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2) - elapsed, token);
+                }
+
+                await _dashboardLoadGate.WaitAsync(token);
+                try
+                {
+                    await LoadAdminDashboard();
+                    _lastDashboardLoadUtc = DateTime.UtcNow;
+                }
+                finally
+                {
+                    _dashboardLoadGate.Release();
+                }
+
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Debounced Firebase dashboard refresh failed.");
+            }
+        });
+    }
 
     private Task StartFirebaseDashboardStreamsAsync(string actorUid)
     {
@@ -532,14 +578,21 @@ else
     private string FirebaseDashboardOwnerUid(string actorUid)
         => FirebaseDashboardOwnerService.ResolveOwnerUid(actorUid, "Admin");
 
-    private async Task FirebaseDashboardStream(string ownerUid, CancellationToken ct)
-    {
-        await FirebaseDashboardOwnerService.StreamOwnerChangesAsync(ownerUid, async (path, _, token) =>
+   private async Task FirebaseDashboardStream(string ownerUid, CancellationToken ct)
+{
+    await FirebaseDashboardOwnerService.StreamOwnerChangesAsync(
+        ownerUid,
+        (path, _, token) =>
         {
             if (IsDashboardPath(path))
-                await InvokeAsync(LoadAdminDashboard);
-        }, ct);
-    }
+            {
+                ScheduleDashboardRefresh();
+            }
+
+            return Task.CompletedTask;
+        },
+        ct);
+}
 
     private static bool IsDashboardPath(string path)
     {
@@ -560,6 +613,9 @@ else
         if (_dashboardTrackingStream != null)
             await IgnoreTask(_dashboardTrackingStream);
         _dashboardCts?.Dispose();
+        _dashboardRefreshDebounceCts?.Cancel();
+        _dashboardRefreshDebounceCts?.Dispose();
+        _dashboardLoadGate.Dispose();
     }
 
     private static async Task IgnoreTask(Task task)

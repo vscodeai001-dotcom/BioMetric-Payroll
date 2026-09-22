@@ -13,17 +13,20 @@ namespace Payroll.Web.Services
         private readonly NotificationService _notificationService;
         private readonly FirebaseEmployeeManagementService _firebaseEmployees;
         private readonly FirebaseRealtimeService _firebase;
+        private readonly AttendanceRefreshService _refreshService;
 
         public FBPService(
             IDbContextFactory<AppDbContext> dbFactory,
             NotificationService notificationService,
             FirebaseEmployeeManagementService firebaseEmployees,
-            FirebaseRealtimeService firebase)
+            FirebaseRealtimeService firebase,
+            AttendanceRefreshService refreshService)
         {
             _dbFactory = dbFactory;
             _notificationService = notificationService;
             _firebaseEmployees = firebaseEmployees;
             _firebase = firebase;
+            _refreshService = refreshService;
         }
 
         // --- ADMIN: MANAGE COMPONENTS ---
@@ -133,6 +136,70 @@ namespace Payroll.Web.Services
                     $"{employee.Name} submitted an FBP declaration for FY {financialYear}-{financialYear + 1}.",
                     "/admin/fbp-approval");
             }
+        }
+
+
+        // --- ADMIN: DECLARATION APPROVAL / REJECTION ---
+        // These methods preserve the existing Web approval semantics for native Android callers.
+        public async Task<bool> ApproveDeclarationsAsync(int employeeId, int financialYear)
+        {
+            var employee = await _firebaseEmployees.GetEmployeeAsync(employeeId);
+            if (employee == null) return false;
+
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var rows = await db.FlexibleBenefitDeclarations
+                .Where(d => d.EmployeeId == employeeId && d.FinancialYear == financialYear && d.Status == "Submitted")
+                .ToListAsync();
+            if (rows.Count == 0) return false;
+
+            var totalAllocated = rows.Sum(d => d.AnnualAllocatedAmount);
+            var availableAllowance = employee.MonthlySalary * 12m * 0.10m;
+            if (totalAllocated > availableAllowance) return false;
+
+            foreach (var row in rows) row.Status = "Approved";
+            await db.SaveChangesAsync();
+            try
+            {
+                var ownerUid = _firebaseEmployees.OwnerUid;
+                var updates = rows.ToDictionary(d => d.DeclarationId.ToString(System.Globalization.CultureInfo.InvariantCulture), d => (object?)d);
+                await _firebase.SetOwnerRecordsAsync(ownerUid, "fbp_declarations", updates);
+                await _firebase.PublishLocalApplicationChangeAsync(ownerUid, "FlexibleBenefitDeclaration", "MODIFIED");
+            }
+            catch { }
+
+            await _notificationService.NotifyEmployeeAsync(
+                employeeId,
+                "FBP Declaration Approved",
+                $"Your FBP declaration for FY {financialYear}-{financialYear + 1} was approved and locked.",
+                "/my-fbp-declaration");
+            await _refreshService.NotifyDataChangedAsync(employeeId, null, "FBP_APPROVAL");
+            return true;
+        }
+
+        public async Task RejectDeclarationsAsync(int employeeId, int financialYear, string remarks)
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var rows = await db.FlexibleBenefitDeclarations
+                .Where(d => d.EmployeeId == employeeId && d.FinancialYear == financialYear && d.Status != "Locked")
+                .ToListAsync();
+            if (rows.Count == 0) return;
+            db.FlexibleBenefitDeclarations.RemoveRange(rows);
+            await db.SaveChangesAsync();
+            try
+            {
+                var ownerUid = _firebaseEmployees.OwnerUid;
+                foreach (var row in rows)
+                    await _firebase.DeleteOwnerRecordAsync(ownerUid, "fbp_declarations", row.DeclarationId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await _firebase.PublishLocalApplicationChangeAsync(ownerUid, "FlexibleBenefitDeclaration", "DELETED");
+            }
+            catch { }
+
+            await _notificationService.NotifyEmployeeAsync(
+                employeeId,
+                "FBP Declaration Rejected",
+                $"Your FBP declaration for FY {financialYear}-{financialYear + 1} was rejected. Reason: {remarks}",
+                "/my-fbp-declaration");
+            await _refreshService.NotifyDataChangedAsync(employeeId, null, "FBP_REJECTION");
         }
 
         // --- PAYROLL INTEGRATION LOGIC ---

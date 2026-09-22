@@ -4952,6 +4952,7 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
             state.selectedRailElement = rail;
             state.selectedRailPaused = false;
             state.selectedRailAddressKey = '';
+            state.selectedRailAddressCache = state.selectedRailAddressCache || {};
 
             const pause = () => { state.selectedRailPaused = true; rail.classList.add('is-auto-scroll-paused'); };
             const resume = () => { state.selectedRailPaused = false; rail.classList.remove('is-auto-scroll-paused'); };
@@ -4980,48 +4981,94 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
 
         const selected = (state.liveStaff || []).find(x => Number(x.employeeId) === Number(selectedId));
         if (selected) {
+            const employeeId = Number(selected.employeeId);
             const lat = Number(selected.latitude);
             const lon = Number(selected.longitude);
-            const key = Number(selected.employeeId) + ':' + lat.toFixed(6) + ':' + lon.toFixed(6);
-            const addresses = Array.from(document.querySelectorAll('[data-selected-address]'));
+            const key = employeeId + ':' + lat.toFixed(6) + ':' + lon.toFixed(6);
+            const addresses = Array.from(rail.querySelectorAll('[data-selected-address]'));
             const detailAddress = document.querySelector('[data-selected-detail-address]');
-            if (addresses.length && key !== state.selectedRailAddressKey && Number.isFinite(lat) && Number.isFinite(lon)) {
-                state.selectedRailAddressKey = key;
+            const cache = state.selectedRailAddressCache || (state.selectedRailAddressCache = {});
+            const cached = String(cache[employeeId] || '');
+
+            // Always keep the last successful address visible while the newest GPS
+            // point is being reverse-geocoded. A transient geocoder failure must
+            // never replace a known-good address with "Address unavailable".
+            const paintAddress = function (text, coordsText) {
                 addresses.forEach(function (address) {
                     const strong = address.querySelector('strong');
                     const coords = address.querySelector('[data-selected-coords]');
-                    if (coords) coords.textContent = lat.toFixed(6) + ' · ' + lon.toFixed(6);
-                    if (strong) strong.textContent = 'Resolving current address...';
+                    if (strong && text) strong.textContent = text;
+                    if (coords) coords.textContent = coordsText || (lat.toFixed(6) + ' · ' + lon.toFixed(6));
                 });
-                if (detailAddress) detailAddress.textContent = 'Resolving current address...';
+                if (detailAddress && text) detailAddress.textContent = text;
+            };
+
+            if (cached) {
+                paintAddress(cached, lat.toFixed(6) + ' · ' + lon.toFixed(6));
+            }
+
+            // Keep live telemetry visible even if the selected rail is in a long
+            // marquee and Blazor has just replaced its DOM nodes.
+            const speedNodes = Array.from(rail.querySelectorAll('[data-selected-speed]'));
+            const radiusNodes = Array.from(rail.querySelectorAll('[data-selected-radius]'));
+            const rangeNodes = Array.from(rail.querySelectorAll('[data-selected-range]'));
+            const speed = Number(selected.speedMps ?? selected.SpeedMps) || 0;
+            const radius = Number(selected.allowedRadiusMeters ?? selected.AllowedRadiusMeters) || 0;
+            const distance = Number(selected.distanceMeters ?? selected.DistanceMeters) || 0;
+            const within = Boolean(selected.isWithinAllowedRadius ?? selected.IsWithinAllowedRadius);
+            const movement = String(selected.movementState ?? selected.MovementState ?? 'Stopped');
+            const speedText = (!Number.isFinite(speed) || speed <= 0.15) ? 'Stopped' : ((speed * 3.6) < 1 ? 'Slow' : (speed * 3.6).toFixed(1) + ' km/h');
+            speedNodes.forEach(node => {
+                const strong = node.querySelector('strong');
+                const small = node.querySelector('small');
+                if (strong) strong.textContent = speedText;
+                if (small) small.textContent = movement;
+            });
+            radiusNodes.forEach(node => {
+                const strong = node.querySelector('strong');
+                if (strong) strong.textContent = radius + ' m';
+            });
+            rangeNodes.forEach(node => {
+                const strong = node.querySelector('strong');
+                const small = node.querySelector('small');
+                if (strong) {
+                    strong.textContent = within ? 'Inside range' : 'Outside range';
+                    strong.classList.toggle('text-success', within);
+                    strong.classList.toggle('text-danger', !within);
+                }
+                if (small) small.textContent = (distance < 1000 ? Math.round(distance) + ' m' : (distance / 1000).toFixed(1) + ' km') + ' from shop';
+            });
+
+            if (addresses.length && key !== state.selectedRailAddressKey && Number.isFinite(lat) && Number.isFinite(lon)) {
+                state.selectedRailAddressKey = key;
+                if (!cached) paintAddress('Resolving current address...', lat.toFixed(6) + ' · ' + lon.toFixed(6));
                 const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon) + '&zoom=18&addressdetails=1';
                 const fallbackUrl = 'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + encodeURIComponent(lat) + '&longitude=' + encodeURIComponent(lon) + '&localityLanguage=en';
                 const renderAddress = function (data) {
                     const a = data?.address || {};
-                    const b = data?.localityInfo?.administrative || [];
-                    const adminNames = b.map(x => x?.name).filter(Boolean);
+                    const admin = data?.localityInfo?.administrative || [];
                     const parts = [
                         a.road || data?.locality || data?.localityInfo?.informative?.find?.(x => x?.description === 'road')?.name,
-                        a.neighbourhood || a.suburb || data?.localityInfo?.administrative?.find?.(x => /district|county/i.test(x?.description || ''))?.name,
+                        a.neighbourhood || a.suburb || admin.find?.(x => /district|county/i.test(x?.description || ''))?.name,
                         a.city || a.town || a.village || data?.city || data?.locality,
                         a.state_district,
                         a.state || data?.principalSubdivision,
                         a.postcode || data?.postcode,
                         data?.countryName || a.country
                     ].filter(Boolean);
-                    const unique = [...new Set(parts.map(String))];
-                    return unique.length ? unique.join(', ') : '';
+                    return [...new Set(parts.map(String))].join(', ');
                 };
                 const applyAddress = function (text, displayName) {
                     if (state.selectedRailElement !== rail || state.selectedRailAddressKey !== key) return;
-                    const finalText = text || displayName || ('GPS ' + lat.toFixed(6) + ', ' + lon.toFixed(6));
-                    addresses.forEach(function (address) {
-                        const strong = address.querySelector('strong');
-                        const coords = address.querySelector('[data-selected-coords]');
-                        if (strong) strong.textContent = finalText;
-                        if (coords) coords.textContent = displayName || (lat.toFixed(6) + ' · ' + lon.toFixed(6));
-                    });
-                    if (detailAddress) detailAddress.textContent = finalText;
+                    const finalText = text || displayName || '';
+                    if (!finalText) {
+                        // Preserve the last known address. If none exists, show GPS
+                        // coordinates rather than the misleading "Address unavailable".
+                        if (!cache[employeeId]) paintAddress('GPS ' + lat.toFixed(6) + ', ' + lon.toFixed(6), lat.toFixed(6) + ' · ' + lon.toFixed(6));
+                        return;
+                    }
+                    cache[employeeId] = finalText;
+                    paintAddress(finalText, displayName || (lat.toFixed(6) + ' · ' + lon.toFixed(6)));
                 };
                 fetch(reverseUrl, { headers: { 'Accept': 'application/json' } })
                     .then(r => r.ok ? r.json() : Promise.reject(new Error('primary reverse geocoder failed')))

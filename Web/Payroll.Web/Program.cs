@@ -88,6 +88,9 @@ Environment.SetEnvironmentVariable(
 
 var builder =
     WebApplication.CreateBuilder(options);
+builder.Logging.AddFilter(
+    "Microsoft.EntityFrameworkCore.Model.Validation",
+    LogLevel.Error);
 
 
 // ============================================================
@@ -224,10 +227,31 @@ var sqliteDirectory = Path.GetDirectoryName(sqlitePath);
 if (!string.IsNullOrWhiteSpace(sqliteDirectory))
     Directory.CreateDirectory(sqliteDirectory);
 
+// SQLite is a local compatibility projection shared by the Web process and
+// Attendance worker. WAL + a bounded busy timeout lets readers continue while
+// short writes are committed and prevents transient SQLITE_BUSY/LOCKED errors
+// from immediately surfacing during GPS/attendance bursts.
+try
+{
+    using var sqliteBootstrap = new SqliteConnection(
+        $"Data Source={sqlitePath};Cache=Shared;Default Timeout=30");
+    sqliteBootstrap.Open();
+    using var sqliteCommand = sqliteBootstrap.CreateCommand();
+    sqliteCommand.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;";
+    sqliteCommand.ExecuteNonQuery();
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"SQLite concurrency bootstrap warning: {ex.Message}");
+}
+
 builder.Services.AddDbContextFactory<AppDbContext>((sp, options) =>
 {
-    options.AddInterceptors(sp.GetRequiredService<ApplicationDataChangeInterceptor>());
-    options.UseSqlite($"Data Source={sqlitePath}");
+    options.AddInterceptors(
+        sp.GetRequiredService<ApplicationDataChangeInterceptor>());
+
+    options.UseSqlite(
+        $"Data Source={sqlitePath};Cache=Shared;Default Timeout=30");
 });
 
 

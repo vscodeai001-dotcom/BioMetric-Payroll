@@ -27,16 +27,32 @@ public sealed class FirebaseAdminDashboardService
     {
         var ownerUid = _firebase.ResolveOwnerUid(actorUid, "Admin");
 
+        var indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
+            OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
+        var today = DateOnly.FromDateTime(now);
+        var monthStart = new DateOnly(today.Year, today.Month, 1);
+        var nextMonthStart = monthStart.AddMonths(1);
+
+        // Dashboard KPI reads are deliberately bounded. The previous version
+        // downloaded the complete attendance/shift/summary collections every
+        // time a realtime event refreshed the dashboard. That produced large
+        // repeated Firebase downloads and unnecessary quota consumption.
+        // Attendance is needed only for today's presence; shifts/summaries are
+        // needed only for today's/month's KPI values.
         var results = await Task.WhenAll(
             _firebase.GetOwnerTableAsync(
                 ownerUid,
                 "employees",
                 cancellationToken),
 
-            _firebase.GetOwnerTableAsync(
+            _firebase.GetOwnerTableByChildRangeAsync(
                 ownerUid,
                 "attendance",
-                cancellationToken),
+                "checkInTime",
+                startAt: new DateTimeOffset(DateTime.SpecifyKind(today.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
+                endAt: new DateTimeOffset(DateTime.SpecifyKind(today.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc)).ToUnixTimeMilliseconds() - 1,
+                cancellationToken: cancellationToken),
 
             _firebase.GetOwnerTableAsync(
                 ownerUid,
@@ -48,19 +64,21 @@ public sealed class FirebaseAdminDashboardService
                 "payroll_history",
                 cancellationToken),
 
-            _firebase.GetOwnerTableAsync(
+            _firebase.GetOwnerTableByChildRangeAsync(
                 ownerUid,
                 "shift_schedules",
-                cancellationToken),
+                "shiftDate",
+                startAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                endAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                cancellationToken: cancellationToken),
 
-            _firebase.GetOwnerTableAsync(
+            _firebase.GetOwnerTableByChildRangeAsync(
                 ownerUid,
                 "daily_summaries",
-                cancellationToken),
-
-            _firebase.GetOwnerTrackingLiveAsync(
-                ownerUid,
-                cancellationToken));
+                "shiftDate",
+                startAt: monthStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                endAt: nextMonthStart.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                cancellationToken: cancellationToken));
 
         try
         {
@@ -70,14 +88,12 @@ public sealed class FirebaseAdminDashboardService
             var payroll = Items(results[3]).ToList();
             var shifts = Items(results[4]).ToList();
             var summaries = Items(results[5]).ToList();
-            var tracking = Items(results[6]).ToList();
+            // Live GPS is owned by LiveStaffLocationPanel's Firebase SSE stream.
+            // Do not download tracking/live as part of the KPI dashboard snapshot.
+            var tracking = new List<JsonElement>();
 
-            // Authoritative Dashboard Date: Use India Timezone for the "Current" day
-            // regardless of the Web server's host clock or UTC state.
-            var indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
-                OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
-            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
-            var today = DateOnly.FromDateTime(now);
+            // Authoritative Dashboard Date: calculated above in India Timezone.
+
 
             /*
              * Firebase contains legacy rows from several schema revisions.
@@ -292,9 +308,15 @@ public sealed class FirebaseAdminDashboardService
             return false;
         }
 
+        // Android/Web live records carry both Timestamp (GPS capture time)
+        // and LastUpdatedUtc (server write time). Prefer capture time when it
+        // is valid, but fall back to LastUpdatedUtc. Older live records can
+        // omit Timestamp while still being a healthy ACTIVE session.
         var timestamp =
             String(e, "Timestamp") ??
-            String(e, "timestamp");
+            String(e, "timestamp") ??
+            String(e, "LastUpdatedUtc") ??
+            String(e, "lastUpdatedUtc");
 
         if (DateTimeOffset.TryParse(
                 timestamp,

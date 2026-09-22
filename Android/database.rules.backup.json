@@ -1,0 +1,445 @@
+{
+  "rules": {
+    "employee_sessions": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid",
+        ".validate": "newData.hasChildren(['deviceId','employeeId','ownerUid','uid','lastSeenAt']) && newData.child('uid').val() == $uid && newData.child('ownerUid').val() == auth.token.owner_uid && newData.child('employeeId').val() == auth.token.employee_id"
+      }
+    },
+    ".read": false,
+    ".write": false,
+    "tracking": {
+      "live": {
+        "$employeeId": {
+          ".read": "auth != null && auth.token.owner_uid != null && data.child('OwnerUid').val() == auth.token.owner_uid && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+          ".write": "auth != null && auth.token.owner_uid != null && auth.token.employee_id == $employeeId && newData.child('OwnerUid').val() == auth.token.owner_uid",
+          ".validate": "newData.hasChildren(['EmployeeId','SessionId','OwnerUid','Latitude','Longitude','Timestamp']) && newData.child('EmployeeId').val() == $employeeId && newData.child('OwnerUid').val() == auth.token.owner_uid"
+        }
+      },
+      "history": {
+        "$employeeId": {
+          "$eventId": {
+            ".read": "auth != null && auth.token.owner_uid != null && data.child('OwnerUid').val() == auth.token.owner_uid && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+            ".write": "auth != null && auth.token.owner_uid != null && auth.token.employee_id == $employeeId && !data.exists() && newData.child('OwnerUid').val() == auth.token.owner_uid",
+            ".validate": "newData.hasChildren(['EmployeeId','SessionId','OwnerUid','Latitude','Longitude','Timestamp']) && newData.child('EmployeeId').val() == $employeeId && newData.child('OwnerUid').val() == auth.token.owner_uid"
+          },
+          ".indexOn": [
+            "Timestamp"
+          ]
+        }
+      },
+      "sessions": {
+        "$employeeId": {
+          ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+          "$sessionId": {
+            ".read": "auth != null && auth.token.owner_uid != null && data.child('OwnerUid').val() == auth.token.owner_uid && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+            ".write": "auth != null && auth.token.owner_uid != null && auth.token.employee_id == $employeeId && newData.child('OwnerUid').val() == auth.token.owner_uid",
+            ".validate": "newData.child('EmployeeId').val() == $employeeId && newData.child('SessionId').val() == $sessionId && newData.child('OwnerUid').val() == auth.token.owner_uid"
+          }
+        }
+      }
+    },
+    "mobile_auth_events": {
+      "$employeeId": {
+        "$eventId": {
+          ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+          ".write": "auth != null && auth.token.employee_id == $employeeId && !data.exists() && newData.child('firebaseUid').val() == auth.uid",
+          ".validate": "newData.hasChildren(['eventId','eventType','employeeId','firebaseUid','deviceId','platform','timestamp']) && newData.child('employeeId').val() == $employeeId"
+        }
+      }
+    },
+    "owner_events": {
+      "$ownerUid": {
+        ".read": "auth != null && (auth.token.owner_uid == $ownerUid || auth.uid == $ownerUid)",
+        ".write": false,
+        "$eventId": {
+          ".validate": "newData.hasChildren(['eventId','timestamp','changes'])"
+        },
+        ".indexOn": [
+          "timestamp"
+        ]
+      }
+    },
+    "client_events": {
+      "$employeeId": {
+        ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN' || auth.token.employee_id == $employeeId)",
+        ".write": "auth != null && auth.token.owner_uid != null && auth.token.employee_id == $employeeId && newData.child('ownerUid').val() == auth.token.owner_uid",
+        "$eventId": {
+          ".validate": "newData.hasChildren(['eventId','timestamp','changes','employeeId','ownerUid']) && newData.child('employeeId').val() == $employeeId && newData.child('ownerUid').val() == auth.token.owner_uid"
+        }
+      }
+    },
+    "application_events": {
+      "$eventId": {
+        ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+        ".write": false
+      }
+    },
+    "owners": {
+      "$uid": {
+        ".read": false,
+        ".write": false,
+        "employees": {
+          ".indexOn": [
+            "employeeId",
+            "email",
+            "biometricId"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$employeeId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId || auth.token.employee_id == $employeeId.toDouble())",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".validate": "newData.hasChildren(['employeeId','isActive']) && newData.child('employeeId').val() == $employeeId && newData.child('isActive').isBoolean() && (!newData.child('_entity').exists() || newData.child('_entity').val() == 'Employee') && (!newData.child('_key').exists() || newData.child('_key').val() == $employeeId) && (!newData.child('_revision').exists() || newData.child('_revision').isNumber()) && (!newData.child('_writeId').exists() || newData.child('_writeId').isString()) && (!newData.child('_updatedUtc').exists() || newData.child('_updatedUtc').isString())"
+          }
+        },
+        "attendance": {
+          ".indexOn": [
+            "employeeId",
+            "date"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == newData.child('employeeId').val() && (!data.exists() || data.child('employeeId').val() == auth.token.employee_id)))",
+            ".validate": "newData.child('employeeId').val() == auth.token.employee_id || (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "attendance_punches": {
+          ".indexOn": [
+            "staffId",
+            "date"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'staffId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('staffId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('staffId').val()) || (data.exists() && auth.token.employee_id == data.child('staffId').val() && auth.token.employee_id == newData.child('staffId').val())))",
+            ".validate": "newData.child('staffId').val() != null && ((auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || newData.child('staffId').val() == auth.token.employee_id)"
+          }
+        },
+        "regularizations": {
+          ".indexOn": [
+            "staffId",
+            "employeeId",
+            "date"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'staffId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('staffId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('staffId').val() && newData.child('status').val() === 'Pending'))",
+            ".validate": "newData.hasChildren(['id','staffId','employeeId','date','punchType','requestedTime','reason','status','submittedAt']) && ((auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || (newData.child('staffId').val() == auth.token.employee_id && newData.child('status').val() === 'Pending'))"
+          }
+        },
+        "leave_requests": {
+          ".indexOn": [
+            "staffId",
+            "employeeId",
+            "startDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'staffId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('staffId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('staffId').val() && newData.child('status').val() === 'Pending'))",
+            ".validate": "newData.child('staffId').val() == auth.token.employee_id || (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "resignation_requests": {
+          ".indexOn": [
+            "employeeId",
+            "submissionDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('employeeId').val() && newData.child('status').val() === 'Pending'))",
+            ".validate": "newData.child('employeeId').val() == auth.token.employee_id || (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "shops": {
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "advance_payments": {
+          ".indexOn": [
+            "employeeId",
+            "date"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".validate": "newData.hasChildren(['advanceId','employeeId','amount','date','isRecovered']) && newData.child('employeeId').val() != null && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('date').isNumber()"
+          }
+        },
+        "bonus_records": {
+          ".indexOn": [
+            "employeeId",
+            "bonusDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id.toDouble()))",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".validate": "newData.hasChildren(['bonusId','employeeId','amount','bonusDate','payrollIdPaid']) && newData.child('employeeId').isNumber() && newData.child('employeeId').val() > 0 && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('bonusDate').isNumber()"
+          }
+        },
+        "payroll_history": {
+          ".indexOn": [
+            "employeeId",
+            "payYear",
+            "payMonth"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id.toDouble()))",
+          ".write": false,
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": false
+          }
+        },
+        "payroll_previews": {
+          "$period": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": false
+          }
+        },
+        "payroll_finalization": {
+          "$period": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": false
+          }
+        },
+        "year_end_summaries": {
+          ".indexOn": [
+            "employeeId",
+            "taxYear"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": false,
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": false
+          }
+        },
+        "employee_history": {
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "audit_logs": {
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && !data.exists() && newData.child('userId').val() == auth.uid",
+            ".validate": "newData.hasChildren(['logId','action','module','userId','ownerUid','timestamp']) && newData.child('logId').val() == $id && newData.child('userId').val() == auth.uid && newData.child('ownerUid').val() == $uid && newData.child('action').val().length <= 120 && newData.child('module').val().length <= 120 && (!newData.child('userDisplayName').exists() || newData.child('userDisplayName').val().length <= 200)"
+          }
+        },
+        "recycle_bin": {
+          "$id": {
+            ".read": "auth != null && (auth.token.role === 'SuperAdmin' || auth.token.role === 'SUPER_ADMIN') && (auth.token.owner_uid == $uid || auth.uid == $uid)",
+            ".write": "auth != null && (auth.token.role === 'SuperAdmin' || auth.token.role === 'SUPER_ADMIN') && (auth.token.owner_uid == $uid || auth.uid == $uid)"
+          }
+        },
+        "tracking": {
+          "live": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            "$employeeId": {
+              ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+              ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && auth.token.employee_id == $employeeId && newData.child('OwnerUid').val() == $uid",
+              ".validate": "newData.hasChildren(['EmployeeId','SessionId','OwnerUid','Latitude','Longitude','Timestamp']) && newData.child('EmployeeId').val() == $employeeId && newData.child('OwnerUid').val() == $uid"
+            }
+          },
+          "history": {
+            "$employeeId": {
+              ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+              "$eventId": {
+                ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && auth.token.employee_id == $employeeId && !data.exists()",
+                ".validate": "newData.hasChildren(['EmployeeId','SessionId','OwnerUid','Latitude','Longitude','Timestamp']) && newData.child('EmployeeId').val() == $employeeId && newData.child('OwnerUid').val() == $uid"
+              },
+              ".indexOn": [
+                "Timestamp"
+              ]
+            }
+          },
+          "sessions": {
+            "$employeeId": {
+              ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+              "$sessionId": {
+                ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && auth.token.employee_id == $employeeId",
+                ".validate": "newData.child('EmployeeId').val() == $employeeId && newData.child('SessionId').val() == $sessionId && newData.child('OwnerUid').val() == $uid"
+              }
+            }
+          },
+          "events": {
+            "$employeeId": {
+              "$eventId": {
+                ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN') || auth.token.employee_id == $employeeId)",
+                ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && auth.token.employee_id == $employeeId && !data.exists()",
+                ".validate": "newData.child('employeeId').val() == $employeeId && newData.child('ownerUid').val() == $uid"
+              }
+            }
+          }
+        },
+        "geofences": {
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id != null)",
+          "$geofenceId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id != null)",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".validate": "newData.hasChildren(['id','latitude','longitude','radius']) && newData.child('id').val() == $geofenceId && newData.child('latitude').val() >= -90 && newData.child('latitude').val() <= 90 && newData.child('longitude').val() >= -180 && newData.child('longitude').val() <= 180 && newData.child('radius').val() > 0"
+          }
+        },
+        "tracking_configuration": {
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".validate": "newData.hasChildren(['mode','customStart','customEnd','intervalSeconds','enabled']) && (newData.child('mode').val() == '24/7' || newData.child('mode').val() == 'SHIFT' || newData.child('mode').val() == 'CUSTOM') && newData.child('intervalSeconds').isNumber() && newData.child('intervalSeconds').val() >= 15 && newData.child('intervalSeconds').val() <= 3600"
+        },
+        "shift_schedules": {
+          ".indexOn": [
+            "employeeId",
+            "shiftDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          "$recordId": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".validate": "newData.hasChildren(['scheduleId','employeeId','shiftDate','startTime','endTime','isRecurringPattern','patternDurationDays','appliesToDayOfWeek']) && newData.child('scheduleId').val() == $recordId"
+          }
+        },
+        "feature_settings": {
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id != null)",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && ((auth.token.role === 'SuperAdmin' || auth.token.role === 'SUPER_ADMIN') || ((auth.token.role === 'Admin' || auth.token.role === 'ADMIN') && root.child('owners').child($uid).child('feature_settings').child('AdminCanManageEmployeePermissions').val() == true))",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id != null)",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "salary_snapshots": {
+          ".indexOn": [
+            "employeeId",
+            "periodEnd"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          ".write": false,
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": false
+          }
+        },
+        "daily_summaries": {
+          ".indexOn": [
+            "employeeId",
+            "shiftDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          ".write": false,
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": false
+          }
+        },
+        "salary_payments": {
+          ".indexOn": [
+            "employeeId",
+            "paymentDate"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id))",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "tax_declarations": {
+          ".indexOn": [
+            "employeeId",
+            "financialYear"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id.toDouble()))",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('employeeId').val() && newData.child('status').val() === 'Pending'))",
+            ".validate": "newData.hasChildren(['declarationId','employeeId','financialYear','regime','status','submissionDate']) && newData.child('employeeId').isNumber() && newData.child('financialYear').isNumber() && newData.child('status').isString() && newData.child('status').val().length <= 40"
+          }
+        },
+        "fbp_declarations": {
+          ".indexOn": [
+            "employeeId",
+            "financialYear"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id != null && query.orderByChild == 'employeeId' && query.equalTo == auth.token.employee_id.toDouble()))",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val()))",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (!data.exists() && auth.token.employee_id == newData.child('employeeId').val() && newData.child('status').val() === 'Draft'))",
+            ".validate": "newData.hasChildren(['declarationId','employeeId','financialYear','componentName','annualAllocatedAmount','monthlyAllocatedAmount','status','submissionDate']) && newData.child('employeeId').isNumber() && newData.child('financialYear').isNumber() && newData.child('annualAllocatedAmount').isNumber() && newData.child('monthlyAllocatedAmount').isNumber()"
+          }
+        },
+        "shop_closed_days": {
+          ".indexOn": [
+            "shopId",
+            "date"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid)",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid)",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "company_settings": {
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid)",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "reminders": {
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "counters": {
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        },
+        "employee_portal_changes": {
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id == data.child('employeeId').val())",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && !data.exists() && auth.token.employee_id == newData.child('employeeId').val()"
+          }
+        },
+        "tracking_scopes": {
+          ".indexOn": [
+            "employeeId"
+          ],
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+          "$id": {
+            ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || auth.token.employee_id == data.child('employeeId').val())",
+            ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')"
+          }
+        }
+      }
+    },
+    "user_profiles": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid == $uid || auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+        ".write": "auth != null && (((auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')) || (auth.uid == $uid && newData.child('uid').val() == $uid && newData.child('role').val() == data.child('role').val()))",
+        ".validate": "newData.child('uid').val() == $uid && (((auth.token.role === 'SuperAdmin' || auth.token.role === 'SUPER_ADMIN')) || $uid == auth.uid || (newData.child('role').val() == data.child('role').val() && newData.child('brandingName').val() == data.child('brandingName').val() && newData.child('brandingLogoUrl').val() == data.child('brandingLogoUrl').val()))"
+      },
+      ".read": "auth != null && (auth.token.role === 'Admin' || auth.token.role === 'SuperAdmin' || auth.token.role === 'ADMIN' || auth.token.role === 'SUPER_ADMIN')",
+      ".write": false
+    }
+  }
+}

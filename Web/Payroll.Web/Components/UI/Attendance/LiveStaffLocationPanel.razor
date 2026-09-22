@@ -72,10 +72,10 @@
                             </div>
                             <div class="admin-selected-rail-item address" data-selected-address>
                                 <span class="rail-label">Current Location</span>
-                                <strong>Address unavailable</strong>
+                                <strong>Resolving current address...</strong>
                                 <small data-selected-coords>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small>
                             </div>
-                            <div class="admin-selected-rail-item">
+                            <div class="admin-selected-rail-item speed" data-selected-speed>
                                 <span class="rail-label">Speed</span>
                                 <strong>@FormatSpeed(selectedLocation.SpeedMps)</strong>
                                 <small>@selectedLocation.MovementState</small>
@@ -93,12 +93,17 @@
                             <div class="admin-selected-rail-item">
                                 <span class="rail-label">Shop Distance</span>
                                 <strong>@FormatDistance(selectedLocation.DistanceMeters)</strong>
-                                <small>@selectedLocation.AllowedRadiusMeters m radius</small>
+                                <small>Distance from shop</small>
                             </div>
-                            <div class="admin-selected-rail-item">
-                                <span class="rail-label">Status</span>
-                                <strong class="@(selectedStatus == LocationStatus.Live ? "text-success" : selectedStatus == LocationStatus.Stale ? "text-warning" : "text-muted")">● @GetStatusText(selectedStatus)</strong>
-                                <small>@(selectedLocation.IsWithinAllowedRadius ? "Inside configured radius" : "Outside configured radius")</small>
+                            <div class="admin-selected-rail-item allowed-radius" data-selected-radius>
+                                <span class="rail-label">Allowed Radius</span>
+                                <strong>@selectedLocation.AllowedRadiusMeters m</strong>
+                                <small>Configured geofence</small>
+                            </div>
+                            <div class="admin-selected-rail-item range-status" data-selected-range>
+                                <span class="rail-label">Range</span>
+                                <strong class="@(selectedLocation.IsWithinAllowedRadius ? "text-success" : "text-danger")">@(selectedLocation.IsWithinAllowedRadius ? "Inside range" : "Outside range")</strong>
+                                <small>@FormatDistance(selectedLocation.DistanceMeters) from shop</small>
                             </div>
                             <div class="admin-selected-rail-item">
                                 <span class="rail-label">Last Updated</span>
@@ -113,12 +118,13 @@
                         </div>
                         <div class="admin-selected-employee-rail-set" aria-hidden="true">
                             <div class="admin-selected-rail-item identity"><span class="rail-label">Employee</span><strong>@selectedEmployee.Name</strong><small>#@selectedEmployee.EmployeeID · @(selectedEmployee.Role ?? "Staff")</small></div>
-                            <div class="admin-selected-rail-item address"><span class="rail-label">Current Location</span><strong>Address unavailable</strong><small>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small></div>
-                            <div class="admin-selected-rail-item"><span class="rail-label">Speed</span><strong>@FormatSpeed(selectedLocation.SpeedMps)</strong><small>@selectedLocation.MovementState</small></div>
+                            <div class="admin-selected-rail-item address" data-selected-address><span class="rail-label">Current Location</span><strong>Resolving current address...</strong><small data-selected-coords>@selectedLocation.Latitude.ToString("F6") · @selectedLocation.Longitude.ToString("F6")</small></div>
+                            <div class="admin-selected-rail-item speed" data-selected-speed><span class="rail-label">Speed</span><strong>@FormatSpeed(selectedLocation.SpeedMps)</strong><small>@selectedLocation.MovementState</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">GPS Accuracy</span><strong>@FormatAccuracy(selectedLocation.AccuracyMeters)</strong><small>Precision</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">Tracking / Stay</span><strong>@FormatDuration(GetSessionDuration(selectedLocation))</strong><small>Current GPS session</small></div>
-                            <div class="admin-selected-rail-item"><span class="rail-label">Shop Distance</span><strong>@FormatDistance(selectedLocation.DistanceMeters)</strong><small>@selectedLocation.AllowedRadiusMeters m radius</small></div>
-                            <div class="admin-selected-rail-item"><span class="rail-label">Status</span><strong>● @GetStatusText(selectedStatus)</strong><small>@(selectedLocation.IsWithinAllowedRadius ? "Inside configured radius" : "Outside configured radius")</small></div>
+                            <div class="admin-selected-rail-item"><span class="rail-label">Shop Distance</span><strong>@FormatDistance(selectedLocation.DistanceMeters)</strong><small>Distance from shop</small></div>
+                            <div class="admin-selected-rail-item allowed-radius" data-selected-radius><span class="rail-label">Allowed Radius</span><strong>@selectedLocation.AllowedRadiusMeters m</strong><small>Configured geofence</small></div>
+                            <div class="admin-selected-rail-item range-status" data-selected-range><span class="rail-label">Range</span><strong class="@(selectedLocation.IsWithinAllowedRadius ? "text-success" : "text-danger")">@(selectedLocation.IsWithinAllowedRadius ? "Inside range" : "Outside range")</strong><small>@FormatDistance(selectedLocation.DistanceMeters) from shop</small></div>
                             <div class="admin-selected-rail-item"><span class="rail-label">Last Updated</span><strong>@ToLocalTime(selectedLocation.LastUpdatedUtc).ToString("HH:mm:ss")</strong><small>@selectedLocation.LastUpdatedUtc.ToLocalTime().ToString("dd MMM yyyy")</small></div>
                             <div class="admin-selected-rail-item coordinates"><span class="rail-label">Exact GPS</span><strong>@selectedLocation.Latitude.ToString("F6"), @selectedLocation.Longitude.ToString("F6")</strong><small>Actual GPS point</small></div>
                         </div>
@@ -2981,8 +2987,11 @@
         overflow:hidden;
     }
     .admin-selected-rail-item.identity { min-width:180px; }
-    .admin-selected-rail-item.address { min-width:270px; }
+    .admin-selected-rail-item.address { min-width:270px; max-width:340px; }
     .admin-selected-rail-item.coordinates { min-width:220px; }
+    .admin-selected-rail-item.speed { min-width:145px; }
+    .admin-selected-rail-item.allowed-radius { min-width:150px; }
+    .admin-selected-rail-item.range-status { min-width:160px; }
     .admin-selected-rail-item .rail-label {
         font-size:.58rem;
         line-height:1;
@@ -3215,7 +3224,9 @@
     // into one authoritative employee-node read. This prevents the Web map from
     // treating a partial SSE event as a missing/offline employee.
     private readonly Dictionary<int, CancellationTokenSource> liveEmployeeReconcileCts = new();
+    private readonly Dictionary<int, DateTime> liveEmployeeLastReconcileUtc = new();
     private readonly object liveEmployeeReconcileGate = new();
+    private static readonly TimeSpan LiveEmployeeReconcileMinimumInterval = TimeSpan.FromSeconds(5);
 
     private double playbackSpeed = 1;
 
@@ -3328,16 +3339,49 @@
              * to a new session/employee, fall back to the authoritative DB
              * snapshot. This preserves the existing lifecycle safety rules.
              */
+            var beforeLocationCount = locations.Count;
+            var beforeSessionId = TryGetPayloadEmployeeId(data, out var payloadEmployeeId)
+                ? locations.FirstOrDefault(x => x.EmployeeId == payloadEmployeeId)?.SessionId
+                : null;
+
             if (!TryApplyLocationPayload(data, out var needsAuthoritativeRefresh))
             {
                 needsAuthoritativeRefresh = true;
             }
 
+            var membershipChanged =
+                beforeLocationCount != locations.Count ||
+                (payloadEmployeeId > 0 &&
+                 beforeSessionId.HasValue &&
+                 locations.FirstOrDefault(x => x.EmployeeId == payloadEmployeeId)?.SessionId != beforeSessionId);
+
             if (needsAuthoritativeRefresh)
             {
-                // Session changes are reconciled from EmployeeGpsSessions so an
-                // old session can never remain on the map or replace a newer one.
+                // Session changes are reconciled from the authoritative
+                // Firebase live snapshot so an old session can never remain
+                // on the map or replace a newer one.
                 await RefreshLocations();
+            }
+            else if (membershipChanged)
+            {
+                /*
+                 * IMPORTANT: a Firebase/SignalR GPS event can arrive before
+                 * the first authoritative snapshot has created the Leaflet
+                 * marker. TryApplyLocationPayload intentionally adds that
+                 * employee to the in-memory live collection immediately.
+                 *
+                 * Previously this branch treated every successful payload as
+                 * a normal coordinate update and cleared mapNeedsUpdate, so
+                 * the new employee existed in Blazor state but no marker was
+                 * ever rendered. That produced "No live staff locations" even
+                 * though Firebase was receiving valid ACTIVE GPS points.
+                 *
+                 * Render ONLY the membership/session change. Normal GPS
+                 * coordinate updates continue through the browser Leaflet
+                 * bridge without a Blazor render, so the map does not blink.
+                 */
+                mapNeedsUpdate = true;
+                await InvokeAsync(StateHasChanged);
             }
             else
             {
@@ -4829,6 +4873,15 @@ foreach (var point in ordered)
 
         lock (liveEmployeeReconcileGate)
         {
+            var now = DateTime.UtcNow;
+            if (liveEmployeeLastReconcileUtc.TryGetValue(employeeId, out var last) &&
+                now - last < LiveEmployeeReconcileMinimumInterval)
+            {
+                return;
+            }
+
+            liveEmployeeLastReconcileUtc[employeeId] = now;
+
             if (liveEmployeeReconcileCts.TryGetValue(employeeId, out var previous))
             {
                 try { previous.Cancel(); } catch { }
@@ -4880,37 +4933,20 @@ foreach (var point in ordered)
         {
             await Task.Delay(350);
 
-            var snapshot =
-                await FirebaseRealtime.GetOwnerTrackingLiveAsync(
-                    FirebaseEmployees.OwnerUid);
+            // IMPORTANT: never re-download the complete tracking/live tree here.
+            // Firebase REST SSE commonly emits nested field events such as
+            // live/{employeeId}/Latitude. The previous implementation responded
+            // to those events by GETting the entire owner tracking/live tree, so
+            // one GPS update could create repeated full-tree downloads and was a
+            // major contributor to the Firebase 45+ GB download usage.
+            // Reconcile only this employee node, and throttle it per employee.
+            JsonElement? employeeNode =
+                await FirebaseRealtime.GetOwnerTrackingLiveEmployeeAsync(
+                    FirebaseEmployees.OwnerUid,
+                    employeeId);
 
-            if (!snapshot.HasValue)
+            if (!employeeNode.HasValue)
                 return;
-
-            JsonElement? employeeNode = null;
-            var root = snapshot.Value;
-
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty(
-                    employeeId.ToString(CultureInfo.InvariantCulture),
-                    out var objectNode))
-            {
-                employeeNode = objectNode;
-            }
-            else if (root.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var node in root.EnumerateArray())
-{
-    if (node.ValueKind != JsonValueKind.Object)
-        continue;
-
-    if (GetJsonInt(node, "EmployeeId", "employeeId") == employeeId)
-    {
-        employeeNode = node;
-        break;
-    }
-}
-            }
 
             if (employeeNode.HasValue &&
                 employeeNode.Value.ValueKind == JsonValueKind.Object &&
@@ -6595,6 +6631,7 @@ foreach (var point in ordered)
                 cts.Dispose();
             }
             liveEmployeeReconcileCts.Clear();
+            liveEmployeeLastReconcileUtc.Clear();
         }
 
         /*

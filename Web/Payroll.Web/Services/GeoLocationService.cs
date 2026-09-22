@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.Sqlite;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.SignalR;
@@ -154,7 +155,7 @@ public class GeoLocationService
             session.LastIsWithinAllowedRadius = currentWithin;
         }
 
-        await db.SaveChangesAsync();
+        await SaveChangesWithSqliteRetryAsync(db);
 
         // Notify all dashboards to refresh their authoritative membership
         await _refreshService.NotifyGlobalRefreshAsync("RADIUS_REBASELINED");
@@ -239,7 +240,7 @@ public class GeoLocationService
                 };
 
                 db.EmployeeGpsSessions.Add(session);
-                await db.SaveChangesAsync();
+                await SaveChangesWithSqliteRetryAsync(db);
 
                 // REQUIREMENT: Bind the live marker to the new session ID in Firebase.
                 // This ensures that late location fixes from a previous session
@@ -426,7 +427,7 @@ public class GeoLocationService
                         };
 
                         db.EmployeeGpsSessions.Add(session);
-                        await db.SaveChangesAsync();
+                        await SaveChangesWithSqliteRetryAsync(db);
 
                         await _firebase.BindLiveLocationAsync(
                             employeeId,
@@ -597,7 +598,7 @@ public class GeoLocationService
                     return false;
                 }
 
-                await db.SaveChangesAsync();
+                await SaveChangesWithSqliteRetryAsync(db);
 
                 /*
                  * Firebase is the shared realtime wire for Web + Android.
@@ -736,7 +737,6 @@ public class GeoLocationService
         bool currentLocationState,
         DateTime? overridePunchTime = null)
     {
-        // ...
         var features = await db.FeatureSettings
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == 1);
@@ -750,126 +750,132 @@ public class GeoLocationService
 
         try
         {
+            /*
+             * IMPORTANT:
+             * Automatic geofence attendance is a RADIUS STATE TRANSITION,
+             * not a reconciliation on every GPS fix.
+             *
+             * OUTSIDE -> INSIDE = one IN
+             * INSIDE  -> OUTSIDE = one OUT
+             * INSIDE  -> INSIDE  = no punch
+             * OUTSIDE -> OUTSIDE = no punch
+             *
+             * A null previous state is the first known state for this GPS
+             * session. Establishing OUTSIDE never creates an OUT punch.
+             * Establishing INSIDE may create the initial IN, but only when
+             * the current attendance parity is still OUT.
+             *
+             * If a genuine transition fails because SQLite is temporarily
+             * locked, return false and do NOT advance the session state. The
+             * next GPS fix can retry the same transition without creating
+             * duplicate punches after the first successful save.
+             */
+            var isTransition =
+                previousLocationState.HasValue &&
+                previousLocationState.Value != currentLocationState;
+
+            var isInitialInside =
+                !previousLocationState.HasValue && currentLocationState;
+
+            if (!isTransition && !isInitialInside)
+                return true;
+
             await using var transaction =
                 await db.Database.BeginTransactionAsync();
 
-            await AcquireAttendanceAdvisoryLockAsync(
-                db,
-                employeeId);
+            await AcquireAttendanceAdvisoryLockAsync(db, employeeId);
 
-            // MIRROR: Use original capture time for offline sync reconciliation.
-            // This ensures that if a phone reconnected after 30 mins, the punch
-            // is recorded at the EXACT time the geofence boundary was crossed.
             var punchTime = overridePunchTime.HasValue
-                ? TimeZoneInfo.ConvertTimeFromUtc(overridePunchTime.Value, IndiaTimeZone)
+                ? TimeZoneInfo.ConvertTimeFromUtc(
+                    overridePunchTime.Value,
+                    IndiaTimeZone)
                 : GetIndiaNow();
 
-            var businessDayStart =
-                DateTime.SpecifyKind(
-                    punchTime.Date,
-                    DateTimeKind.Unspecified);
+            var businessDayStart = DateTime.SpecifyKind(
+                punchTime.Date,
+                DateTimeKind.Unspecified);
 
-            var businessDayEnd =
-                DateTime.SpecifyKind(
-                    punchTime.Date.AddDays(1),
-                    DateTimeKind.Unspecified);
+            var businessDayEnd = DateTime.SpecifyKind(
+                punchTime.Date.AddDays(1),
+                DateTimeKind.Unspecified);
 
-            var todaysPunches =
-                await db.AttendanceLogs
-                    .Where(x =>
-                        x.EmployeeID == employeeId &&
-                        x.PunchTime >= businessDayStart &&
-                        x.PunchTime < businessDayEnd)
-                    .OrderBy(x => x.PunchTime)
-                    .ThenBy(x => x.LogID)
-                    .ToListAsync();
+            var todaysPunches = await db.AttendanceLogs
+                .Where(x =>
+                    x.EmployeeID == employeeId &&
+                    x.PunchTime >= businessDayStart &&
+                    x.PunchTime < businessDayEnd)
+                .OrderBy(x => x.PunchTime)
+                .ThenBy(x => x.LogID)
+                .ToListAsync();
 
-            // The existing attendance engine remains untouched: attendance
-            // state is still derived from chronological punch parity.
-            var attendanceCurrentlyOpen =
-                todaysPunches.Count % 2 != 0;
+            var attendanceCurrentlyOpen = todaysPunches.Count % 2 != 0;
+            var punchType = currentLocationState ? "IN" : "OUT";
 
-            var requiredPunchType =
-                currentLocationState
-                    ? "IN"
-                    : "OUT";
-
-            // Attendance state is the safety gate on EVERY valid GPS fix.
-            // This is deliberately reconciliation-based rather than relying
-            // only on a detected GPS transition. It covers: fresh sessions,
-            // reconnects, missed fixes, browser sleep, Android suspension,
-            // legacy sessions with a null LastIsWithinAllowedRadius, and an
-            // employee who starts tracking after already leaving/entering.
-            //
-            //   GPS INSIDE  + attendance OUT -> automatic IN
-            //   GPS OUTSIDE + attendance IN  -> automatic OUT
-            //   GPS INSIDE  + attendance IN  -> no duplicate IN
-            //   GPS OUTSIDE + attendance OUT -> no duplicate OUT
-            //
-            // Once the required parity is reached, every later fix is
-            // naturally idempotent because the same condition becomes true.
-            if (currentLocationState == attendanceCurrentlyOpen)
+            // Initial OUT is only a state initialization, never an OUT punch.
+            if (!currentLocationState && !previousLocationState.HasValue)
+            {
+                await transaction.CommitAsync();
                 return true;
+            }
 
-            /*
-             * BIOMETRIC and explicit MOBILE punches are authoritative.
-             * If one has already been committed close to this transition,
-             * the fallback must not add another event.
-             */
-            var recentAuthoritative =
-                todaysPunches
-                    .Where(IsAuthoritativeAttendancePunch)
-                    .Where(x =>
-                        Math.Abs(
-                            (x.PunchTime - punchTime).TotalSeconds)
-                        <= AuthoritativePunchProtectionSeconds)
-                    .OrderByDescending(x => x.PunchTime)
-                    .FirstOrDefault();
+            // For a real transition, the geofence direction must agree with
+            // the attendance direction before creating a fallback punch.
+            // This prevents a manual/biometric punch from being duplicated.
+            if (currentLocationState == attendanceCurrentlyOpen)
+            {
+                await transaction.CommitAsync();
+                return true;
+            }
+
+            var recentAuthoritative = todaysPunches
+                .Where(IsAuthoritativeAttendancePunch)
+                .Where(x =>
+                    Math.Abs((x.PunchTime - punchTime).TotalSeconds) <=
+                    AuthoritativePunchProtectionSeconds)
+                .OrderByDescending(x => x.PunchTime)
+                .FirstOrDefault();
 
             if (recentAuthoritative != null)
             {
                 _logger.LogInformation(
-                    "Automatic geofence {PunchType} skipped because an authoritative attendance punch already exists. " +
-                    "EmployeeId={EmployeeId}, LogId={LogId}, Device={Device}, Time={PunchTime}",
-                    requiredPunchType,
-                    employeeId,
-                    recentAuthoritative.LogID,
-                    recentAuthoritative.DeviceID,
-                    recentAuthoritative.PunchTime);
+    "Automatic geofence {PunchType} skipped because an authoritative attendance punch already exists. " +
+    "EmployeeId={EmployeeId}, LogId={LogId}, Device={Device}, Time={PunchTime}",
+    punchType,
+    employeeId,
+    recentAuthoritative.LogID,
+    recentAuthoritative.DeviceID,
+    recentAuthoritative.PunchTime);
 
                 await transaction.CommitAsync();
                 return true;
             }
 
-            var log =
-                new AttendanceLog
-                {
-                    EmployeeID = employeeId,
-                    BiometricID = "GEOFENCE_AUTO",
-                    PunchTime = punchTime,
-                    DeviceID = "GeofenceAuto",
-                    LogType = requiredPunchType,
-                    Latitude = latitude,
-                    Longitude = longitude,
-                    IsApproved = true
-                };
+            var log = new AttendanceLog
+            {
+                EmployeeID = employeeId,
+                BiometricID = "GEOFENCE_AUTO",
+                PunchTime = punchTime,
+                DeviceID = "GeofenceAuto",
+                LogType = punchType,
+                Latitude = latitude,
+                Longitude = longitude,
+                IsApproved = true
+            };
 
             db.AttendanceLogs.Add(log);
-            await db.SaveChangesAsync();
+            await SaveChangesWithSqliteRetryAsync(db);
 
-            // REQUIREMENT: Synchronize the new automatic punch to the Firebase SSOT
-            // attendance_punches node. This ensures the Android app observes the
-            // state change immediately without waiting for a background sync.
+            // Firebase synchronization remains secondary to the committed
+            // local attendance transaction and must never create another punch.
             _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
 
-            var result =
-                new GeoPunchResult
-                {
-                    Success = true,
-                    Message =
-                        $"Automatic geofence {requiredPunchType} recorded. " +
-                        $"(Dist: {distanceMeters:F0}m)"
-                };
+            var result = new GeoPunchResult
+            {
+                Success = true,
+                Message =
+    $"Automatic geofence {punchType} recorded. " +
+    $"(Dist: {distanceMeters:F0}m)"
+            };
 
             await SavePunchAuditAsync(
                 db,
@@ -889,12 +895,13 @@ public class GeoLocationService
             await transaction.CommitAsync();
 
             _logger.LogInformation(
-                "Automatic geofence {PunchType} recorded. " +
-                "EmployeeId={EmployeeId}, LogId={LogId}, Distance={Distance}m",
+                "Automatic geofence {PunchType} recorded. EmployeeId={EmployeeId}, LogId={LogId}, Distance={Distance}m, PreviousState={PreviousState}, CurrentState={CurrentState}",
                 requiredPunchType,
                 employeeId,
                 log.LogID,
-                Math.Round(distanceMeters, 1));
+                Math.Round(distanceMeters, 1),
+                previousLocationState?.ToString() ?? "NULL",
+                currentLocationState);
 
             try
             {
@@ -915,8 +922,7 @@ public class GeoLocationService
             {
                 _logger.LogWarning(
                     refreshEx,
-                    "Automatic geofence punch saved but attendance refresh notification failed. " +
-                    "EmployeeId={EmployeeId}, LogId={LogId}",
+                    "Automatic geofence punch saved but attendance refresh notification failed. EmployeeId={EmployeeId}, LogId={LogId}",
                     employeeId,
                     log.LogID);
             }
@@ -925,15 +931,16 @@ public class GeoLocationService
         }
         catch (Exception ex)
         {
-            // Automatic fallback must NEVER break normal GPS tracking.
-            // Record the failure separately so an operator can diagnose a
-            // missing automatic punch from the existing Punch Audit screen.
+            // Automatic fallback must NEVER stop normal GPS tracking. A
+            // transient SQLite lock leaves the previous geofence state intact,
+            // allowing the next GPS fix to retry the same transition.
             _logger.LogError(
                 ex,
-                "Automatic geofence attendance processing failed. " +
-                "EmployeeId={EmployeeId}, SessionId={SessionId}",
+                "Automatic geofence attendance processing failed. EmployeeId={EmployeeId}, SessionId={SessionId}, PreviousState={PreviousState}, CurrentState={CurrentState}",
                 employeeId,
-                sessionId);
+                sessionId,
+                previousLocationState?.ToString() ?? "NULL",
+                currentLocationState);
 
             try
             {
@@ -944,7 +951,7 @@ public class GeoLocationService
                     auditDb,
                     employeeId,
                     sessionId,
-                    DateTime.UtcNow,
+                    overridePunchTime?.ToUniversalTime() ?? DateTime.UtcNow,
                     latitude,
                     longitude,
                     accuracyMeters,
@@ -954,8 +961,8 @@ public class GeoLocationService
                     new GeoPunchResult
                     {
                         Success = false,
-                        Message = $"Automatic geofence {
-                            (currentLocationState ? "IN" : "OUT")} failed: {ex.Message}"
+                        Message =
+                            $"Automatic geofence {requiredPunchType(currentLocationState)} failed: {ex.Message}"
                     },
                     null,
                     "GEOFENCE_AUTO");
@@ -971,6 +978,8 @@ public class GeoLocationService
 
             return false;
         }
+
+        static string requiredPunchType(bool inside) => inside ? "IN" : "OUT";
     }
 
     private static bool IsAuthoritativeAttendancePunch(AttendanceLog log)
@@ -1012,6 +1021,37 @@ public class GeoLocationService
     {
         if (!LocalAdvisoryLocks.TryGetValue(key, out var gate)) return;
         try { gate.Release(); } catch (SemaphoreFullException) { }
+    }
+
+    private static async Task SaveChangesWithSqliteRetryAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken = default)
+    {
+        const int maxAttempts = 5;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                return;
+            }
+            catch (SqliteException ex)
+                when ((ex.SqliteErrorCode == 5 || ex.SqliteErrorCode == 6) &&
+                      attempt < maxAttempts)
+            {
+                // SQLITE_BUSY (5) / SQLITE_LOCKED (6). Another Web/Worker
+                // compatibility-database operation is briefly holding the
+                // table. Wait with bounded exponential backoff instead of
+                // immediately failing the GPS/geofence operation.
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * attempt),
+                    cancellationToken);
+            }
+        }
+
+        // Final attempt propagates the original SQLite exception.
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private static bool? ResolveStableGeofenceState(
@@ -1123,7 +1163,7 @@ public class GeoLocationService
                             ? endReason[..40]
                             : endReason;
 
-                await db.SaveChangesAsync();
+                await SaveChangesWithSqliteRetryAsync(db);
 
                 // Keep the cross-platform Firebase session lifecycle aligned with
                 // the authoritative Web session. This prevents Android from
@@ -1294,7 +1334,7 @@ public class GeoLocationService
                     session.EndReason = safeReason;
                 }
 
-                await db.SaveChangesAsync();
+                await SaveChangesWithSqliteRetryAsync(db);
 
                 // REQUIREMENT: Synchronize session termination to Firebase.
                 // This ensures map markers go offline immediately without
@@ -1461,7 +1501,7 @@ public class GeoLocationService
                 };
 
                 db.AttendanceLogs.Add(log);
-                await db.SaveChangesAsync();
+                await SaveChangesWithSqliteRetryAsync(db);
 
                 // Synchronize to Firebase so the Android app observes the logout punch immediately.
                 _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
@@ -1624,7 +1664,7 @@ public class GeoLocationService
 
             db.EmployeeLocationHistory.Add(record);
 
-            await db.SaveChangesAsync();
+            await SaveChangesWithSqliteRetryAsync(db);
         }
         catch (Exception ex)
         {
@@ -1820,7 +1860,7 @@ public class GeoLocationService
                 });
         }
 
-        await db.SaveChangesAsync();
+        await SaveChangesWithSqliteRetryAsync(db);
 
         // REQUIREMENT: Synchronize the new mobile punch to the Firebase SSOT
         // attendance_punches node.
@@ -1941,7 +1981,7 @@ public class GeoLocationService
             authoritativePunchTime,
             fallback.LogID);
 
-        await db.SaveChangesAsync();
+        await SaveChangesWithSqliteRetryAsync(db);
     }
 
     // ================================================================
@@ -2080,7 +2120,7 @@ public class GeoLocationService
 
             db.GeoPunchAudits.Add(audit);
 
-            await db.SaveChangesAsync();
+            await SaveChangesWithSqliteRetryAsync(db);
 
             // Firebase is the realtime SSOT for connected Web/Android clients.
             // Publish only after the local audit row has committed so the
