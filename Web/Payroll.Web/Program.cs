@@ -88,6 +88,9 @@ Environment.SetEnvironmentVariable(
 
 var builder =
     WebApplication.CreateBuilder(options);
+builder.Logging.AddFilter(
+    "Microsoft.EntityFrameworkCore.Model.Validation",
+    LogLevel.Error);
 
 
 // ============================================================
@@ -226,8 +229,11 @@ if (!string.IsNullOrWhiteSpace(sqliteDirectory))
 
 builder.Services.AddDbContextFactory<AppDbContext>((sp, options) =>
 {
-    options.AddInterceptors(sp.GetRequiredService<ApplicationDataChangeInterceptor>());
-    options.UseSqlite($"Data Source={sqlitePath}");
+    options.AddInterceptors(
+        sp.GetRequiredService<ApplicationDataChangeInterceptor>());
+
+    options.UseSqlite(
+        $"Data Source={sqlitePath}");
 });
 
 

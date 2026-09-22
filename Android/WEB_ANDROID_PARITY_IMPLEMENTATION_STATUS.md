@@ -28,3 +28,10 @@ Updated: 2026-09-22
 - Android-only SSOT.
 - Android-only payroll/attendance calculations.
 - Unrelated Android-only admin screens.
+
+## 2026-09-22 Navigation + Realtime Warning Fix
+- Admin navigation now exposes the Web-parity modules directly from the MainActivity toolbar via `Admin Modules` for Admin/SuperAdmin users.
+- Web-parity modules are grouped into PAYROLL, ATTENDANCE, ADMIN & SETTINGS, LOCATION, and REPORTS & INSIGHTS sections.
+- Firebase RTDB indexes added for `tracking/history/$employeeId.Timestamp` and `owner_events/$ownerUid.timestamp` to prevent unindexed query failures/warnings.
+- Android `MainViewModel` no longer logs expected coroutine cancellation as `Workforce recalculation failed`.
+- Web local SQLite compatibility DbContext now suppresses only EF Core `SchemaConfiguredWarning` for SQLite schema metadata.

@@ -16,6 +16,7 @@ import com.biometric.app.util.DateRangeUtil
 import com.google.firebase.auth.FirebaseAuth
 import com.google.gson.Gson
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -310,6 +311,12 @@ class MainViewModel @Inject constructor(
                     _shopsWorkforceState.value = states
                     _isLoading.value = false
                 }
+            } catch (e: CancellationException) {
+                // repeatOnLifecycle/viewModelScope cancellation is expected when the
+                // screen leaves STARTED state or a newer calculation replaces the
+                // previous one. Do not report normal coroutine cancellation as an
+                // application failure.
+                throw e
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Workforce recalculation failed", e)
                 _isLoading.value = false
