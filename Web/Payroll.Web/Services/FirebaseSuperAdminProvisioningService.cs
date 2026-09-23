@@ -83,13 +83,13 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
         try 
         { 
             using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            opCts.CancelAfter(TimeSpan.FromSeconds(15));
+            opCts.CancelAfter(TimeSpan.FromSeconds(45));
             user = await auth.GetUserByEmailAsync(email, opCts.Token); 
         }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
             using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            opCts.CancelAfter(TimeSpan.FromSeconds(15));
+            opCts.CancelAfter(TimeSpan.FromSeconds(45));
             user = await auth.CreateUserAsync(
                 new UserRecordArgs
                 {

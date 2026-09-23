@@ -198,5 +198,9 @@ namespace Payroll.Shared.Data
         [Column("enable_in_app_notifications")]
         public bool EnableInAppNotifications { get; set; } = true;
 
+        // --- FIREBASE PLAN MODE (Spark = Free/Optimized 80% bandwidth reduction, Blaze = Full) ---
+        [Column("firebase_plan_mode")]
+        public string FirebasePlanMode { get; set; } = "Spark";
+
     }
 }

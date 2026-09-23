@@ -404,7 +404,8 @@
                         // ------------------------------------------------
 
                         await LoadLogs(
-                            autoProcessNewPunches: true);
+                            autoProcessNewPunches: true,
+                            isBackgroundRefresh: true);
 
                         if (
                             !_disposed &&
@@ -538,7 +539,8 @@
     // ============================================================
 
     private async Task LoadLogs(
-     bool autoProcessNewPunches = false)
+        bool autoProcessNewPunches = false,
+        bool isBackgroundRefresh = false)
     {
         if (!startDate.HasValue ||
             !endDate.HasValue)
@@ -546,15 +548,18 @@
             return;
         }
 
-        isLoading = true;
-        _showingCachedAttendance = false;
+        if (!isBackgroundRefresh)
+        {
+            isLoading = true;
+            _showingCachedAttendance = false;
 
-        logs.Clear();
+            logs.Clear();
 
-        cumulative = null;
+            cumulative = null;
 
-        await InvokeAsync(
-            StateHasChanged);
+            await InvokeAsync(
+                StateHasChanged);
+        }
 
         try
         {
@@ -1109,7 +1114,10 @@
         }
         finally
         {
-            isLoading = false;
+            if (!isBackgroundRefresh)
+            {
+                isLoading = false;
+            }
 
             await InvokeAsync(
                 StateHasChanged);
@@ -2374,7 +2382,7 @@
     {
         try
         {
-            await LoadLogs(autoProcessNewPunches: true);
+            await LoadLogs(autoProcessNewPunches: true, isBackgroundRefresh: true);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)

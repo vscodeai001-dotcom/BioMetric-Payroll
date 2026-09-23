@@ -180,10 +180,12 @@ class SignalRManager @Inject constructor(
                 } else ref
             }
 
-        // Keep the canonical live collection synchronized while Admin is open.
-        // This is still Firebase/SSOT data, not Room, and prevents a long-lived
-        // Android Admin process from relying on an old local snapshot.
-        liveRef.keepSynced(true)
+        // Spark Mode Optimization (Option B1): Restrict keepSynced(true) to individual employee node only.
+        // For Admin multi-employee views, do not force offline disk caching of the entire tree to save ~50GB/month bandwidth.
+        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
+        if (isEmployeeRole) {
+            liveRef.keepSynced(true)
+        }
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -427,9 +429,13 @@ class SignalRManager @Inject constructor(
         reconciliationJob?.cancel()
         reconciliationJob = managerScope.launch {
             while (isActive) {
-                delay(15_000L)
+                delay(30_000L)
                 if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
-                    reconcileLiveLocationsNow()
+                    val now = System.currentTimeMillis()
+                    // Spark Mode Optimization (Option B5): Only reconcile if last successful live read was >60s ago
+                    if (now - lastSuccessfulLiveReadAt > 60_000L) {
+                        reconcileLiveLocationsNow()
+                    }
                 }
             }
         }

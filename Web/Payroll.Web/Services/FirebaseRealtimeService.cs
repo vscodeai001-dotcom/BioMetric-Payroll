@@ -1170,7 +1170,49 @@ public sealed class FirebaseRealtimeService
             updates[$"owners/{ownerUid}/tracking/history/{employeeId}/{clientEventId}"] = payload;
         }
 
-        return await UpdateAsync(updates, cancellationToken);
+        var success = await UpdateAsync(updates, cancellationToken);
+
+        // Spark Mode Optimization (Option B2): Purge tracking history entries older than 24 hours
+        if (success && !string.IsNullOrWhiteSpace(ownerUid))
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await PurgeOldTrackingHistoryAsync(ownerUid, employeeId, TimeSpan.FromHours(24));
+                }
+                catch { }
+            });
+        }
+
+        return success;
+    }
+
+    public async Task PurgeOldTrackingHistoryAsync(string ownerUid, int employeeId, TimeSpan maxAge)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid) || employeeId <= 0) return;
+
+        var historyJson = await GetOwnerTrackingHistoryAsync(ownerUid, employeeId, limit: 100);
+        if (historyJson == null || historyJson.Value.ValueKind != JsonValueKind.Object) return;
+
+        var cutoff = DateTime.UtcNow.Subtract(maxAge);
+        var toDelete = new List<string>();
+
+        foreach (var prop in historyJson.Value.EnumerateObject())
+        {
+            if (prop.Value.TryGetProperty("Timestamp", out var tsProp) &&
+                DateTime.TryParse(tsProp.GetString(), out var ts) && ts < cutoff)
+            {
+                toDelete.Add($"owners/{ownerUid.Trim()}/tracking/history/{employeeId}/{prop.Name}");
+                toDelete.Add($"tracking/history/{employeeId}/{prop.Name}");
+            }
+        }
+
+        if (toDelete.Count > 0)
+        {
+            var updates = toDelete.ToDictionary(k => k, v => (object?)null);
+            await UpdateAsync(updates, CancellationToken.None);
+        }
     }
 
 

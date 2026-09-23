@@ -221,6 +221,31 @@ namespace Payroll.AttendanceService
                 using var scope = _serviceProvider.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+                await dbContext.Database.EnsureCreatedAsync(stoppingToken);
+                try
+                {
+                    var connection = dbContext.Database.GetDbConnection();
+                    await connection.OpenAsync(stoppingToken);
+                    await using var cmd = connection.CreateCommand();
+                    cmd.CommandText = "PRAGMA table_info(feature_settings);";
+                    await using var reader = await cmd.ExecuteReaderAsync(stoppingToken);
+                    var hasColumn = false;
+                    while (await reader.ReadAsync(stoppingToken))
+                    {
+                        if (string.Equals(reader.GetString(1), "firebase_plan_mode", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasColumn = true;
+                            break;
+                        }
+                    }
+                    if (!hasColumn)
+                    {
+                        await dbContext.Database.ExecuteSqlRawAsync(
+                            "ALTER TABLE feature_settings ADD COLUMN firebase_plan_mode TEXT DEFAULT 'Spark';", stoppingToken);
+                    }
+                }
+                catch { }
+
                 var settings = await dbContext.FeatureSettings
                     .AsNoTracking()
                     .FirstOrDefaultAsync(x => x.Id == 1, stoppingToken);

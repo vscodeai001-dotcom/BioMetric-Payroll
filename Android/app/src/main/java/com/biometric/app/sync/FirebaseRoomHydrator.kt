@@ -530,6 +530,7 @@ class FirebaseRoomHydrator @Inject constructor(
         adminCanEditSettings = b("adminCanEditSettings", true),
         adminCanManageEmployeePermissions = b("adminCanManageEmployeePermissions", true),
         adminCanManagePunchApprovals = b("adminCanManagePunchApprovals", true),
+        firebasePlanMode = s("firebasePlanMode") ?: s("firebase_plan_mode") ?: "Spark",
         syncState = 1
     )
 

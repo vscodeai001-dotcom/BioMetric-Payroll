@@ -327,6 +327,33 @@ else
                                             </div>
                                         </div>
                                     </div>
+                                    <hr class="my-3 text-muted opacity-25" />
+                                    <div class="mb-1">
+                                        <label class="form-label fw-bold text-warning small mb-2">
+                                            <i class="bi bi-fire me-1"></i> Firebase Plan Mode (Data & Bandwidth Optimization)
+                                        </label>
+                                        <div class="d-flex gap-3 align-items-center">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="planMode" id="planSpark" value="Spark"
+                                                       checked="@(settings.FirebasePlanMode != "Blaze")"
+                                                       @onchange="@(() => settings.FirebasePlanMode = "Spark")" />
+                                                <label class="form-check-label fw-bold text-success small" for="planSpark">
+                                                    ⚡ Spark (Free Tier - 80% Bandwidth Optimized)
+                                                </label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="planMode" id="planBlaze" value="Blaze"
+                                                       checked="@(settings.FirebasePlanMode == "Blaze")"
+                                                       @onchange="@(() => settings.FirebasePlanMode = "Blaze")" />
+                                                <label class="form-check-label fw-bold text-danger small" for="planBlaze">
+                                                    🔥 Blaze (Pay-as-you-go - Full Unrestricted Sync)
+                                                </label>
+                                            </div>
+                                        </div>
+                                        <small class="text-muted d-block mt-1" style="font-size: 0.78rem;">
+                                            Spark mode restricts background live node caching and auto-purges tracking history older than 24h to save up to 80% bandwidth.
+                                        </small>
+                                    </div>
                                 </div>
                             </div>
                         </div>
