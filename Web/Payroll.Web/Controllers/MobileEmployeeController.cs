@@ -543,7 +543,8 @@ public sealed class MobileEmployeeController : ControllerBase
         if (!Guid.TryParse(request.SessionId, out var sessionId) || sessionId == Guid.Empty)
             return BadRequest(new { success = false, message = "A valid GPS session ID is required." });
         if (!double.IsFinite(request.Latitude) || !double.IsFinite(request.Longitude) ||
-            request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180)
+            request.Latitude is < -90 or > 90 || request.Longitude is < -180 or > 180 ||
+            (request.Latitude == 0.0 && request.Longitude == 0.0))
             return BadRequest(new { success = false, message = "Invalid GPS coordinates." });
 
         var distance = await _geo.GetDistanceFromOfficeAsync(request.Latitude, request.Longitude);

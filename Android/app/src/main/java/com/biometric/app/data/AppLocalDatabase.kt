@@ -13,7 +13,7 @@ import com.biometric.app.data.entity.OfflineTrackingEvent
 
 @Database(
     entities = [LocalLocation::class, OfflineTrackingEvent::class, GeofenceLocation::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppLocalDatabase : RoomDatabase() {
@@ -59,13 +59,23 @@ abstract class AppLocalDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add bearing column to offline_locations
+                db.execSQL("ALTER TABLE offline_locations ADD COLUMN bearing REAL NOT NULL DEFAULT 0.0")
+            }
+        }
+
         fun getDatabase(context: Context): AppLocalDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppLocalDatabase::class.java,
                     "biometric_local_db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+                )
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }

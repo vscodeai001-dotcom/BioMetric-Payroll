@@ -60,6 +60,8 @@ class RegularizationActivity : MotionBaseActivity() {
                 requests.clear()
                 requests.addAll(it)
                 binding.rvRequests.adapter?.notifyDataSetChanged()
+                binding.llEmptyState.visibility = if (it.isEmpty()) View.VISIBLE else View.GONE
+                binding.rvRequests.visibility = if (it.isEmpty()) View.GONE else View.VISIBLE
             }
         }
     }

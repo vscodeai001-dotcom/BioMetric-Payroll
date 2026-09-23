@@ -124,11 +124,20 @@ class UserManagementActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    viewModel.isLoading.collectLatest { binding.progressBar.isVisible = it }
+                    viewModel.isLoading.collectLatest { loading ->
+                        binding.progressBar.isVisible = loading
+                        if (loading) {
+                            binding.llEmptyState.isVisible = false
+                        } else {
+                            binding.llEmptyState.isVisible = viewModel.users.value.isEmpty()
+                        }
+                    }
                 }
                 launch {
                     viewModel.users.collectLatest { users ->
                         binding.rvUsers.adapter = UserAdapter(users)
+                        binding.llEmptyState.isVisible = users.isEmpty() && !viewModel.isLoading.value
+                        binding.rvUsers.isVisible = users.isNotEmpty()
                     }
                 }
             }

@@ -336,6 +336,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         var latitude = GetDouble(eventData.Value, "Latitude", "latitude");
         var longitude = GetDouble(eventData.Value, "Longitude", "longitude");
+        if (!double.IsFinite(latitude) || !double.IsFinite(longitude) ||
+            latitude is < -90 or > 90 || longitude is < -180 or > 180 ||
+            (latitude == 0.0 && longitude == 0.0))
+            return;
         var accuracy = GetDouble(eventData.Value, "AccuracyMeters", "accuracyMeters");
         var distance = GetDouble(eventData.Value, "DistanceMeters", "distanceMeters");
         var radius = GetInt(eventData.Value, "AllowedRadiusMeters", "allowedRadiusMeters");
@@ -575,7 +579,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var captured = GetDateTime(eventData.Value, "Timestamp", "timestamp") ?? DateTime.UtcNow;
 
         if (!double.IsFinite(latitude) || !double.IsFinite(longitude) ||
-            latitude is < -90 or > 90 || longitude is < -180 or > 180)
+            latitude is < -90 or > 90 || longitude is < -180 or > 180 ||
+            (latitude == 0.0 && longitude == 0.0))
         {
             _logger.LogWarning(
                 "Rejected Firebase GPS live event with invalid coordinates. EmployeeId={EmployeeId}, SessionId={SessionId}",

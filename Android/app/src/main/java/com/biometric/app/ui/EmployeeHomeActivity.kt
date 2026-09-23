@@ -351,7 +351,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
 
         lifecycleScope.launch {
-            binding.llMapLoading.visibility = View.GONE
+            _binding?.llMapLoading?.visibility = View.GONE
 
             // Requirement: Silently pre-download and cache map tiles for the office zone
             if (officeLat != 0.0) {
@@ -517,64 +517,69 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         }
 
     private fun setupEmployeeMapControls() {
-        binding.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
-        binding.btnEmployeeMapFollow.setOnClickListener {
+        val bInitial = _binding ?: return
+        bInitial.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+        bInitial.btnEmployeeMapFollow.setOnClickListener {
+            val b = _binding ?: return@setOnClickListener
             isAutoFocusEnabled = !isAutoFocusEnabled
-            binding.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+            b.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
             Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
             
             if (isAutoFocusEnabled && currentLat != 0.0) {
-                binding.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
+                b.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
             }
         }
-        binding.btnEmployeeMapRoute.setOnClickListener {
+        bInitial.btnEmployeeMapRoute.setOnClickListener {
+            val b = _binding ?: return@setOnClickListener
             isAutoFocusEnabled = false
-            binding.btnEmployeeMapFollow.alpha = 0.4f
+            b.btnEmployeeMapFollow.alpha = 0.4f
             showRouteToOffice = true
             if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
                 val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
-                createBoundingBox(points)?.let { binding.mapview.zoomToBoundingBox(it, true, 120) }
+                createBoundingBox(points)?.let { b.mapview.zoomToBoundingBox(it, true, 120) }
                 updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
             }
         }
-        binding.btnEmployeeMapOffice.setOnClickListener {
+        bInitial.btnEmployeeMapOffice.setOnClickListener {
+            val b = _binding ?: return@setOnClickListener
             isAutoFocusEnabled = false
             showRouteToOffice = true
             if (officeLat != 0.0 && officeLon != 0.0) {
-                binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
-                binding.mapview.controller.setZoom(16.0)
+                b.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
+                b.mapview.controller.setZoom(16.0)
                 if (currentLat != 0.0) {
                     updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
                 }
             }
         }
-        binding.btnEmployeeMapLayers.setOnClickListener {
-            val next = ((binding.mapview.tag as? Int ?: 0) + 1) % 4
-            binding.mapview.tag = next
+        bInitial.btnEmployeeMapLayers.setOnClickListener {
+            val b = _binding ?: return@setOnClickListener
+            val next = ((b.mapview.tag as? Int ?: 0) + 1) % 4
+            b.mapview.tag = next
             when (next) {
                 0 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    b.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 1 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.USGS_SAT)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    b.mapview.setTileSource(TileSourceFactory.USGS_SAT)
+                    b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 2 -> {
-                    binding.mapview.setTileSource(TileSourceFactory.OpenTopo)
-                    binding.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    b.mapview.setTileSource(TileSourceFactory.OpenTopo)
+                    b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
                 }
                 else -> {
-                    binding.mapview.setTileSource(TileSourceFactory.MAPNIK)
-                    applyDarkThemeFilter(binding.mapview)
+                    b.mapview.setTileSource(TileSourceFactory.MAPNIK)
+                    applyDarkThemeFilter(b.mapview)
                 }
             }
-            binding.mapview.invalidate()
+            b.mapview.invalidate()
         }
         // Full-screen live staff tracking is an Admin/SuperAdmin-only capability.
         // Employee screens retain the existing layout but do not expose this action.
-        binding.btnEmployeeMapFullscreen.visibility = View.GONE
-        binding.btnEmployeeMapFullscreen.setOnClickListener(null)
+        bInitial.btnEmployeeMapFullscreen.visibility = View.GONE
+        bInitial.btnEmployeeMapFullscreen.setOnClickListener(null)
         binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             // Use _binding? (nullable) instead of binding (non-null) to guard against
             // the case where this posted callback runs after onDestroy nulls _binding.

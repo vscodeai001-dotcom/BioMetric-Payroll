@@ -90,9 +90,9 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
                 ?: v.findViewById<View?>(R.id.swipeRefresh) 
                 ?: v.findViewById<View?>(R.id.mainScrollView)
                 ?: v.findViewById<View?>(R.id.rvAttendance)
-                ?: v.findViewById<View?>(R.id.rvWorkforceList)
             
-            val bottomNavigation = v.findViewById<View?>(R.id.bottomNavigation)
+            val bottomNavId = resources.getIdentifier("bottomNavigation", "id", packageName)
+            val bottomNavigation = if (bottomNavId != 0) v.findViewById<View?>(bottomNavId) else null
             
             if (bottomNavigation != null) {
                 val baseBottomPadding = (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)

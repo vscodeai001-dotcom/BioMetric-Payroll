@@ -752,6 +752,11 @@ else if (locationUpdatesStarted) {
             }
         }
 
+        val isAlreadyActive = remoteState.equals("ACTIVE", ignoreCase = true) && sessionId == effectiveSessionId
+        if (isAlreadyActive) {
+            return effectiveSessionId
+        }
+
         val started = firebaseSync.pushTrackingSessionStarted(
             employeeId = employeeId,
             sessionId = effectiveSessionId

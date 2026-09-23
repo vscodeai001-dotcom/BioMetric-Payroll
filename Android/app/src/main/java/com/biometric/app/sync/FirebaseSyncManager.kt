@@ -628,23 +628,8 @@ class FirebaseSyncManager @Inject constructor(
                     Log.d("FirebaseSyncManager", "Legacy tracking/sessions write skipped: ${legacyEx.message}")
                 }
 
-                // If live marker can be safely bound, update it safely with full tenant identity.
-                // If it fails (e.g. coordinates required by validation rules), do not fail session start;
-                // the first GPS location update will establish the complete live marker.
-                try {
-                    val liveBinding = mapOf(
-                        "EmployeeId" to employeeId,
-                        "SessionId" to sessionId,
-                        "OwnerUid" to ownerUid,
-                        "State" to "ACTIVE",
-                        "Sequence" to 0L,
-                        "LastUpdatedUtc" to payload["StartedAtUtc"]
-                    )
-                    getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(liveBinding).await()
-                    getGlobalRef().child("tracking/live/$employeeId").updateChildren(liveBinding).await()
-                } catch (liveEx: Exception) {
-                    Log.d("FirebaseSyncManager", "Live marker initial binding deferred until first GPS fix: ${liveEx.message}")
-                }
+                // Live marker is established exclusively by pushLiveLocation when genuine
+                // GPS coordinates are available, preventing Null Island (0,0) phantom triggers.
             }
             committed
         } catch (e: Exception) {

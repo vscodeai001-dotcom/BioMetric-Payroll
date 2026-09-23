@@ -283,84 +283,11 @@ class SignalRManager @Inject constructor(
                     )
                 }
 
-                // LIVE is authoritative only when the corresponding durable
-                // Firebase GPS session is ACTIVE. A stale live node can survive
-                // briefly after logout/session termination, so never let the map
-                // infer LIVE from a GPS point alone. Validate every live marker
-                // against owners/{ownerUid}/tracking/sessions/{employeeId}/{sessionId}.
-                val validationOwnerUid = ownerUid
-                val generation = ++liveSnapshotGeneration
-                val previousKnown = lastOwnerLiveLocations
-
-                managerScope.launch {
-                    val activeLocations = mutableMapOf<Int, LiveLocation>()
-
-                    for ((employeeId, location) in locations) {
-                        if (!isActive) break
-
-                        val stateResult = runCatching {
-                            firebaseSync.getGlobalRef()
-                                .child("owners")
-                                .child(validationOwnerUid)
-                                .child("tracking")
-                                .child("sessions")
-                                .child(employeeId.toString())
-                                .child(location.sessionId)
-                                .get()
-                                .await()
-                                .child("State")
-                                .getValue(String::class.java)
-                        }
-
-                        val state = stateResult.getOrNull()
-
-                        when {
-                            state.equals("ACTIVE", ignoreCase = true) -> {
-                                activeLocations[employeeId] = location
-                            }
-
-                            state.equals("ENDED", ignoreCase = true) ||
-                                state.equals("OFFLINE", ignoreCase = true) -> {
-                                // Confirmed terminal state. Remove from LIVE.
-                            }
-
-                            else -> {
-                                // Transient read/auth/network failure. Preserve
-                                // the last known-good ACTIVE session when the
-                                // employee/session still match.
-                                val previous = previousKnown[employeeId]
-
-                                if (previous != null &&
-                                    previous.sessionId.equals(
-                                        location.sessionId,
-                                        ignoreCase = true
-                                    )
-                                ) {
-                                    activeLocations[employeeId] = previous
-                                }
-                            }
-                        }
-                    }
-
-                    if (activeOwnerUid == validationOwnerUid &&
-                        generation == liveSnapshotGeneration) {
-                        // If current live nodes exist but all durable-session reads
-                        // failed transiently, retain the exact previous map rather
-                        // than flashing the Admin screen to zero live employees.
-                        // Confirmed ACTIVE/ENDED responses still win normally.
-                        val resolved = if (activeLocations.isEmpty() &&
-                            locations.isNotEmpty() &&
-                            previousKnown.isNotEmpty()) {
-                            previousKnown.filterKeys { locations.containsKey(it) }
-                        } else {
-                            activeLocations
-                        }
-
-                        lastOwnerLiveLocations = resolved.toMap()
-                        withContext(Dispatchers.Main.immediate) {
-                            publishOwnerScopedLocations(lastOwnerLiveLocations)
-                        }
-                    }
+                // Web Parity: tracking/live snapshot is the real-time SSOT.
+                // Publish active locations immediately without blocking secondary network loops.
+                lastOwnerLiveLocations = locations.toMap()
+                managerScope.launch(Dispatchers.Main.immediate) {
+                    publishOwnerScopedLocations(lastOwnerLiveLocations)
                 }
             }
 
@@ -777,13 +704,27 @@ class SignalRManager @Inject constructor(
         )
     }
 
-    private fun parseTrackingTimestamp(value: String?): Long = runCatching {
-        val patterns = listOf("yyyy-MM-dd'T'HH:mm:ss.SSSX", "yyyy-MM-dd'T'HH:mm:ssX", "yyyy-MM-dd'T'HH:mm:ss.SSS", "yyyy-MM-dd'T'HH:mm:ss")
+    fun parseTrackingTimestamp(value: String?): Long = runCatching {
+        if (value.isNullOrBlank()) return 0L
+        value.toLongOrNull()?.let { return it }
+        runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()?.let { return it }
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+            "yyyy-MM-dd'T'HH:mm:ssX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSSS",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss"
+        )
         patterns.firstNotNullOfOrNull { pattern ->
             runCatching {
                 java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
                     if (!pattern.endsWith("X")) timeZone = java.util.TimeZone.getTimeZone("UTC")
-                }.parse(value ?: "")?.time
+                }.parse(value)?.time
             }.getOrNull()
         } ?: 0L
     }.getOrDefault(0L)
