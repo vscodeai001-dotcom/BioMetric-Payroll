@@ -576,8 +576,10 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         binding.btnEmployeeMapFullscreen.visibility = View.GONE
         binding.btnEmployeeMapFullscreen.setOnClickListener(null)
         binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            binding.mapview.post {
-                binding.mapview.invalidate()
+            // Use _binding? (nullable) instead of binding (non-null) to guard against
+            // the case where this posted callback runs after onDestroy nulls _binding.
+            _binding?.mapview?.post {
+                _binding?.mapview?.invalidate()
             }
         }
     }

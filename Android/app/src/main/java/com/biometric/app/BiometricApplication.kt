@@ -52,10 +52,12 @@ class BiometricApplication : Application(), Configuration.Provider {
         // Firebase disk persistence MUST be configured before any FirebaseDatabase
         // reference/listener is touched. Hilt injection happens in super.onCreate()
         // and can trigger singleton constructors that touch Firebase.
+        // Firebase disk persistence is intentionally disabled.
+        // Room serves as the local cache; Firebase persistence on large RTDB datasets
+        // triggers DefaultPersistenceManager.runInTransaction → ChildrenNode.getHashRepresentation
+        // which allocates unbounded StringBuilder memory → OOM crash loop on startup.
         runCatching {
-            val firebaseDatabase = FirebaseDatabase.getInstance()
-            firebaseDatabase.setPersistenceEnabled(true)
-            firebaseDatabase.setPersistenceCacheSizeBytes(20 * 1024 * 1024)
+            FirebaseDatabase.getInstance().setPersistenceEnabled(false)
         }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
 
         super.onCreate()

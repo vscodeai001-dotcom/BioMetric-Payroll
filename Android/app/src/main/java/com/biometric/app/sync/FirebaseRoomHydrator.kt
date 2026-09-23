@@ -173,7 +173,14 @@ class FirebaseRoomHydrator @Inject constructor(
 
             override fun onCancelled(error: DatabaseError) {
                 if (error.code == DatabaseError.PERMISSION_DENIED) {
-                    Log.w("FirebaseRoomHydrator", "Listen at $table cancelled: Permission denied (will not rebind)")
+                    // PERMISSION_DENIED can happen during a custom-token race:
+                    // the native Firebase Auth token is restored on cold-start
+                    // before the custom token (owner_uid/role claims) is minted.
+                    // Schedule a delayed rebind to give the custom token time to
+                    // propagate (typically 5-10 seconds after login).
+                    Log.w("FirebaseRoomHydrator",
+                        "Listen at $table cancelled: Permission denied — scheduling token-recovery rebind")
+                    scheduleRebind("$table PERMISSION_DENIED — custom token race recovery")
                     return
                 }
                 // Firebase listeners can be cancelled by an expired/rotated auth
@@ -191,15 +198,17 @@ class FirebaseRoomHydrator @Inject constructor(
                         delay(2000L)
                         writeMutex.withLock {
                             runCatching {
-                                val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
-                                val staleSynced = existing().asSequence()
-                                    .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
-                                    .map { it.first }
-                                    .toList()
-                                
-                                if (staleSynced.isNotEmpty()) {
-                                    Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
-                                    staleSynced.forEach { onDelete(it) }
+                                if (snapshot.exists() && snapshot.childrenCount > 0) {
+                                    val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                                    val staleSynced = existing().asSequence()
+                                        .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
+                                        .map { it.first }
+                                        .toList()
+                                    
+                                    if (staleSynced.isNotEmpty()) {
+                                        Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
+                                        staleSynced.forEach { onDelete(it) }
+                                    }
                                 }
                             }.onFailure { error ->
                                 Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
@@ -213,6 +222,8 @@ class FirebaseRoomHydrator @Inject constructor(
                 }
             })
         }
+        // CRITICAL: Attach the ChildEventListener to Firebase reference so onChildAdded/onChildChanged fire!
+        ref.addChildEventListener(listener)
         // Keep the ChildEventListener alive for the application lifetime.
         listeners += ref to listener
     }
@@ -546,7 +557,8 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
                 if (error.code == DatabaseError.PERMISSION_DENIED) {
-                    Log.w("FirebaseRoomHydrator", "Listen at payroll_history cancelled: Permission denied (will not rebind)")
+                    Log.w("FirebaseRoomHydrator", "Listen at payroll_history cancelled: Permission denied — scheduling recovery rebind")
+                    scheduleRebind("payroll_history PERMISSION_DENIED — custom token recovery")
                     return
                 }
                 scheduleRebind("payroll_history cancelled: ${error.message}")
@@ -587,7 +599,8 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
                 if (error.code == DatabaseError.PERMISSION_DENIED) {
-                    Log.w("FirebaseRoomHydrator", "Listen at shift_schedules cancelled: Permission denied (will not rebind)")
+                    Log.w("FirebaseRoomHydrator", "Listen at shift_schedules cancelled: Permission denied — scheduling recovery rebind")
+                    scheduleRebind("shift_schedules PERMISSION_DENIED — custom token recovery")
                     return
                 }
                 scheduleRebind("shift_schedules cancelled: ${error.message}")
@@ -616,7 +629,8 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
                 if (error.code == DatabaseError.PERMISSION_DENIED) {
-                    Log.w("FirebaseRoomHydrator", "Listen at $table cancelled: Permission denied (will not rebind)")
+                    Log.w("FirebaseRoomHydrator", "Listen at $table cancelled: Permission denied — scheduling recovery rebind")
+                    scheduleRebind("$table PERMISSION_DENIED — custom token recovery")
                     return
                 }
                 scheduleRebind("realtime table cancelled: ${error.message}")

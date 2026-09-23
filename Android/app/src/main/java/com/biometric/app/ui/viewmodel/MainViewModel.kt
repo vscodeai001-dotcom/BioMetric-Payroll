@@ -279,8 +279,8 @@ class MainViewModel @Inject constructor(
                     val currentYear = nowCal.get(Calendar.YEAR)
                     val currentMonth = nowCal.get(Calendar.MONTH) + 1
                     val summariesThisMonth = summaries.filter { 
-                        val sDate = it.shiftDate.split("-")
-                        if (sDate.size == 3) {
+                        val sDate = it.shiftDate?.split("-")
+                        if (sDate != null && sDate.size == 3) {
                             sDate[0].toIntOrNull() == currentYear && sDate[1].toIntOrNull() == currentMonth
                         } else false
                     }
