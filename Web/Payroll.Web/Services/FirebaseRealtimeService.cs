@@ -1132,6 +1132,7 @@ public sealed class FirebaseRealtimeService
         int allowedRadiusMeters = 0,
         bool isWithinAllowedRadius = false,
         DateTime? sessionStartedUtc = null,
+        double distanceMeters = 0.0,
         CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0 || sessionId == Guid.Empty || string.IsNullOrWhiteSpace(clientEventId))
@@ -1144,6 +1145,7 @@ public sealed class FirebaseRealtimeService
             ["Latitude"] = latitude,
             ["Longitude"] = longitude,
             ["AccuracyMeters"] = Math.Max(0, accuracyMeters),
+            ["DistanceMeters"] = Math.Max(0, distanceMeters),
             ["SpeedMps"] = Math.Max(0, speedMps),
             ["Sequence"] = sequence,
             ["Timestamp"] = DateTimeOffset.FromUnixTimeMilliseconds(capturedAtUnixMs).UtcDateTime.ToString("O"),

@@ -423,6 +423,38 @@ class SignalRManager @Inject constructor(
                 }
             }
         }
+
+        reconciliationJob?.cancel()
+        reconciliationJob = managerScope.launch {
+            while (isActive) {
+                delay(15_000L)
+                if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
+                    reconcileLiveLocationsNow()
+                }
+            }
+        }
+
+        realtimeHealthJob?.cancel()
+        realtimeHealthJob = managerScope.launch {
+            var lastTokenRefresh = System.currentTimeMillis()
+            while (isActive) {
+                delay(30_000L)
+                if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) continue
+
+                val now = System.currentTimeMillis()
+                if (now - lastTokenRefresh >= AUTH_TOKEN_REFRESH_INTERVAL_MS) {
+                    runCatching {
+                        FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()
+                        lastTokenRefresh = now
+                    }
+                }
+
+                val lastReadAge = now - lastSuccessfulLiveReadAt
+                if (lastSuccessfulLiveReadAt > 0L && lastReadAge > LIVE_READ_HEALTH_TIMEOUT_MS) {
+                    reconcileLiveLocationsNow()
+                }
+            }
+        }
     }
 
     private fun scheduleStartRetry() {
@@ -687,6 +719,18 @@ class SignalRManager @Inject constructor(
 
         fun string(vararg names: String): String = any(*names)?.toString().orEmpty()
 
+        val lastUpdatedStr = string("LastUpdatedUtc", "lastUpdatedUtc").takeIf { it.isNotBlank() }
+        val timestampStr = string("Timestamp", "timestamp").takeIf { it.isNotBlank() }
+        val effectiveTimestamp = when {
+            lastUpdatedStr != null && timestampStr != null -> {
+                val tLastUpdated = parseTrackingTimestamp(lastUpdatedStr)
+                val tTimestamp = parseTrackingTimestamp(timestampStr)
+                if (tLastUpdated >= tTimestamp) lastUpdatedStr else timestampStr
+            }
+            lastUpdatedStr != null -> lastUpdatedStr
+            else -> timestampStr
+        }
+
         return FirebaseLiveLocation(
             EmployeeId = int("EmployeeId", "employeeId"),
             SessionId = string("SessionId", "sessionId"),
@@ -696,8 +740,7 @@ class SignalRManager @Inject constructor(
             DistanceMeters = double("DistanceMeters", "distanceMeters"),
             AllowedRadiusMeters = int("AllowedRadiusMeters", "allowedRadiusMeters"),
             IsWithinAllowedRadius = bool("IsWithinAllowedRadius", "isWithinAllowedRadius"),
-            Timestamp = string("Timestamp", "timestamp").takeIf { it.isNotBlank() }
-                ?: string("LastUpdatedUtc", "lastUpdatedUtc").takeIf { it.isNotBlank() },
+            Timestamp = effectiveTimestamp,
             SpeedMps = double("SpeedMps", "speedMps"),
             Bearing = double("Bearing", "bearing"),
             MovementState = string("MovementState", "movementState")

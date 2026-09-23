@@ -157,6 +157,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var selectedRailAddressLat: Double? = null
     private var selectedRailAddressLon: Double? = null
     private var selectedRailAddressJob: Job? = null
+    private var standbyRefreshJob: Job? = null
 
     private val driveManager by lazy { GoogleDriveManager(this) }
     private var tvLastSynced: TextView? = null
@@ -785,6 +786,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val employeeData = sharedViewModel.allEmployees.value
             val firebaseEmployeeData = signalR.ownerEmployees.value
 
+            val liveOpCount = locations.count { getLocStatus(it) == "Live" }
+            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else (firebaseEmployeeData.size.takeIf { it > 0 } ?: locations.size.coerceAtLeast(1))
+            b.tvAdminMapLiveCount.text = "$liveOpCount Live / $totalCount"
+
             // Firebase can repeat the same parent snapshot. Avoid rebuilding
             // marker windows/routes and invalidating OSMDroid surface when
             // the visible state has not changed.
@@ -934,6 +939,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 }
 
                 val office = officeMarker?.position
+                    ?: viewModel.companySettings.value?.let { s ->
+                        if (s.officeLatitude != 0.0 && s.officeLongitude != 0.0) GeoPoint(s.officeLatitude, s.officeLongitude) else null
+                    }
                 val liveDistanceMeters = if (office != null) {
                     distanceBetween(office, point).toDouble()
                 } else {
@@ -970,10 +978,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 adminMapAutoCentered = true
                 dashboardMap.tag = markerCount
             }
-
-            val liveOpCount = locations.count { getLocStatus(it) == "Live" }
-            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else (firebaseEmployeeData.size.takeIf { it > 0 } ?: locations.size.coerceAtLeast(1))
-            b.tvAdminMapLiveCount.text = "$liveOpCount Live / $totalCount"
 
             val selectedRailLoc = adminFollowingEmployeeId?.let { id -> locations.firstOrNull { it.employeeId == id } }
             if (selectedRailLoc != null) {
@@ -1055,9 +1059,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                                 }
                             }
                             is SignalRManager.SyncEvent.LocationChanged -> {
-                                // liveLocations is already the authoritative Firebase
-                                // realtime stream. The Flow collector coalesces GPS
-                                // bursts, so do not render a second time here.
+                                updateAdminMarkers(signalR.liveLocations.value.values.toList())
                             }
                             is SignalRManager.SyncEvent.SessionStarted -> {
                                 Log.d("MainActivity", "New GPS session detected: ${event.employeeId}. Updating live map. 🛰️")
@@ -1199,7 +1201,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         _binding?.adminMapView?.post { _binding?.adminMapView?.invalidate() }
         checkBatteryOptimizations()
 
-        lifecycleScope.launch {
+        standbyRefreshJob?.cancel()
+        standbyRefreshJob = lifecycleScope.launch {
             // Anti-Inactivity: Stagger to avoid UI jank on resume
             delay(400)
             _binding?.let {
@@ -1210,15 +1213,33 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 // the realtime manager is already running.
                 signalR.reconcileLiveLocationsNow()
             }
+
+            // Standby live updater: Re-evaluates marker status (Live/Stale/Offline)
+            // and reconciles live locations every 15s while the Admin screen is active.
+            while (isActive) {
+                delay(15_000L)
+                if (isFinishing || isDestroyed) break
+                _binding?.let {
+                    val currentLocs = signalR.liveLocations.value.values.toList()
+                    if (currentLocs.isNotEmpty()) {
+                        updateAdminMarkers(currentLocs)
+                    }
+                    signalR.reconcileLiveLocationsNow()
+                }
+            }
         }
     }
 
     override fun onPause() {
         super.onPause()
+        standbyRefreshJob?.cancel()
+        standbyRefreshJob = null
         _binding?.adminMapView?.onPause()
     }
 
     override fun onDestroy() {
+        standbyRefreshJob?.cancel()
+        standbyRefreshJob = null
         adminRoadRouteJobs.values.forEach { it.cancel() }
         adminRoadRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }

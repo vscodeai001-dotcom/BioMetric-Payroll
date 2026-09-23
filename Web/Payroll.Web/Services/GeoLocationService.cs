@@ -714,7 +714,8 @@ public class GeoLocationService
                         new DateTimeOffset(captureTime).ToUnixTimeMilliseconds(),
                         allowedRadiusMeters,
                         session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,
-                        session.StartedAtUtc);
+                        session.StartedAtUtc,
+                        safeDistance);
                 }
                 catch (Exception firebaseEx)
                 {
