@@ -255,10 +255,17 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
     private fun startTrackingConfigurationGuard() {
-        trackingConfigListener = trackingConfiguration.startRealtimeListener { config -> applyTrackingConfiguration(config) }
+        trackingConfigListener = runCatching {
+            trackingConfiguration.startRealtimeListener { config -> applyTrackingConfiguration(config) }
+        }.getOrNull()
         serviceScope.launch {
-            val config = trackingConfiguration.load()
-            applyTrackingConfiguration(config)
+            runCatching {
+                val config = trackingConfiguration.load()
+                applyTrackingConfiguration(config)
+            }.onFailure { e ->
+                Log.w("TrackingService", "Failed to load tracking config, using cached: ${e.message}")
+                applyTrackingConfiguration(trackingConfiguration.cached())
+            }
         }
     }
 

@@ -72,14 +72,18 @@ class BiometricApplication : Application(), Configuration.Provider {
 
         fun startRealtimeInfrastructure() {
             if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return
+            val role = sessionStore.userRole().trim().uppercase()
+            val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
             realtimeScope.launch {
                 delay(150)
                 if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return@launch
 
-                adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-                firebaseRoomHydrator.start()
-                runCatching { firebaseReconnectCoordinator.start() }
-                    .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+                if (isAdmin) {
+                    adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                    firebaseRoomHydrator.start()
+                    runCatching { firebaseReconnectCoordinator.start() }
+                        .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+                }
                 runCatching { signalRManager.start() }
                     .onFailure { Log.w("BiometricApplication", "Firebase realtime manager start skipped", it) }
             }

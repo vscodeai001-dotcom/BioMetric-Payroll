@@ -309,7 +309,7 @@
           }
         },
         "tracking_configuration": {
-          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')) || auth.token.employee_id != null)",
           ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
           ".validate": "newData.hasChildren(['mode','customStart','customEnd','intervalSeconds','enabled']) && (newData.child('mode').val() == '24/7' || newData.child('mode').val() == 'SHIFT' || newData.child('mode').val() == 'CUSTOM') && newData.child('intervalSeconds').isNumber() && newData.child('intervalSeconds').val() >= 15 && newData.child('intervalSeconds').val() <= 3600"
         },
@@ -452,7 +452,7 @@
           ".indexOn": [
             "employeeId"
           ],
-          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
+          ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')) || auth.token.employee_id != null)",
           ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
           "$id": {
             ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')) || auth.token.employee_id == data.child('employeeId').val())",

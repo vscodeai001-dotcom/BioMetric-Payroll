@@ -293,8 +293,6 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                     updateRangeStatus()
                                 }
                             }
-                            is SignalRManager.SyncEvent.BonusChanged,
-                            is SignalRManager.SyncEvent.TaxDeclarationChanged,
                             is SignalRManager.SyncEvent.LocationChanged -> {
                                 val currentEmpId = sessionStore.employeeId()
                                 signalR.liveLocations.value[currentEmpId]?.let { loc ->
@@ -304,6 +302,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                                         updateMapMarkers()
                                     }
                                 }
+                            }
+                            is SignalRManager.SyncEvent.BonusChanged,
+                            is SignalRManager.SyncEvent.TaxDeclarationChanged -> {
                                 sharedViewModel.warmUpDashboard()
                                 loadDashboard()
                             }
@@ -1166,6 +1167,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     updateMapMarkers()
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) return@launch
                 Log.e("EmployeeHome", "Firebase dashboard load failed", e)
                 _binding?.let { b ->
                     // Keep cached/local UI visible during offline mode.

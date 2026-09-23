@@ -48,10 +48,14 @@ class TrackingConfigurationRepository @Inject constructor(
     }
 
     suspend fun load(): Config {
-        val snapshot = firebaseSync.getOwnerRef()?.child(PATH)?.get()?.await()
-        val config = snapshot?.let { parse(it) } ?: cached()
-        cache(config)
-        return config
+        return runCatching {
+            val snapshot = firebaseSync.getOwnerRef()?.child(PATH)?.get()?.await()
+            val config = snapshot?.let { parse(it) } ?: cached()
+            cache(config)
+            config
+        }.getOrElse {
+            cached()
+        }
     }
 
     suspend fun save(config: Config) {

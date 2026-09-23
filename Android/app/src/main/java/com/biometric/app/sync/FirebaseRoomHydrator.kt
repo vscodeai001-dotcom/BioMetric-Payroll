@@ -77,6 +77,13 @@ class FirebaseRoomHydrator @Inject constructor(
     fun start() {
         if (!firebaseSync.isAuthenticated()) return
 
+        val role = sessionStore.userRole().trim().uppercase()
+        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        if (!isAdmin) {
+            Log.i("FirebaseRoomHydrator", "Skipping Admin Room hydration for role=$role")
+            return
+        }
+
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
 
         if (activeOwnerUid == ownerUid && listeners.isNotEmpty()) return
@@ -664,6 +671,10 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun scheduleRebind(reason: String) {
         if (!sessionStore.isLoggedIn() || !firebaseSync.isAuthenticated()) return
+        val role = sessionStore.userRole().trim().uppercase()
+        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        if (!isAdmin) return
+
         synchronized(this) {
             if (reconnectJob?.isActive == true) return
             reconnectJob = scope.launch {

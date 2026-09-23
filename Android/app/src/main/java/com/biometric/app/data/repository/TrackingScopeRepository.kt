@@ -125,8 +125,10 @@ class TrackingScopeRepository @Inject constructor(
 
     private suspend fun load(type: String, id: String): Assignment? {
         if (id.isBlank()) return null
-        val snapshot = firebaseSync.getOwnerRef()?.child("tracking_scopes")?.child(type)?.child(id)?.get()?.await() ?: return null
-        return if (snapshot.exists()) parseAssignment(snapshot) else null
+        return runCatching {
+            val snapshot = firebaseSync.getOwnerRef()?.child("tracking_scopes")?.child(type)?.child(id)?.get()?.await() ?: return@runCatching null
+            if (snapshot.exists()) parseAssignment(snapshot) else null
+        }.getOrNull()
     }
 
     private fun parseAssignment(s: DataSnapshot): Assignment? = if (!s.exists()) null else Assignment(

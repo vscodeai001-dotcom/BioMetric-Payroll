@@ -61,8 +61,20 @@ abstract class AppLocalDatabase : RoomDatabase() {
 
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Add bearing column to offline_locations
-                db.execSQL("ALTER TABLE offline_locations ADD COLUMN bearing REAL NOT NULL DEFAULT 0.0")
+                var columnExists = false
+                val cursor = db.query("PRAGMA table_info(offline_locations)")
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIndex != -1 && cursor.getString(nameIndex) == "bearing") {
+                        columnExists = true
+                        break
+                    }
+                }
+                cursor.close()
+
+                if (!columnExists) {
+                    db.execSQL("ALTER TABLE offline_locations ADD COLUMN bearing REAL NOT NULL DEFAULT 0.0")
+                }
             }
         }
 
