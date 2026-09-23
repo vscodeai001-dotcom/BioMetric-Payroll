@@ -11,6 +11,7 @@
 @inject IToastService toastService
 @inject IJSRuntime JSRuntime
 @inject FeatureCleanUpService CleanerService
+@inject Payroll.Web.Services.DatabaseBackupRestoreService BackupService
 @inject ILogger<FeatureToggleManager> _logger
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
@@ -602,29 +603,166 @@ else
             @* ====================================================================================== *@
             @if (userIsSuperAdmin)
             {
-             <div class="@(activeTab == "danger" ? "" : "d-none")">
-                    <h5 class="text-danger mb-3 border-bottom border-danger pb-2">Danger Zone</h5>
-                    
-                    <div class="row g-3">
-                      <div class="col-md-6">
-                            <div class="card border-danger h-100 shadow-sm">
-                                <div class="card-body text-center">
-                                    <i class="bi bi-arrow-counterclockwise text-danger fs-1 mb-2"></i>
-                                    <h6 class="fw-bold">Reset Feature Toggles</h6>
-                                    <p class="small text-muted mb-3">Revert all settings on this page to factory defaults.</p>
-                                    <button class="btn btn-outline-danger w-100" @onclick="ConfirmResetToggles">Reset Toggles</button>
+                <div class="@(activeTab == "danger" ? "" : "d-none")">
+                    <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                        <div>
+                            <h5 class="text-danger mb-0 fw-bold"><i class="bi bi-shield-exclamation me-2"></i>Database Backups & Danger Zone</h5>
+                            <small class="text-muted">Manage full local backups, automated hourly backups, cloud restore, and system data wipe.</small>
+                        </div>
+                        <span class="badge bg-success-subtle text-success border border-success-subtle px-3 py-2">
+                            <i class="bi bi-clock-history me-1"></i>Hourly Auto-Backup: Active
+                        </span>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        @* 1. BACKUP DATA *@
+                        <div class="col-md-3">
+                            <div class="card border-primary h-100 shadow-sm">
+                                <div class="card-body text-center d-flex flex-column justify-content-between">
+                                    <div>
+                                        <i class="bi bi-cloud-arrow-down text-primary fs-1 mb-2 d-block"></i>
+                                        <h6 class="fw-bold">Backup Database Locally</h6>
+                                        <p class="small text-muted mb-3">Creates an instant, non-blocking local snapshot of the SQLite database.</p>
+                                    </div>
+                                    <button class="btn btn-primary w-100 fw-bold" @onclick="CreateManualBackup" disabled="@(isBackingUp || isRestoring || isWiping)">
+                                        <i class="bi @(isBackingUp ? "bi-arrow-repeat spin" : "bi-download") me-1"></i>
+                                        @(isBackingUp ? "Creating..." : "Backup Data Now")
+                                    </button>
                                 </div>
                             </div>
                         </div>
-                         <div class="col-md-6">
-                            <div class="card bg-danger text-white h-100 shadow-sm">
-                                <div class="card-body text-center">
-                                    <i class="bi bi-database-x fs-1 mb-2"></i>
-                                    <h6 class="fw-bold">Wipe All Data</h6>
-                                    <p class="small mb-3" style="opacity:0.9">Permanently delete employees, logs, payroll, and users. Cannot be undone.</p>
-                                    <button class="btn btn-light text-danger w-100 fw-bold" @onclick="ConfirmWipeData">Wipe Data</button>
+
+                        @* 2. RESET TOGGLES *@
+                        <div class="col-md-3">
+                            <div class="card border-secondary h-100 shadow-sm">
+                                <div class="card-body text-center d-flex flex-column justify-content-between">
+                                    <div>
+                                        <i class="bi bi-arrow-counterclockwise text-secondary fs-1 mb-2 d-block"></i>
+                                        <h6 class="fw-bold">Reset Feature Toggles</h6>
+                                        <p class="small text-muted mb-3">Revert all feature toggles and admin permissions to factory defaults.</p>
+                                    </div>
+                                    <button class="btn btn-outline-secondary w-100 fw-bold" @onclick="ConfirmResetToggles" disabled="@(isBackingUp || isRestoring || isWiping)">Reset Toggles</button>
                                 </div>
                             </div>
+                        </div>
+
+                        @* 3. PARTIAL WIPE (KEEP ADMIN SETTINGS & EMPLOYEES) *@
+                        <div class="col-md-3">
+                            <div class="card border-warning h-100 shadow-sm">
+                                <div class="card-body text-center d-flex flex-column justify-content-between">
+                                    <div>
+                                        <i class="bi bi-database-dash text-warning fs-1 mb-2 d-block"></i>
+                                        <h6 class="fw-bold text-warning-emphasis">Partial Wipe (Operational)</h6>
+                                        <p class="small text-muted mb-3">Wipes logs, tracking, attendance & payroll. <strong>Keeps</strong> Employees, Company, Holidays & Users.</p>
+                                    </div>
+                                    <button class="btn btn-warning w-100 fw-bold text-dark" @onclick="ConfirmPartialWipeData" disabled="@(isBackingUp || isRestoring || isWiping)">
+                                        <i class="bi @(isWiping ? "bi-arrow-repeat spin" : "bi-eraser-fill") me-1"></i>
+                                        @(isWiping ? "Wiping..." : "Partial Wipe")
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        @* 4. FULL WIPE ALL DATA *@
+                        <div class="col-md-3">
+                            <div class="card bg-danger text-white h-100 shadow-sm">
+                                <div class="card-body text-center d-flex flex-column justify-content-between">
+                                    <div>
+                                        <i class="bi bi-database-x fs-1 mb-2 d-block"></i>
+                                        <h6 class="fw-bold">Full Factory Wipe</h6>
+                                        <p class="small mb-3" style="opacity:0.9">Permanently wipe employees, logs, GPS & payroll from <strong>Local & Cloud</strong>. Preserves Admin login.</p>
+                                    </div>
+                                    <button class="btn btn-light text-danger w-100 fw-bold" @onclick="ConfirmWipeData" disabled="@(isBackingUp || isRestoring || isWiping)">
+                                        <i class="bi @(isWiping ? "bi-arrow-repeat spin" : "bi-trash3-fill") me-1"></i>
+                                        @(isWiping ? "Wiping..." : "Full Wipe")
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    @* BACKUPS & RESTORE TABLE *@
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+                            <div class="fw-bold text-dark">
+                                <i class="bi bi-archive-fill text-primary me-2"></i>Available Backups & Restore to Cloud
+                                <span class="badge bg-secondary ms-2">@backups.Count</span>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadBackups" disabled="@isLoadingBackups">
+                                <i class="bi bi-arrow-clockwise me-1 @(isLoadingBackups ? "spin" : "")"></i>Refresh List
+                            </button>
+                        </div>
+                        <div class="card-body p-0">
+                            @if (isLoadingBackups)
+                            {
+                                <div class="p-4 text-center text-muted">
+                                    <span class="spinner-border spinner-border-sm me-2"></span>Loading backups...
+                                </div>
+                            }
+                            else if (backups.Count == 0)
+                            {
+                                <div class="p-4 text-center text-muted">
+                                    <i class="bi bi-folder-x display-6 d-block mb-2"></i>
+                                    No backups found yet. Click <strong>"Backup Data Now"</strong> to create your first backup.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-hover align-middle mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Created Time (IST)</th>
+                                                <th>Backup File</th>
+                                                <th>Type</th>
+                                                <th>Size</th>
+                                                <th class="text-end pe-3">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var b in backups)
+                                            {
+                                                <tr>
+                                                    <td>
+                                                        <i class="bi bi-clock me-1 text-muted"></i>
+                                                        <strong>@FormatBackupTime(b.CreatedAtUtc)</strong>
+                                                    </td>
+                                                    <td>
+                                                        <code class="small">@b.FileName</code>
+                                                    </td>
+                                                    <td>
+                                                        @if (b.TriggerType.Equals("HourlyAuto", StringComparison.OrdinalIgnoreCase))
+                                                        {
+                                                            <span class="badge bg-info-subtle text-info border border-info-subtle"><i class="bi bi-robot me-1"></i>Hourly Auto</span>
+                                                        }
+                                                        else if (b.TriggerType.Equals("PreWipeSafety", StringComparison.OrdinalIgnoreCase))
+                                                        {
+                                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle"><i class="bi bi-shield-lock me-1"></i>Pre-Wipe Safety</span>
+                                                        }
+                                                        else if (b.TriggerType.Equals("PreRestoreSafety", StringComparison.OrdinalIgnoreCase))
+                                                        {
+                                                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle"><i class="bi bi-shield me-1"></i>Pre-Restore Safety</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle"><i class="bi bi-person me-1"></i>Manual</span>
+                                                        }
+                                                    </td>
+                                                    <td>@b.FormattedSize</td>
+                                                    <td class="text-end pe-3">
+                                                        <button class="btn btn-sm btn-outline-success me-1" @onclick="() => ConfirmRestore(b.FileName)" disabled="@(isRestoring || isBackingUp || isWiping)" title="Restore to Local DB and sync to Firebase Cloud">
+                                                            <i class="bi bi-cloud-arrow-up-fill me-1"></i>@(isRestoring ? "Restoring..." : "Restore to Cloud")
+                                                        </button>
+                                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteBackup(b.FileName)" disabled="@(isRestoring || isBackingUp || isWiping)" title="Delete backup">
+                                                            <i class="bi bi-trash"></i>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
                         </div>
                     </div>
                 </div>
@@ -643,7 +781,13 @@ else
     private string activeTab = "modules";
     private bool userIsSuperAdmin = false;
     private bool authCheckCompleted = false;
-    
+
+    private List<Payroll.Web.Services.BackupMetadata> backups = new();
+    private bool isLoadingBackups = false;
+    private bool isBackingUp = false;
+    private bool isRestoring = false;
+    private bool isWiping = false;
+
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthState.GetAuthenticationStateAsync();
@@ -657,6 +801,103 @@ else
         
         authCheckCompleted = true;
         await LoadAllSettings();
+
+        if (userIsSuperAdmin)
+        {
+            await LoadBackups();
+        }
+    }
+
+    private async Task LoadBackups()
+    {
+        isLoadingBackups = true;
+        try
+        {
+            backups = await BackupService.GetBackupsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load backups list.");
+        }
+        finally
+        {
+            isLoadingBackups = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task CreateManualBackup()
+    {
+        isBackingUp = true;
+        try
+        {
+            var meta = await BackupService.CreateBackupAsync("Manual");
+            toastService.ShowSuccess($"Backup created successfully ({meta.FormattedSize}).");
+            await LoadBackups();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Manual backup failed.");
+            toastService.ShowError($"Backup failed: {ex.Message}");
+        }
+        finally
+        {
+            isBackingUp = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ConfirmRestore(string fileName)
+    {
+        var confirmMsg = $"WARNING: Restoring backup '{fileName}' will replace current local database records and push all restored data to Firebase Cloud. A safety backup will be taken first. Continue?";
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", confirmMsg)) return;
+
+        isRestoring = true;
+        try
+        {
+            var result = await BackupService.RestoreBackupAsync(fileName);
+            if (result.Success)
+            {
+                toastService.ShowSuccess($"Restore completed! Restored {result.CloudRecordsRestored} records to Cloud. Safety backup: {result.SafetyBackupFileName}");
+                await LoadAllSettings();
+                await LoadBackups();
+            }
+            else
+            {
+                toastService.ShowError($"Restore failed: {result.ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Restore failed for {FileName}", fileName);
+            toastService.ShowError($"Restore failed: {ex.Message}");
+        }
+        finally
+        {
+            isRestoring = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteBackup(string fileName)
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"Delete backup '{fileName}'?")) return;
+        var deleted = await BackupService.DeleteBackupAsync(fileName);
+        if (deleted)
+        {
+            toastService.ShowSuccess("Backup deleted.");
+            await LoadBackups();
+        }
+        else
+        {
+            toastService.ShowError("Could not delete backup.");
+        }
+    }
+
+    private string FormatBackupTime(DateTime utcTime)
+    {
+        var ist = utcTime.AddHours(5).AddMinutes(30);
+        return ist.ToString("dd-MMM-yyyy hh:mm:ss tt");
     }
     
     private async Task LoadAllSettings()
@@ -735,22 +976,71 @@ else
         await LoadAllSettings();
     }
 
+    private async Task ConfirmPartialWipeData()
+    {
+        var msg1 = "WARNING: Partial Wipe will permanently delete all attendance logs, punches, GPS tracking history, payroll records, salary advances, and leave requests from BOTH Local DB and Firebase Cloud.\n\nAll Admin Settings (Employee Records, Company Settings, Holiday Management, User & Role Management, and Feature Toggles) WILL BE KEPT.\n\nA safety backup will be created automatically before wiping. Proceed?";
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", msg1)) return;
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", "FINAL CONFIRMATION: Wipe operational data (keeping Admin Settings & Employees)?")) return;
+
+        isWiping = true;
+        try
+        {
+            var result = await BackupService.WipeOperationalDataOnlyAsync();
+            if (result.Success)
+            {
+                try { await JSRuntime.InvokeVoidAsync("attendanceCache.clear"); } catch { }
+                toastService.ShowSuccess($"Operational data wiped from Local DB and Firebase Cloud! (Admin settings & Employees preserved). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
+                await LoadAllSettings();
+                await LoadBackups();
+            }
+            else
+            {
+                toastService.ShowError($"Partial wipe failed: {result.ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Partial wipe failed");
+            toastService.ShowError($"Partial wipe failed: {ex.Message}");
+        }
+        finally
+        {
+            isWiping = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task ConfirmWipeData()
     {
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "WARNING: Wipe ALL data?")) return;
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "FINAL WARNING: This cannot be undone. Confirm?")) return;
-        try {
-            await CleanerService.WipeAllTransactionalDataAsync();
+        var msg1 = "DANGER: Full Factory Wipe will permanently delete ALL employees, logs, GPS history, payroll, and transactional records from BOTH Local Database and Firebase Cloud.\n\nOnly the SuperAdmin login and system configuration will be preserved.\n\nA safety backup will be created automatically before wiping. Proceed?";
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", msg1)) return;
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", "FINAL CONFIRMATION: Are you absolutely certain you want to wipe ALL employees and operational data?")) return;
 
-            // Wipe uses direct SQL/TRUNCATE, so EF SaveChanges interception
-            // cannot publish the realtime invalidation. Publish explicitly
-            // after the transaction succeeds.
-            await AttendanceRefresh.NotifyGlobalRefreshAsync("SYSTEM_DATA_WIPED");
-
-            toastService.ShowSuccess("System reset.");
-        } catch (Exception ex) {
-             toastService.ShowError("Wipe failed.");
-            _logger.LogError(ex, "Wipe failed");
+        isWiping = true;
+        try
+        {
+            var result = await BackupService.WipeAllDataAsync();
+            if (result.Success)
+            {
+                try { await JSRuntime.InvokeVoidAsync("attendanceCache.clear"); } catch { }
+                toastService.ShowSuccess($"Full system wipe completed! (Local DB and Firebase Cloud). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
+                await LoadAllSettings();
+                await LoadBackups();
+            }
+            else
+            {
+                toastService.ShowError($"Full wipe failed: {result.ErrorMessage}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Full wipe failed");
+            toastService.ShowError($"Full wipe failed: {ex.Message}");
+        }
+        finally
+        {
+            isWiping = false;
+            StateHasChanged();
         }
     }
 }

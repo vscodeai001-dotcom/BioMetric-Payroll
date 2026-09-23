@@ -813,3 +813,99 @@ body.dark .manual-punch-empty-state {
 body.dark .manual-punch-empty-state em {
     color: #aeb9c6 !important;
 }
+
+/* =========================================================
+   SUPERADMIN TENANT CONTEXT BANNER & MULTI-TENANT PORTAL
+   ========================================================= */
+
+.superadmin-context-banner {
+    position: sticky;
+    top: 0;
+    z-index: 1040;
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
+    color: #ffffff;
+    border-bottom: 2px solid #f59e0b;
+    padding: 0.5rem 0;
+    font-size: 0.875rem;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    animation: fadeInSlideDown 0.3s ease-out;
+}
+
+@keyframes fadeInSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tenant-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+}
+
+.tenant-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12) !important;
+}
+
+.tenant-emoji-badge {
+    width: 52px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 12px;
+    background-color: #f8fafc;
+    flex-shrink: 0;
+}
+
+.tenant-info-box {
+    background-color: #f8fafc;
+    border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.tenant-kpi-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.tenant-kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18) !important;
+}
+
+/* Dark Mode Support for Multi-Tenant Portal */
+body.dark .tenant-card {
+    background-color: #1e242c !important;
+    border-color: #333d4b !important;
+    color: #e2e8f0 !important;
+}
+
+body.dark .tenant-card h5 {
+    color: #f8fafc !important;
+}
+
+body.dark .tenant-emoji-badge {
+    background-color: #262e39 !important;
+    border-color: #3b4554 !important;
+}
+
+body.dark .tenant-info-box {
+    background-color: #242c37 !important;
+    border-color: #384252 !important;
+    color: #cbd5e1 !important;
+}
+
+body.dark .tenant-info-box strong {
+    color: #f1f5f9 !important;
+}
+
+body.dark .superadmin-context-banner {
+    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #0f172a 100%) !important;
+    border-bottom-color: #fbbf24 !important;
+}
+

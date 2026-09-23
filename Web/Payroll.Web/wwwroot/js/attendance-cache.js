@@ -48,15 +48,17 @@ window.attendanceCache = (function () {
         });
     }
 
-    async function remove(key) {
-        const db = await openDb();
-        return new Promise(function (resolve, reject) {
-            const tx = db.transaction(STORE_NAME, 'readwrite');
-            tx.objectStore(STORE_NAME).delete(key);
-            tx.oncomplete = function () { resolve(); };
-            tx.onerror = function () { reject(tx.error || new Error('Attendance cache delete failed')); };
-        });
+    async function clear() {
+        try {
+            const db = await openDb();
+            return new Promise(function (resolve, reject) {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).clear();
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error || new Error('Attendance cache clear failed')); };
+            });
+        } catch (_) { }
     }
 
-    return { initialize: initialize, set: set, get: get, remove: remove };
+    return { initialize: initialize, set: set, get: get, remove: remove, clear: clear };
 })();

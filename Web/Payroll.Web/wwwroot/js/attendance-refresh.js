@@ -319,6 +319,37 @@ window.attendanceRefresh = (function () {
                             connection.on("ExitChanged", onExitChanged);
                             connection.on("GlobalRefresh", onGlobalRefresh);
                             connection.on("SessionInvalidated", onSessionInvalidated);
+
+                            connection.onreconnected(function (connectionId) {
+                                console.log("SignalR realtime reconnected:", connectionId);
+                                notifyListeners('AttendanceChanged', {});
+                                notifyViewer();
+                            });
+                            connection.onclose(function (error) {
+                                console.warn("SignalR connection closed. Scheduling auto-reconnect...", error);
+                                scheduleRetry();
+                            });
+
+                            if (!window.__payrollRealtimeHeartbeatBound) {
+                                window.__payrollRealtimeHeartbeatBound = true;
+                                function checkAndHealConnection() {
+                                    if (connection && connection.state === window.signalR.HubConnectionState.Disconnected) {
+                                        console.log("Auto-healing disconnected SignalR connection...");
+                                        connection.start().then(function () {
+                                            notifyListeners('AttendanceChanged', {});
+                                            notifyViewer();
+                                        }).catch(scheduleRetry);
+                                    } else if (connection && connection.state === window.signalR.HubConnectionState.Connected) {
+                                        notifyViewer();
+                                    }
+                                }
+                                window.addEventListener("visibilitychange", function () {
+                                    if (document.visibilityState === "visible") checkAndHealConnection();
+                                });
+                                window.addEventListener("focus", checkAndHealConnection);
+                                window.addEventListener("online", checkAndHealConnection);
+                                setInterval(checkAndHealConnection, 120000);
+                            }
                         }
 
                         if (connection.state !== window.signalR.HubConnectionState.Connected) {

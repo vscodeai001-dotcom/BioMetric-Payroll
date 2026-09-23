@@ -1521,18 +1521,22 @@
                         p => p.PunchTime)
                     .ToListAsync();
 
-            var summaries =
+            var summaryList =
                 await dbContext.DailySummaries
                     .AsNoTracking()
                     .Where(
                         s =>
                             s.ShiftDate >= dStart &&
                             s.ShiftDate <= dEnd)
+                    .ToListAsync();
+
+            var summaries =
+                summaryList
                     .GroupBy(s => $"{s.EmployeeID}:{s.ShiftDate:yyyy-MM-dd}")
                     // Legacy/compatibility data can contain duplicate summaries
                     // for the same employee/day. Keep the newest SummaryID rather
                     // than failing the entire attendance synchronization pass.
-                    .ToDictionaryAsync(
+                    .ToDictionary(
                         g => g.Key,
                         g => g.OrderByDescending(s => s.SummaryID).First());
 

@@ -109,6 +109,8 @@ public class AppDbContext
         get; set;
     }
 
+    public DbSet<CompanyTenant> CompanyTenants { get; set; }
+
 
     // ============================================================
     // MODEL CONFIGURATION
@@ -118,6 +120,21 @@ public class AppDbContext
         ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+
+        // ========================================================
+        // COMPANY TENANT CONFIGURATION
+        // ========================================================
+
+        builder.Entity<CompanyTenant>(entity =>
+        {
+            entity.ToTable("CompanyTenants");
+            entity.HasKey(x => x.Id);
+            entity.HasIndex(x => x.TenantId).IsUnique();
+            entity.HasIndex(x => x.CompanyCode).IsUnique();
+            entity.HasIndex(x => x.AdminEmail);
+            entity.HasIndex(x => x.AdminUserId);
+        });
 
 
         // ========================================================

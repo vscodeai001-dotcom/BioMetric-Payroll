@@ -371,7 +371,7 @@ namespace Payroll.Shared.Services
                     total +=
                         outTime - inTime;
                 }
-                else
+                else if (outTime < inTime)
                 {
                     LogInvalidPunchPair(
                         punches,

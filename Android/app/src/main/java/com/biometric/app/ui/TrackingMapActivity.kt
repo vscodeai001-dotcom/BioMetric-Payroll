@@ -62,6 +62,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.Polygon
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import javax.inject.Inject
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -454,6 +455,36 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnMapToolsToggle.setOnClickListener {
             setMapControlsVisible(!mapControlsVisible)
         }
+
+        // Google Maps-style Vertical Floating Navigation Widget Actions
+        binding.btnZoomIn.setOnClickListener {
+            binding.mapview.controller.zoomIn()
+        }
+
+        binding.btnZoomOut.setOnClickListener {
+            binding.mapview.controller.zoomOut()
+        }
+
+        binding.btnCompass.setOnClickListener {
+            binding.mapview.mapOrientation = 0.0f
+            binding.mapview.invalidate()
+            Toast.makeText(this, "Orientation Reset to North 🧭", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnRecenterStaff.setOnClickListener {
+            val empId = followingEmployeeId
+            val empLoc = if (empId != null) signalR.liveLocations.value[empId] else signalR.liveLocations.value.values.firstOrNull()
+            if (empLoc != null) {
+                binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
+                binding.mapview.controller.setZoom(17.0)
+                Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"}", Toast.LENGTH_SHORT).show()
+            } else if (officeLat != 0.0 && officeLon != 0.0) {
+                binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
+                binding.mapview.controller.setZoom(16.0)
+                Toast.makeText(this, "Centered on Office 🏢", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         // Controls are explicitly expanded/minimized by the persistent Tools
         // button. They never appear because of hover or disappear by timeout.
         setMapControlsVisible(false)
@@ -548,6 +579,10 @@ class TrackingMapActivity : MotionBaseActivity() {
             setUseDataConnection(true)
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
+            val rotationGestureOverlay = RotationGestureOverlay(this).apply {
+                isEnabled = true
+            }
+            overlays.add(rotationGestureOverlay)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             minZoomLevel = 3.0
             maxZoomLevel = 20.0

@@ -208,9 +208,9 @@ builder.Services.AddSingleton<
 builder.Services.AddSingleton<
     ApplicationDataChangeInterceptor>();
 
-// Background service broadcasting location health for admin dashboards
 builder.Services.AddHostedService<LocationHealthService>();
 builder.Services.AddHostedService<GpsSessionCleanupHostedService>();
+builder.Services.AddHostedService<HourlyAutoBackupHostedService>();
 
 
 // ============================================================
@@ -382,8 +382,14 @@ builder.Services.AddScoped<
     FeatureCleanUpService>();
 
 builder.Services.AddScoped<
+    DatabaseBackupRestoreService>();
+
+builder.Services.AddScoped<
     EmployeeDeletionService>();
 
+builder.Services.AddScoped<ITenantContextService, TenantContextService>();
+builder.Services.AddScoped<TenantContextService>();
+builder.Services.AddScoped<TenantManagementService>();
 
 builder.Services.AddHttpContextAccessor();
 
@@ -844,6 +850,16 @@ try
         }
     }
     catch { }
+
+    try
+    {
+        var tenantManager = scope.ServiceProvider.GetRequiredService<TenantManagementService>();
+        await tenantManager.EnsureDefaultTenantSeededAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Failed to seed default tenant on startup.");
+    }
 
     if (sqliteIntegrity.Recreated)
     {

@@ -334,7 +334,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             var isSuperAdmin =
                 await _userManager.IsInRoleAsync(
                     user,
-                    "SuperAdmin");
+                    "SuperAdmin") ||
+                string.Equals(email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase);
 
             var hasKnownRole =
                 isEmployee ||
@@ -635,6 +636,11 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     Url.IsLocalUrl(ReturnUrl))
                 {
                     return LocalRedirect(ReturnUrl);
+                }
+
+                if (isSuperAdmin)
+                {
+                    return LocalRedirect("/superadmin/tenants");
                 }
 
                 return LocalRedirect("/");

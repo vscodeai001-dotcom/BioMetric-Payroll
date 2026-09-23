@@ -148,6 +148,30 @@
                  class="admin-live-map">
             </div>
 
+            <!-- Google Maps-style Floating Navigation Controls Widget -->
+            <div class="payroll-map-floating-nav" data-map-nav-for="@mapId">
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'zoom-in')" title="Zoom In" aria-label="Zoom In">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'zoom-out')" title="Zoom Out" aria-label="Zoom Out">
+                    <i class="bi bi-dash-lg"></i>
+                </button>
+                <div class="floating-nav-divider"></div>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'recenter')" title="Recenter Selected / Staff" aria-label="Recenter Target">
+                    <i class="bi bi-crosshair2"></i>
+                </button>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'office')" title="Focus Office" aria-label="Focus Office">
+                    <i class="bi bi-building"></i>
+                </button>
+                <div class="floating-nav-divider"></div>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'fit')" title="Fit All Staff" aria-label="Fit All Staff">
+                    <i class="bi bi-bounding-box"></i>
+                </button>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'layer')" title="Switch Map Layer" aria-label="Switch Map Layer">
+                    <i class="bi bi-layers"></i>
+                </button>
+            </div>
+
             <!-- Leaflet zoom controls are moved by JavaScript into the horizontal
                  bottom map toolbar. The host remains only for initialization. -->
             <div id="@($"{mapId}-zoom-controls")"
@@ -2798,6 +2822,78 @@
         border:0 !important;
     }
     .payroll-bottom-zoom-control a + a { border-left:1px solid rgba(15,23,42,.10) !important; border-top:0 !important; }
+
+    /* Google Maps-Style Vertical Floating Navigation Widget */
+    .payroll-map-floating-nav {
+        position: absolute;
+        top: 14px;
+        right: 14px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        border-radius: 12px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        padding: 3px;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        pointer-events: auto;
+    }
+    .floating-nav-btn {
+        width: 36px;
+        height: 36px;
+        border: none;
+        background: transparent;
+        color: #334155;
+        font-size: 15px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+    .floating-nav-btn:hover {
+        background: rgba(37, 99, 235, 0.10);
+        color: #2563eb;
+        transform: scale(1.06);
+    }
+    .floating-nav-btn:active {
+        transform: scale(0.95);
+    }
+    .floating-nav-divider {
+        width: 24px;
+        height: 1px;
+        background: rgba(15, 23, 42, 0.10);
+        margin: 2px 0;
+    }
+
+    body.dark .payroll-map-floating-nav,
+    [data-theme="dark"] .payroll-map-floating-nav,
+    [data-bs-theme="dark"] .payroll-map-floating-nav {
+        background: rgba(23, 34, 53, 0.92);
+        border-color: rgba(255, 255, 255, 0.14);
+        box-shadow: 0 14px 30px -5px rgba(0, 0, 0, 0.5);
+    }
+    body.dark .floating-nav-btn,
+    [data-theme="dark"] .floating-nav-btn,
+    [data-bs-theme="dark"] .floating-nav-btn {
+        color: #e2e8f0;
+    }
+    body.dark .floating-nav-btn:hover,
+    [data-theme="dark"] .floating-nav-btn:hover,
+    [data-bs-theme="dark"] .floating-nav-btn:hover {
+        background: rgba(96, 165, 250, 0.20);
+        color: #60a5fa;
+    }
+    body.dark .floating-nav-divider,
+    [data-theme="dark"] .floating-nav-divider,
+    [data-bs-theme="dark"] .floating-nav-divider {
+        background: rgba(255, 255, 255, 0.12);
+    }
 
     body.dark .payroll-map-commandbar,
     [data-theme="dark"] .payroll-map-commandbar,

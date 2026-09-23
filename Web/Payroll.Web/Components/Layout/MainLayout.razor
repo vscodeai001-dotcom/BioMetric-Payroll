@@ -13,6 +13,7 @@
 @inject ILogger<MainLayout> _logger
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject ITenantContextService TenantContext
 
 <div class="page">
     <div class="sidebar">
@@ -24,6 +25,7 @@
     </div>
 
     <main>
+        <global::Payroll.Web.Components.UI.Layout.SuperAdminTenantBanner />
         <div class="top-row">
             <div class="header-content-wrapper">
                 <a class="navbar-brand" href="">Payroll.Web</a>
@@ -141,10 +143,18 @@
         }
 
         userIsSuperAdmin =
-            authState.User.IsInRole("SuperAdmin");
+            await TenantContext.IsSuperAdminAsync();
+
+        TenantContext.OnTenantChanged += HandleTenantChanged;
 
         await LoadFeatureSettings();
         await LoadCurrentEmployee();
+    }
+
+    private async void HandleTenantChanged()
+    {
+        await LoadFeatureSettings();
+        await InvokeAsync(StateHasChanged);
     }
 
     protected override async Task OnAfterRenderAsync(
@@ -348,36 +358,15 @@
     {
         Theme.OnThemeChanged -= StateHasChanged;
         Navigation.LocationChanged -= HandleLocationChanged;
+        TenantContext.OnTenantChanged -= HandleTenantChanged;
     }
 
     private async Task LoadFeatureSettings()
     {
         try
         {
-            await using var dbContext =
-                await DbFactory.CreateDbContextAsync();
-
-            settings =
-                await dbContext.FeatureSettings
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        s => s.Id == 1);
-
-            if (settings == null)
-            {
-                _logger.LogWarning(
-                    "FeatureSettings not found, inserting defaults.");
-
-                settings =
-                    new FeatureSettings();
-
-                dbContext.FeatureSettings.Add(settings);
-
-                await dbContext.SaveChangesAsync();
-            }
-
-            geoTrackingEnabled =
-                settings.EnableGeoFencing;
+            settings = await TenantContext.GetActiveFeatureSettingsAsync();
+            geoTrackingEnabled = settings.EnableGeoFencing;
         }
         catch (Exception ex)
         {

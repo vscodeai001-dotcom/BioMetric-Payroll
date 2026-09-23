@@ -23,6 +23,16 @@
                 <Authorized>
                     @* --- ADMIN/SUPERADMIN MENU --- *@
 
+                    @* 0. SuperAdmin Command Center *@
+                    @if (userIsSuperAdmin)
+                    {
+                        <div class="nav-item px-3 mb-2">
+                            <NavLink class="nav-link text-warning fw-bold border border-warning rounded-2 py-2" href="superadmin/tenants">
+                                <span class="me-2">👑</span> Multi-Tenant Portal
+                            </NavLink>
+                        </div>
+                    }
+
                     @* 1. Admin Dashboard *@
                     @if (userIsSuperAdmin || settings.AdminCanViewDashboard)
                     {

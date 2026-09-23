@@ -1886,6 +1886,324 @@ public sealed class FirebaseRealtimeService
         return seeded;
     }
 
+    /// <summary>
+    /// Deletes a specific path in Firebase Realtime Database using native HTTP DELETE.
+    /// Returns true on success (HTTP 200/204), cleanly wiping the entire node subtree.
+    /// </summary>
+    public async Task<bool> DeletePathAsync(
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        var context = await _context.Value;
+        if (context == null)
+            return false;
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+            var cleanPath = path.Trim().TrimStart('/').TrimEnd('/');
+            var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/{cleanPath}.json");
+            using var request = new HttpRequestMessage(HttpMethod.Delete, uri);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await context.GetAccessTokenAsync());
+
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (response.IsSuccessStatusCode)
+                return true;
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            // Handle Firebase error when node data size exceeds single-request limit:
+            // "Data to write exceeds the maximum size that can be modified with a single request."
+            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest &&
+                body.Contains("Data to write exceeds the maximum size", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Node {Path} exceeds Firebase single-request write limit. Initiating recursive shallow-chunked deletion.",
+                    cleanPath);
+                return await DeleteLargeNodeInChunksAsync(cleanPath, cancellationToken);
+            }
+
+            _logger.LogWarning(
+                "Firebase realtime DELETE failed with HTTP {Status} for {Path}: {Body}",
+                (int)response.StatusCode,
+                path,
+                body.Length > 500 ? body[..500] : body);
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Firebase realtime DELETE deferred for {Path}", path);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Deletes large Firebase nodes (e.g. tracking/history containing tens of thousands of GPS breadcrumbs)
+    /// by inspecting shallow keys and deleting child trees in chunks, preventing HTTP 400 "exceeds maximum size".
+    /// </summary>
+    private async Task<bool> DeleteLargeNodeInChunksAsync(
+        string cleanPath,
+        CancellationToken cancellationToken = default)
+    {
+        var context = await _context.Value;
+        if (context == null)
+            return false;
+
+        try
+        {
+            var shallow = await GetJsonAsync(cleanPath, cancellationToken, "shallow=true");
+            if (!shallow.HasValue || shallow.Value.ValueKind != JsonValueKind.Object)
+            {
+                // Nothing or not an object, consider it already cleared
+                return true;
+            }
+
+            var keys = new List<string>();
+            foreach (var prop in shallow.Value.EnumerateObject())
+            {
+                if (!string.IsNullOrWhiteSpace(prop.Name))
+                    keys.Add(prop.Name);
+            }
+
+            _logger.LogInformation("Chunking deletion of large node {Path}: {Count} child key(s) discovered.", cleanPath, keys.Count);
+
+            var allChildrenOk = true;
+            foreach (var key in keys)
+            {
+                var childPath = $"{cleanPath}/{key}";
+                var childOk = await DeletePathAsync(childPath, cancellationToken);
+                if (!childOk) allChildrenOk = false;
+            }
+
+            // Once all child nodes are deleted, delete the now empty parent node
+            var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+            var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/{cleanPath}.json");
+            using var req = new HttpRequestMessage(HttpMethod.Delete, uri);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await context.GetAccessTokenAsync());
+            using var resp = await client.SendAsync(req, cancellationToken);
+
+            return resp.IsSuccessStatusCode || allChildrenOk;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed chunked deletion for large node {Path}", cleanPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Discovers all owner UIDs currently stored under the /owners tree in Firebase,
+    /// along with the configured and default owner UIDs.
+    /// </summary>
+    public async Task<List<string>> GetAvailableOwnerUidsAsync(CancellationToken cancellationToken = default)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var configured = _configuration["Firebase:OwnerUid"]
+            ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID");
+        if (!string.IsNullOrWhiteSpace(configured))
+            set.Add(configured.Trim());
+
+        set.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+
+        try
+        {
+            var shallow = await GetJsonAsync("owners", cancellationToken, "shallow=true");
+            if (shallow.HasValue && shallow.Value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in shallow.Value.EnumerateObject())
+                {
+                    if (!string.IsNullOrWhiteSpace(prop.Name))
+                        set.Add(prop.Name.Trim());
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not discover shallow owner keys from Firebase.");
+        }
+
+        return set.ToList();
+    }
+
+    /// <summary>
+    /// Partial Wipe: Wipes operational data (attendance, tracking, payroll, leaves, advances, audits)
+    /// but strictly preserves Employees, Shops, Company Settings, Feature Toggles, and Holidays in Firebase.
+    /// Uses native HTTP DELETE per table to prevent path conflicts or 400 errors.
+    /// </summary>
+    public async Task<bool> WipeOwnerOperationalDataOnlyAsync(
+        string ownerUid,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return false;
+
+        var cleanUid = ownerUid.Trim();
+        var operationalTables = new[]
+        {
+            "attendance",
+            "attendance_punches",
+            "daily_summaries",
+            "advance_payments",
+            "regularizations",
+            "leave_requests",
+            "resignation_requests",
+            "salary_snapshots",
+            "audit_logs",
+            "shift_schedules",
+            "payroll_history",
+            "payroll_previews",
+            "payroll_finalization",
+            "bonus_records",
+            "tax_declarations",
+            "fbp_components",
+            "fbp_declarations",
+            "year_end_summaries",
+            "fnf_settlements",
+            "report_definitions",
+            "geo_punch_audits",
+            "presence",
+            "tracking/history",
+            "tracking/sessions",
+            "tracking/live",
+            "tracking"
+        };
+
+        var allOk = true;
+        foreach (var table in operationalTables)
+        {
+            var ok = await DeletePathAsync($"owners/{cleanUid}/{table}", cancellationToken);
+            if (!ok) allOk = false;
+        }
+
+        await DeletePathAsync($"owner_events/{cleanUid}", cancellationToken);
+        await DeletePathAsync("mobile_auth_events", cancellationToken);
+
+        _logger.LogInformation("WipeOwnerOperationalDataOnlyAsync for owner {OwnerUid}: success={Success}", cleanUid, allOk);
+        return allOk;
+    }
+
+    /// <summary>
+    /// Full Wipe: Wipes all operational data PLUS employees, shops, and employee history.
+    /// Preserves only configuration: feature_settings, company_settings, professional_tax_slabs, and shop_closed_days.
+    /// </summary>
+    public async Task<bool> WipeOwnerAllDataAsync(
+        string ownerUid,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return false;
+
+        var cleanUid = ownerUid.Trim();
+        var allTables = new[]
+        {
+            "employees",
+            "employee_history",
+            "shops",
+            "attendance",
+            "attendance_punches",
+            "daily_summaries",
+            "advance_payments",
+            "regularizations",
+            "leave_requests",
+            "resignation_requests",
+            "salary_snapshots",
+            "audit_logs",
+            "shift_schedules",
+            "payroll_history",
+            "payroll_previews",
+            "payroll_finalization",
+            "bonus_records",
+            "tax_declarations",
+            "fbp_components",
+            "fbp_declarations",
+            "year_end_summaries",
+            "fnf_settlements",
+            "report_definitions",
+            "geo_punch_audits",
+            "presence",
+            "tracking/history",
+            "tracking/sessions",
+            "tracking/live",
+            "tracking"
+        };
+
+        var allOk = true;
+        foreach (var table in allTables)
+        {
+            var ok = await DeletePathAsync($"owners/{cleanUid}/{table}", cancellationToken);
+            if (!ok) allOk = false;
+        }
+
+        await DeletePathAsync($"owner_events/{cleanUid}", cancellationToken);
+        await DeletePathAsync("mobile_auth_events", cancellationToken);
+
+        _logger.LogInformation("WipeOwnerAllDataAsync for owner {OwnerUid}: success={Success}", cleanUid, allOk);
+        return allOk;
+    }
+
+    public Task<bool> WipeOwnerOperationalDataAsync(string ownerUid, CancellationToken cancellationToken = default)
+        => WipeOwnerAllDataAsync(ownerUid, cancellationToken);
+
+    /// <summary>
+    /// Restores/pushes all local SQLite data up to the Cloud (Firebase Realtime Database),
+    /// ensuring Cloud matches the restored local database state.
+    /// </summary>
+    public async Task<int> PushAllLocalDataToFirebaseAsync(
+        string ownerUid,
+        IDbContextFactory<AppDbContext> factory,
+        CancellationToken cancellationToken = default)
+    {
+        if (factory == null || string.IsNullOrWhiteSpace(ownerUid)) return 0;
+        var pushed = 0;
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+
+        // Wipe operational data in cloud first so deleted records don't persist
+        await WipeOwnerOperationalDataAsync(ownerUid, cancellationToken);
+
+        foreach (var entityName in RealtimeEntities)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var table = GetFirebaseTable(entityName);
+            if (string.IsNullOrWhiteSpace(table)) continue;
+
+            var entityType = db.Model.GetEntityTypes().FirstOrDefault(x => x.ClrType.Name == entityName);
+            if (entityType == null) continue;
+
+            var rows = await GetEntitySet(db, entityType.ClrType).Cast<object>().ToListAsync(cancellationToken);
+            var updates = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+            foreach (var row in rows)
+            {
+                var entry = db.Entry(row);
+                var key = BuildKey(entry);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+
+                var firebaseRow = BuildFirebaseRow(entry, entityName, key);
+                firebaseRow["_entity"] = entityName;
+                firebaseRow["_key"] = key;
+                firebaseRow["_updatedUtc"] = DateTime.UtcNow.ToString("O");
+                updates[$"owners/{ownerUid}/{table}/{EscapeFirebaseKey(key)}"] = firebaseRow;
+
+                if (updates.Count >= 100)
+                {
+                    if (await UpdateAsync(updates, cancellationToken)) pushed += updates.Count;
+                    updates.Clear();
+                }
+            }
+
+            if (updates.Count > 0 && await UpdateAsync(updates, cancellationToken))
+                pushed += updates.Count;
+        }
+
+        _logger.LogInformation("PushAllLocalDataToFirebaseAsync restored {Count} records to Firebase owner {OwnerUid}", pushed, ownerUid);
+        return pushed;
+    }
+
     public async Task<bool> EnsureConfiguredAsync()
     {
         return await _context.Value != null;
@@ -1906,7 +2224,7 @@ public sealed class FirebaseRealtimeService
 
     public bool IsConfigured => _context.IsValueCreated && _context.Value.IsCompletedSuccessfully && _context.Value.Result != null;
 
-    private async Task<bool> SetAsync(string path, object value, CancellationToken cancellationToken)
+    public async Task<bool> SetAsync(string path, object value, CancellationToken cancellationToken = default)
         => await UpdateAsync(new Dictionary<string, object?> { [path] = value }, cancellationToken);
 
     private async Task<JsonElement?> GetJsonAsync(
@@ -1974,9 +2292,9 @@ public sealed class FirebaseRealtimeService
         }
     }
 
-    private async Task<bool> UpdateAsync(
+    public async Task<bool> UpdateAsync(
         IReadOnlyDictionary<string, object?> updates,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
         var context = await _context.Value;
         if (context == null)
