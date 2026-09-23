@@ -1,0 +1,12 @@
+
+[1m[37m===[39m Deploying to 'biometricpayroll'...[22m
+
+[36m[1mi [22m[39m deploying [1mdatabase[22m
+[36m[1mi [22m[39m [1m[36mdatabase: [39m[22mchecking rules syntax...
+[32m[1m+ [22m[39m [1m[32mdatabase: [39m[22mrules syntax for database [1mbiometricpayroll-default-rtdb[22m is valid
+[36m[1mi [22m[39m [1m[36mdatabase: [39m[22mreleasing rules...
+[32m[1m+ [22m[39m [1m[32mdatabase: [39m[22mrules for database [1mbiometricpayroll-default-rtdb[22m released successfully
+
+[32m[1m+ [22m[39m [1m[4mDeploy complete![24m[22m
+
+[1mProject Console:[22m https://console.firebase.google.com/project/biometricpayroll/overview

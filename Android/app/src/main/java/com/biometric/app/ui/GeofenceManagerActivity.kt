@@ -99,8 +99,10 @@ class GeofenceManagerActivity : MotionBaseActivity(), OnMapReadyCallback {
         updateMapMarkers()
     }
 
+    private var geofenceListener: ValueEventListener? = null
+
     private fun listenToGeofences() {
-        dbRef.addValueEventListener(object : ValueEventListener {
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 try {
                     geofenceList.clear()
@@ -131,7 +133,15 @@ class GeofenceManagerActivity : MotionBaseActivity(), OnMapReadyCallback {
             override fun onCancelled(error: DatabaseError) {
                 Toast.makeText(this@GeofenceManagerActivity, error.message, Toast.LENGTH_SHORT).show()
             }
-        })
+        }
+        geofenceListener = listener
+        dbRef.addValueEventListener(listener)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        geofenceListener?.let { dbRef.removeEventListener(it) }
+        geofenceListener = null
     }
 
     private fun updateMapMarkers() {

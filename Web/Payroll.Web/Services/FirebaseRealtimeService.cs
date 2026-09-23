@@ -225,6 +225,64 @@ public sealed class FirebaseRealtimeService
         }
     }
 
+    /// <summary>
+    /// Authenticates email/password against Firebase Authentication via REST API.
+    /// Used as a live bridge when an employee account was created in Firebase Console
+    /// or password was reset via email, enabling Web login to match Firebase Auth instantly.
+    /// </summary>
+    public async Task<FirebasePasswordVerificationResult> VerifyEmailPasswordAsync(
+        string email,
+        string password,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+            return new(false, null, null, null, "Email and password are required.");
+
+        var apiKey = _configuration["Firebase:ApiKey"]
+            ?? Environment.GetEnvironmentVariable("FIREBASE_API_KEY")
+            ?? "AIzaSyDE6qAFRWzKkZiH2G2Hr6a6GC98wjEzucg";
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+            var url = $"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={apiKey}";
+
+            var payload = new
+            {
+                email = email.Trim(),
+                password = password,
+                returnSecureToken = true
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+            };
+
+            using var response = await client.SendAsync(request, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Firebase Auth verification failed for {Email}: HTTP {Status}", email, (int)response.StatusCode);
+                return new(false, null, null, null, "Invalid email or password.");
+            }
+
+            using var doc = JsonDocument.Parse(content);
+            var root = doc.RootElement;
+            var localId = root.TryGetProperty("localId", out var idProp) ? idProp.GetString() : null;
+            var verifiedEmail = root.TryGetProperty("email", out var emailProp) ? emailProp.GetString() : email;
+            var idToken = root.TryGetProperty("idToken", out var tokenProp) ? tokenProp.GetString() : null;
+
+            return new(true, localId, verifiedEmail, idToken, "Verification successful.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error verifying Firebase email/password for {Email}.", email);
+            return new(false, null, null, null, ex.Message);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Firebase SSOT owner-store primitives
     // ---------------------------------------------------------------------
@@ -567,10 +625,17 @@ public sealed class FirebaseRealtimeService
             _ => Uri.EscapeDataString(Convert.ToString(equalTo, CultureInfo.InvariantCulture) ?? string.Empty)
         };
 
-        return await GetJsonAsync(
+        var result = await GetJsonAsync(
             $"owners/{ownerUid.Trim()}/{table.Trim()}",
             cancellationToken,
             $"?orderBy={orderBy}&equalTo={encodedValue}");
+
+        if (result != null)
+            return result;
+
+        // Fallback: If indexed query fails (e.g. index not defined in Firebase rules),
+        // read the table directly so callers do not receive null / fail to render.
+        return await GetOwnerTableAsync(ownerUid, table, cancellationToken);
     }
 
     /// <summary>
@@ -609,10 +674,17 @@ public sealed class FirebaseRealtimeService
         if (endAt is not null) parameters.Add($"endAt={EncodeValue(endAt)}");
         if (limitToLast.HasValue) parameters.Add($"limitToLast={Math.Clamp(limitToLast.Value, 1, 10000)}");
 
-        return await GetJsonAsync(
+        var result = await GetJsonAsync(
             $"owners/{ownerUid.Trim()}/{table.Trim()}",
             cancellationToken,
             "?" + string.Join("&", parameters));
+
+        if (result != null)
+            return result;
+
+        // Fallback: If indexed query fails (e.g. index not defined in Firebase rules),
+        // read the table directly so callers do not receive null / fail to render.
+        return await GetOwnerTableAsync(ownerUid, table, cancellationToken);
     }
 
     public async Task<JsonElement?> GetGlobalRecordAsync(
@@ -2030,3 +2102,11 @@ public sealed class FirebaseRealtimeService
             => await _credential.UnderlyingCredential.GetAccessTokenForRequestAsync();
     }
 }
+
+public sealed record FirebasePasswordVerificationResult(
+    bool Success,
+    string? LocalId,
+    string? Email,
+    string? IdToken,
+    string Message);
+

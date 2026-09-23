@@ -346,7 +346,7 @@ class StaffViewModel @Inject constructor(
         }
     }
 
-    val employeeHistory: StateFlow<Map<String, List<EmployeeHistory>>> = repository.firebaseSync.getDataFlow<EmployeeHistory>("employee_history")
+    val employeeHistory: StateFlow<Map<String, List<EmployeeHistory>>> = repository.allHistoryFlow
         .map { list -> list.asSequence().groupBy { it.employeeId }.mapValues { it.value.sortedByDescending { h -> h.effectiveDate } } }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyMap())
 

@@ -78,7 +78,11 @@ public sealed class FirebaseAdminDashboardService
                 "shiftDate",
                 startAt: monthStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 endAt: nextMonthStart.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                cancellationToken: cancellationToken));
+                cancellationToken: cancellationToken),
+
+            _firebase.GetOwnerTrackingLiveAsync(
+                ownerUid,
+                cancellationToken));
 
         try
         {
@@ -88,9 +92,7 @@ public sealed class FirebaseAdminDashboardService
             var payroll = Items(results[3]).ToList();
             var shifts = Items(results[4]).ToList();
             var summaries = Items(results[5]).ToList();
-            // Live GPS is owned by LiveStaffLocationPanel's Firebase SSE stream.
-            // Do not download tracking/live as part of the KPI dashboard snapshot.
-            var tracking = new List<JsonElement>();
+            var tracking = Items(results[6]).ToList();
 
             // Authoritative Dashboard Date: calculated above in India Timezone.
 

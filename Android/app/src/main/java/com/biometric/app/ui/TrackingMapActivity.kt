@@ -1034,8 +1034,8 @@ class TrackingMapActivity : MotionBaseActivity() {
             val parsed = java.time.Instant.parse(timestamp)
             val ageMs = (System.currentTimeMillis() - parsed.toEpochMilli()).coerceAtLeast(0L)
             when {
-                ageMs <= 120_000L -> "Live"
-                ageMs <= 300_000L -> "Stale"
+                ageMs <= 300_000L -> "Live"
+                ageMs <= 900_000L -> "Stale"
                 else -> "Offline"
             }
         } catch (_: Exception) {

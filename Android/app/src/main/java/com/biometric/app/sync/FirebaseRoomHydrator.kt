@@ -172,44 +172,47 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
 
             override fun onCancelled(error: DatabaseError) {
+                if (error.code == DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Listen at $table cancelled: Permission denied (will not rebind)")
+                    return
+                }
                 // Firebase listeners can be cancelled by an expired/rotated auth
-                // token or a transient permission/connection boundary. Do not
-                // require logout/login. Rebind the existing realtime listener
-                // automatically while the authenticated owner session remains active.
+                // token or a transient connection boundary.
                 scheduleRebind("$table cancelled: ${error.message}")
             }
         }
-        ref.addChildEventListener(listener)
-        // Reconcile the existing Room cache against the authoritative Firebase
-        // snapshot once after listener registration. Wait briefly to allow 
-        // initial child-added events to settle.
-        ref.addListenerForSingleValueEvent(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                scope.launch {
-                    delay(2000L) // Increased stagger for reconciliation
-                    writeMutex.withLock {
-                        runCatching {
-                            val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
-                            val staleSynced = existing().asSequence()
-                                .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
-                                .map { it.first }
-                                .toList()
-                            
-                            if (staleSynced.isNotEmpty()) {
-                                Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
-                                staleSynced.forEach { onDelete(it) }
+        // Only small master tables (shops, employees, shop_closed_days) need
+        // explicit reconciliation for deleted keys. High-volume transactional tables
+        // (punches, attendance, logs) rely purely on ChildEventListener to save bandwidth.
+        if (table in setOf("shops", "employees", "shop_closed_days")) {
+            ref.addListenerForSingleValueEvent(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    scope.launch {
+                        delay(2000L)
+                        writeMutex.withLock {
+                            runCatching {
+                                val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                                val staleSynced = existing().asSequence()
+                                    .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
+                                    .map { it.first }
+                                    .toList()
+                                
+                                if (staleSynced.isNotEmpty()) {
+                                    Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
+                                    staleSynced.forEach { onDelete(it) }
+                                }
+                            }.onFailure { error ->
+                                Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
                             }
-                        }.onFailure { error ->
-                            Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
                         }
                     }
                 }
-            }
 
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
-            }
-        })
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
+                }
+            })
+        }
         // Keep the ChildEventListener alive for the application lifetime.
         listeners += ref to listener
     }
@@ -542,6 +545,10 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
+                if (error.code == DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Listen at payroll_history cancelled: Permission denied (will not rebind)")
+                    return
+                }
                 scheduleRebind("payroll_history cancelled: ${error.message}")
             }
         }
@@ -579,6 +586,10 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
+                if (error.code == DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Listen at shift_schedules cancelled: Permission denied (will not rebind)")
+                    return
+                }
                 scheduleRebind("shift_schedules cancelled: ${error.message}")
             }
         }
@@ -604,6 +615,10 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
+                if (error.code == DatabaseError.PERMISSION_DENIED) {
+                    Log.w("FirebaseRoomHydrator", "Listen at $table cancelled: Permission denied (will not rebind)")
+                    return
+                }
                 scheduleRebind("realtime table cancelled: ${error.message}")
             }
         }

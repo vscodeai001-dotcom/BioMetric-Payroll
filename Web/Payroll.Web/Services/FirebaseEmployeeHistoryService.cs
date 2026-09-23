@@ -40,7 +40,12 @@ public sealed class FirebaseEmployeeHistoryService
 
     public async Task<List<LeaveRequest>> GetLeaveAsync(int employeeId, CancellationToken ct = default)
     {
-        var json = await _firebase.GetOwnerTableAsync(OwnerUid, "leave_requests", ct);
+        // BANDWIDTH OPTIMIZATION: Query only this employee's leave records instead of
+        // downloading the entire leave_requests table and filtering in C#.
+        // Uses the same orderBy/equalTo pattern already applied to advances.
+        var json = employeeId > 0
+            ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, "leave_requests", "employeeId", employeeId, ct)
+            : await _firebase.GetOwnerTableAsync(OwnerUid, "leave_requests", ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
         var result = new List<LeaveRequest>();
@@ -158,7 +163,12 @@ public sealed class FirebaseEmployeeHistoryService
 
     public async Task<List<AuditLog>> GetEmployeeAuditAsync(int employeeId, int take = 20, CancellationToken ct = default)
     {
-        var json = await _firebase.GetOwnerTableAsync(OwnerUid, "audit_logs", ct);
+        // BANDWIDTH OPTIMIZATION: Query only this employee's audit records instead of
+        // downloading the entire audit_logs table and filtering in C#.
+        // Firebase orderBy="employeeId"&equalTo=N returns only records for this employee.
+        var json = employeeId > 0
+            ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, "audit_logs", "employeeId", employeeId, ct)
+            : await _firebase.GetOwnerTableAsync(OwnerUid, "audit_logs", ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
         var result = new List<AuditLog>();
         if (json.Value.ValueKind == JsonValueKind.Object)

@@ -558,16 +558,28 @@ else
         // payroll and advances for every GPS point creates a request/render loop.
         _dashboardOwnerStream = Task.Run(async () =>
         {
-            try
+            while (!ct.IsCancellationRequested)
             {
-                await FirebaseDashboardStream(ownerUid, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Firebase dashboard owner stream ended");
+                try
+                {
+                    await FirebaseDashboardStream(ownerUid, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Firebase dashboard owner stream disconnected. Reconnecting in 3s.");
+                    try
+                    {
+                        await Task.Delay(3000, ct);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
             }
         }, ct);
 

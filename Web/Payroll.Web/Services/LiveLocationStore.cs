@@ -10,8 +10,8 @@ public static class LiveLocationStore
     // historical fix. Logout/session end removes it immediately; a missing
     // GPS heartbeat expires it automatically so old employees cannot remain
     // on the Admin map indefinitely.
-    public const int LiveTimeoutSeconds = 120; // 2 minutes, aligned with background GPS cadence
-    public const int StaleTimeoutSeconds = 300; // 5 minutes before a live marker disappears
+    public const int LiveTimeoutSeconds = 300; // 5 minutes, aligned with background GPS cadence
+    public const int StaleTimeoutSeconds = 900; // 15 minutes before a live marker disappears
 
     /*
      * ============================================================

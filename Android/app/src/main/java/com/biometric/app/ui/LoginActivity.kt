@@ -21,6 +21,7 @@ import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.sync.ThemePreferenceSync
+import com.biometric.app.sync.ssot.FirebaseSsotSchema
 import com.biometric.app.sync.RealtimeUiDispatcher
 import com.biometric.app.util.MotionManager
 import com.google.android.gms.common.api.ApiException
@@ -519,7 +520,15 @@ class LoginActivity : MotionBaseActivity() {
             val ownerUid = claims["owner_uid"]
                 ?.toString()
                 ?.takeIf { it.isNotBlank() }
-                ?: if (isCanonicalSuperAdmin) "biometricpayroll" else ""
+                ?: if (role == UserRole.Admin.name || role == UserRole.SuperAdmin.name) {
+                    // Admin/SuperAdmin accounts created via the Web panel may not yet
+                    // have the owner_uid custom claim propagated to their Firebase ID token
+                    // (claim refresh can lag up to 1 hour). Fall back to the canonical
+                    // owner UID so FirebaseRoomHydrator can attach its listeners immediately.
+                    FirebaseSsotSchema.DEFAULT_OWNER_UID
+                } else {
+                    ""
+                }
 
             if (ownerUid.isBlank()) {
                 setLoading(false)

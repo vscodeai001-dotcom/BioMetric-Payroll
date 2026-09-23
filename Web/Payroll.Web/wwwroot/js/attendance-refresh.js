@@ -64,7 +64,7 @@ window.attendanceRefresh = (function () {
 
             if (!firebase.apps.length) {
                 firebase.initializeApp({
-                    apiKey: 'AIzaSyDxIsBW8bq31gG7LqOm8-lwhmRFMsRu5CE',
+                    apiKey: authResult.apiKey || 'AIzaSyDE6qAFRWzKkZiH2G2Hr6a6GC98wjEzucg',
                     authDomain: 'biometricpayroll.firebaseapp.com',
                     databaseURL: 'https://biometricpayroll-default-rtdb.asia-southeast1.firebasedatabase.app',
                     projectId: 'biometricpayroll',

@@ -5,7 +5,7 @@ import java.util.*
 
 class GeminiService(private val apiKey: String) {
 
-    private val modelNames = listOf("gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-pro")
+    private val modelNames = listOf("gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-pro")
 
     suspend fun generateResponse(
         userQuery: String,

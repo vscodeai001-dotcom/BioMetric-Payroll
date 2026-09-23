@@ -259,6 +259,15 @@ class SignalRManager @Inject constructor(
                         continue
                     }
 
+                    // Web Parity: ignore unanchored / Null Island (0.0, 0.0) coordinates
+                    // until authoritative GPS coordinates are received.
+                    if (!value.Latitude.isFinite() || !value.Longitude.isFinite() ||
+                        value.Latitude < -90.0 || value.Latitude > 90.0 ||
+                        value.Longitude < -180.0 || value.Longitude > 180.0 ||
+                        (value.Latitude == 0.0 && value.Longitude == 0.0)) {
+                        continue
+                    }
+
                     locations[employeeId] = LiveLocation(
                         employeeId = employeeId,
                         sessionId = value.SessionId,
@@ -416,103 +425,6 @@ class SignalRManager @Inject constructor(
         locationListener = listener
         liveRef.addValueEventListener(listener)
 
-        // Primary channel: Firebase ValueEventListener.
-        // Safety net: periodically read the exact same owner-scoped Firebase
-        // node so the Android Admin map converges automatically after any
-        // listener/process/network edge case. No manual Refresh is required.
-        reconciliationJob?.cancel()
-        reconciliationJob = managerScope.launch {
-            while (isActive && activeOwnerUid == ownerUid) {
-                delay(5000L)
-                if (!isActive || activeOwnerUid != ownerUid) break
-
-                runCatching {
-                    val snapshot = liveRef.get().await()
-                    withContext(Dispatchers.Main.immediate) {
-                        listener.onDataChange(snapshot)
-                    }
-                }.onFailure { error ->
-                    Log.d(
-                        "SignalRManager",
-                        "Live-location reconciliation skipped: ${error.message}"
-                    )
-                }
-            }
-        }
-
-        // Long-lived Admin sessions must not depend on a manual logout/login to
-        // recover Firebase authentication or a stale realtime transport. Refresh
-        // the Firebase Auth token before its normal expiry window and force an
-        // immediate canonical live read. If the live read itself has stopped
-        // succeeding for a short period, restart the realtime manager so the
-        // listener is rebuilt with the refreshed credentials.
-        lastSuccessfulLiveReadAt = System.currentTimeMillis()
-        realtimeHealthJob?.cancel()
-        realtimeHealthJob = managerScope.launch {
-            var lastTokenRefreshAt = System.currentTimeMillis()
-
-            while (isActive && activeOwnerUid == ownerUid) {
-                delay(15_000L)
-
-                if (!isActive || activeOwnerUid != ownerUid)
-                    break
-
-                val now = System.currentTimeMillis()
-
-                if (now - lastTokenRefreshAt >= AUTH_TOKEN_REFRESH_INTERVAL_MS) {
-                    runCatching {
-                        FirebaseAuth.getInstance()
-                            .currentUser
-                            ?.getIdToken(true)
-                            ?.await()
-                    }.onSuccess {
-                        // The token refresh is deliberately followed by a
-                        // canonical live read. This catches a listener that
-                        // survived transport-level reconnect but stopped
-                        // delivering current owner-scoped GPS data.
-                        reconcileLiveLocationsNow()
-                    }.onFailure { error ->
-                        Log.w(
-                            "SignalRManager",
-                            "Firebase Auth token refresh failed; realtime health check will retry.",
-                            error
-                        )
-                    }
-                    lastTokenRefreshAt = now
-                }
-
-                // The 5-second reconciliation normally updates this timestamp.
-                // If it stops succeeding, rebuild the manager once instead of
-                // waiting for the user to log out and log in again.
-                if (now - lastSuccessfulLiveReadAt >= LIVE_READ_HEALTH_TIMEOUT_MS) {
-                    Log.w(
-                        "SignalRManager",
-                        "Firebase live-location read is unhealthy for ${now - lastSuccessfulLiveReadAt} ms. Restarting realtime listeners."
-                    )
-
-                    runCatching {
-                        FirebaseAuth.getInstance()
-                            .currentUser
-                            ?.getIdToken(true)
-                            ?.await()
-                    }.onFailure { error ->
-                        Log.w(
-                            "SignalRManager",
-                            "Forced Firebase Auth token refresh failed during realtime recovery.",
-                            error
-                        )
-                    }
-
-                    if (activeOwnerUid == ownerUid && isActive) {
-                        stop()
-                        start()
-                    }
-
-                    break
-                }
-            }
-        }
-
         // Authoritative employee binding for the current tenant. Admin maps
         // must render only employees that actually exist under this owner.
         val employeesRef = firebaseSync.getGlobalRef()
@@ -611,7 +523,13 @@ class SignalRManager @Inject constructor(
      * Activity/login cycle. This method is deliberately idempotent and only
      * updates the existing liveLocations StateFlow.
      */
+    @Volatile private var lastReconcileTime = 0L
+
     fun reconcileLiveLocationsNow() {
+        val now = System.currentTimeMillis()
+        if (now - lastReconcileTime < 5000L) return
+        lastReconcileTime = now
+
         val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: return
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
@@ -762,12 +680,9 @@ class SignalRManager @Inject constructor(
 
             if (gpsOrSessionChange) {
                 // GPS/session invalidations update only the live-location StateFlow.
-                // Do not request a whole-dashboard refresh, which can make the
-                // map or surrounding Admin UI visibly blink.
-                reconcileLiveLocationsNow()
+                // The liveRef listener already delivers the updated GPS payload.
                 _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
             } else {
-                reconcileLiveLocationsNow()
                 _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
             }
         }
@@ -854,7 +769,8 @@ class SignalRManager @Inject constructor(
             DistanceMeters = double("DistanceMeters", "distanceMeters"),
             AllowedRadiusMeters = int("AllowedRadiusMeters", "allowedRadiusMeters"),
             IsWithinAllowedRadius = bool("IsWithinAllowedRadius", "isWithinAllowedRadius"),
-            Timestamp = string("Timestamp", "timestamp"),
+            Timestamp = string("Timestamp", "timestamp").takeIf { it.isNotBlank() }
+                ?: string("LastUpdatedUtc", "lastUpdatedUtc").takeIf { it.isNotBlank() },
             SpeedMps = double("SpeedMps", "speedMps"),
             Bearing = double("Bearing", "bearing"),
             MovementState = string("MovementState", "movementState")

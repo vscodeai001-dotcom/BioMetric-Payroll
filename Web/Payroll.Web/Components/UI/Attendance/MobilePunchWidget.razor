@@ -699,10 +699,21 @@
                         }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine(
-                        $"Automatic GPS attempt {automaticTrackingAttempts} failed: {ex}");
+                    if (ex is TaskCanceledException || ex.InnerException is TaskCanceledException)
+                    {
+                        locationMessage = "Waiting for device location...";
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine(
+                            $"Automatic GPS attempt {automaticTrackingAttempts} failed: {ex.Message}");
+                    }
 
                     isLiveTracking = false;
 
@@ -778,7 +789,7 @@
         {
             var persistent = await JSRuntime.InvokeAsync<LocationData?>(
                 "getPersistentEmployeeGpsLocation",
-                30000);
+                300000);
 
             if (persistent != null &&
                 double.IsFinite(persistent.Latitude) &&

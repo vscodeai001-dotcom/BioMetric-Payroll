@@ -352,6 +352,7 @@ class FirebaseSyncManager @Inject constructor(
             "Sequence" to sequence,
             "Timestamp" to Date(timestamp).toInstant().toString(),
             "LastUpdatedUtc" to Date().toInstant().toString(),
+            "State" to "ACTIVE",
             "Source" to "ANDROID_FIREBASE"
         )
 

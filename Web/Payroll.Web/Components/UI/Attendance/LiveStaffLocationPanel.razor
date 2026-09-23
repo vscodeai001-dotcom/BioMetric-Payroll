@@ -155,7 +155,7 @@
                  aria-hidden="true">
             </div>
 
-            @if (liveCount == 0)
+            @if (locations.Count == 0)
             {
                 <div class="map-empty-overlay" data-live-empty-overlay="@mapId">
                     <i class="bi bi-broadcast-pin display-6 text-muted"></i>
@@ -3429,6 +3429,11 @@
             // not the whole Blazor circuit/page. This is intentionally a
             // database-backed invalidation, not a browser Refresh-button action.
             await RefreshLocations();
+            if (selectedEmployeeId > 0)
+            {
+                await RefreshSelectedEmployeePunchAuditsSilently();
+                await LoadSelectedEmployeeHistory();
+            }
             mapNeedsUpdate = true;
             await InvokeAsync(StateHasChanged);
         }
@@ -3447,16 +3452,20 @@
 
         try
         {
-            if (selectedEmployeeId <= 0 || !TryGetPayloadEmployeeId(data, out var changedEmployeeId))
+            if (selectedEmployeeId <= 0)
                 return;
 
-            if (changedEmployeeId != selectedEmployeeId)
-                return;
+            if (data != null && TryGetPayloadEmployeeId(data, out var changedEmployeeId))
+            {
+                if (changedEmployeeId > 0 && changedEmployeeId != selectedEmployeeId)
+                    return;
+            }
 
-            // Firebase is the realtime trigger. Re-query only the selected
+            // Firebase / SignalR is the realtime trigger. Re-query only the selected
             // audit card so the existing table/date filter/business rules stay
             // unchanged. This does not reload the page.
             await RefreshSelectedEmployeePunchAuditsSilently();
+            await LoadSelectedEmployeeHistory();
         }
         catch (Exception ex)
         {
@@ -3527,7 +3536,13 @@
             return false;
         }
 
-        return idProperty.TryGetInt32(out employeeId) && employeeId > 0;
+        if (idProperty.ValueKind == JsonValueKind.Number && idProperty.TryGetInt32(out employeeId))
+            return employeeId > 0;
+
+        if (idProperty.ValueKind == JsonValueKind.String && int.TryParse(idProperty.GetString(), out employeeId))
+            return employeeId > 0;
+
+        return false;
     }
 
     private bool TryApplyLocationPayload(
@@ -3674,8 +3689,8 @@
                     ? updatedWithinVal
                     : existing.IsWithinAllowedRadius),
             LastUpdatedUtc = TryGetJsonDateTime(json, "LastUpdatedUtc", out var updatedTimeVal)
-                ? updatedTimeVal
-                : DateTime.UtcNow,
+                ? updatedTimeVal.ToUniversalTime()
+                : (TryGetJsonDateTime(json, "Timestamp", out var tsVal) ? tsVal.ToUniversalTime() : DateTime.UtcNow),
             SessionStartedUtc = existing.SessionStartedUtc,
             SessionId = sessionId != Guid.Empty
                 ? sessionId
@@ -3827,14 +3842,41 @@
     {
         value = default;
 
-        if (!TryGetJsonString(json, name, out var text))
+        if (json.ValueKind != JsonValueKind.Object)
             return false;
 
-        return DateTime.TryParse(
-            text,
-            System.Globalization.CultureInfo.InvariantCulture,
-            System.Globalization.DateTimeStyles.RoundtripKind,
-            out value);
+        if (!json.TryGetProperty(name, out var property) &&
+            !json.TryGetProperty(
+                char.ToLowerInvariant(name[0]) + name[1..],
+                out property))
+        {
+            return false;
+        }
+
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var unixMs))
+        {
+            value = DateTimeOffset.FromUnixTimeMilliseconds(unixMs).UtcDateTime;
+            return true;
+        }
+
+        if (property.ValueKind == JsonValueKind.String)
+        {
+            var text = property.GetString();
+            if (string.IsNullOrWhiteSpace(text))
+                return false;
+
+            if (DateTime.TryParse(
+                    text,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                    out value))
+            {
+                value = DateTime.SpecifyKind(value, DateTimeKind.Utc);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // The shared attendance SignalR hub broadcasts NotificationChanged to all
@@ -3896,13 +3938,18 @@
             return "Ended";
         }
 
-        /*
-         * EndedAtUtc == null means the GPS session
-         * has not been explicitly closed yet.
-         */
-        return session.EndedAtUtc.HasValue
-            ? "Ended"
-            : "Active";
+        if (session.EndedAtUtc.HasValue)
+            return "Ended";
+
+        // An employee can only have at most ONE active session.
+        // If there are multiple sessions with EndedAtUtc == null, only the newest is Active.
+        var newestActiveSessionId = gpsSessionLookup.Values
+            .Where(x => x.EndedAtUtc == null)
+            .OrderByDescending(x => x.StartedAtUtc)
+            .Select(x => x.SessionId)
+            .FirstOrDefault();
+
+        return newestActiveSessionId == sessionId ? "Active" : "Ended";
     }
 
     private async Task LoadPlaybackCaptureIntervalAsync()
@@ -5252,6 +5299,7 @@ foreach (var point in ordered)
                 .Select(x => new AdminMapLocation
                 {
                     EmployeeId = x.EmployeeId,
+                    SessionId = x.SessionId,
                     Name = employees
                         .FirstOrDefault(e => e.EmployeeID == x.EmployeeId)
                         ?.Name ?? "Employee",
@@ -6423,9 +6471,16 @@ foreach (var point in ordered)
         if (location == null || location.SessionId == Guid.Empty)
             return LocationStatus.Offline;
 
-        var age =
-            DateTime.UtcNow -
-            location.LastUpdatedUtc;
+        var lastUpdatedUtc = location.LastUpdatedUtc.Kind switch
+        {
+            DateTimeKind.Utc => location.LastUpdatedUtc,
+            DateTimeKind.Local => location.LastUpdatedUtc.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(location.LastUpdatedUtc, DateTimeKind.Utc)
+        };
+
+        var age = DateTime.UtcNow - lastUpdatedUtc;
+        if (age < TimeSpan.Zero)
+            age = TimeSpan.Zero;
 
         // The LiveLocationStore is the source of truth for the active
         // employee GPS session. Its thresholds are intentionally long so
@@ -6738,6 +6793,8 @@ foreach (var point in ordered)
     private sealed class AdminMapLocation
     {
         public int EmployeeId { get; set; }
+
+        public Guid SessionId { get; set; }
 
         public string Name { get; set; } = "";
 

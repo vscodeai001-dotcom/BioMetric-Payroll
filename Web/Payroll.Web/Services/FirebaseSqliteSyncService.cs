@@ -812,9 +812,30 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
     private async Task SyncAllTablesAsync(string ownerUid, CancellationToken ct)
     {
+        // BANDWIDTH OPTIMIZATION: Exclude high-volume append-only tables from the
+        // startup bootstrap sync. These tables grow continuously (audit_logs can be
+        // 10 MB+, attendance_punches and geo_punch_audits accumulate all year).
+        // All three are accurately populated in real-time by the SSE delta stream
+        // that starts immediately after this bootstrap. Downloading them as a full
+        // snapshot on every server restart wastes significant bandwidth with no
+        // functional benefit — the SSE stream delivers all future deltas correctly.
+        var skipOnBootstrap = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "AuditLog",         // audit_logs       — append-only, large
+            "AttendancePunch",  // attendance_punches — append-only, large
+            "GeoPunchAudit",    // geo_punch_audits  — append-only, large
+        };
+
         foreach (var table in Tables)
         {
             ct.ThrowIfCancellationRequested();
+            if (skipOnBootstrap.Contains(table.Key))
+            {
+                _logger.LogInformation(
+                    "Skipping bootstrap sync for high-volume table {Table} ({FirebaseTable}). " +
+                    "SSE stream will deliver all deltas.", table.Key, table.Value);
+                continue;
+            }
             await SyncTableAsync(table.Key, table.Value, ownerUid, ct);
         }
     }

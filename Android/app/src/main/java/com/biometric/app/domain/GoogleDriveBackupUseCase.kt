@@ -20,16 +20,16 @@ class GoogleDriveBackupUseCase @Inject constructor(
         val backup = FullBackupData(
             timestamp = System.currentTimeMillis(),
             version = 3,
-            shops = repository.getAllShops().first(),
-            employees = firebaseSync.getDataFlow<Employee>("employees").first(),
-            attendance = firebaseSync.getDataFlow<Attendance>("attendance").first(),
-            advances = firebaseSync.getDataFlow<AdvancePayment>("advance_payments").first(),
-            closedDays = firebaseSync.getDataFlow<ShopClosedDay>("shop_closed_days").first(),
-            employeeHistory = firebaseSync.getDataFlow<EmployeeHistory>("employee_history").first(),
-            auditLogs = firebaseSync.getDataFlow<AuditLog>("audit_logs").first(),
-            salaryPayments = firebaseSync.getDataFlow<SalaryPayment>("salary_payments").first(),
-            reminders = firebaseSync.getDataFlow<Reminder>("reminders").first(),
-            recycleBin = firebaseSync.getDataFlow<RecycleBinItem>("recycle_bin").first()
+            shops = repository.allShopsFlow.first(),
+            employees = repository.allEmployeesFlow.first(),
+            attendance = repository.allAttendanceFlow.first(),
+            advances = repository.allAdvancesFlow.first(),
+            closedDays = repository.allClosedDaysFlow.first(),
+            employeeHistory = repository.allHistoryFlow.first(),
+            auditLogs = emptyList(),
+            salaryPayments = emptyList(),
+            reminders = emptyList(),
+            recycleBin = emptyList()
         )
         GsonBuilder().setPrettyPrinting().create().toJson(backup)
     }

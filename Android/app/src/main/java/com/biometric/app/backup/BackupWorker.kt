@@ -14,6 +14,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -81,10 +82,15 @@ class BackupWorker @AssistedInject constructor(
             // 4. Auto-clean Recycle Bin (Older than 30 days)
             try {
                 val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
-                val binItems = firebaseSync.getDataFlow<RecycleBinItem>("recycle_bin").first()
-                binItems.forEach { item ->
-                    if (item.timestamp < thirtyDaysAgo) {
-                        firebaseSync.deleteRecycleBinItem(item.id)
+                val ownerRef = firebaseSync.getOwnerRef()
+                if (ownerRef != null) {
+                    val expiredSnapshot = ownerRef.child("recycle_bin")
+                        .orderByChild("timestamp")
+                        .endAt(thirtyDaysAgo.toDouble())
+                        .get()
+                        .await()
+                    for (child in expiredSnapshot.children) {
+                        child.key?.let { firebaseSync.deleteRecycleBinItem(it) }
                     }
                 }
             } catch (e: Exception) {

@@ -38,6 +38,7 @@ import com.biometric.app.util.PremiumLoader
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import dagger.hilt.android.AndroidEntryPoint
@@ -114,37 +115,45 @@ class StaffDetailActivity : MotionBaseActivity() {
         refreshData()
     }
 
+    private var liveStatusRef: DatabaseReference? = null
+    private var liveStatusListener: ValueEventListener? = null
+
     private fun startLiveStatusListener() {
         val blink = AlphaAnimation(1.0f, 0.4f).apply {
             duration = 800
             repeatMode = Animation.REVERSE
             repeatCount = Animation.INFINITE
         }
-        
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                // Real-time Status listener for the selected employee
-                val ref = FirebaseDatabase.getInstance().reference
-                    .child("owners")
-                    .child(FirebaseAuth.getInstance().currentUser?.uid ?: "")
-                    .child("realtime_tracking")
-                
-                ref.addValueEventListener(object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        val isOnline = snapshot.hasChild(employeeId)
-                        if (isOnline) {
-                            binding.actvStaffName.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_trending_up, 0)
-                            binding.actvStaffName.compoundDrawables[2]?.setTint(ContextCompat.getColor(this@StaffDetailActivity, R.color.green))
-                            binding.actvStaffName.startAnimation(blink)
-                        } else {
-                            binding.actvStaffName.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
-                            binding.actvStaffName.clearAnimation()
-                        }
-                    }
-                    override fun onCancelled(error: DatabaseError) {}
-                })
+
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
+        if (employeeId.isBlank()) return
+
+        val ref = FirebaseDatabase.getInstance().reference
+            .child("owners")
+            .child(uid)
+            .child("realtime_tracking")
+            .child(employeeId)
+
+        liveStatusListener?.let { liveStatusRef?.removeEventListener(it) }
+        liveStatusRef = ref
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (_binding == null) return
+                val isOnline = snapshot.exists()
+                if (isOnline) {
+                    binding.actvStaffName.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_trending_up, 0)
+                    binding.actvStaffName.compoundDrawables[2]?.setTint(ContextCompat.getColor(this@StaffDetailActivity, R.color.green))
+                    binding.actvStaffName.startAnimation(blink)
+                } else {
+                    binding.actvStaffName.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+                    binding.actvStaffName.clearAnimation()
+                }
             }
+            override fun onCancelled(error: DatabaseError) {}
         }
+        liveStatusListener = listener
+        ref.addValueEventListener(listener)
     }
 
     private fun setupToolbar() {
@@ -966,6 +975,9 @@ class StaffDetailActivity : MotionBaseActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        liveStatusListener?.let { liveStatusRef?.removeEventListener(it) }
+        liveStatusListener = null
+        liveStatusRef = null
         _binding = null
     }
 }

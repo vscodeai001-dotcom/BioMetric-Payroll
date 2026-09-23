@@ -20,7 +20,8 @@ class DeviceDashboardActivity : MotionBaseActivity() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var binding: ActivityDeviceDashboardBinding
-    private val dbRef = FirebaseDatabase.getInstance().getReference("owners")
+    private var activeQuery: Query? = null
+    private var activeListener: ValueEventListener? = null
 
     private lateinit var adapter: DeviceAdapter
     private val deviceList = mutableListOf<UserProfile>()
@@ -48,23 +49,22 @@ class DeviceDashboardActivity : MotionBaseActivity() {
     }
 
     private fun listenToDevices() {
-        dbRef.addValueEventListener(object : ValueEventListener {
+        val ownerRef = firebaseSync.getOwnerRef() ?: return
+        val targetRef = ownerRef.child("user_profiles")
+        activeQuery = targetRef
+
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 try {
                     deviceList.clear()
-                    for (owner in snapshot.children) {
-                        val staffRef = owner.child("user_profiles")
-                        if (staffRef.exists()) {
-                            for (staff in staffRef.children) {
-                                try {
-                                    val profile = staff.getValue(UserProfile::class.java)
-                                    if (profile != null && profile.deviceId != null) {
-                                        deviceList.add(profile)
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("Devices", "Parse error", e)
-                                }
+                    for (staff in snapshot.children) {
+                        try {
+                            val profile = staff.getValue(UserProfile::class.java)
+                            if (profile != null && !profile.deviceId.isNullOrBlank()) {
+                                deviceList.add(profile)
                             }
+                        } catch (e: Exception) {
+                            Log.e("Devices", "Parse error", e)
                         }
                     }
                     adapter.notifyDataSetChanged()
@@ -76,7 +76,18 @@ class DeviceDashboardActivity : MotionBaseActivity() {
             override fun onCancelled(error: DatabaseError) {
                 Toast.makeText(this@DeviceDashboardActivity, error.message, Toast.LENGTH_SHORT).show()
             }
-        })
+        }
+        activeListener = listener
+        targetRef.addValueEventListener(listener)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activeListener?.let { listener ->
+            activeQuery?.removeEventListener(listener)
+        }
+        activeListener = null
+        activeQuery = null
     }
 
     private fun revokeDevice(user: UserProfile) {
@@ -84,10 +95,11 @@ class DeviceDashboardActivity : MotionBaseActivity() {
             .setTitle("Revoke Device? 📱")
             .setMessage("Remove device binding for ${user.name}? They will need to log in and register a new device.")
             .setPositiveButton("Revoke 🗑️") { _, _ ->
-                FirebaseDatabase.getInstance().getReference("user_profiles")
-                    .child(user.uid)
-                    .child("deviceId")
-                    .removeValue()
+                val ownerProfilesRef = firebaseSync.getOwnerRef()?.child("user_profiles")?.child(user.uid)?.child("deviceId")
+                val globalProfilesRef = FirebaseDatabase.getInstance().getReference("user_profiles").child(user.uid).child("deviceId")
+                
+                ownerProfilesRef?.removeValue()
+                globalProfilesRef.removeValue()
                     .addOnSuccessListener {
                         firebaseSync.notifyRealtimeChanged("UserProfile", "MODIFIED")
                         Toast.makeText(this, "Device revoked successfully", Toast.LENGTH_SHORT).show()

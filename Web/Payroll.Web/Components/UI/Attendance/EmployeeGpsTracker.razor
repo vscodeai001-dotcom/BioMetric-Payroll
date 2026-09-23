@@ -273,9 +273,10 @@
                 return;
             }
 
-            // The browser watcher can start before the server has an ACTIVE
-            // session. A genuinely current online GPS event creates/rebinds it.
-            // Offline queued points never create a session.
+            // Ensure the database GPS session is created/active and bound in Firebase
+            sessionStarted = await GeoService.StartGpsSessionAsync(
+                EmployeeId,
+                liveLocationSessionId);
 
             dotNetReference ??=
                 DotNetObjectReference.Create(this);

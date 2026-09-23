@@ -137,6 +137,25 @@ window.getCoords = async function () {
         );
     }
 
+    // Fast path: if persistent watcher already has a recent location, return it immediately
+    if (window.EmployeeGpsTracker && typeof window.EmployeeGpsTracker.getLatestLocation === 'function') {
+        try {
+            const cached = window.EmployeeGpsTracker.getLatestLocation(300000);
+            if (cached && Number.isFinite(cached.Latitude) && Number.isFinite(cached.Longitude)) {
+                return cached;
+            }
+        } catch { }
+    }
+    if (window.persistentEmployeeGps &&
+        Number.isFinite(window.persistentEmployeeGps.lastLatitude) &&
+        Number.isFinite(window.persistentEmployeeGps.lastLongitude)) {
+        return {
+            Latitude: window.persistentEmployeeGps.lastLatitude,
+            Longitude: window.persistentEmployeeGps.lastLongitude,
+            Accuracy: 30
+        };
+    }
+
     function getPosition(options) {
         return new Promise(function (resolve, reject) {
             navigator.geolocation.getCurrentPosition(
@@ -174,15 +193,14 @@ window.getCoords = async function () {
     }
 
     /*
-     * First try a recent location. This is fast when the device
-     * already has a recent GPS/network location.
+     * First try a recent location with reasonable timeout.
      */
     try {
 
         const position = await getPosition({
             enableHighAccuracy: false,
-            timeout: 8000,
-            maximumAge: 15000
+            timeout: 5000,
+            maximumAge: 30000
         });
 
         return {
@@ -200,14 +218,14 @@ window.getCoords = async function () {
     }
 
     /*
-     * Then request a fresh high-accuracy position.
+     * Then request a fresh high-accuracy position with reasonable timeout.
      */
     try {
 
         const position = await getPosition({
             enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
+            timeout: 6000,
+            maximumAge: 10000
         });
 
         return {
@@ -222,6 +240,17 @@ window.getCoords = async function () {
             "High accuracy GPS attempt failed:",
             secondError
         );
+
+        // Fallback to any persistent fix before throwing
+        if (window.persistentEmployeeGps &&
+            Number.isFinite(window.persistentEmployeeGps.lastLatitude) &&
+            Number.isFinite(window.persistentEmployeeGps.lastLongitude)) {
+            return {
+                Latitude: window.persistentEmployeeGps.lastLatitude,
+                Longitude: window.persistentEmployeeGps.lastLongitude,
+                Accuracy: 50
+            };
+        }
 
         throw convertError(secondError);
     }
@@ -3269,13 +3298,21 @@ window.refreshAdminLiveMapSummary = function (mapId) {
         const now = Date.now();
         let live = 0;
 
-        Object.keys(state.liveData || {}).forEach(function (key) {
-            const id = Number(key);
-            const last = Number(state.realtimeLastTimestamp?.[id]) ||
-                Number(state.realtimeLastAt?.[id]) || 0;
-            const age = last > 0 ? Math.max(0, now - last) : Infinity;
-            if (age <= 120000) live++;
+        const staff = Array.isArray(state.liveStaff) ? state.liveStaff : [];
+        staff.forEach(function (x) {
+            const status = String(x.status || '').toLowerCase();
+            if (status === 'live') live++;
         });
+
+        if (live === 0 && state.liveData) {
+            Object.keys(state.liveData || {}).forEach(function (key) {
+                const id = Number(key);
+                const last = Number(state.realtimeLastTimestamp?.[id]) ||
+                    Number(state.realtimeLastAt?.[id]) || 0;
+                const age = last > 0 ? Math.max(0, now - last) : Infinity;
+                if (age <= 300000) live++;
+            });
+        }
 
         const labels = document.querySelectorAll(
             `[data-live-count-for="${mapId}"]`
@@ -3290,11 +3327,12 @@ window.refreshAdminLiveMapSummary = function (mapId) {
             label.appendChild(document.createTextNode(` ${live} Live${total ? ' / ' + total : ''}`));
         });
 
+        const totalStaff = staff.length || Object.keys(state.liveData || {}).length;
         const overlays = document.querySelectorAll(
             `[data-live-empty-overlay="${mapId}"]`
         );
         overlays.forEach(function (overlay) {
-            overlay.style.display = live === 0 ? '' : 'none';
+            overlay.style.display = totalStaff === 0 ? '' : 'none';
         });
     } catch (error) {
         // Summary updates are presentation-only and must never affect live GPS.
@@ -3769,9 +3807,8 @@ window.updateAdminLiveStaffMap =
                     const lat = Number(x.latitude);
                     const lng = Number(x.longitude);
                     const status = String(x.status || '').toLowerCase();
-                    const sessionId = String(x.sessionId || x.SessionId || '').trim();
-                    if (id > 0 && Number.isFinite(lat) && Number.isFinite(lng) &&
-                        status === 'live' && sessionId) {
+                    const sessionId = String(x.sessionId || x.SessionId || x.employeeId || '').trim();
+                    if (id > 0 && Number.isFinite(lat) && Number.isFinite(lng) && sessionId) {
                         existingStateForCollision.liveData[id] = {
                             employeeId: id,
                             latitude: lat,

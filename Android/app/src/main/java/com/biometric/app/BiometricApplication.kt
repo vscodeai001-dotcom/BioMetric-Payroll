@@ -55,7 +55,7 @@ class BiometricApplication : Application(), Configuration.Provider {
         runCatching {
             val firebaseDatabase = FirebaseDatabase.getInstance()
             firebaseDatabase.setPersistenceEnabled(true)
-            firebaseDatabase.setPersistenceCacheSizeBytes(100 * 1024 * 1024)
+            firebaseDatabase.setPersistenceCacheSizeBytes(20 * 1024 * 1024)
         }.onFailure { Log.w("BiometricApplication", "Firebase persistence setup skipped", it) }
 
         super.onCreate()

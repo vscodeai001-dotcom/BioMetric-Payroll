@@ -512,6 +512,12 @@ else if (locationUpdatesStarted) {
             offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.ERROR, "Invalid GPS coordinate rejected")
             return
         }
+        // Reject (0.0, 0.0) "Null Island" — device has not acquired a GPS fix yet.
+        // Web admin's LiveStaffLocationPanel also drops (0,0), so never upload them.
+        if (location.latitude == 0.0 && location.longitude == 0.0) {
+            offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Null Island (0,0) coordinate rejected — GPS not yet fixed")
+            return
+        }
         if (qualityManager.isSuspiciousMovement(lastLocation, location)) {
             offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Suspicious movement detected; preserving GPS fix for audit")
         }
@@ -725,11 +731,9 @@ else if (locationUpdatesStarted) {
         )
         val liveSessionId = firebaseSync.getTrackingLiveSessionId(employeeId)
 
-        // Preserve ended history. If another platform ended this session, or
-        // a newer session already owns the live marker, start a NEW session.
-        if (remoteState.equals("ENDED", ignoreCase = true) ||
-            remoteState.equals("MISSING", ignoreCase = true) ||
-            (!liveSessionId.isNullOrBlank() && liveSessionId != effectiveSessionId)) {
+        // Rotate only when the remote session is explicitly ENDED.
+        // A "MISSING" state is expected before the session is first created in Firebase.
+        if (remoteState.equals("ENDED", ignoreCase = true)) {
             effectiveSessionId = UUID.randomUUID().toString()
             sessionStore.setGpsSessionId(effectiveSessionId)
             serverSessionStarted = false
@@ -740,8 +744,12 @@ else if (locationUpdatesStarted) {
 
             Log.i(
                 "TrackingService",
-                "Rotating GPS session. EmployeeId=$employeeId oldSession=$sessionId newSession=$effectiveSessionId remoteState=$remoteState liveSession=$liveSessionId"
+                "Rotating GPS session because remote state is ENDED. EmployeeId=$employeeId oldSession=$sessionId newSession=$effectiveSessionId remoteState=$remoteState"
             )
+
+            if (sessionId.isNotBlank() && sessionId != effectiveSessionId) {
+                firebaseSync.pushTrackingSessionEnded(employeeId, sessionId, "SESSION_ROTATED")
+            }
         }
 
         val started = firebaseSync.pushTrackingSessionStarted(

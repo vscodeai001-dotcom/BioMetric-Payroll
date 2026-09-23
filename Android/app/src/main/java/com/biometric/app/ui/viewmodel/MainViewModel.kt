@@ -275,10 +275,13 @@ class MainViewModel @Inject constructor(
 
                     val shiftsToday = schedules.filter { it.shiftDate == dateTodayStr }.size
                     
+                    val nowCal = Calendar.getInstance()
+                    val currentYear = nowCal.get(Calendar.YEAR)
+                    val currentMonth = nowCal.get(Calendar.MONTH) + 1
                     val summariesThisMonth = summaries.filter { 
                         val sDate = it.shiftDate.split("-")
                         if (sDate.size == 3) {
-                            sDate[0].toInt() == Calendar.getInstance().get(Calendar.YEAR) && sDate[1].toInt() == Calendar.getInstance().get(Calendar.MONTH) + 1
+                            sDate[0].toIntOrNull() == currentYear && sDate[1].toIntOrNull() == currentMonth
                         } else false
                     }
                     val totalScheduledMs = summariesThisMonth.sumOf { it.scheduledShiftDurationMs }

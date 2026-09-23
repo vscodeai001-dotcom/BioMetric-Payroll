@@ -433,13 +433,28 @@ window.EmployeeGpsTracker = (function () {
                     onLocationSuccess(position);
                 },
                 function (error) {
-                    console.log('Force update - getCurrentPosition error: ' + error.message);
-                    // Don't report error, just continue with watchPosition
+                    if (error.code === 3) { // TIMEOUT
+                        // Fallback to network/WiFi geolocation with relaxed accuracy for desktop/laptops
+                        navigator.geolocation.getCurrentPosition(
+                            function (fallbackPos) {
+                                console.log('Force update - fallback network position success');
+                                onLocationSuccess(fallbackPos);
+                            },
+                            function (fallbackErr) {
+                                // Ignore silent background error
+                            },
+                            {
+                                enableHighAccuracy: false,
+                                timeout: 10000,
+                                maximumAge: 30000
+                            }
+                        );
+                    }
                 },
                 {
                     enableHighAccuracy: true,
-                    timeout: 5000,
-                    maximumAge: 0
+                    timeout: 8000,
+                    maximumAge: 10000
                 }
             );
         }
@@ -942,7 +957,7 @@ window.EmployeeGpsTracker = (function () {
             }
 
             const age = Date.now() - Number(lastLocationData.timestamp || 0);
-            const maxAge = Number(maxAgeMs) || 30000;
+            const maxAge = Number(maxAgeMs) || 300000;
 
             if (age < 0 || age > maxAge) {
                 return null;
@@ -1045,7 +1060,7 @@ window.processQueuedLocations =
 // starting a second competing getCurrentPosition request.
 window.getPersistentEmployeeGpsLocation =
     function (maxAgeMs) {
-        return window.EmployeeGpsTracker.getLatestLocation(maxAgeMs || 30000);
+        return window.EmployeeGpsTracker.getLatestLocation(maxAgeMs || 300000);
     };
 
 console.log('Employee GPS Tracker module loaded');

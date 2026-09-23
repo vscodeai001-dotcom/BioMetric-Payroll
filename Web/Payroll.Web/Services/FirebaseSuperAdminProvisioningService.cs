@@ -58,10 +58,9 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "SuperAdmin provisioning attempt {Attempt} failed.", attempt);
-                // Keep retrying until the canonical Firebase account is actually
-                // synchronized. This is especially important when the service
-                // starts before environment/configuration is available.
-                await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+                // Back off progressively if network is slow or delayed
+                var delaySeconds = Math.Min(15 * attempt, 120);
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
             }
         }
     }
@@ -81,9 +80,16 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
         // Firebase Console. A password is required only when creating the account,
         // or when an explicit configured password is supplied for synchronization.
         UserRecord? user = null;
-        try { user = await auth.GetUserByEmailAsync(email, ct); }
+        try 
+        { 
+            using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            opCts.CancelAfter(TimeSpan.FromSeconds(15));
+            user = await auth.GetUserByEmailAsync(email, opCts.Token); 
+        }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
+            using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            opCts.CancelAfter(TimeSpan.FromSeconds(15));
             user = await auth.CreateUserAsync(
                 new UserRecordArgs
                 {
@@ -92,7 +98,7 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
                     EmailVerified = true,
                     DisplayName = "SuperAdmin"
                 },
-                ct);
+                opCts.Token);
 
             _logger.LogInformation(
                 "Firebase SuperAdmin {Email} account created successfully.",
@@ -100,11 +106,18 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
         }
         if (user != null)
         {
+            var ownerUid = _configuration["Firebase:OwnerUid"] ?? "biometricpayroll";
+            var hasCorrectClaims = user.CustomClaims != null &&
+                user.CustomClaims.TryGetValue("role", out var r) && r?.ToString() == "SuperAdmin" &&
+                user.CustomClaims.TryGetValue("owner_uid", out var ou) && ou?.ToString() == ownerUid;
+
             // The canonical SuperAdmin uses one Firebase credential on Web and
             // Android. If an explicit Web password is configured, synchronize it.
             // Otherwise preserve the password already stored in Firebase.
             if (!string.IsNullOrWhiteSpace(password))
             {
+                using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                opCts.CancelAfter(TimeSpan.FromSeconds(15));
                 await auth.UpdateUserAsync(
                     new UserRecordArgs
                     {
@@ -113,17 +126,22 @@ public sealed class FirebaseSuperAdminProvisioningService : BackgroundService
                         EmailVerified = true,
                         DisplayName = "SuperAdmin"
                     },
-                    ct);
+                    opCts.Token);
             }
 
-            await auth.SetCustomUserClaimsAsync(
-                user.Uid,
-                new Dictionary<string, object>
-                {
-                    ["role"] = "SuperAdmin",
-                    ["owner_uid"] = _configuration["Firebase:OwnerUid"] ?? "biometricpayroll"
-                },
-                ct);
+            if (!hasCorrectClaims)
+            {
+                using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                opCts.CancelAfter(TimeSpan.FromSeconds(15));
+                await auth.SetCustomUserClaimsAsync(
+                    user.Uid,
+                    new Dictionary<string, object>
+                    {
+                        ["role"] = "SuperAdmin",
+                        ["owner_uid"] = ownerUid
+                    },
+                    opCts.Token);
+            }
         }
     }
 

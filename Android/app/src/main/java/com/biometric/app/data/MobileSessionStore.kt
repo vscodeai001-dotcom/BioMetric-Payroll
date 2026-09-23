@@ -31,7 +31,16 @@ class MobileSessionStore @Inject constructor(
     fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
     fun userRole(): String = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         .getString("user_role", "") ?: ""
-    fun firebaseOwnerUid(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+    fun firebaseOwnerUid(): String? {
+        val uid = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+        if (!uid.isNullOrBlank()) return uid
+        if (isLoggedIn()) {
+            val fallback = "biometricpayroll"
+            prefs.edit { putString(KEY_FIREBASE_OWNER_UID, fallback) }
+            return fallback
+        }
+        return null
+    }
     fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_ACTIVE, false) && !token().isNullOrBlank()
 

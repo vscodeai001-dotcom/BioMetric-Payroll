@@ -132,7 +132,15 @@ else
             try
             {
                 var ownerUid = Firebase.ResolveOwnerUid("audit-viewer", "SuperAdmin");
-                var remote = await Firebase.GetOwnerTableAsync(ownerUid, "audit_logs");
+                // BANDWIDTH OPTIMIZATION: Use server-side timestamp range query instead of
+                // downloading the entire audit_logs table and filtering in C#.
+                // Firebase filters by the indexed "timestamp" field (milliseconds) and caps
+                // results at 200 most-recent records matching the selected date window.
+                var startMillis = new DateTimeOffset(queryStart, TimeSpan.Zero).ToUnixTimeMilliseconds();
+                var endMillis = new DateTimeOffset(queryEndExclusive, TimeSpan.Zero).ToUnixTimeMilliseconds() - 1;
+                var remote = await Firebase.GetOwnerTableByChildRangeAsync(
+                    ownerUid, "audit_logs", "timestamp",
+                    startAt: startMillis, endAt: endMillis, limitToLast: 200);
                 if (remote.HasValue && remote.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
                 {
                     foreach (var property in remote.Value.EnumerateObject())

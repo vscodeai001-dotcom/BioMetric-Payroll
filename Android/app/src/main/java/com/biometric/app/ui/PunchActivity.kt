@@ -20,12 +20,15 @@ import com.biometric.app.domain.location.GeofenceManager
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.google.firebase.auth.FirebaseAuth
+import com.biometric.app.data.dao.GeofenceDao
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -39,6 +42,7 @@ class PunchActivity : AppCompatActivity() {
     
     @Inject lateinit var geofenceManager: GeofenceManager
     @Inject lateinit var repository: MainRepository
+    @Inject lateinit var geofenceDao: GeofenceDao
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val auth = FirebaseAuth.getInstance()
@@ -62,7 +66,7 @@ class PunchActivity : AppCompatActivity() {
 
         if (allPermissionsGranted()) {
             startCamera()
-            listenToGeofences()
+            loadGeofences()
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS)
         }
@@ -91,17 +95,29 @@ class PunchActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private fun listenToGeofences() {
-        dbRef.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                geofences.clear()
-                for (child in snapshot.children) {
-                    child.getValue(GeofenceLocation::class.java)?.let { geofences.add(it) }
+    private fun loadGeofences() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val localList = runCatching { geofenceDao.getAllActive() }.getOrDefault(emptyList())
+            if (localList.isNotEmpty()) {
+                withContext(Dispatchers.Main) {
+                    geofences.clear()
+                    geofences.addAll(localList)
+                    validateLocation()
                 }
-                validateLocation()
+            } else {
+                // Fallback to single fetch only if local DB is empty
+                dbRef.addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        geofences.clear()
+                        for (child in snapshot.children) {
+                            child.getValue(GeofenceLocation::class.java)?.let { geofences.add(it) }
+                        }
+                        validateLocation()
+                    }
+                    override fun onCancelled(error: DatabaseError) {}
+                })
             }
-            override fun onCancelled(error: DatabaseError) {}
-        })
+        }
     }
 
     private fun validateLocation() {
@@ -184,7 +200,7 @@ class PunchActivity : AppCompatActivity() {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 startCamera()
-                listenToGeofences()
+                loadGeofences()
             } else {
                 Toast.makeText(this, "Permissions not granted", Toast.LENGTH_SHORT).show()
                 finish()

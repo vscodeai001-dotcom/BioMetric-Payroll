@@ -18,6 +18,8 @@ import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.entity.UserRole
+import com.biometric.app.sync.ssot.FirebaseSsotSchema
 import com.google.gson.Gson
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.*
@@ -69,8 +71,10 @@ class FirebaseSyncManager @Inject constructor(
         awaitClose { connectedRef.removeEventListener(listener) }
     }
 
-    fun getOwnerUid(): String? =
-        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
+    fun getOwnerUid(): String? {
+        sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let { return it }
+        return if (isAuthenticated() || sessionStore.isLoggedIn()) FirebaseSsotSchema.DEFAULT_OWNER_UID else null
+    }
 
     fun getOwnerRef(): DatabaseReference? {
         val uid = getOwnerUid() ?: return null
@@ -618,18 +622,29 @@ class FirebaseSyncManager @Inject constructor(
             // Keep the legacy compatibility path, but only after the owner-scoped
             // session has accepted the start.
             if (committed) {
-                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
+                try {
+                    getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
+                } catch (legacyEx: Exception) {
+                    Log.d("FirebaseSyncManager", "Legacy tracking/sessions write skipped: ${legacyEx.message}")
+                }
 
-                // REQUIREMENT: Bind the live marker to this specific session.
-                // This prevents late GPS packets from a previous session from
-                // overwriting the live position of the new session.
-                val liveBinding = mapOf(
-                    "SessionId" to sessionId,
-                    "State" to "ACTIVE",
-                    "LastUpdatedUtc" to payload["StartedAtUtc"]
-                )
-                getGlobalRef().child("tracking/live/$employeeId").updateChildren(liveBinding).await()
-                getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(liveBinding).await()
+                // If live marker can be safely bound, update it safely with full tenant identity.
+                // If it fails (e.g. coordinates required by validation rules), do not fail session start;
+                // the first GPS location update will establish the complete live marker.
+                try {
+                    val liveBinding = mapOf(
+                        "EmployeeId" to employeeId,
+                        "SessionId" to sessionId,
+                        "OwnerUid" to ownerUid,
+                        "State" to "ACTIVE",
+                        "Sequence" to 0L,
+                        "LastUpdatedUtc" to payload["StartedAtUtc"]
+                    )
+                    getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId").updateChildren(liveBinding).await()
+                    getGlobalRef().child("tracking/live/$employeeId").updateChildren(liveBinding).await()
+                } catch (liveEx: Exception) {
+                    Log.d("FirebaseSyncManager", "Live marker initial binding deferred until first GPS fix: ${liveEx.message}")
+                }
             }
             committed
         } catch (e: Exception) {
@@ -764,6 +779,7 @@ class FirebaseSyncManager @Inject constructor(
             "Timestamp" to Date(timestamp).toInstant().toString(),
             "LastUpdatedUtc" to Date().toInstant().toString(),
             "ClientEventId" to clientEventId,
+            "State" to "ACTIVE",
             "Source" to if (isOffline) "OfflineSync" else "Online",
             "CaptureSource" to if (isOffline) "OfflineSync" else "Online"
         )
@@ -834,13 +850,21 @@ class FirebaseSyncManager @Inject constructor(
                 val currentState = current.child("State").getValue(String::class.java).orEmpty()
                 val currentClientEventId = current.child("ClientEventId").getValue(String::class.java).orEmpty()
 
-                if (currentSession.isNotBlank() && currentSession != sessionId) return@runTransactionAwait false
-                if (currentState.equals("ENDED", true)) return@runTransactionAwait false
-                if (currentSequence > sequence) return@runTransactionAwait false
+                // Only reject if THIS incoming session is the one that was ended.
+                // When a new session begins (currentSession != sessionId), accept it and establish the new active live marker.
+                if (currentSession.equals(sessionId, ignoreCase = true) && currentState.equals("ENDED", true)) {
+                    return@runTransactionAwait false
+                }
+                // Sequence order check applies strictly within the same session.
+                // When a new active session is started, sequence counter starts fresh.
+                if (currentSession.equals(sessionId, ignoreCase = true) && currentSequence > sequence) {
+                    return@runTransactionAwait false
+                }
 
                 // Same event was already accepted. Keep the transaction
                 // committed so the immutable history write below is retried.
-                if (currentSequence == sequence &&
+                if (currentSession.equals(sessionId, ignoreCase = true) &&
+                    currentSequence == sequence &&
                     currentClientEventId.isNotBlank() &&
                     currentClientEventId != clientEventId) {
                     return@runTransactionAwait false
@@ -864,10 +888,14 @@ class FirebaseSyncManager @Inject constructor(
             // Legacy compatibility stream receives only the newest accepted
             // point. It is never allowed to overwrite a newer owner-scoped
             // session.
-            getGlobalRef()
-                .child("tracking/live/$employeeId")
-                .setValue(payload)
-                .await()
+            try {
+                getGlobalRef()
+                    .child("tracking/live/$employeeId")
+                    .setValue(payload)
+                    .await()
+            } catch (legacyEx: Exception) {
+                Log.d("FirebaseSyncManager", "Legacy tracking/live write skipped: ${legacyEx.message}")
+            }
 
             true
         } catch (e: Exception) {

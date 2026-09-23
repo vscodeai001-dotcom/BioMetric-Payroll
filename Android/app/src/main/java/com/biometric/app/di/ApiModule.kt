@@ -25,7 +25,7 @@ import kotlinx.coroutines.tasks.await
 @Module
 @InstallIn(SingletonComponent::class)
 object ApiModule {
-    private const val GEMINI_API_KEY = "AIzaSyBptaB9GQdDhsWZ0u6dxnellgNJPhTK95Q"
+    private const val GEMINI_API_KEY = "AQ.Ab8RN6JicMMCTvse3s8bsKd32nVjqcTD6ntGB1whP2-WqCUOJA"
 
     @Provides
     @Singleton

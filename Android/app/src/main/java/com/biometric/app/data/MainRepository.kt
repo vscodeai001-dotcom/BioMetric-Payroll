@@ -294,7 +294,7 @@ class MainRepository(
     }
     suspend fun updateProfile(profile: UserProfile) = firebaseSync.pushProfile(profile)
     
-    suspend fun fetchProfileByPhone(phone: String): UserProfile? {
+    suspend fun fetchProfileByPhone(phone: String): UserProfile? = runCatching {
         val digitsOnly = phone.filter { it.isDigit() }
         val formats = mutableListOf<String>()
         when (digitsOnly.length) {
@@ -316,14 +316,14 @@ class MainRepository(
         val ref = firebaseSync.getGlobalRef().child("user_profiles")
         for (f in formats.distinct()) {
             val snapshot = ref.orderByChild("phone").equalTo(f).get().await()
-            snapshot.children.firstOrNull()?.getValue(UserProfile::class.java)?.let { return it }
+            snapshot.children.firstOrNull()?.getValue(UserProfile::class.java)?.let { return@runCatching it }
         }
 
         val allSnapshot = ref.get().await()
-        return allSnapshot.children.asSequence()
+        allSnapshot.children.asSequence()
             .mapNotNull { it.getValue(UserProfile::class.java) }
             .find { it.phone.filter { char -> char.isDigit() }.contains(digitsOnly.takeLast(10)) }
-    }
+    }.getOrNull()
 
     suspend fun pushProfileByUid(profile: UserProfile) {
         firebaseSync.pushProfile(profile)
@@ -427,7 +427,7 @@ class MainRepository(
     }
 
     fun getEmployeeHistoryFlow(employeeId: String): Flow<List<EmployeeHistory>> =
-        firebaseSync.getDataFlow<EmployeeHistory>("employee_history").map { history ->
+        allHistoryFlow.map { history ->
             history.asSequence().filter { it.employeeId == employeeId }.sortedBy { it.version }.toList()
         }.flowOn(Dispatchers.Default)
 

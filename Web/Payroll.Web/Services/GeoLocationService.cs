@@ -192,14 +192,6 @@ public class GeoLocationService
                     .FirstOrDefaultAsync(x =>
                         x.SessionId == sessionId);
 
-                if (existing != null)
-                {
-                    if (existing.EmployeeId != employeeId)
-                        return false;
-
-                    return !existing.EndedAtUtc.HasValue;
-                }
-
                 var previousSessions = await db.EmployeeGpsSessions
                     .Where(x =>
                         x.EmployeeId == employeeId &&
@@ -209,21 +201,46 @@ public class GeoLocationService
 
                 var now = DateTime.UtcNow;
 
-                foreach (var previous in previousSessions)
+                if (previousSessions.Count > 0)
                 {
-                    previous.EndedAtUtc = now;
-                    previous.EndReason = "NEW_SESSION";
+                    foreach (var previous in previousSessions)
+                    {
+                        previous.EndedAtUtc = now;
+                        previous.EndReason = "NEW_SESSION";
 
-                    LiveLocationStore.Remove(
-                        previous.EmployeeId,
-                        previous.SessionId);
+                        LiveLocationStore.Remove(
+                            previous.EmployeeId,
+                            previous.SessionId);
 
-                    // Ensure the Firebase live marker is un-bound from
-                    // this now-ended session.
-                    await _firebase.TerminateLiveLocationAsync(
-                        previous.EmployeeId,
-                        _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"),
-                        expectedSessionId: previous.SessionId);
+                        // Ensure the Firebase live marker is un-bound from
+                        // this now-ended session.
+                        await _firebase.TerminateLiveLocationAsync(
+                            previous.EmployeeId,
+                            _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"),
+                            expectedSessionId: previous.SessionId);
+                    }
+                    await SaveChangesWithSqliteRetryAsync(db);
+                }
+
+                if (existing != null)
+                {
+                    if (existing.EmployeeId != employeeId)
+                        return false;
+
+                    if (existing.EndedAtUtc.HasValue)
+                    {
+                        existing.EndedAtUtc = null;
+                        existing.EndReason = null;
+                        existing.LastUpdateAtUtc = now;
+                        await SaveChangesWithSqliteRetryAsync(db);
+                    }
+
+                    await _firebase.BindLiveLocationAsync(
+                        employeeId,
+                        sessionId,
+                        _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
+
+                    return true;
                 }
 
                 var session = new EmployeeGpsSession
@@ -391,32 +408,79 @@ public class GeoLocationService
 
                 if (session == null || session.EndedAtUtc.HasValue)
                 {
-                    LiveLocationStore.Remove(employeeId, sessionId);
-
                     if (!allowSessionRecovery)
+                    {
+                        if (session != null && session.EndedAtUtc.HasValue)
+                        {
+                            LiveLocationStore.Remove(employeeId, sessionId);
+                        }
                         return false;
+                    }
 
-                    var activeSession = await db.EmployeeGpsSessions
+                    var recoveryStart = DateTime.UtcNow;
+
+                    // Check if another active session exists for this employee
+                    var existingActive = await db.EmployeeGpsSessions
                         .Where(x =>
                             x.EmployeeId == employeeId &&
-                            x.EndedAtUtc == null)
+                            x.EndedAtUtc == null &&
+                            x.SessionId != sessionId)
                         .OrderByDescending(x => x.StartedAtUtc)
                         .FirstOrDefaultAsync();
 
-                    if (activeSession != null)
+                    if (existingActive != null)
                     {
-                        session = activeSession;
-                        effectiveSessionId = activeSession.SessionId;
+                        session = existingActive;
+                        effectiveSessionId = existingActive.SessionId;
+                    }
+                    else if (session != null && session.EndedAtUtc.HasValue)
+                    {
+                        session.EndedAtUtc = null;
+                        session.EndReason = null;
+                        session.LastUpdateAtUtc = recoveryStart;
+                        await SaveChangesWithSqliteRetryAsync(db);
+                        effectiveSessionId = sessionId;
+
+                        await _firebase.BindLiveLocationAsync(
+                            employeeId,
+                            sessionId,
+                            _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
+
+                        _logger.LogInformation(
+                            "Reactivated ended GPS session for EmployeeId={EmployeeId}, SessionId={SessionId}",
+                            employeeId,
+                            sessionId);
                     }
                     else
                     {
-                        effectiveSessionId = Guid.NewGuid();
-                        var recoveryStart = DateTime.UtcNow;
+                        // Ensure only ONE session can be active for an employee. Close any older dangling sessions.
+                        var previousSessions = await db.EmployeeGpsSessions
+                            .Where(x =>
+                                x.EmployeeId == employeeId &&
+                                x.EndedAtUtc == null &&
+                                x.SessionId != sessionId)
+                            .ToListAsync();
+
+                        if (previousSessions.Count > 0)
+                        {
+                            foreach (var previous in previousSessions)
+                            {
+                                previous.EndedAtUtc = previous.LastUpdateAtUtc > DateTime.MinValue ? previous.LastUpdateAtUtc : recoveryStart;
+                                previous.EndReason = "SUPERSEDED";
+                                LiveLocationStore.Remove(previous.EmployeeId, previous.SessionId);
+                                await _firebase.TerminateLiveLocationAsync(
+                                    previous.EmployeeId,
+                                    _firebase.ResolveOwnerUid($"employee-{previous.EmployeeId}", "Employee"),
+                                    expectedSessionId: previous.SessionId);
+                            }
+                        }
+
+                        effectiveSessionId = sessionId;
 
                         session = new EmployeeGpsSession
                         {
                             EmployeeId = employeeId,
-                            SessionId = effectiveSessionId,
+                            SessionId = sessionId,
                             StartedAtUtc = recoveryStart,
                             LastUpdateAtUtc = DateTime.MinValue,
                             EndedAtUtc = null,
@@ -431,7 +495,7 @@ public class GeoLocationService
 
                         await _firebase.BindLiveLocationAsync(
                             employeeId,
-                            effectiveSessionId,
+                            sessionId,
                             _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee"));
 
                         try
@@ -441,7 +505,7 @@ public class GeoLocationService
                                 new
                                 {
                                     EmployeeId = employeeId,
-                                    SessionId = effectiveSessionId,
+                                    SessionId = sessionId,
                                     StartedAtUtc = recoveryStart
                                 });
                         }
@@ -454,21 +518,45 @@ public class GeoLocationService
                         }
 
                         _logger.LogInformation(
-                            "Recovered GPS session. EmployeeId={EmployeeId}, OldSessionId={OldSessionId}, NewSessionId={NewSessionId}",
+                            "Created/Recovered GPS session for EmployeeId={EmployeeId}, SessionId={SessionId}",
                             employeeId,
-                            sessionId,
-                            effectiveSessionId);
+                            sessionId);
                     }
+                }
+
+                // Ensure only ONE session can be active for an employee. Close any older dangling sessions.
+                var supersededSessions = await db.EmployeeGpsSessions
+                    .Where(x =>
+                        x.EmployeeId == employeeId &&
+                        x.EndedAtUtc == null &&
+                        x.SessionId != effectiveSessionId)
+                    .ToListAsync();
+
+                if (supersededSessions.Count > 0)
+                {
+                    var nowUtc = DateTime.UtcNow;
+                    foreach (var superseded in supersededSessions)
+                    {
+                        superseded.EndedAtUtc = superseded.LastUpdateAtUtc > DateTime.MinValue ? superseded.LastUpdateAtUtc : nowUtc;
+                        superseded.EndReason = "SUPERSEDED";
+                        LiveLocationStore.Remove(superseded.EmployeeId, superseded.SessionId);
+                    }
+                    await SaveChangesWithSqliteRetryAsync(db);
                 }
 
                 var captureTime = capturedAtUtc.HasValue && capturedAtUtc.Value != default
                     ? capturedAtUtc.Value.ToUniversalTime()
                     : DateTime.UtcNow;
 
+                // Adjust session start time if first fix has minor clock skew before session creation
+                if (session.LastUpdateAtUtc == DateTime.MinValue && captureTime < session.StartedAtUtc)
+                {
+                    session.StartedAtUtc = captureTime;
+                }
+
                 // Do not let delayed/retried GPS packets overwrite the newer
-                // session position. This is a display/data-integrity guard;
-                // attendance rules continue to use the current server time.
-                if (captureTime < session.StartedAtUtc)
+                // session position. Allow reasonable 60-second clock skew for live fixes.
+                if (captureTime < session.StartedAtUtc.AddSeconds(-60))
                 {
                     _logger.LogDebug(
                         "Ignoring GPS fix captured before effective session start. EmployeeId={EmployeeId}, IncomingSessionId={IncomingSessionId}, EffectiveSessionId={EffectiveSessionId}",
@@ -869,6 +957,17 @@ public class GeoLocationService
             // local attendance transaction and must never create another punch.
             _ = _firebaseAttendanceMutations.UpsertPunchAsync(log, "CREATED");
 
+            try
+            {
+                var punchDate = DateOnly.FromDateTime(punchTime);
+                _ = _refreshService.NotifyPunchCreatedAsync(employeeId, punchDate);
+                _ = _refreshService.NotifyAttendanceChangedAsync(employeeId, punchDate);
+            }
+            catch (Exception refreshEx)
+            {
+                _logger.LogWarning(refreshEx, "Failed to broadcast attendance change for auto-punch: {EmployeeId}", employeeId);
+            }
+
             var result = new GeoPunchResult
             {
                 Success = true,
@@ -896,7 +995,7 @@ public class GeoLocationService
 
             _logger.LogInformation(
                 "Automatic geofence {PunchType} recorded. EmployeeId={EmployeeId}, LogId={LogId}, Distance={Distance}m, PreviousState={PreviousState}, CurrentState={CurrentState}",
-                requiredPunchType,
+                punchType,
                 employeeId,
                 log.LogID,
                 Math.Round(distanceMeters, 1),
@@ -2153,6 +2252,27 @@ public class GeoLocationService
                     "Geo punch audit committed locally but Firebase realtime publication failed. EmployeeId={EmployeeId}, AuditId={AuditId}",
                     employeeId,
                     audit.Id);
+            }
+
+            try
+            {
+                await _hubContext.Clients.All.SendAsync(
+                    "GeoPunchAuditChanged",
+                    new
+                    {
+                        EmployeeId = employeeId,
+                        SessionId = sessionId.ToString(),
+                        AuditId = audit.Id,
+                        PunchTimeUtc = punchTimeUtc,
+                        IsWithinAllowedRadius = withinRadius,
+                        ResultMessage = result.Message
+                    });
+
+                await _refreshService.NotifyLocationChangedAsync(employeeId);
+            }
+            catch (Exception signalREx)
+            {
+                _logger.LogWarning(signalREx, "Failed to broadcast GeoPunchAuditChanged event via SignalR. EmployeeId={EmployeeId}", employeeId);
             }
         }
         catch (Exception ex)

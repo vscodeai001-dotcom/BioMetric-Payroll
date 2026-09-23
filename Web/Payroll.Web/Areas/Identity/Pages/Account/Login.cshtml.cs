@@ -201,24 +201,106 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
 
             // ========================================================
-            // FIND USER
+            // FIND AND VERIFY USER (Identity + Firebase Auth)
             // ========================================================
 
             var user =
                 await _userManager.FindByEmailAsync(email);
 
+            var passwordVerified = false;
 
-            // --------------------------------------------------------
-            // Do not reveal whether an account exists.
-            // --------------------------------------------------------
-
-            if (user == null)
+            if (user != null)
             {
-                AddInvalidLoginError();
+                var localPasswordResult =
+                    await _signInManager.CheckPasswordSignInAsync(
+                        user,
+                        Input.Password,
+                        lockoutOnFailure: false);
 
-                return Page();
+                if (localPasswordResult.Succeeded)
+                {
+                    passwordVerified = true;
+                }
+                else if (localPasswordResult.IsLockedOut)
+                {
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "This account is temporarily locked. Please try again later.");
+                    return Page();
+                }
+                else if (localPasswordResult.IsNotAllowed)
+                {
+                    ModelState.AddModelError(
+                        string.Empty,
+                        "This account is currently not allowed to sign in.");
+                    return Page();
+                }
             }
 
+            // If user does not exist in local Identity or local password failed,
+            // authenticate against Firebase Authentication directly.
+            if (!passwordVerified)
+            {
+                var fbResult = await _firebaseRealtime.VerifyEmailPasswordAsync(
+                    email,
+                    Input.Password,
+                    HttpContext.RequestAborted);
+
+                if (fbResult.Success)
+                {
+                    passwordVerified = true;
+
+                    if (user == null)
+                    {
+                        user = new IdentityUser
+                        {
+                            Id = fbResult.LocalId ?? Guid.NewGuid().ToString(),
+                            Email = email,
+                            UserName = email,
+                            EmailConfirmed = true
+                        };
+
+                        var createResult = await _userManager.CreateAsync(user, Input.Password);
+                        if (createResult.Succeeded)
+                        {
+                            var fbEmp = await _firebaseEmployees.GetEmployeeByEmailAsync(email);
+                            var role = string.Equals(email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase)
+                                ? "SuperAdmin" : (fbEmp != null ? "Employee" : "Admin");
+                            await _userManager.AddToRoleAsync(user, role);
+
+                            if (fbEmp != null)
+                            {
+                                await using var db = await _dbFactory.CreateDbContextAsync();
+                                var dbEmp = await db.Employees.FirstOrDefaultAsync(e => e.EmployeeID == fbEmp.EmployeeID);
+                                if (dbEmp != null)
+                                {
+                                    dbEmp.AspNetUserId = user.Id;
+                                    dbEmp.Email = email;
+                                    await db.SaveChangesAsync();
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Sync updated Firebase password into local Identity
+                        var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
+                        await _userManager.ResetPasswordAsync(user, resetToken, Input.Password);
+                    }
+                }
+            }
+
+            if (user == null || !passwordVerified)
+            {
+                if (user != null)
+                {
+                    await _attendanceMonitor.RecordAsync(
+                        "LOGIN_FAILED", user.Id, user.Email ?? email, null, "Web", "FAILED", "INVALID_CREDENTIALS");
+                }
+
+                AddInvalidLoginError();
+                return Page();
+            }
 
             // ========================================================
             // CONFIRMED EMAIL CHECK
@@ -234,7 +316,6 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
                 return Page();
             }
-
 
             // ========================================================
             // ROLE CHECK
@@ -259,55 +340,6 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 isEmployee ||
                 isAdmin ||
                 isSuperAdmin;
-
-
-            // ========================================================
-            // VERIFY PASSWORD FIRST
-            // ========================================================
-            //
-            // We NEVER allow a person to force logout an existing
-            // session without first proving the correct password.
-            //
-            // This is important.
-            // ========================================================
-
-            var passwordResult =
-                await _signInManager.CheckPasswordSignInAsync(
-                    user,
-                    Input.Password,
-                    lockoutOnFailure: false);
-
-
-            if (passwordResult.IsLockedOut)
-            {
-                ModelState.AddModelError(
-                    string.Empty,
-                    "This account is temporarily locked. Please try again later.");
-
-                return Page();
-            }
-
-
-            if (passwordResult.IsNotAllowed)
-            {
-                ModelState.AddModelError(
-                    string.Empty,
-                    "This account is currently not allowed to sign in.");
-
-                return Page();
-            }
-
-
-            if (!passwordResult.Succeeded)
-            {
-                await _attendanceMonitor.RecordAsync(
-                    "LOGIN_FAILED", user.Id, user.Email ?? email, null, "Web", "FAILED",
-                    passwordResult.IsLockedOut ? "LOCKED" : (passwordResult.IsNotAllowed ? "NOT_ALLOWED" : "INVALID_CREDENTIALS"));
-
-                AddInvalidLoginError();
-
-                return Page();
-            }
 
 
             _logger.LogInformation(

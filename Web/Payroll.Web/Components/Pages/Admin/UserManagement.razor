@@ -75,7 +75,10 @@ else
 
     private List<Employee> unlinkedEmployees =>
         allEmployees
-            .Where(e => string.IsNullOrEmpty(e.AspNetUserId) || !userList.Any(u => u.UserId == e.AspNetUserId))
+            .Where(e => !userList.Any(u =>
+                (u.EmployeeId.HasValue && u.EmployeeId.Value == e.EmployeeID) ||
+                (!string.IsNullOrWhiteSpace(e.Email) && !string.IsNullOrWhiteSpace(u.Email) && string.Equals(e.Email.Trim(), u.Email.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrWhiteSpace(e.AspNetUserId) && (u.UserId == e.AspNetUserId || u.FirebaseUid == e.AspNetUserId))))
             .ToList();
 
     private NewUserFormModel newUserForm = new();
@@ -86,95 +89,20 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await using var dbContext = await DbFactory.CreateDbContextAsync();
-        await LoadUsersAndRoles(dbContext);
+        await LoadUsersAndRoles();
     }
 
-    private async Task LoadUsersAndRoles(AppDbContext dbContext)
+    private async Task LoadUsersAndRoles(AppDbContext? dbContext = null)
     {
         isLoading = true;
         try
         {
             allEmployees = await FirebaseEmployees.GetEmployeesAsync();
-
-            // Read Identity data through the same AppDbContext that is used
-            // by the SQLite compatibility store. This avoids one UserManager
-            // role query per user and keeps the list deterministic after a
-            // create/role update.
-            var users = await dbContext.Users
-                .AsNoTracking()
-                .ToListAsync();
-
-            var rolesById = await dbContext.Roles
-                .AsNoTracking()
-                .ToDictionaryAsync(r => r.Id, r => r.Name ?? "Employee");
-
-            var roleIdsByUserId = await dbContext.UserRoles
-                .AsNoTracking()
-                .GroupBy(ur => ur.UserId)
-                .ToDictionaryAsync(
-                    g => g.Key,
-                    g => g.Select(x => x.RoleId).ToList());
-
-            userList = new();
-
-            foreach (var u in users)
-            {
-                var role = "Employee";
-                var email = u.Email ?? u.UserName ?? string.Empty;
-
-                if (roleIdsByUserId.TryGetValue(u.Id, out var roleIds))
-                {
-                    var roleName = roleIds
-                        .Select(id => rolesById.TryGetValue(id, out var name) ? name : null)
-                        .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
-
-                    if (!string.IsNullOrWhiteSpace(roleName))
-                        role = roleName!;
-                }
-
-                var isCanonicalSuperAdmin =
-                    !string.IsNullOrEmpty(email) &&
-                    string.Equals(
-                        email,
-                        "prakashshiva368@gmail.com",
-                        StringComparison.OrdinalIgnoreCase);
-
-                if (isCanonicalSuperAdmin)
-                    role = "SuperAdmin";
-
-                var linked = isCanonicalSuperAdmin
-                    ? null
-                    : allEmployees.FirstOrDefault(e => e.AspNetUserId == u.Id)
-                      ?? allEmployees.FirstOrDefault(e =>
-                          !string.IsNullOrWhiteSpace(e.Email) &&
-                          !string.IsNullOrEmpty(email) &&
-                          string.Equals(e.Email.Trim(), email.Trim(), StringComparison.OrdinalIgnoreCase));
-
-                // Employee users are shown only when linked to a saved
-                // Employee record. Admin and the canonical SuperAdmin remain visible.
-                // UNLINKED USERS are now shown so they can be fixed or deleted.
-                if (role == "Employee" && linked == null && !isCanonicalSuperAdmin)
-                {
-                    // If it's an employee role but not linked, we still show it
-                    // as a "Broken Link" or "Empty User" in the management list.
-                }
-
-                userList.Add(new UserRoleViewModel
-                {
-                    UserId = u.Id,
-                    Email = u.Email ?? u.UserName ?? string.Empty,
-                    UserName = u.UserName ?? u.Email ?? string.Empty,
-                    CurrentRole = role,
-                    EmployeeId = linked?.EmployeeID,
-                    EmployeeName = linked?.Name ?? (role == "Admin" ? "Administrator" : (isCanonicalSuperAdmin ? "SuperAdmin" : "Unlinked User ⚠️")),
-                });
-            }
-
+            userList = await FirebaseUsers.GetAllUsersAsync(allEmployees);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error loading user data from local Identity/SQLite store.");
+            _logger.LogError(ex, "Error loading user data.");
             toastService.ShowError("Error loading user data.");
         }
         finally
@@ -220,8 +148,7 @@ else
         }
         finally
         {
-            await using var db = await DbFactory.CreateDbContextAsync();
-            await LoadUsersAndRoles(db);
+            await LoadUsersAndRoles();
             isSaving = false;
         }
     }
@@ -240,51 +167,13 @@ else
 
         try
         {
-            var user = await UserManager.FindByIdAsync(userToEditRole.UserId);
-            if (user == null)
+            var targetUid = userToEditRole.FirebaseUid ?? userToEditRole.UserId;
+            var result = await FirebaseUsers.ChangeRoleAsync(targetUid, newRoleForUser, CancellationToken.None);
+            if (!result.Success)
             {
-                toastService.ShowError("User not found.");
+                toastService.ShowError(result.Message);
                 return;
             }
-
-            // 1. Get ALL current roles
-            var currentRoles = await UserManager.GetRolesAsync(user);
-            
-            // 2. Remove ALL existing roles first (clean slate)
-            if (currentRoles.Any())
-            {
-                var removeResult = await UserManager.RemoveFromRolesAsync(user, currentRoles);
-                if (!removeResult.Succeeded)
-                {
-                    throw new Exception("Failed to remove existing roles: " + string.Join(", ", removeResult.Errors.Select(e => e.Description)));
-                }
-            }
-
-            // 3. Add the NEW single role
-            if (!string.IsNullOrEmpty(newRoleForUser))
-            {
-                var addResult = await UserManager.AddToRoleAsync(user, newRoleForUser);
-                if (!addResult.Succeeded)
-                {
-                    throw new Exception("Failed to add new role: " + string.Join(", ", addResult.Errors.Select(e => e.Description)));
-                }
-            }
-
-            var linkedEmployee = await (await DbFactory.CreateDbContextAsync())
-                .Employees
-                .AsNoTracking()
-                .FirstOrDefaultAsync(e => e.AspNetUserId == user.Id);
-
-            // Role changes are mirrored to Firebase custom claims. Existing
-            // Android sessions will pick up the new claims on their next token
-            // refresh without changing the application flow.
-            await FirebaseRealtime.EnsureFirebaseUserAsync(
-                user.Email ?? user.UserName ?? string.Empty,
-                string.Empty,
-                newRoleForUser,
-                linkedEmployee?.EmployeeID ?? 0,
-                user.UserName,
-                user.Id);
 
             await AttendanceRefresh.NotifyGlobalRefreshAsync("USER_ROLE_UPDATED");
             toastService.ShowSuccess($"Role updated to {newRoleForUser}.");
@@ -298,17 +187,14 @@ else
         finally
         {
             isSaving = false;
-            await using var db = await DbFactory.CreateDbContextAsync();
-            await LoadUsersAndRoles(db);
+            await LoadUsersAndRoles();
         }
     }
 
     private async Task HandleRefresh()
     {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        await LoadUsersAndRoles(db);
+        await LoadUsersAndRoles();
     }
-
 
     private async Task ConfirmDeleteUser(UserRoleViewModel user)
     {
@@ -326,31 +212,27 @@ else
     private async Task DeleteUser(UserRoleViewModel user)
     {
         isSaving = true;
-        await using var dbContext = await DbFactory.CreateDbContextAsync();
-
         try
         {
-            var u = await UserManager.FindByIdAsync(user.UserId);
-            if (u != null)
+            var targetUid = user.FirebaseUid ?? user.UserId;
+            var result = await FirebaseUsers.DeleteAsync(targetUid, CancellationToken.None);
+            if (!result.Success)
             {
-                var emp = await dbContext.Employees.FirstOrDefaultAsync(e => e.AspNetUserId == u.Id);
-                if (emp != null)
-                {
-                    emp.AspNetUserId = null;
-                    emp.Email = null;
-                    dbContext.Update(emp);
-                    await dbContext.SaveChangesAsync();
-                }
-
-                await UserManager.DeleteAsync(u);
+                toastService.ShowError(result.Message);
+                return;
             }
 
             await AttendanceRefresh.NotifyGlobalRefreshAsync("USER_DELETED");
             toastService.ShowSuccess("User deleted.");
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting user");
+            toastService.ShowError(ex.Message);
+        }
         finally
         {
-            await LoadUsersAndRoles(dbContext);
+            await LoadUsersAndRoles();
             isSaving = false;
         }
     }
