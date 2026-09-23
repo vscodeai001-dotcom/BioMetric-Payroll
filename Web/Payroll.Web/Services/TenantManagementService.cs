@@ -190,9 +190,26 @@ namespace Payroll.Web.Services
                 await _userManager.AddToRoleAsync(adminUser, "Admin");
             }
 
+            // Provision Firebase Auth account for tenant admin
+            try
+            {
+                await _firebase.EnsureFirebaseUserAsync(
+                    request.AdminEmail.Trim(),
+                    request.AdminPassword,
+                    "Admin",
+                    displayName: string.IsNullOrWhiteSpace(request.AdminName) ? request.CompanyName.Trim() + " Admin" : request.AdminName.Trim(),
+                    updatePasswordIfExisting: true);
+            }
+            catch (Exception authEx)
+            {
+                _logger.LogWarning(authEx, "Firebase Auth provisioning deferred for admin {Email}", request.AdminEmail);
+            }
+
             // Create CompanySetting
+            var maxSettingId = await db.CompanySettings.MaxAsync(c => (int?)c.SettingID) ?? 0;
             var companySetting = new CompanySetting
             {
+                SettingID = maxSettingId + 1,
                 CompanyName = request.CompanyName.Trim(),
                 AddressLine1 = "Office Location",
                 CityStatePincode = "",
@@ -205,7 +222,9 @@ namespace Payroll.Web.Services
             await db.SaveChangesAsync();
 
             // Create FeatureSettings
+            var maxFeatureId = await db.FeatureSettings.MaxAsync(f => (int?)f.Id) ?? 0;
             var features = request.InitialFeatures ?? new FeatureSettings();
+            features.Id = maxFeatureId + 1;
             features.FirebasePlanMode = request.PlanMode;
             db.FeatureSettings.Add(features);
             await db.SaveChangesAsync();
@@ -275,28 +294,148 @@ namespace Payroll.Web.Services
             };
         }
 
-        public async Task<bool> UpdateTenantAsync(CompanyTenant updated)
+        public async Task<TenantOperationResult> UpdateTenantProfileAndCredentialsAsync(
+            CompanyTenant updated,
+            string? newAdminEmail,
+            string? newAdminPassword)
         {
+            if (string.IsNullOrWhiteSpace(updated.CompanyName))
+                return new TenantOperationResult { Success = false, ErrorMessage = "Company Name is required." };
+
             await using var db = await _dbFactory.CreateDbContextAsync();
             var existing = await db.CompanyTenants.FirstOrDefaultAsync(t => t.Id == updated.Id);
-            if (existing == null) return false;
+            if (existing == null)
+                return new TenantOperationResult { Success = false, ErrorMessage = "Company Tenant record not found." };
 
+            string targetEmail = string.IsNullOrWhiteSpace(newAdminEmail) ? existing.AdminEmail.Trim() : newAdminEmail.Trim();
+
+            // Validate email format
+            if (!Regex.IsMatch(targetEmail, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+                return new TenantOperationResult { Success = false, ErrorMessage = "Invalid Administrator Email format." };
+
+            bool emailChanged = !string.Equals(existing.AdminEmail, targetEmail, StringComparison.OrdinalIgnoreCase);
+
+            if (emailChanged)
+            {
+                // Check if target email belongs to another company
+                var emailInUseByOtherTenant = await db.CompanyTenants.AnyAsync(t => t.Id != existing.Id && t.AdminEmail.ToLower() == targetEmail.ToLower());
+                if (emailInUseByOtherTenant)
+                    return new TenantOperationResult { Success = false, ErrorMessage = $"Email '{targetEmail}' is already assigned as administrator of another company." };
+            }
+
+            if (!string.IsNullOrWhiteSpace(newAdminPassword) && newAdminPassword.Length < 6)
+                return new TenantOperationResult { Success = false, ErrorMessage = "Password must be at least 6 characters long." };
+
+            // Find or create Identity admin user
+            IdentityUser? adminUser = null;
+            if (!string.IsNullOrWhiteSpace(existing.AdminUserId))
+            {
+                adminUser = await _userManager.FindByIdAsync(existing.AdminUserId);
+            }
+            if (adminUser == null)
+            {
+                adminUser = await _userManager.FindByEmailAsync(existing.AdminEmail) ?? await _userManager.FindByEmailAsync(targetEmail);
+            }
+
+            if (adminUser != null)
+            {
+                if (emailChanged)
+                {
+                    var setEmailRes = await _userManager.SetEmailAsync(adminUser, targetEmail);
+                    var setUsernameRes = await _userManager.SetUserNameAsync(adminUser, targetEmail);
+                    if (!setEmailRes.Succeeded || !setUsernameRes.Succeeded)
+                    {
+                        var err = string.Join("; ", setEmailRes.Errors.Concat(setUsernameRes.Errors).Select(e => e.Description));
+                        _logger.LogWarning("Failed to update Identity email: {Err}", err);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(newAdminPassword))
+                {
+                    var token = await _userManager.GeneratePasswordResetTokenAsync(adminUser);
+                    var resetRes = await _userManager.ResetPasswordAsync(adminUser, token, newAdminPassword);
+                    if (!resetRes.Succeeded)
+                    {
+                        await _userManager.RemovePasswordAsync(adminUser);
+                        var addRes = await _userManager.AddPasswordAsync(adminUser, newAdminPassword);
+                        if (!addRes.Succeeded)
+                        {
+                            var err = string.Join("; ", addRes.Errors.Select(e => e.Description));
+                            return new TenantOperationResult { Success = false, ErrorMessage = $"Could not update admin password: {err}" };
+                        }
+                    }
+                }
+
+                if (!await _roleManager.RoleExistsAsync("Admin"))
+                {
+                    await _roleManager.CreateAsync(new IdentityRole("Admin"));
+                }
+
+                if (!await _userManager.IsInRoleAsync(adminUser, "Admin") && !await _userManager.IsInRoleAsync(adminUser, "SuperAdmin"))
+                {
+                    await _userManager.AddToRoleAsync(adminUser, "Admin");
+                }
+            }
+            else
+            {
+                if (!await _roleManager.RoleExistsAsync("Admin"))
+                {
+                    await _roleManager.CreateAsync(new IdentityRole("Admin"));
+                }
+
+                adminUser = new IdentityUser
+                {
+                    UserName = targetEmail,
+                    Email = targetEmail,
+                    EmailConfirmed = true
+                };
+
+                var initialPassword = string.IsNullOrWhiteSpace(newAdminPassword) ? "Admin@123" : newAdminPassword;
+                var createRes = await _userManager.CreateAsync(adminUser, initialPassword);
+                if (!createRes.Succeeded)
+                {
+                    var err = string.Join("; ", createRes.Errors.Select(e => e.Description));
+                    return new TenantOperationResult { Success = false, ErrorMessage = $"Failed to create admin user: {err}" };
+                }
+                await _userManager.AddToRoleAsync(adminUser, "Admin");
+            }
+
+            // Sync to Firebase Auth
+            try
+            {
+                await _firebase.EnsureFirebaseUserAsync(
+                    targetEmail,
+                    string.IsNullOrWhiteSpace(newAdminPassword) ? "" : newAdminPassword,
+                    "Admin",
+                    displayName: string.IsNullOrWhiteSpace(updated.AdminName) ? updated.CompanyName.Trim() + " Admin" : updated.AdminName.Trim(),
+                    updatePasswordIfExisting: !string.IsNullOrWhiteSpace(newAdminPassword));
+            }
+            catch (Exception fbAuthEx)
+            {
+                _logger.LogWarning(fbAuthEx, "Firebase Auth credential sync deferred for {Email}", targetEmail);
+            }
+
+            // Update Tenant entity
             existing.CompanyName = updated.CompanyName.Trim();
-            existing.AdminName = updated.AdminName.Trim();
+            existing.AdminUserId = adminUser.Id;
+            existing.AdminEmail = targetEmail;
+            existing.AdminName = string.IsNullOrWhiteSpace(updated.AdminName) ? existing.CompanyName + " Admin" : updated.AdminName.Trim();
             existing.AdminPhone = updated.AdminPhone;
-            existing.IconEmoji = updated.IconEmoji;
+            existing.IconEmoji = string.IsNullOrWhiteSpace(updated.IconEmoji) ? "🏢" : updated.IconEmoji.Trim();
             existing.PlanMode = updated.PlanMode;
             existing.IsActive = updated.IsActive;
 
             await db.SaveChangesAsync();
 
-            // Sync to Firebase
+            // Sync tenant metadata to Firebase Realtime Database
             try
             {
                 var tenantPayload = new Dictionary<string, object?>
                 {
                     ["companyName"] = existing.CompanyName,
+                    ["adminEmail"] = existing.AdminEmail,
                     ["adminName"] = existing.AdminName,
+                    ["adminPhone"] = existing.AdminPhone,
                     ["iconEmoji"] = existing.IconEmoji,
                     ["planMode"] = existing.PlanMode,
                     ["isActive"] = existing.IsActive
@@ -308,11 +447,17 @@ namespace Payroll.Web.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Firebase tenant update deferred.");
+                _logger.LogWarning(ex, "Firebase tenant metadata update deferred.");
             }
 
             await _refreshService.NotifyGlobalRefreshAsync("TENANTS_UPDATED");
-            return true;
+            return new TenantOperationResult { Success = true, Tenant = existing };
+        }
+
+        public async Task<bool> UpdateTenantAsync(CompanyTenant updated)
+        {
+            var res = await UpdateTenantProfileAndCredentialsAsync(updated, updated.AdminEmail, null);
+            return res.Success;
         }
 
         public async Task<bool> SaveTenantFeaturesAsync(int tenantId, FeatureSettings newSettings)

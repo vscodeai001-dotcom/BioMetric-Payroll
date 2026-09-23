@@ -12,6 +12,7 @@
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject Payroll.Web.Services.GeoLocationService GeoService
 @inject Payroll.Web.Services.FirebaseRealtimeService FirebaseRealtime
+@inject Payroll.Web.Services.ITenantContextService TenantContext
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Company Settings</PageTitle>
@@ -135,6 +136,8 @@ else
     private int trackingIntervalSeconds = 30;
     private string? firebaseOwnerUid;
 
+    private CompanyTenant? activeTenant;
+
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthState.GetAuthenticationStateAsync();
@@ -142,9 +145,13 @@ else
 
         try
         {
+            activeTenant = await TenantContext.GetActiveTenantAsync();
+            var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+            var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
+
             await using var dbContext = await DbFactory.CreateDbContextAsync();
-            settings = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1);
-            features = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == 1) ?? new FeatureSettings();
+            settings = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
+            features = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(f => f.Id == targetFeatureId) ?? new FeatureSettings();
         }
         catch (Exception ex)
         {
@@ -153,7 +160,7 @@ else
         }
         if (settings == null) settings = new CompanySetting();
 
-        firebaseOwnerUid = FirebaseRealtime.ResolveOwnerUid(
+        firebaseOwnerUid = activeTenant?.TenantId ?? FirebaseRealtime.ResolveOwnerUid(
             authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "web-admin",
             isSuperAdmin ? "SuperAdmin" : "Admin");
         await LoadTrackingIntervalAsync();
@@ -165,9 +172,12 @@ else
         isSaving = true;
         try
         {
+            activeTenant ??= await TenantContext.GetActiveTenantAsync();
+            var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+
             await using var dbContext = await DbFactory.CreateDbContextAsync();
-            settings.SettingID = 1;
-            var existing = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1);
+            settings.SettingID = targetSettingId;
+            var existing = await dbContext.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
             if (existing == null) dbContext.CompanySettings.Add(settings);
             else { dbContext.Entry(existing).State = EntityState.Detached; dbContext.CompanySettings.Update(settings); }
             await dbContext.SaveChangesAsync();

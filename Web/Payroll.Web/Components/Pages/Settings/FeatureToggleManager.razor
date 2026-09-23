@@ -15,6 +15,7 @@
 @inject ILogger<FeatureToggleManager> _logger
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
+@inject Payroll.Web.Services.ITenantContextService TenantContext
 
 <PageTitle>Feature & Permission Manager</PageTitle>
 
@@ -607,11 +608,32 @@ else
                     <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
                         <div>
                             <h5 class="text-danger mb-0 fw-bold"><i class="bi bi-shield-exclamation me-2"></i>Database Backups & Danger Zone</h5>
-                            <small class="text-muted">Manage full local backups, automated hourly backups, cloud restore, and system data wipe.</small>
+                            <small class="text-muted">Manage full local backups, automated hourly backups, cloud restore, and company-scoped data wipe.</small>
                         </div>
                         <span class="badge bg-success-subtle text-success border border-success-subtle px-3 py-2">
                             <i class="bi bi-clock-history me-1"></i>Hourly Auto-Backup: Active
                         </span>
+                    </div>
+
+                    @* ACTIVE TENANT ISOLATION BANNER *@
+                    <div class="alert alert-danger border-danger-subtle d-flex align-items-center justify-content-between mb-4 shadow-sm py-2 px-3">
+                        <div class="d-flex align-items-center">
+                            <span class="fs-3 me-3">@(string.IsNullOrWhiteSpace(activeTenant?.IconEmoji) ? "🏢" : activeTenant.IconEmoji)</span>
+                            <div>
+                                <div class="fw-bold fs-6 text-danger-emphasis">
+                                    Danger Zone Workspace: @(activeTenant?.CompanyName ?? "Primary Workspace")
+                                </div>
+                                <div class="small text-muted">
+                                    Tenant Code: <code>@(activeTenant?.CompanyCode ?? "PRIMARY")</code> | ID: <code>@(activeTenant?.TenantId ?? "biometricpayroll")</code>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <span class="badge bg-danger text-white px-3 py-2 d-inline-block">
+                                <i class="bi bi-shield-check me-1"></i> Multi-Tenant Isolation Active
+                            </span>
+                            <div class="small text-danger fw-semibold mt-1">Actions below affect this company ONLY</div>
+                        </div>
                     </div>
 
                     <div class="row g-3 mb-4">
@@ -639,7 +661,7 @@ else
                                     <div>
                                         <i class="bi bi-arrow-counterclockwise text-secondary fs-1 mb-2 d-block"></i>
                                         <h6 class="fw-bold">Reset Feature Toggles</h6>
-                                        <p class="small text-muted mb-3">Revert all feature toggles and admin permissions to factory defaults.</p>
+                                        <p class="small text-muted mb-3">Revert feature toggles for @(activeTenant?.CompanyName ?? "this company") to factory defaults.</p>
                                     </div>
                                     <button class="btn btn-outline-secondary w-100 fw-bold" @onclick="ConfirmResetToggles" disabled="@(isBackingUp || isRestoring || isWiping)">Reset Toggles</button>
                                 </div>
@@ -653,11 +675,11 @@ else
                                     <div>
                                         <i class="bi bi-database-dash text-warning fs-1 mb-2 d-block"></i>
                                         <h6 class="fw-bold text-warning-emphasis">Partial Wipe (Operational)</h6>
-                                        <p class="small text-muted mb-3">Wipes logs, tracking, attendance & payroll. <strong>Keeps</strong> Employees, Company, Holidays & Users.</p>
+                                        <p class="small text-muted mb-3">Wipes logs, tracking & payroll for <strong>@(activeTenant?.CompanyName ?? "this company")</strong> only. Other companies remain safe.</p>
                                     </div>
                                     <button class="btn btn-warning w-100 fw-bold text-dark" @onclick="ConfirmPartialWipeData" disabled="@(isBackingUp || isRestoring || isWiping)">
                                         <i class="bi @(isWiping ? "bi-arrow-repeat spin" : "bi-eraser-fill") me-1"></i>
-                                        @(isWiping ? "Wiping..." : "Partial Wipe")
+                                        @(isWiping ? "Wiping..." : "Partial Wipe (" + (activeTenant?.CompanyCode ?? "Active") + ")")
                                     </button>
                                 </div>
                             </div>
@@ -670,11 +692,11 @@ else
                                     <div>
                                         <i class="bi bi-database-x fs-1 mb-2 d-block"></i>
                                         <h6 class="fw-bold">Full Factory Wipe</h6>
-                                        <p class="small mb-3" style="opacity:0.9">Permanently wipe employees, logs, GPS & payroll from <strong>Local & Cloud</strong>. Preserves Admin login.</p>
+                                        <p class="small mb-3" style="opacity:0.9">Wipes employees & records for <strong>@(activeTenant?.CompanyName ?? "this company")</strong> only from Local & Cloud.</p>
                                     </div>
                                     <button class="btn btn-light text-danger w-100 fw-bold" @onclick="ConfirmWipeData" disabled="@(isBackingUp || isRestoring || isWiping)">
                                         <i class="bi @(isWiping ? "bi-arrow-repeat spin" : "bi-trash3-fill") me-1"></i>
-                                        @(isWiping ? "Wiping..." : "Full Wipe")
+                                        @(isWiping ? "Wiping..." : "Full Wipe (" + (activeTenant?.CompanyCode ?? "Active") + ")")
                                     </button>
                                 </div>
                             </div>
@@ -776,6 +798,7 @@ else
 
 @code {
     private FeatureSettings? settings;
+    private CompanyTenant? activeTenant;
     private bool isLoading = true;
     private bool isSaving = false;
     private string activeTab = "modules";
@@ -799,6 +822,7 @@ else
             activeTab = "employee";
         }
         
+        activeTenant = await TenantContext.GetActiveTenantAsync();
         authCheckCompleted = true;
         await LoadAllSettings();
 
@@ -905,13 +929,16 @@ else
         isLoading = true;
         try
         {
+            activeTenant ??= await TenantContext.GetActiveTenantAsync();
+            var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
+
             await using var dbContext = await DbFactory.CreateDbContextAsync();
-            settings = await dbContext.FeatureSettings.FirstOrDefaultAsync(s => s.Id == 1);
+            settings = await dbContext.FeatureSettings.FirstOrDefaultAsync(s => s.Id == targetFeatureId);
 
             if (settings == null)
             {
-                _logger.LogWarning("FeatureSettings not found, inserting defaults.");
-                settings = new FeatureSettings();
+                _logger.LogWarning("FeatureSettings not found for Id {Id}, inserting defaults.", targetFeatureId);
+                settings = new FeatureSettings { Id = targetFeatureId };
                 dbContext.FeatureSettings.Add(settings);
                 await dbContext.SaveChangesAsync();
             }
@@ -935,6 +962,10 @@ else
         isSaving = true;
         try
         {
+            activeTenant ??= await TenantContext.GetActiveTenantAsync();
+            var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
+            settings.Id = targetFeatureId;
+
             // Geo-Fencing is the master GPS switch. Child attendance modes
             // cannot remain enabled when the master is disabled.
             if (!settings.EnableGeoFencing)
@@ -944,13 +975,13 @@ else
             }
 
             await using var dbContext = await DbFactory.CreateDbContextAsync();
-            var existing = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == 1);
+            var existing = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == targetFeatureId);
             if (existing != null) dbContext.Entry(existing).State = EntityState.Detached;
 
             dbContext.FeatureSettings.Update(settings);
             await dbContext.SaveChangesAsync();
             await AttendanceRefresh.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
-            toastService.ShowSuccess("Feature settings saved!");
+            toastService.ShowSuccess($"Feature settings saved for {activeTenant?.CompanyName ?? "Company"}!");
         }
         catch (Exception ex)
         {
@@ -962,11 +993,12 @@ else
 
     private async Task ConfirmResetToggles()
     {
-        if (await JSRuntime.InvokeAsync<bool>("confirm", "Reset all toggles to default?"))
+        var compName = activeTenant?.CompanyName ?? "this company";
+        if (await JSRuntime.InvokeAsync<bool>("confirm", $"Reset all toggles to default for {compName}?"))
         {
             await CleanerService.ResetAllTogglesAsync();
             await AttendanceRefresh.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_RESET");
-            toastService.ShowSuccess("Toggles reset.");
+            toastService.ShowSuccess($"Toggles reset for {compName}.");
             await LoadAllSettings();
         }
     }
@@ -978,18 +1010,21 @@ else
 
     private async Task ConfirmPartialWipeData()
     {
-        var msg1 = "WARNING: Partial Wipe will permanently delete all attendance logs, punches, GPS tracking history, payroll records, salary advances, and leave requests from BOTH Local DB and Firebase Cloud.\n\nAll Admin Settings (Employee Records, Company Settings, Holiday Management, User & Role Management, and Feature Toggles) WILL BE KEPT.\n\nA safety backup will be created automatically before wiping. Proceed?";
+        var compName = activeTenant?.CompanyName ?? "this company";
+        var tid = activeTenant?.TenantId ?? "default";
+
+        var msg1 = $"WARNING: Partial Wipe will permanently delete all attendance logs, punches, GPS tracking history, payroll records, salary advances, and leave requests for {compName} ({tid}) from BOTH Local DB and Firebase Cloud.\n\nAll Admin Settings (Employee Records, Company Settings, Holiday Management, User & Role Management, and Feature Toggles) for {compName} WILL BE KEPT.\n\nOTHER COMPANIES WILL NOT BE TOUCHED.\n\nA safety backup will be created automatically before wiping. Proceed?";
         if (!await JSRuntime.InvokeAsync<bool>("confirm", msg1)) return;
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "FINAL CONFIRMATION: Wipe operational data (keeping Admin Settings & Employees)?")) return;
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"FINAL CONFIRMATION: Wipe operational data for {compName} ONLY?")) return;
 
         isWiping = true;
         try
         {
-            var result = await BackupService.WipeOperationalDataOnlyAsync();
+            var result = await BackupService.WipeOperationalDataOnlyAsync(tid);
             if (result.Success)
             {
                 try { await JSRuntime.InvokeVoidAsync("attendanceCache.clear"); } catch { }
-                toastService.ShowSuccess($"Operational data wiped from Local DB and Firebase Cloud! (Admin settings & Employees preserved). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
+                toastService.ShowSuccess($"Operational data wiped for {compName} from Local DB and Firebase Cloud! (Settings & Employees preserved). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
                 await LoadAllSettings();
                 await LoadBackups();
             }
@@ -1000,7 +1035,7 @@ else
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Partial wipe failed");
+            _logger.LogError(ex, "Partial wipe failed for tenant {TenantId}", tid);
             toastService.ShowError($"Partial wipe failed: {ex.Message}");
         }
         finally
@@ -1012,18 +1047,21 @@ else
 
     private async Task ConfirmWipeData()
     {
-        var msg1 = "DANGER: Full Factory Wipe will permanently delete ALL employees, logs, GPS history, payroll, and transactional records from BOTH Local Database and Firebase Cloud.\n\nOnly the SuperAdmin login and system configuration will be preserved.\n\nA safety backup will be created automatically before wiping. Proceed?";
+        var compName = activeTenant?.CompanyName ?? "this company";
+        var tid = activeTenant?.TenantId ?? "default";
+
+        var msg1 = $"DANGER: Full Factory Wipe will permanently delete ALL employees, logs, GPS history, payroll, and transactional records for {compName} ({tid}) from BOTH Local Database and Firebase Cloud.\n\nSettings for {compName} and ALL OTHER COMPANIES will remain safe.\n\nA safety backup will be created automatically before wiping. Proceed?";
         if (!await JSRuntime.InvokeAsync<bool>("confirm", msg1)) return;
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "FINAL CONFIRMATION: Are you absolutely certain you want to wipe ALL employees and operational data?")) return;
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"FINAL CONFIRMATION: Are you absolutely certain you want to wipe ALL employees and operational data for {compName} ONLY?")) return;
 
         isWiping = true;
         try
         {
-            var result = await BackupService.WipeAllDataAsync();
+            var result = await BackupService.WipeAllDataAsync(tid);
             if (result.Success)
             {
                 try { await JSRuntime.InvokeVoidAsync("attendanceCache.clear"); } catch { }
-                toastService.ShowSuccess($"Full system wipe completed! (Local DB and Firebase Cloud). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
+                toastService.ShowSuccess($"Full system wipe completed for {compName}! (Local DB and Firebase Cloud). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
                 await LoadAllSettings();
                 await LoadBackups();
             }
@@ -1034,7 +1072,7 @@ else
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Full wipe failed");
+            _logger.LogError(ex, "Full wipe failed for tenant {TenantId}", tid);
             toastService.ShowError($"Full wipe failed: {ex.Message}");
         }
         finally

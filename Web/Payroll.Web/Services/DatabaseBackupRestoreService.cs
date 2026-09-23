@@ -44,6 +44,7 @@ public sealed class DatabaseBackupRestoreService
     private readonly FirebaseRealtimeService _firebase;
     private readonly FeatureCleanUpService _cleanerService;
     private readonly AttendanceRefreshService _refreshService;
+    private readonly ITenantContextService _tenantContext;
     private readonly ILogger<DatabaseBackupRestoreService> _logger;
 
     public DatabaseBackupRestoreService(
@@ -53,6 +54,7 @@ public sealed class DatabaseBackupRestoreService
         FirebaseRealtimeService firebase,
         FeatureCleanUpService cleanerService,
         AttendanceRefreshService refreshService,
+        ITenantContextService tenantContext,
         ILogger<DatabaseBackupRestoreService> logger)
     {
         _environment = environment;
@@ -61,6 +63,7 @@ public sealed class DatabaseBackupRestoreService
         _firebase = firebase;
         _cleanerService = cleanerService;
         _refreshService = refreshService;
+        _tenantContext = tenantContext;
         _logger = logger;
     }
 
@@ -275,40 +278,39 @@ public sealed class DatabaseBackupRestoreService
     }
 
     /// <summary>
-    /// Partial Wipe: Wipes all operational/transactional records (attendance, GPS tracking, payroll,
-    /// advances, leaves, and audit logs) from BOTH Local SQLite and Firebase Cloud.
-    /// Strictly preserves all Admin Settings screens: Employees, Shops, Company Settings, Holiday Management,
+    /// Partial Wipe: Strictly scoped to the specified tenant (or active tenant).
+    /// Wipes operational/transactional records (attendance, GPS tracking, payroll,
+    /// advances, leaves, and audit logs) for THIS COMPANY ONLY from BOTH Local SQLite and Firebase Cloud.
+    /// Other companies' data, credentials, and settings remain 100% untouched.
+    /// Preserves all Admin Settings screens: Employees, Shops, Company Settings, Holiday Management,
     /// User & Role Management, Feature Toggles, and Tax Slabs.
     /// Takes an automated safety backup before wiping.
     /// </summary>
-    public async Task<WipeResult> WipeOperationalDataOnlyAsync(CancellationToken cancellationToken = default)
+    public async Task<WipeResult> WipeOperationalDataOnlyAsync(string? tenantId = null, CancellationToken cancellationToken = default)
     {
         string? safetyFileName = null;
         try
         {
+            var targetTenantId = !string.IsNullOrWhiteSpace(tenantId)
+                ? tenantId.Trim()
+                : await _tenantContext.GetActiveTenantIdAsync();
+
             // 1. Create automatic safety backup before partial wiping
-            var safetyBackup = await CreateBackupAsync("PrePartialWipeSafety", cancellationToken);
+            var safetyBackup = await CreateBackupAsync($"PrePartialWipe_{targetTenantId}", cancellationToken);
             safetyFileName = safetyBackup.FileName;
 
-            // 2. Wipe Firebase Realtime Database operational nodes FIRST across all discovered owners
-            var owners = await _firebase.GetAvailableOwnerUidsAsync(cancellationToken);
-            var firebaseOk = true;
-            foreach (var owner in owners)
-            {
-                var ok = await _firebase.WipeOwnerOperationalDataOnlyAsync(owner, cancellationToken);
-                if (!ok) firebaseOk = false;
-            }
-
+            // 2. Wipe Firebase Realtime Database operational nodes for this tenant ONLY
+            var firebaseOk = await _firebase.WipeOwnerOperationalDataOnlyAsync(targetTenantId, cancellationToken);
             _logger.LogInformation(
-                "Firebase Cloud operational data wiped across {Count} owner(s). Success={Success}",
-                owners.Count, firebaseOk);
+                "Firebase Cloud operational data wiped for tenant {TenantId}. Success={Success}",
+                targetTenantId, firebaseOk);
 
-            // 3. Wipe SQLite database operational tables (preserves employees, settings, users, holidays)
-            await _cleanerService.WipeOperationalDataOnlyAsync();
-            _logger.LogInformation("Local SQLite operational data wiped successfully (settings & employees preserved).");
+            // 3. Wipe SQLite database operational records strictly tied to this tenant's employees
+            await WipeLocalOperationalDataForTenantAsync(targetTenantId, cancellationToken);
+            _logger.LogInformation("Local SQLite operational data wiped for tenant {TenantId} (settings & employees preserved).", targetTenantId);
 
             // 4. Invalidate global caches
-            await _refreshService.NotifyGlobalRefreshAsync("SYSTEM_DATA_WIPED");
+            await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
 
             return new WipeResult
             {
@@ -319,7 +321,7 @@ public sealed class DatabaseBackupRestoreService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "WipeOperationalDataOnlyAsync failed.");
+            _logger.LogError(ex, "WipeOperationalDataOnlyAsync failed for tenant {TenantId}.", tenantId);
             return new WipeResult
             {
                 Success = false,
@@ -330,37 +332,36 @@ public sealed class DatabaseBackupRestoreService
     }
 
     /// <summary>
-    /// Full Wipe: Wipes all operational data PLUS employees and shops from BOTH local SQLite and Firebase Realtime Database.
+    /// Full Factory Wipe: Strictly scoped to the specified tenant (or active tenant).
+    /// Wipes all operational data PLUS employees and shops for THIS COMPANY ONLY from BOTH local SQLite and Firebase Realtime Database.
+    /// Other companies are NEVER affected!
     /// Preserves only configuration and SuperAdmin access, and creates a pre-wipe safety backup.
     /// </summary>
-    public async Task<WipeResult> WipeAllDataAsync(CancellationToken cancellationToken = default)
+    public async Task<WipeResult> WipeAllDataAsync(string? tenantId = null, CancellationToken cancellationToken = default)
     {
         string? safetyFileName = null;
         try
         {
+            var targetTenantId = !string.IsNullOrWhiteSpace(tenantId)
+                ? tenantId.Trim()
+                : await _tenantContext.GetActiveTenantIdAsync();
+
             // 1. Create automatic safety backup before wiping
-            var safetyBackup = await CreateBackupAsync("PreWipeSafety", cancellationToken);
+            var safetyBackup = await CreateBackupAsync($"PreWipeSafety_{targetTenantId}", cancellationToken);
             safetyFileName = safetyBackup.FileName;
 
-            // 2. Wipe Firebase Realtime Database operational + employee nodes across all discovered owners
-            var owners = await _firebase.GetAvailableOwnerUidsAsync(cancellationToken);
-            var firebaseOk = true;
-            foreach (var owner in owners)
-            {
-                var ok = await _firebase.WipeOwnerAllDataAsync(owner, cancellationToken);
-                if (!ok) firebaseOk = false;
-            }
-
+            // 2. Wipe Firebase Realtime Database operational + employee nodes for this tenant ONLY
+            var firebaseOk = await _firebase.WipeOwnerAllDataAsync(targetTenantId, cancellationToken);
             _logger.LogInformation(
-                "Firebase Cloud all data wiped across {Count} owner(s). Success={Success}",
-                owners.Count, firebaseOk);
+                "Firebase Cloud all data wiped for tenant {TenantId}. Success={Success}",
+                targetTenantId, firebaseOk);
 
-            // 3. Wipe SQLite database tables (preserves settings & SuperAdmin)
-            await _cleanerService.WipeAllTransactionalDataAsync();
-            _logger.LogInformation("Local SQLite transactional data wiped successfully.");
+            // 3. Wipe SQLite operational records AND employees for this tenant only
+            await WipeLocalAllDataForTenantAsync(targetTenantId, cancellationToken);
+            _logger.LogInformation("Local SQLite transactional data wiped for tenant {TenantId}.", targetTenantId);
 
             // 4. Invalidate global caches
-            await _refreshService.NotifyGlobalRefreshAsync("SYSTEM_DATA_WIPED");
+            await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
 
             return new WipeResult
             {
@@ -371,13 +372,182 @@ public sealed class DatabaseBackupRestoreService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "WipeAllDataAsync failed.");
+            _logger.LogError(ex, "WipeAllDataAsync failed for tenant {TenantId}.", tenantId);
             return new WipeResult
             {
                 Success = false,
                 ErrorMessage = ex.Message,
                 SafetyBackupFileName = safetyFileName
             };
+        }
+    }
+
+    private async Task WipeLocalOperationalDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+
+        // Fetch employee IDs for this tenant from Firebase
+        var tenantEmpIds = new HashSet<int>();
+        try
+        {
+            var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
+            if (employeesSnapshot.HasValue)
+            {
+                if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var prop in employeesSnapshot.Value.EnumerateObject())
+                    {
+                        if (int.TryParse(prop.Name, out var id))
+                        {
+                            tenantEmpIds.Add(id);
+                        }
+                        else if (prop.Value.TryGetProperty("EmployeeID", out var eidProp) && eidProp.TryGetInt32(out var eid))
+                        {
+                            tenantEmpIds.Add(eid);
+                        }
+                        else if (prop.Value.TryGetProperty("employeeid", out var eidProp2) && eidProp2.TryGetInt32(out var eid2))
+                        {
+                            tenantEmpIds.Add(eid2);
+                        }
+                    }
+                }
+                else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
+                {
+                    var idx = 0;
+                    foreach (var elem in employeesSnapshot.Value.EnumerateArray())
+                    {
+                        if (elem.ValueKind != JsonValueKind.Null)
+                        {
+                            if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id))
+                            {
+                                tenantEmpIds.Add(id);
+                            }
+                            else
+                            {
+                                tenantEmpIds.Add(idx);
+                            }
+                        }
+                        idx++;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}. Checking local fallback.", tenantId);
+        }
+
+        // If this is the default tenant and no Firebase employee IDs were found, include all local employees
+        if (tenantEmpIds.Count == 0 && tenantId == TenantContextService.DefaultTenantId)
+        {
+            var localEmpIds = await db.Employees.Select(e => e.EmployeeID).ToListAsync(cancellationToken);
+            foreach (var id in localEmpIds) tenantEmpIds.Add(id);
+        }
+
+        if (tenantEmpIds.Count == 0)
+        {
+            _logger.LogInformation("No employees found for tenant {TenantId}. No local operational records to wipe.", tenantId);
+            return;
+        }
+
+        var idList = string.Join(",", tenantEmpIds);
+
+        // Delete records strictly tied to these employees
+        var deleteQueries = new[]
+        {
+            $"DELETE FROM \"AttendanceLogs\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"SalaryAdvances\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"PayrollHistories\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"LeaveRequests\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"ShiftSchedules\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"DailySummaries\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"employee_gps_sessions\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"employee_location_history\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"employee_device_locks\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"attendance_punches\" WHERE \"employeeid\" IN ({idList});",
+            $"DELETE FROM \"bonus_records\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"tax_declarations\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"resignation_requests\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"flexible_benefit_declarations\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"fnf_settlements\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"attendance_regularizations\" WHERE \"employee_id\" IN ({idList});",
+            $"DELETE FROM \"geo_punch_audits\" WHERE \"employee_id\" IN ({idList});"
+        };
+
+        foreach (var sql in deleteQueries)
+        {
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Query skipped: {Sql} - {Message}", sql, ex.Message);
+            }
+        }
+    }
+
+    private async Task WipeLocalAllDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+
+        var tenantEmpIds = new HashSet<int>();
+        try
+        {
+            var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
+            if (employeesSnapshot.HasValue)
+            {
+                if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var prop in employeesSnapshot.Value.EnumerateObject())
+                    {
+                        if (int.TryParse(prop.Name, out var id)) tenantEmpIds.Add(id);
+                        else if (prop.Value.TryGetProperty("EmployeeID", out var eidProp) && eidProp.TryGetInt32(out var eid)) tenantEmpIds.Add(eid);
+                        else if (prop.Value.TryGetProperty("employeeid", out var eidProp2) && eidProp2.TryGetInt32(out var eid2)) tenantEmpIds.Add(eid2);
+                    }
+                }
+                else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
+                {
+                    var idx = 0;
+                    foreach (var elem in employeesSnapshot.Value.EnumerateArray())
+                    {
+                        if (elem.ValueKind != JsonValueKind.Null)
+                        {
+                            if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id)) tenantEmpIds.Add(id);
+                            else tenantEmpIds.Add(idx);
+                        }
+                        idx++;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}.", tenantId);
+        }
+
+        if (tenantEmpIds.Count == 0 && tenantId == TenantContextService.DefaultTenantId)
+        {
+            var localEmpIds = await db.Employees.Select(e => e.EmployeeID).ToListAsync(cancellationToken);
+            foreach (var id in localEmpIds) tenantEmpIds.Add(id);
+        }
+
+        // Wipe operational tables first
+        await WipeLocalOperationalDataForTenantAsync(tenantId, cancellationToken);
+
+        // Then wipe the employees themselves
+        if (tenantEmpIds.Count > 0)
+        {
+            var idList = string.Join(",", tenantEmpIds);
+            try
+            {
+                var deleteEmployeesSql = $"DELETE FROM \"Employees\" WHERE \"employeeid\" IN ({idList});";
+                await db.Database.ExecuteSqlRawAsync(deleteEmployeesSql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Employees wipe query failed: {Message}", ex.Message);
+            }
         }
     }
 

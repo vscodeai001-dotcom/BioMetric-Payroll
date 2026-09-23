@@ -12,6 +12,7 @@
 @inject TenantManagementService TenantManager
 @inject NavigationManager Navigation
 @inject IToastService ToastService
+@inject IJSRuntime JSRuntime
 @inject ILogger<SuperAdminTenants> Logger
 
 <PageTitle>👑 SuperAdmin Multi-Tenant Command Center</PageTitle>
@@ -240,9 +241,18 @@ else
                                             <span>@tenant.AdminPhone</span>
                                         </div>
                                     }
-                                    <div class="d-flex align-items-center text-muted">
+                                    <div class="d-flex align-items-center text-muted mb-2">
                                         <i class="bi bi-calendar3 me-2"></i>
                                         <span>Registered: @tenant.CreatedAtUtc.ToString("dd MMM yyyy")</span>
+                                    </div>
+                                    <div class="pt-2 border-top d-flex justify-content-between align-items-center">
+                                        <span class="text-muted small">Login Access:</span>
+                                        <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-semibold"
+                                                style="font-size: 0.78rem;"
+                                                title="Copy administrator login details to share with company admin"
+                                                @onclick="() => CopyAdminCredentials(tenant)">
+                                            <i class="bi bi-clipboard-check me-1"></i>Copy Login Info
+                                        </button>
                                     </div>
                                 </div>
 
@@ -882,9 +892,17 @@ else
                     </div>
 
                     <div class="modal-body p-4">
+                        @if (!string.IsNullOrWhiteSpace(editErrorMessage))
+                        {
+                            <div class="alert alert-danger d-flex align-items-center mb-3">
+                                <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+                                <div>@editErrorMessage</div>
+                            </div>
+                        }
+
                         <div class="row g-3">
                             <div class="col-12">
-                                <label class="form-label fw-bold small">Company Display Name</label>
+                                <label class="form-label fw-bold small">Company Display Name <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control" @bind="editingTenant.CompanyName" />
                             </div>
                             <div class="col-6">
@@ -916,6 +934,45 @@ else
                                 <label class="form-label fw-bold small">Admin Phone</label>
                                 <input type="tel" class="form-control" @bind="editingTenant.AdminPhone" />
                             </div>
+
+                            @* --- CREDENTIALS MANAGEMENT (EMAIL & RESET PASSWORD) --- *@
+                            <div class="col-12">
+                                <div class="card border border-primary-subtle bg-primary-subtle bg-opacity-10 p-3 rounded-3 shadow-none">
+                                    <div class="d-flex align-items-center gap-2 mb-2 text-primary fw-bold">
+                                        <i class="bi bi-shield-lock-fill"></i>
+                                        <span>🔑 Company Administrator Credentials (Login &amp; Password)</span>
+                                    </div>
+                                    <div class="text-muted small mb-3">
+                                        Saved credentials immediately synchronize with ASP.NET Identity &amp; Firebase Auth so the administrator can log in directly without separate setup.
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold small">Administrator Email / Username <span class="text-danger">*</span></label>
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-white"><i class="bi bi-envelope-at-fill text-primary"></i></span>
+                                            <input type="email" class="form-control" @bind="editAdminEmail" placeholder="admin@company.com" />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="form-label fw-bold small">New / Reset Password</label>
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-white"><i class="bi bi-key-fill text-primary"></i></span>
+                                            <input type="@(showEditPassword ? "text" : "password")"
+                                                   class="form-control"
+                                                   @bind="editAdminPassword"
+                                                   placeholder="Leave blank to retain current password (min 6 chars)" />
+                                            <button class="btn btn-outline-secondary" type="button" @onclick="() => showEditPassword = !showEditPassword" title="Toggle password visibility">
+                                                <i class="bi @(showEditPassword ? "bi-eye-slash-fill" : "bi-eye-fill")"></i>
+                                            </button>
+                                        </div>
+                                        <div class="form-text small text-muted">
+                                            Enter a password to update or reset this administrator's login access.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="col-12">
                                 <div class="form-check form-switch mt-2">
                                     <input class="form-check-input" type="checkbox" id="edit_active" @bind="editingTenant.IsActive" />
@@ -975,6 +1032,10 @@ else
     private bool showEditModal = false;
     private bool isSavingEdit = false;
     private CompanyTenant? editingTenant;
+    private string editAdminEmail = string.Empty;
+    private string editAdminPassword = string.Empty;
+    private bool showEditPassword = false;
+    private string? editErrorMessage;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1289,6 +1350,10 @@ else
             CompanySettingId = tenant.CompanySettingId,
             FeatureSettingsId = tenant.FeatureSettingsId
         };
+        editAdminEmail = tenant.AdminEmail;
+        editAdminPassword = string.Empty;
+        showEditPassword = false;
+        editErrorMessage = null;
         showEditModal = true;
     }
 
@@ -1297,35 +1362,58 @@ else
         showEditModal = false;
         selectedTenant = null;
         editingTenant = null;
+        editErrorMessage = null;
     }
 
     private async Task SubmitSaveEditTenant()
     {
         if (editingTenant == null) return;
 
+        editErrorMessage = null;
         isSavingEdit = true;
         try
         {
-            var success = await TenantManager.UpdateTenantAsync(editingTenant);
-            if (success)
+            var result = await TenantManager.UpdateTenantProfileAndCredentialsAsync(
+                editingTenant,
+                editAdminEmail,
+                string.IsNullOrWhiteSpace(editAdminPassword) ? null : editAdminPassword);
+
+            if (result.Success)
             {
-                ToastService.ShowSuccess($"Tenant profile updated for {editingTenant.CompanyName}!");
+                ToastService.ShowSuccess($"Tenant profile & credentials saved for {editingTenant.CompanyName}!");
                 CloseEditTenantModal();
                 await LoadDataAsync();
             }
             else
             {
-                ToastService.ShowError("Failed to update tenant profile.");
+                editErrorMessage = result.ErrorMessage ?? "Failed to update tenant profile.";
+                ToastService.ShowError(editErrorMessage);
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error updating tenant.");
+            editErrorMessage = ex.Message;
             ToastService.ShowError("Failed to update tenant: " + ex.Message);
         }
         finally
         {
             isSavingEdit = false;
+        }
+    }
+
+    private async Task CopyAdminCredentials(CompanyTenant tenant)
+    {
+        try
+        {
+            var loginUrl = Navigation.BaseUri + "Identity/Account/Login";
+            var text = $"🏢 Company: {tenant.CompanyName}\n🔑 Admin Email: {tenant.AdminEmail}\n🌐 Login URL: {loginUrl}";
+            await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            ToastService.ShowSuccess($"Copied administrator credentials for {tenant.CompanyName} to clipboard!");
+        }
+        catch
+        {
+            ToastService.ShowInfo($"Admin Email: {tenant.AdminEmail}");
         }
     }
 }

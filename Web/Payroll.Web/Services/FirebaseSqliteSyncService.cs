@@ -1,4 +1,5 @@
 using Payroll.Shared.Firebase;
+using Payroll.Shared.Data;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -1299,6 +1300,50 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             if (child.Value.ValueKind != JsonValueKind.Object)
                 continue;
 
+            // Handle 2-level hierarchy in tracking/sessions: tracking/sessions/{employeeId}/{sessionId}
+            if (entityName == "EmployeeGpsSession" &&
+                !child.Value.TryGetProperty("SessionId", out _) &&
+                !child.Value.TryGetProperty("sessionId", out _))
+            {
+                foreach (var sessionChild in child.Value.EnumerateObject())
+                {
+                    if (sessionChild.Value.ValueKind != JsonValueKind.Object)
+                        continue;
+
+                    try
+                    {
+                        changedAny |= await UpsertRecordAsync(
+                            tableDb,
+                            tableEntityType,
+                            tableKeys,
+                            sessionChild.Name,
+                            sessionChild.Value,
+                            ct);
+
+                        processedCount++;
+                        if (processedCount % 100 == 0)
+                        {
+                            if (changedAny)
+                            {
+                                using var batchSyncScope = _firebaseSyncWriteScope.Enter();
+                                await tableDb.SaveChangesAsync(ct);
+                                changedAny = false;
+                            }
+                            tableDb.ChangeTracker.Clear();
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Skipping Firebase nested session {Key}", sessionChild.Name);
+                    }
+                }
+                continue;
+            }
+
             try
             {
                 changedAny |= await UpsertRecordAsync(
@@ -1383,6 +1428,59 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         JsonElement json,
         CancellationToken ct)
     {
+        // Specialized handler for EmployeeGpsSession:
+        // In SQLite, session_id is a unique key, and id is an auto-increment integer.
+        // Firebase keys records by SessionId (Guid), so lookups and updates must match on SessionId
+        // rather than the auto-generated id to prevent 'UNIQUE constraint failed: employee_gps_sessions.session_id'.
+        if (entityType.ClrType == typeof(EmployeeGpsSession))
+        {
+            var sidElement = FindJsonValue(json, nameof(EmployeeGpsSession.SessionId));
+            var sidStr = sidElement?.GetString() ?? sidElement?.ToString() ?? (firebaseKey.Contains('/') ? firebaseKey.Split('/')[^1] : firebaseKey);
+            if (!Guid.TryParse(sidStr, out var sid) || sid == Guid.Empty)
+                return false;
+
+            var existingSession = await db.EmployeeGpsSessions.FirstOrDefaultAsync(s => s.SessionId == sid, ct)
+                ?? db.ChangeTracker.Entries<EmployeeGpsSession>()
+                    .Select(e => e.Entity)
+                    .FirstOrDefault(s => s.SessionId == sid);
+
+            var isNew = existingSession == null;
+            var targetSession = existingSession ?? new EmployeeGpsSession { SessionId = sid };
+
+            var changedSession = false;
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.IsShadowProperty() || property.PropertyInfo == null) continue;
+                if (property.Name == nameof(EmployeeGpsSession.Id)) continue; // Preserve SQLite autoincrement ID
+
+                var value = FindJsonValue(json, property.Name);
+                if (value is null) continue;
+
+                var converted = ConvertValue(value, property.ClrType);
+                if (converted is null && Nullable.GetUnderlyingType(property.ClrType) == null && property.ClrType.IsValueType)
+                    continue;
+
+                var current = property.PropertyInfo.GetValue(targetSession);
+                if (!Equals(current, converted))
+                {
+                    property.PropertyInfo.SetValue(targetSession, converted);
+                    changedSession = true;
+                }
+            }
+
+            if (isNew)
+            {
+                db.EmployeeGpsSessions.Add(targetSession);
+                return true;
+            }
+            else if (changedSession && db.Entry(targetSession).State == EntityState.Unchanged)
+            {
+                db.Entry(targetSession).State = EntityState.Modified;
+            }
+
+            return changedSession;
+        }
+
         var keyParts = firebaseKey.Split('|');
         var keyValues = new object?[keys.Count];
 

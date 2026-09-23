@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -12,7 +12,7 @@ namespace Payroll.Shared.Data
     public class CompanySetting
     {
         [Key]
-        public int SettingID { get; set; } = 1;
+        public int SettingID { get; set; } = 0;
 
         // --- Company Details ---
         public string CompanyName { get; set; } = "Your Company Name";

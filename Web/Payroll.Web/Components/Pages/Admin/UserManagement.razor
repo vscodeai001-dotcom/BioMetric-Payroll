@@ -19,19 +19,36 @@
 @inject FirebaseRealtimeService FirebaseRealtime
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject Payroll.Web.Services.FirebaseUserManagementService FirebaseUsers
+@inject ITenantContextService TenantContext
+@inject TenantManagementService TenantManager
 
-@attribute [Authorize(Roles = "SuperAdmin")]
+@attribute [Authorize(Roles = "SuperAdmin, Admin")]
 
-<PageTitle>User & Role Management</PageTitle>
+<PageTitle>👥 User & Role Management</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h3>User & Role Management</h3>
-    <p class="lead mb-0">Manage users, assign roles, and link them to employee records.</p>
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+        <div class="d-flex align-items-center gap-2">
+            <h3 class="fw-bold text-primary mb-0"><span class="me-2">👥</span>User &amp; Role Management</h3>
+            @if (isSuperAdmin)
+            {
+                <span class="badge bg-warning text-dark fw-bold">👑 SuperAdmin Mode</span>
+            }
+            else if (activeTenant != null)
+            {
+                <span class="badge bg-info text-dark fw-bold">🏢 @activeTenant.CompanyName</span>
+            }
+        </div>
+        <p class="text-muted small mb-0 mt-1">Manage staff user accounts, assign roles, and link credentials to employee records.</p>
+    </div>
 </div>
 
 @if (isLoading)
 {
-    <p><em>Loading users & roles...</em></p>
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary mb-3" style="width: 2.5rem; height: 2.5rem;" role="status"></div>
+        <p class="text-muted">Loading workspace users &amp; roles...</p>
+    </div>
 }
 else
 {
@@ -40,6 +57,8 @@ else
             <UserCreationForm NewUserForm="newUserForm"
                               UnlinkedEmployees="unlinkedEmployees"
                               IsSaving="isSaving"
+                              IsSuperAdmin="isSuperAdmin"
+                              ActiveCompanyName="@(activeTenant?.CompanyName ?? "")"
                               OnCreateUser="CreateNewUser" />
         </div>
 
@@ -51,6 +70,7 @@ else
             <UserListTable UserList="userList"
                            IsLoading="isLoading"
                            IsSaving="isSaving"
+                           IsSuperAdmin="isSuperAdmin"
                            OnEditRoleRequested="HandleEditRoleStart"
                            OnDeleteUser="ConfirmDeleteUser"
                            UpdateUserRole="UpdateUserRole"
@@ -69,6 +89,9 @@ else
 @code {
     private bool isLoading = true;
     private bool isSaving = false;
+    private bool isSuperAdmin = false;
+    private CompanyTenant? activeTenant;
+    private List<CompanyTenant> allTenants = new();
 
     private List<UserRoleViewModel> userList = new();
     private List<Employee> allEmployees = new();
@@ -97,8 +120,33 @@ else
         isLoading = true;
         try
         {
+            isSuperAdmin = await TenantContext.IsSuperAdminAsync();
+            activeTenant = await TenantContext.GetActiveTenantAsync();
+            allTenants = await TenantManager.GetAllTenantsAsync();
+
             allEmployees = await FirebaseEmployees.GetEmployeesAsync();
-            userList = await FirebaseUsers.GetAllUsersAsync(allEmployees);
+            var rawUsers = await FirebaseUsers.GetAllUsersAsync(allEmployees);
+
+            if (!isSuperAdmin)
+            {
+                // Company Admin is strictly isolated:
+                // 1. Never see root SuperAdmin account
+                // 2. Never see administrators of other client companies
+                var otherAdmins = allTenants
+                    .Where(t => t.Id != activeTenant?.Id)
+                    .Select(t => t.AdminEmail.Trim().ToLowerInvariant())
+                    .ToHashSet();
+
+                userList = rawUsers.Where(u =>
+                    !string.Equals(u.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(u.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase) &&
+                    (string.IsNullOrWhiteSpace(u.Email) || !otherAdmins.Contains(u.Email.Trim().ToLowerInvariant()))
+                ).ToList();
+            }
+            else
+            {
+                userList = rawUsers;
+            }
         }
         catch (Exception ex)
         {
@@ -116,6 +164,11 @@ else
         isSaving = true;
         try
         {
+            if (!isSuperAdmin)
+            {
+                newUserForm.InitialRole = "Employee";
+            }
+
             if (newUserForm.InitialRole.Equals("Employee", StringComparison.OrdinalIgnoreCase) &&
                 !newUserForm.EmployeeId.HasValue)
             {
@@ -163,6 +216,13 @@ else
     private async Task UpdateUserRole()
     {
         if (userToEditRole == null) return;
+
+        if (!isSuperAdmin && !string.Equals(newRoleForUser, "Employee", StringComparison.OrdinalIgnoreCase))
+        {
+            toastService.ShowWarning("Only SuperAdmin can assign Admin or SuperAdmin roles.");
+            return;
+        }
+
         isSaving = true;
 
         try
@@ -204,7 +264,13 @@ else
             return;
         }
 
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"Delete {user.Email}?")) return;
+        if (!isSuperAdmin && user.CurrentRole != "Employee")
+        {
+            toastService.ShowWarning("Company administrators can only manage employee accounts.");
+            return;
+        }
+
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"Delete account for {user.Email}?")) return;
 
         await DeleteUser(user);
     }

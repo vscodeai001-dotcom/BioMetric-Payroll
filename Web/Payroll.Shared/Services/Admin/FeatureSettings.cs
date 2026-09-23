@@ -13,7 +13,7 @@ namespace Payroll.Shared.Data
     {
         [Key]
         [Column("id")]
-        public int Id { get; set; } = 1;
+        public int Id { get; set; } = 0;
 
         // --- 1. Core Module Toggles (Formerly ClientFeatureToggle) ---
         // These are the "master switches" for the company subscription

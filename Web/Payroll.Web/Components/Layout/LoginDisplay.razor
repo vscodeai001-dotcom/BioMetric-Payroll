@@ -1,4 +1,4 @@
-﻿@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.JSInterop
 
 @inject IJSRuntime JSRuntime
@@ -14,18 +14,41 @@
                  LOGGED-IN USER
                  ===================================================== -->
 
-            <a class="nav-link login-user-link"
+            <a class="nav-link login-user-link d-flex align-items-center gap-1"
                href="/Identity/Account/Manage"
                title="@context.User.Identity?.Name">
 
-                <span class="hello-text">
+                <span class="user-avatar">
+                    @if (context.User.IsInRole("SuperAdmin"))
+                    {
+                        <span>👑</span>
+                    }
+                    else if (context.User.IsInRole("Admin"))
+                    {
+                        <span>🛡️</span>
+                    }
+                    else
+                    {
+                        <span>👤</span>
+                    }
+                </span>
+
+                <span class="hello-text text-muted small">
                     Hello,
                 </span>
 
-                <span class="user-name">
+                <span class="user-name fw-semibold">
                     @context.User.Identity?.Name
                 </span>
 
+                @if (context.User.IsInRole("SuperAdmin"))
+                {
+                    <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7rem;">Root SA</span>
+                }
+                else if (context.User.IsInRole("Admin"))
+                {
+                    <span class="badge bg-info text-dark ms-1" style="font-size: 0.7rem;">Admin</span>
+                }
             </a>
 
 
