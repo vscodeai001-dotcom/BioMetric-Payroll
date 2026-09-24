@@ -618,17 +618,27 @@ class LoginActivity : MotionBaseActivity() {
         
         // If they are an Admin or SuperAdmin, always go to MainActivity (Admin Dashboard)
         // If they are STAFF, go to EmployeeHomeActivity
-        val destination = if (role == UserRole.Admin.name || role == UserRole.SuperAdmin.name) {
-            
-            // Admin sessions must never inherit an Employee GPS service.
-            stopService(Intent(this, com.biometric.app.domain.location.TrackingService::class.java))
-            getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
-                putBoolean("is_service_active_intended", false)
-                putBoolean("tracking_waiting_for_shift", false)
+        val destination = when (role) {
+            UserRole.SuperAdmin.name -> {
+                // Admin/SuperAdmin sessions must never inherit an Employee GPS service.
+                stopService(Intent(this, com.biometric.app.domain.location.TrackingService::class.java))
+                getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                    putBoolean("is_service_active_intended", false)
+                    putBoolean("tracking_waiting_for_shift", false)
+                }
+                TenantSelectionActivity::class.java
             }
-MainActivity::class.java
-        } else {
-            EmployeeHomeActivity::class.java
+            UserRole.Admin.name -> {
+                stopService(Intent(this, com.biometric.app.domain.location.TrackingService::class.java))
+                getSharedPreferences("tracking_prefs", MODE_PRIVATE).edit {
+                    putBoolean("is_service_active_intended", false)
+                    putBoolean("tracking_waiting_for_shift", false)
+                }
+                MainActivity::class.java
+            }
+            else -> {
+                EmployeeHomeActivity::class.java
+            }
         }
 
         if (mobileSessionStore.isReliabilitySetupDone()) {

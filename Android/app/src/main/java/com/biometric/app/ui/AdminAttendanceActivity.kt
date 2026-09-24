@@ -161,6 +161,9 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             sharedViewModel.allAttendancePunches.collectLatest { render() }
         }
         lifecycleScope.launch {
+            sharedViewModel.allAttendance.collectLatest { render() }
+        }
+        lifecycleScope.launch {
             sharedViewModel.allEmployees.collectLatest { employees ->
                 val items = mutableListOf("All Employees")
                 items += employees.sortedBy { it.name }.map { "${it.name} (#${it.employeeId})" }
@@ -194,7 +197,8 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val summariesInRange = sharedViewModel.allDailySummaries.value.filter {
             it.shiftDate in f..t && (employeeFilterId == null || it.employeeId == employeeFilterId)
         }
-        val punchesGrouped = sharedViewModel.allAttendancePunches.value.groupBy { it.date }
+        val allPunches = sharedViewModel.allAttendancePunches.value
+        val allAttendance = sharedViewModel.allAttendance.value
 
         // Compute KPI Cumulative Metrics across all filtered summaries
         val employeesProcessed = summariesInRange.map { it.employeeId }.distinct().count()
@@ -224,13 +228,45 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             val dateParsed = runCatching { isoDateFormat.parse(s.shiftDate) }.getOrNull()
             val formattedDate = if (dateParsed != null) shiftDateFormat.format(dateParsed) else s.shiftDate
 
-            val rawPunchesText = punchesGrouped[s.shiftDate].orEmpty()
-                .filter { it.staffId == s.employeeId.toString() }
-                .sortedBy { it.timestamp }
-                .joinToString("  •  ") { p ->
-                    val time = punchTimeFormat.format(Date(p.timestamp))
-                    "$time ${p.type}"
-                }.ifBlank { "No punches recorded" }
+            // 1. Direct punches from attendance_punches (mobile, web, biometric sync)
+            val directPunches = allPunches.filter { p ->
+                val idMatches = p.staffId == s.employeeId.toString() ||
+                    p.staffId.toIntOrNull() == s.employeeId ||
+                    (emp != null && emp.biometricId.isNotBlank() && p.staffId == emp.biometricId)
+                val dateMatches = p.date == s.shiftDate ||
+                    (p.timestamp > 0 && isoDateFormat.format(Date(p.timestamp)) == s.shiftDate)
+                idMatches && dateMatches
+            }.map { p ->
+                Pair(p.timestamp, p.type.ifBlank { "IN" })
+            }
+
+            // 2. Attendance check-in / check-out pairs from attendance table
+            val attendancePunches = allAttendance.filter { a ->
+                val idMatches = a.employeeId == s.employeeId.toString() ||
+                    a.employeeId.toIntOrNull() == s.employeeId ||
+                    (emp != null && emp.biometricId.isNotBlank() && a.employeeId == emp.biometricId)
+                val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == s.shiftDate
+                idMatches && dateMatches
+            }.flatMap { a ->
+                val list = mutableListOf<Pair<Long, String>>()
+                if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
+                val outTime = a.checkOutTime ?: 0L
+                if (outTime > 0) list.add(Pair(outTime, "OUT"))
+                list
+            }
+
+            val mergedPunches = (directPunches + attendancePunches)
+                .distinctBy { Pair(it.first / 60000, it.second) } // deduplicate within same minute & type
+                .sortedBy { it.first }
+
+            val rawPunchesText = if (mergedPunches.isNotEmpty()) {
+                mergedPunches.joinToString("  •  ") { (timeMs, type) ->
+                    val time = punchTimeFormat.format(Date(timeMs))
+                    "$time $type"
+                }
+            } else {
+                "No punches recorded"
+            }
 
             val scheduledDuration = formatDurationMs(s.scheduledShiftDurationMs)
             val scheduledShiftText = if (s.scheduledShiftDurationMs > 0) {

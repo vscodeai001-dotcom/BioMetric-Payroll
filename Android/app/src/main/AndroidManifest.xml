@@ -412,6 +412,31 @@
         <activity android:name=".ui.AttendanceEventMonitoringActivity" android:exported="false" />
         <activity android:name=".ui.AdminTaxDeclarationsActivity" android:exported="false" />
         <activity android:name=".ui.AdminBonusActivity" android:exported="false" />
+        <activity
+            android:name=".ui.AdminFinanceActivity"
+            android:exported="false"
+            android:label="Salary Advances &amp; Finance"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.ShopClosedDaysActivity"
+            android:exported="false"
+            android:label="Shop Closed Days"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.TrackingScopeActivity"
+            android:exported="false"
+            android:label="Tracking Scope"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.WebParityModuleActivity"
+            android:exported="false"
+            android:label="Web Parity Module"
+            android:screenOrientation="portrait" />
+        <activity
+            android:name=".ui.TenantSelectionActivity"
+            android:exported="false"
+            android:label="Tenant Management"
+            android:screenOrientation="portrait" />
     </application>
 
 </manifest>

@@ -1557,7 +1557,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         // 0. SuperAdmin Multi-Tenant Portal
         menus.cardSuperAdminPortal.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, SuperAdminManagementActivity::class.java))
+            startActivity(Intent(this, TenantSelectionActivity::class.java))
         }
 
         // SECTION 1: Payroll Management

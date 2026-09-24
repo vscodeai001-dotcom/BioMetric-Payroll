@@ -78,49 +78,73 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
         scrollContainer: View? = null
     ) {
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val systemBars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
             
-            // Apply top padding to the root view to handle the status bar.
-            // This ensures the AppBarLayout starts below the status bar.
-            v.updatePadding(top = systemBars.top)
+            // 1. Top Safe Area (Status bar & camera cutout)
+            val topBar: View? = appBarLayout 
+                ?: v.findViewById<AppBarLayout?>(R.id.appBar)
+                ?: v.findViewById<Toolbar?>(R.id.toolbar)
 
-            // Detect common scrolling containers if not provided
-            val targetScroll = scrollContainer 
-                ?: v.findViewById<View?>(R.id.swipeRefresh) 
-                ?: v.findViewById<View?>(R.id.mainScrollView)
-                ?: v.findViewById<View?>(R.id.rvAttendance)
-            
+            if (topBar != null) {
+                val baseTopPadding = (topBar.getTag(R.id.top_inset_base_padding) as? Int)
+                    ?: topBar.paddingTop.also { topBar.setTag(R.id.top_inset_base_padding, it) }
+                topBar.updatePadding(top = baseTopPadding + systemBars.top)
+                v.updatePadding(top = 0)
+            } else {
+                val baseTopPadding = (v.getTag(R.id.top_inset_base_padding) as? Int)
+                    ?: v.paddingTop.also { v.setTag(R.id.top_inset_base_padding, it) }
+                v.updatePadding(top = baseTopPadding + systemBars.top)
+            }
+
+            // 2. Bottom Safe Area (Taskbar / Navigation buttons / Gestures)
             val bottomNavId = resources.getIdentifier("bottomNavigation", "id", packageName)
             val bottomNavigation = if (bottomNavId != 0) v.findViewById<View?>(bottomNavId) else null
+
+            val targetScroll = scrollContainer 
+                ?: findScrollableView(v)
             
             if (bottomNavigation != null) {
                 val baseBottomPadding = (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)
                     ?: bottomNavigation.paddingBottom.also {
                         bottomNavigation.setTag(R.id.bottom_inset_base_padding, it)
                     }
-                
-                // Navigation bar itself needs padding for the system navigation handle/buttons
-                bottomNavigation.updatePadding(bottom = baseBottomPadding + navBars.bottom)
-                
-                // If there's a scroll container, it must end ABOVE the bottom navigation bar.
-                // We use a fixed offset or wait for layout to ensure it's not obscured.
+                bottomNavigation.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
                 bottomNavigation.post {
-                    targetScroll?.updatePadding(bottom = bottomNavigation.height + navBars.bottom)
+                    targetScroll?.updatePadding(bottom = bottomNavigation.height + systemBars.bottom)
                 }
                 v.updatePadding(bottom = 0)
+            } else if (targetScroll != null) {
+                val baseBottomPadding = (targetScroll.getTag(R.id.bottom_inset_base_padding) as? Int)
+                    ?: targetScroll.paddingBottom.also { targetScroll.setTag(R.id.bottom_inset_base_padding, it) }
+                targetScroll.updatePadding(bottom = baseBottomPadding + systemBars.bottom + 24)
+                v.updatePadding(bottom = 0)
             } else {
-                // No bottom nav, apply bottom system insets to either scroll view or root
-                if (targetScroll != null) {
-                    targetScroll.updatePadding(bottom = navBars.bottom)
-                    v.updatePadding(bottom = 0)
-                } else {
-                    v.updatePadding(bottom = navBars.bottom)
-                }
+                val baseBottomPadding = (v.getTag(R.id.bottom_inset_base_padding) as? Int)
+                    ?: v.paddingBottom.also { v.setTag(R.id.bottom_inset_base_padding, it) }
+                v.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
             }
             
             insets
         }
+        ViewCompat.requestApplyInsets(rootView)
+    }
+
+    private fun findScrollableView(view: View): View? {
+        if (view is androidx.core.widget.NestedScrollView || 
+            view is android.widget.ScrollView || 
+            view is androidx.recyclerview.widget.RecyclerView) {
+            return view
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                val found = findScrollableView(child)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     protected fun animateContentEntry(viewGroup: ViewGroup) {

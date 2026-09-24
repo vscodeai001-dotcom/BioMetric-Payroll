@@ -11,9 +11,16 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
 import com.biometric.app.api.*
+import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalDailySummaryDao
+import com.biometric.app.data.dao.LocalPayrollHistoryDao
+import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.Employee
+import com.biometric.app.data.entity.LocalPayrollHistory
+import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
 import com.biometric.app.ui.selfservice.PayslipListActivity
+import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.HapticUtil
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
@@ -21,7 +28,9 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.io.File
 import java.io.FileWriter
 import java.text.NumberFormat
@@ -31,8 +40,12 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class AdminPayrollActivity : MotionBaseActivity() {
 
-    @Inject lateinit var api: MobileApiService
     @Inject lateinit var firebaseSync: com.biometric.app.sync.FirebaseSyncManager
+    @Inject lateinit var sharedViewModel: SharedViewModel
+    @Inject lateinit var mainRepository: MainRepository
+    @Inject lateinit var localDailySummaryDao: LocalDailySummaryDao
+    @Inject lateinit var localPayrollHistoryDao: LocalPayrollHistoryDao
+    @Inject lateinit var financeRepository: FirebaseAdminFinanceRepository
     private lateinit var session: MobileSessionStore
 
     private lateinit var spMonth: Spinner
@@ -65,7 +78,11 @@ class AdminPayrollActivity : MotionBaseActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_admin_payroll)
 
-        applyWindowInsets(findViewById(R.id.clAdminPayrollRoot), findViewById(R.id.appBar))
+        applyWindowInsets(
+            findViewById(R.id.clAdminPayrollRoot),
+            findViewById(R.id.appBar),
+            findViewById(R.id.nestedScrollView)
+        )
         session = MobileSessionStore(this)
 
         initViews()
@@ -172,26 +189,174 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
         try {
             val (y, m) = period()
-            val response = api.adminPayrollPreview(auth(), AdminPayrollPeriodRequest(y, m))
-            if (!response.isSuccessful || response.body()?.success != true) {
-                throw Exception(response.body()?.message ?: "Unable to generate preview")
+
+            // 1. Fetch active employees from SharedViewModel or Room or Firebase
+            var employees = sharedViewModel.allEmployees.value.filter { it.isActive }
+            if (employees.isEmpty()) {
+                employees = runCatching { mainRepository.allEmployeesFlow.first() }.getOrDefault(emptyList()).filter { it.isActive }
+            }
+            if (employees.isEmpty()) {
+                val snapshot = runCatching { firebaseSync.getOwnerRef()?.child("employees")?.get()?.await() }.getOrNull()
+                employees = snapshot?.children?.mapNotNull { it.getValue(Employee::class.java) }?.filter { it.isActive } ?: emptyList()
             }
 
-            val rows = response.body()?.rows ?: emptyList()
-            previewList = rows.toMutableList()
+            if (employees.isEmpty()) {
+                throw Exception("No active staff found to calculate payroll.")
+            }
+
+            // 2. Fetch daily attendance summaries for the selected period
+            val monthStr = if (m < 10) "0$m" else "$m"
+            val periodPrefix = "$y-$monthStr"
+            val allSummaries = runCatching { localDailySummaryDao.getAllFlow().first() }.getOrDefault(emptyList())
+            val monthSummaries = allSummaries.filter { it.shiftDate.startsWith(periodPrefix) }
+
+            // 3. Fetch unpaid advances and bonuses
+            val unpaidAdvances = runCatching { financeRepository.advances(unpaidOnly = true) }.getOrDefault(emptyList())
+            val allBonuses = runCatching { financeRepository.bonuses() }.getOrDefault(emptyList())
+            val monthBonuses = allBonuses.filter { !it.paid && it.date.startsWith(periodPrefix) }
+
+            // 4. Calculate for each employee (1:1 with Web RunPayroll.razor & PayrollProcessorService)
+            val generatedRows = mutableListOf<AdminPayrollRowDto>()
+
+            for (emp in employees) {
+                val empIdInt = emp.employeeId.toIntOrNull() ?: 0
+                val empSummaries = monthSummaries.filter { it.employeeId == empIdInt }
+
+                val baseSalary = if (emp.salaryRate > 0) emp.salaryRate else if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else 15000.0
+                val dailyRate = baseSalary / 26.0
+                val standardHrs = if (emp.standardHours > 0) emp.standardHours else 8
+                val hourlyRate = dailyRate / standardHrs
+
+                var earnedHours = 0.0
+                var overtimeMinutes = 0.0
+                var penaltyMinutes = 0.0
+                var totalShiftAllowance = 0.0
+                var presentDays = 0.0
+                var leaveDays = 0
+                var absentDays = 0
+
+                if (empSummaries.isNotEmpty()) {
+                    for (ds in empSummaries) {
+                        earnedHours += ds.earnedStandardHours
+                        overtimeMinutes += (ds.totalOvertimeMs / 60000.0)
+                        penaltyMinutes += (ds.totalPenaltyMs / 60000.0)
+                        totalShiftAllowance += ds.shiftAllowanceEarned
+
+                        when {
+                            ds.status.equals("Present", ignoreCase = true) -> presentDays += 1.0
+                            ds.status.equals("Half Day", ignoreCase = true) -> presentDays += 0.5
+                            ds.status.contains("Leave", ignoreCase = true) -> leaveDays += 1
+                            ds.status.contains("Absent", ignoreCase = true) || ds.status.contains("Loss of Pay", ignoreCase = true) -> absentDays += 1
+                        }
+                    }
+                } else {
+                    // Fallback for full active month when daily summaries not yet closed
+                    presentDays = 26.0
+                    earnedHours = 26.0 * standardHrs
+                }
+
+                // Earned Pay
+                val earnedPay = if (emp.salaryCalculationMethod.contains("Pro-Rata", ignoreCase = true)) {
+                    earnedHours * hourlyRate
+                } else {
+                    (presentDays + leaveDays) * dailyRate
+                }
+
+                // Overtime pay
+                val otHours = overtimeMinutes / 60.0
+                val overtimePay = when (emp.otRule.trim().lowercase()) {
+                    "1.5x" -> otHours * hourlyRate * 1.5
+                    "2.0x" -> otHours * hourlyRate * 2.0
+                    "flat" -> otHours * (if (emp.otFlatRate > 0) emp.otFlatRate else hourlyRate)
+                    "no overtime" -> 0.0
+                    else -> otHours * hourlyRate
+                }
+
+                // Penalty deduction
+                val penaltyHours = penaltyMinutes / 60.0
+                val penaltyDeduction = penaltyHours * hourlyRate
+
+                // Advance deduction
+                val empAdvances = unpaidAdvances.filter { it.employeeId == empIdInt }
+                val advanceDeduction = empAdvances.sumOf { it.amount }
+
+                // Bonus
+                val empBonuses = monthBonuses.filter { it.employeeId == empIdInt }
+                val bonus = empBonuses.sumOf { it.amount }
+
+                // Statutory (PF, ESI, PT, TDS)
+                val basicSalary = if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else (baseSalary * 0.5)
+                val isPfEnabled = emp.enablePf
+                val pfDeduction = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
+                val employerPf = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
+
+                val gross = earnedPay + overtimePay + bonus + totalShiftAllowance
+                val isEsiEnabled = emp.enableEsi && (gross <= 21000.0)
+                val esiDeduction = if (isEsiEnabled) (gross * 0.0075) else 0.0
+                val employerEsi = if (isEsiEnabled) (gross * 0.0325) else 0.0
+
+                val ptDeduction = when {
+                    gross > 15000.0 -> 200.0
+                    gross > 10000.0 -> 150.0
+                    else -> 0.0
+                }
+
+                val tdsDeduction = if (emp.tdsRatePercent > 0) (gross * (emp.tdsRatePercent / 100.0)) else 0.0
+
+                val totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceDeduction + penaltyDeduction
+                val netPayable = (gross - totalDeductions).coerceAtLeast(0.0)
+
+                generatedRows.add(
+                    AdminPayrollRowDto(
+                        employeeID = empIdInt,
+                        employeeName = emp.name,
+                        baseSalary = baseSalary,
+                        hourlyRate = hourlyRate,
+                        earnedStandardHours = earnedHours,
+                        earnedPay = earnedPay,
+                        overtimeMinutes = overtimeMinutes,
+                        overtimePay = overtimePay,
+                        penaltyMinutes = penaltyMinutes,
+                        penaltyDeduction = penaltyDeduction,
+                        advanceDeduction = advanceDeduction,
+                        bonus = bonus,
+                        totalShiftAllowance = totalShiftAllowance,
+                        tdsDeduction = tdsDeduction,
+                        basicSalary = basicSalary,
+                        pfDeduction = pfDeduction,
+                        esiDeduction = esiDeduction,
+                        ptDeduction = ptDeduction,
+                        employerPfContribution = employerPf,
+                        employerEsiContribution = employerEsi,
+                        isPfEnabled = isPfEnabled,
+                        isEsiEnabled = isEsiEnabled,
+                        netPayable = netPayable,
+                        leaveDays = leaveDays,
+                        absentDays = absentDays
+                    )
+                )
+            }
+
+            previewList = generatedRows.sortedBy { it.employeeName }.toMutableList()
             renderPreviewRows()
-            tvStatus.text = "Preview generated • ${previewList.size} staff members"
+            tvStatus.text = "Preview generated • ${previewList.size} staff members (Standalone ⚡)"
             btnFinalize.isEnabled = previewList.isNotEmpty()
             btnRecalculate.isEnabled = false
         } catch (e: Exception) {
             tvStatus.text = "Payroll preview failed: ${e.message}"
-            Toast.makeText(this@AdminPayrollActivity, e.message ?: "Request failed", Toast.LENGTH_LONG).show()
+            Toast.makeText(this@AdminPayrollActivity, e.message ?: "Calculation error", Toast.LENGTH_LONG).show()
         } finally {
             setBusy(false)
         }
     }
 
     private fun recalculatePreview() {
+        previewList = previewList.map { row ->
+            val gross = row.earnedPay + row.overtimePay + row.bonus + row.totalShiftAllowance
+            val ded = row.pfDeduction + row.esiDeduction + row.ptDeduction + row.tdsDeduction + row.advanceDeduction + row.penaltyDeduction
+            val net = (gross - ded).coerceAtLeast(0.0)
+            row.copy(netPayable = net)
+        }.toMutableList()
         renderPreviewRows()
         btnRecalculate.isEnabled = false
         tvStatus.text = "Preview recalculated • Adjusted net pay updated"
@@ -478,12 +643,106 @@ class AdminPayrollActivity : MotionBaseActivity() {
     }
 
     private fun finalizePayroll() = lifecycleScope.launch {
-        setBusy(true, "Saving finalized payroll to database… 💾")
+        setBusy(true, "Finalizing & saving payroll to database… 💾")
         try {
             val (y, m) = period()
-            val response = api.adminPayrollFinalize(auth(), AdminPayrollFinalizeRequest(y, m, previewList))
-            if (!response.isSuccessful || response.body()?.success != true) {
-                throw Exception(response.body()?.message ?: "Finalization failed")
+            val ownerRef = firebaseSync.getOwnerRef() ?: throw Exception("Firebase session not initialized")
+
+            val timestamp = System.currentTimeMillis()
+            previewList.forEachIndexed { index, row ->
+                val pid = ((timestamp % 100000000).toInt()) + index
+                val gross = row.earnedPay + row.overtimePay + row.bonus + row.totalShiftAllowance
+                val deductions = row.pfDeduction + row.esiDeduction + row.ptDeduction + row.tdsDeduction + row.advanceDeduction + row.penaltyDeduction
+                val net = (gross - deductions).coerceAtLeast(0.0)
+
+                val realtimeRow = RealtimePayrollRow(
+                    payrollId = pid,
+                    employeeId = row.employeeID,
+                    payMonth = m,
+                    payYear = y,
+                    baseSalary = row.baseSalary ?: 0.0,
+                    totalHoursWorked = row.earnedStandardHours,
+                    overtimePay = row.overtimePay,
+                    deductionsHours = row.penaltyDeduction,
+                    deductionsAdvance = row.advanceDeduction,
+                    bonus = row.bonus,
+                    netSalary = net,
+                    manualLeaveDays = row.leaveDays,
+                    absentDays = row.absentDays,
+                    totalPenaltyMs = (row.penaltyMinutes * 60000).toLong(),
+                    totalOvertimeMs = (row.overtimeMinutes * 60000).toLong(),
+                    hourlyRate = row.hourlyRate,
+                    basicComponent = row.basicSalary,
+                    pfDeduction = row.pfDeduction,
+                    esiDeduction = row.esiDeduction,
+                    employerPfContribution = row.employerPfContribution,
+                    employerEsiContribution = row.employerEsiContribution,
+                    ptDeduction = row.ptDeduction,
+                    tdsDeduction = row.tdsDeduction,
+                    totalShiftAllowance = row.totalShiftAllowance
+                )
+
+                // Push to Firebase Realtime Database
+                ownerRef.child("payroll_history").child(pid.toString()).setValue(realtimeRow).await()
+
+                // Upsert to local Room SQLite
+                val localRow = LocalPayrollHistory(
+                    payrollId = pid,
+                    employeeId = row.employeeID,
+                    payMonth = m,
+                    payYear = y,
+                    baseSalary = row.baseSalary ?: 0.0,
+                    totalHoursWorked = row.earnedStandardHours,
+                    overtimePay = row.overtimePay,
+                    deductionsHours = row.penaltyDeduction,
+                    deductionsAdvance = row.advanceDeduction,
+                    bonus = row.bonus,
+                    netSalary = net,
+                    manualLeaveDays = row.leaveDays,
+                    absentDays = row.absentDays,
+                    totalPenaltyMs = (row.penaltyMinutes * 60000).toLong(),
+                    totalOvertimeMs = (row.overtimeMinutes * 60000).toLong(),
+                    hourlyRate = row.hourlyRate,
+                    basicComponent = row.basicSalary,
+                    pfDeduction = row.pfDeduction,
+                    esiDeduction = row.esiDeduction,
+                    employerPfContribution = row.employerPfContribution,
+                    employerEsiContribution = row.employerEsiContribution,
+                    ptDeduction = row.ptDeduction,
+                    tdsDeduction = row.tdsDeduction,
+                    totalShiftAllowance = row.totalShiftAllowance,
+                    syncState = 1,
+                    lastModified = System.currentTimeMillis()
+                )
+                localPayrollHistoryDao.upsert(localRow)
+
+                // If advance was deducted, mark advance as recovered in Firebase
+                if (row.advanceDeduction > 0) {
+                    runCatching {
+                        val advSnapshot = ownerRef.child("advance_payments").get().await()
+                        advSnapshot.children.forEach { child ->
+                            val empId = child.child("employeeId").value?.toString()?.toIntOrNull()
+                            val isRec = child.child("isRecovered").value as? Boolean ?: false
+                            if (empId == row.employeeID && !isRec) {
+                                child.ref.child("isRecovered").setValue(true)
+                                child.ref.child("recoveryPaymentId").setValue(pid.toString())
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Record Audit Log
+            runCatching {
+                firebaseSync.pushAuditLog(
+                    AuditLog(
+                        action = "FINALIZE",
+                        module = "Payroll",
+                        newValue = "Finalized ${previewList.size} payslips for period $m/$y (Standalone Android)",
+                        userDisplayName = session.employeeName().ifBlank { "Admin" },
+                        userId = session.employeeId().toString()
+                    )
+                )
             }
 
             Toast.makeText(this@AdminPayrollActivity, "Payroll Finalized Successfully! 💎 ✅", Toast.LENGTH_LONG).show()

@@ -418,11 +418,16 @@ class FirebaseRoomHydrator @Inject constructor(
         reason = s("reason").orEmpty(), status = s("status") ?: "Pending", adminRemarks = s("adminRemarks"), submittedAt = l("submittedAt")
     )
     private fun DataSnapshot.toAttendancePunch() = AttendancePunch(
-        punchId = s("punchId") ?: key.orEmpty(),
-        staffId = s("staffId") ?: l("staffId").toString(),
-        date = s("date").orEmpty(),
-        type = s("type") ?: "IN",
-        timestamp = l("timestamp"),
+        punchId = s("punchId") ?: s("attendanceId") ?: key.orEmpty(),
+        staffId = s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: s("employeeId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: l("staffId").takeIf { it > 0 }?.toString()
+            ?: l("employeeId").takeIf { it > 0 }?.toString()
+            ?: "",
+        date = s("date")?.takeIf { it.isNotBlank() }
+            ?: (l("timestamp").takeIf { it > 0 } ?: l("checkInTime")).let { if (it > 0) java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(it)) else "" },
+        type = s("type") ?: s("punchType") ?: s("note") ?: "IN",
+        timestamp = l("timestamp").takeIf { it > 0 } ?: l("checkInTime").takeIf { it > 0 } ?: l("createdAt"),
         latitude = d("latitude"),
         longitude = d("longitude"),
         accuracy = d("accuracy").toFloat(),
@@ -431,7 +436,7 @@ class FirebaseRoomHydrator @Inject constructor(
         photoId = s("photoId"),
         deviceId = s("deviceId") ?: "",
         source = s("source") ?: "GEOFENCE",
-        status = s("status") ?: "PENDING"
+        status = s("status") ?: "APPROVED"
     )
     private fun DataSnapshot.toLeaveRequest() = LeaveRequest(
         id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(),
