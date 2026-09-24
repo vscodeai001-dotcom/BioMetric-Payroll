@@ -1197,6 +1197,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     override fun onResume() {
         super.onResume()
+        binding.tvLiveDate.text = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date())
         _binding?.adminMapView?.onResume()
         _binding?.adminMapView?.post { _binding?.adminMapView?.invalidate() }
         checkBatteryOptimizations()
@@ -1204,14 +1205,25 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         standbyRefreshJob?.cancel()
         standbyRefreshJob = lifecycleScope.launch {
             // Anti-Inactivity: Stagger to avoid UI jank on resume
-            delay(400)
+            delay(300)
             _binding?.let {
+                runCatching {
+                    FirebaseAuth.getInstance().currentUser?.getIdToken(false)
+                }
+
                 triggerExclusiveRefresh()
+                viewModel.startRealtimeSync()
+                viewModel.triggerRefresh()
                 signalR.start()
                 // Force a canonical Firebase/SSOT live-location read whenever
                 // Admin returns to the foreground. start() also reconciles when
                 // the realtime manager is already running.
                 signalR.reconcileLiveLocationsNow()
+
+                val currentLocs = signalR.liveLocations.value.values.toList()
+                if (currentLocs.isNotEmpty()) {
+                    updateAdminMarkers(currentLocs)
+                }
             }
 
             // Standby live updater: Re-evaluates marker status (Live/Stale/Offline)

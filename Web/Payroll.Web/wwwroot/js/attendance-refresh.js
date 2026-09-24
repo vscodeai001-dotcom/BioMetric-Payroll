@@ -154,7 +154,18 @@ window.attendanceRefresh = (function () {
     async function onFirebaseLiveLocation(snapshot) {
         try {
             const data = snapshot.val();
-            if (!data || !data.EmployeeId) return;
+            if (!data) return;
+
+            const employeeId = Number(data.EmployeeId ?? data.employeeId ?? snapshot.key ?? 0);
+            if (!Number.isFinite(employeeId) || employeeId <= 0) return;
+
+            // Normalize properties so all consumers (camelCase and PascalCase) receive valid numbers
+            data.EmployeeId = employeeId;
+            data.employeeId = employeeId;
+            if (data.Latitude !== undefined && data.latitude === undefined) data.latitude = data.Latitude;
+            if (data.latitude !== undefined && data.Latitude === undefined) data.Latitude = data.latitude;
+            if (data.Longitude !== undefined && data.longitude === undefined) data.longitude = data.Longitude;
+            if (data.longitude !== undefined && data.Longitude === undefined) data.Longitude = data.longitude;
 
             // Dispatch the browser event first. The Leaflet map can therefore
             // react immediately even if a Blazor circuit is busy reconnecting.
@@ -333,13 +344,6 @@ window.attendanceRefresh = (function () {
                             if (!window.__payrollRealtimeHeartbeatBound) {
                                 window.__payrollRealtimeHeartbeatBound = true;
                                 function checkAndHealConnection() {
-                                    if (connection && connection.state === window.signalR.HubConnectionState.Disconnected) {
-                                        console.log("Auto-healing disconnected SignalR connection...");
-                                        connection.start().then(function () {
-                                            notifyListeners('AttendanceChanged', {});
-                                            notifyViewer();
-                                        }).catch(scheduleRetry);
-                                function checkAndHealConnection() {
                                     if (!firebaseStarted && !firebaseStarting) {
                                         startFirebaseRealtime();
                                     } else if (firebaseStarted && window.firebase && firebase.auth().currentUser) {
@@ -350,7 +354,9 @@ window.attendanceRefresh = (function () {
                                     }
                                     if (connection) {
                                         if (connection.state === window.signalR.HubConnectionState.Disconnected) {
+                                            console.log("Auto-healing disconnected SignalR connection...");
                                             connection.start().then(function () {
+                                                notifyListeners('AttendanceChanged', {});
                                                 notifyViewer();
                                             }).catch(scheduleRetry);
                                         } else if (connection.state === window.signalR.HubConnectionState.Connected) {

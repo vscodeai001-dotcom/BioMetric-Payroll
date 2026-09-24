@@ -43,7 +43,7 @@
                             </tr>
                         }
 
-                        @foreach (var user in UserList.OrderBy(u => u.Email))
+                        @foreach (var user in UserList.Where(u => !string.IsNullOrWhiteSpace(u.Email) && u.Email.Contains('@')).OrderBy(u => u.Email))
                         {
                             <tr>
                                 <td>

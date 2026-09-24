@@ -228,7 +228,7 @@ else
             }
             else
             {
-                userList = rawUsers;
+                userList = rawUsers.Where(u => !string.IsNullOrWhiteSpace(u.Email) && u.Email.Contains('@')).ToList();
             }
         }
         catch (Exception ex)

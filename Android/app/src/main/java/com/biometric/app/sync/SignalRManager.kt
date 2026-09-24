@@ -511,13 +511,16 @@ class SignalRManager @Inject constructor(
 
     fun reconcileLiveLocationsNow() {
         val now = System.currentTimeMillis()
-        if (now - lastReconcileTime < 5000L) return
+        if (now - lastReconcileTime < 2000L) return
         lastReconcileTime = now
 
-        val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: return
+        if (activeOwnerUid == null || locationListener == null) {
+            start()
+        }
+
+        val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
-        val listener = locationListener ?: return
         val liveRef = firebaseSync.getGlobalRef()
             .child("owners")
             .child(ownerUid)
@@ -535,7 +538,7 @@ class SignalRManager @Inject constructor(
             runCatching {
                 val snapshot = liveRef.get().await()
                 withContext(Dispatchers.Main.immediate) {
-                    listener.onDataChange(snapshot)
+                    locationListener?.onDataChange(snapshot)
                 }
             }.onFailure { error ->
                 Log.d(
@@ -545,19 +548,17 @@ class SignalRManager @Inject constructor(
             }
 
             // Also pull fresh employee directory so live markers always map to valid employees
-            employeeListener?.let { empListener ->
-                val employeesRef = firebaseSync.getGlobalRef()
-                    .child("owners")
-                    .child(ownerUid)
-                    .child("employees")
-                runCatching {
-                    val empSnapshot = employeesRef.get().await()
-                    withContext(Dispatchers.Main.immediate) {
-                        empListener.onDataChange(empSnapshot)
-                    }
-                }.onFailure { error ->
-                    Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
+            val employeesRef = firebaseSync.getGlobalRef()
+                .child("owners")
+                .child(ownerUid)
+                .child("employees")
+            runCatching {
+                val empSnapshot = employeesRef.get().await()
+                withContext(Dispatchers.Main.immediate) {
+                    employeeListener?.onDataChange(empSnapshot)
                 }
+            }.onFailure { error ->
+                Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
             }
         }
     }

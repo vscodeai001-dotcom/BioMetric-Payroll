@@ -572,17 +572,8 @@ else
         {
             try
             {
-                // Coalesce bursts of Firebase child events. A single attendance
-                // operation can update several Firebase nodes; refreshing all
-                // dashboard KPIs for each child event causes a read storm.
-                await Task.Delay(TimeSpan.FromMilliseconds(750), token);
-
-                // Never refresh the KPI snapshot more often than once per 2s.
-                var elapsed = DateTime.UtcNow - _lastDashboardLoadUtc;
-                if (elapsed < TimeSpan.FromSeconds(2))
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(2) - elapsed, token);
-                }
+                // Fast debounce for immediate responsive real-time updates
+                await Task.Delay(TimeSpan.FromMilliseconds(100), token);
 
                 await _dashboardLoadGate.WaitAsync(token);
                 try
@@ -673,12 +664,19 @@ else
     private static bool IsDashboardPath(string path)
     {
         var p = path.Trim('/');
-        return p.StartsWith("employees/", StringComparison.Ordinal)
-            || p.StartsWith("attendance/", StringComparison.Ordinal)
-            || p.StartsWith("advance_payments/", StringComparison.Ordinal)
-            || p.StartsWith("payroll_history/", StringComparison.Ordinal)
-            || p.StartsWith("shift_schedules/", StringComparison.Ordinal)
-            || p.StartsWith("daily_summaries/", StringComparison.Ordinal);
+        return p.StartsWith("employees", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("attendance", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("attendance_punches", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("geo_punch_audits", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("regularizations", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("leave_requests", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("advance_payments", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("payroll_history", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("shift_schedules", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("daily_summaries", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("company_settings", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("feature_settings", StringComparison.OrdinalIgnoreCase)
+            || p.StartsWith("shops", StringComparison.OrdinalIgnoreCase);
     }
 
     public async ValueTask DisposeAsync()

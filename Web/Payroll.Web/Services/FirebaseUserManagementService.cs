@@ -68,6 +68,9 @@ public sealed class FirebaseUserManagementService
                 var role = "Employee";
                 var email = u.Email ?? u.UserName ?? string.Empty;
 
+                if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+                    continue;
+
                 if (roleIdsByUserId.TryGetValue(u.Id, out var roleIds))
                 {
                     var roleName = roleIds
@@ -86,7 +89,7 @@ public sealed class FirebaseUserManagementService
                 else if (string.Equals(role, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
                     role = "Admin";
 
-                var key = !string.IsNullOrWhiteSpace(email) ? email.Trim().ToLowerInvariant() : u.Id;
+                var key = email.Trim().ToLowerInvariant();
 
                 result[key] = new UserRoleViewModel
                 {
@@ -114,7 +117,18 @@ public sealed class FirebaseUserManagementService
                 await foreach (var fbUser in pagedEnumerable.WithCancellation(ct))
                 {
                     var email = fbUser.Email ?? string.Empty;
-                    var key = !string.IsNullOrWhiteSpace(email) ? email.Trim().ToLowerInvariant() : fbUser.Uid;
+                    if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+                    {
+                        // Ghost/empty user in Firebase Auth without email. Clean it up and skip!
+                        try
+                        {
+                            await auth.DeleteUserAsync(fbUser.Uid, ct);
+                        }
+                        catch { }
+                        continue;
+                    }
+
+                    var key = email.Trim().ToLowerInvariant();
 
                     var fbRole = ResolveRole(fbUser);
                     var isCanonicalSuperAdmin = !string.IsNullOrEmpty(email) &&
@@ -237,7 +251,10 @@ public sealed class FirebaseUserManagementService
             }
         }
 
-        return userList.OrderBy(u => u.Email).ToList();
+        return userList
+            .Where(u => !string.IsNullOrWhiteSpace(u.Email) && u.Email.Contains('@'))
+            .OrderBy(u => u.Email)
+            .ToList();
     }
 
     public async Task<UserManagementResult> CreateAsync(
