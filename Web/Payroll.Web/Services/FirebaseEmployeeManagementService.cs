@@ -50,17 +50,21 @@ public sealed class FirebaseEmployeeManagementService
     {
         using (var scope = _scopeFactory.CreateScope())
         {
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localEmployees = await db.Employees.AsNoTracking()
+                    .Where(x => !x.IsDeleted)
+                    .OrderBy(x => x.Name)
+                    .ToListAsync(ct);
+
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+
+                if (localEmployees.Count > 0 || isOffline)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.Employees.AsNoTracking()
-                        .Where(x => !x.IsDeleted)
-                        .OrderBy(x => x.Name)
-                        .ToListAsync(ct);
+                    return localEmployees;
                 }
             }
         }
@@ -147,14 +151,16 @@ public sealed class FirebaseEmployeeManagementService
 
         using (var scope = _scopeFactory.CreateScope())
         {
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localEmployee = await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeID == employeeId, ct);
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+                if (localEmployee != null || isOffline)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeID == employeeId, ct);
+                    return localEmployee;
                 }
             }
         }

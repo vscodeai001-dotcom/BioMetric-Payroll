@@ -48,6 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.text.SimpleDateFormat
@@ -1212,7 +1213,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             delay(300)
             _binding?.let {
                 runCatching {
-                    FirebaseAuth.getInstance().currentUser?.getIdToken(false)
+                    val user = FirebaseAuth.getInstance().currentUser
+                    val tokenResult = user?.getIdToken(true)?.await()
+                    tokenResult?.token?.let { freshToken ->
+                        applicationContext.getSharedPreferences("mobile_session", Context.MODE_PRIVATE)
+                            .edit(commit = true) {
+                                putString("token", freshToken)
+                            }
+                    }
                 }
 
                 triggerExclusiveRefresh()

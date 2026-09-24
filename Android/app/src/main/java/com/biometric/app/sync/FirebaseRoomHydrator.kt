@@ -25,6 +25,7 @@ import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -667,6 +668,19 @@ class FirebaseRoomHydrator @Inject constructor(
         hydrationJob = null
         activeOwnerUid = null
         reconnectJob = scope.launch {
+            runCatching {
+                val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                val tokenResult = user?.getIdToken(true)?.await()
+                tokenResult?.token?.let { freshToken ->
+                    sessionStore.saveLogin(
+                        token = freshToken,
+                        employeeId = sessionStore.employeeId(),
+                        name = sessionStore.employeeName(),
+                        email = user.email.orEmpty(),
+                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                    )
+                }
+            }
             delay(250L)
             if (sessionStore.isLoggedIn() && firebaseSync.isAuthenticated() && firebaseSync.getOwnerUid() == ownerUid) {
                 start()

@@ -62,18 +62,25 @@ class FirebaseAuthSecurityGate @Inject constructor(
         // here made a valid login fail during a temporary network outage.
         // Only fall back to a forced refresh when the cached token is unavailable.
         val token = runCatching {
-            user.getIdToken(false).await()
-        }.getOrElse { cachedError ->
-            Log.w("FirebaseAuthSecurity", "Cached Firebase ID token unavailable; forcing refresh.", cachedError)
+            val initial = user.getIdToken(false).await()
+            val nowSec = System.currentTimeMillis() / 1000L
+            if (initial.expirationTimestamp <= nowSec + 120L) {
+                Log.i("FirebaseAuthSecurity", "Cached Firebase ID token expired or expiring soon; force-refreshing.")
+                user.getIdToken(true).await()
+            } else {
+                initial
+            }
+        }.getOrElse { tokenError ->
+            Log.w("FirebaseAuthSecurity", "Initial token fetch failed; attempting forced refresh.", tokenError)
             runCatching { user.getIdToken(true).await() }.getOrElse { refreshError ->
                 Log.w("FirebaseAuthSecurity", "Unable to refresh Firebase ID token", refreshError)
-                
-                if (isAdmin && sessionLoggedIn) {
-                   Log.w("FirebaseAuthSecurity", "Admin token refresh failed; routing to re-authenticate to restore Firebase session.")
-                   return Result(false, message = "Firebase authentication session could not be refreshed. Please sign in again.")
+                runCatching { user.getIdToken(false).await() }.getOrElse { cachedFallback ->
+                    if (isAdmin && sessionLoggedIn) {
+                       Log.w("FirebaseAuthSecurity", "Admin token refresh failed; routing to re-authenticate to restore Firebase session.")
+                       return Result(false, message = "Firebase authentication session could not be refreshed. Please sign in again.")
+                    }
+                    return Result(false, message = "Firebase authentication session could not be refreshed.")
                 }
-                
-                return Result(false, message = "Firebase authentication session could not be refreshed.")
             }
         }
 

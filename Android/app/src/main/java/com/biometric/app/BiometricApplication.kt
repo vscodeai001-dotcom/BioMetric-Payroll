@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -124,8 +125,21 @@ class BiometricApplication : Application(), Configuration.Provider {
                         realtimeScope.launch {
                             // Proactively refresh Firebase Auth token so expired tokens do not cause listener silence
                             runCatching {
-                                FirebaseAuth.getInstance().currentUser?.getIdToken(false)
+                                val user = FirebaseAuth.getInstance().currentUser
+                                val tokenResult = user?.getIdToken(true)?.await()
+                                tokenResult?.token?.let { freshToken ->
+                                    sessionStore.saveLogin(
+                                        token = freshToken,
+                                        employeeId = sessionStore.employeeId(),
+                                        name = sessionStore.employeeName(),
+                                        email = user.email.orEmpty(),
+                                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                                    )
+                                }
+                            }.onFailure {
+                                Log.w("BiometricApplication", "Failed to force-refresh Firebase token on foreground resume", it)
                             }
+                            delay(200L)
                             val role = sessionStore.userRole().trim().uppercase()
                             val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
                             if (isAdmin) {

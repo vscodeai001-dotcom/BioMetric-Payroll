@@ -648,7 +648,9 @@
             var cacheKey = BuildAttendanceCacheKey(dStart, dEnd, selectedEmployeeId);
             try
             {
-                data = await FirebaseAttendanceService.GetDailySummariesAsync(dStart, dEnd);
+                data = selectedEmployeeId > 0
+                    ? await FirebaseAttendanceService.GetDailySummariesAsync(selectedEmployeeId, dStart, dEnd)
+                    : await FirebaseAttendanceService.GetDailySummariesAsync(dStart, dEnd);
             }
             catch (Exception firebaseReadEx)
             {
@@ -731,7 +733,8 @@
                         ? new List<AttendanceLog>()
                         : await FirebaseAttendanceService.GetAttendancePunchesAsync(
                             dStart,
-                            dEnd);
+                            dEnd,
+                            selectedEmployeeId > 0 ? selectedEmployeeId : null);
             }
             catch (Exception firebasePunchEx)
             {
@@ -2064,10 +2067,14 @@
             return;
         }
 
+        var scopeText = selectedEmployeeId > 0
+            ? $"selected employee #{selectedEmployeeId}"
+            : "ALL employees";
+
         var confirm =
             await JSRuntime.InvokeAsync<bool>(
                 "confirm",
-                $"This will re-calculate attendance for ALL employees from {startDate:dd-MMM} to {endDate:dd-MMM}. Continue?");
+                $"This will re-calculate attendance for {scopeText} from {startDate:dd-MMM} to {endDate:dd-MMM}. Continue?");
 
         if (!confirm)
         {
@@ -2086,6 +2093,10 @@
                 await DbFactory.CreateDbContextAsync();
 
             var allEmployees = await FirebaseEmployees.GetEmployeesAsync();
+            if (selectedEmployeeId > 0)
+            {
+                allEmployees = allEmployees.Where(e => e.EmployeeID == selectedEmployeeId).ToList();
+            }
 
             var settings =
                 await dbContext.CompanySettings

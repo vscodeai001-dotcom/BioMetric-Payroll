@@ -18,15 +18,18 @@ public sealed class FirebaseAttendanceService
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
     private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly ILogger<FirebaseAttendanceService>? _logger;
 
     public FirebaseAttendanceService(
         FirebaseRealtimeService firebase,
         IConfiguration configuration,
-        IServiceScopeFactory? scopeFactory = null)
+        IServiceScopeFactory? scopeFactory = null,
+        ILogger<FirebaseAttendanceService>? logger = null)
     {
         _firebase = firebase;
         _configuration = configuration;
         _scopeFactory = scopeFactory;
+        _logger = logger;
     }
 
     private string OwnerUid => _firebase.ResolveOwnerUid("attendance-service", "Admin");
@@ -41,17 +44,23 @@ public sealed class FirebaseAttendanceService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localList = await db.DailySummaries.AsNoTracking()
+                    .Where(x => x.ShiftDate >= from && x.ShiftDate <= to)
+                    .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                    .ToListAsync(ct);
+
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+
+                // BANDWIDTH OPTIMIZATION: Return from local SQLite instantly if available.
+                // The SSE live stream keeps SQLite up to date in real time.
+                if (localList.Count > 0 || isOffline)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.DailySummaries.AsNoTracking()
-                        .Where(x => x.ShiftDate >= from && x.ShiftDate <= to)
-                        .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
-                        .ToListAsync(ct);
+                    return localList;
                 }
             }
         }
@@ -82,7 +91,35 @@ public sealed class FirebaseAttendanceService
             }
         }
 
-        return result.OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID).ToList();
+        var sortedResult = result.OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID).ToList();
+
+        if (sortedResult.Count > 0 && _scopeFactory != null)
+        {
+            try
+            {
+                using var cacheScope = _scopeFactory.CreateScope();
+                var dbFactory = cacheScope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    foreach (var s in sortedResult)
+                    {
+                        var exists = await db.DailySummaries.AnyAsync(x => x.SummaryID == s.SummaryID || (x.EmployeeID == s.EmployeeID && x.ShiftDate == s.ShiftDate), ct);
+                        if (!exists)
+                        {
+                            db.DailySummaries.Add(s);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Failed to cache fetched daily summaries to local SQLite");
+            }
+        }
+
+        return sortedResult;
     }
 
     private static DailySummary? ParseDailySummary(JsonElement row, string key, DateOnly from, DateOnly to)
@@ -119,17 +156,21 @@ public sealed class FirebaseAttendanceService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localList = await db.DailySummaries.AsNoTracking()
+                    .Where(x => x.EmployeeID == employeeId && x.ShiftDate >= from && x.ShiftDate <= to)
+                    .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                    .ToListAsync(ct);
+
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+
+                if (localList.Count > 0 || isOffline)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.DailySummaries.AsNoTracking()
-                        .Where(x => x.EmployeeID == employeeId && x.ShiftDate >= from && x.ShiftDate <= to)
-                        .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
-                        .ToListAsync(ct);
+                    return localList;
                 }
             }
         }
@@ -162,7 +203,35 @@ public sealed class FirebaseAttendanceService
             }
         }
 
-        return result.OrderBy(x => x.ShiftDate).ToList();
+        var sortedResult = result.OrderBy(x => x.ShiftDate).ToList();
+
+        if (sortedResult.Count > 0 && _scopeFactory != null)
+        {
+            try
+            {
+                using var cacheScope = _scopeFactory.CreateScope();
+                var dbFactory = cacheScope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    foreach (var s in sortedResult)
+                    {
+                        var exists = await db.DailySummaries.AnyAsync(x => x.SummaryID == s.SummaryID || (x.EmployeeID == s.EmployeeID && x.ShiftDate == s.ShiftDate), ct);
+                        if (!exists)
+                        {
+                            db.DailySummaries.Add(s);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Failed to cache employee daily summaries to local SQLite");
+            }
+        }
+
+        return sortedResult;
     }
 
     private static DailySummary? ParseDailySummaryForEmployee(JsonElement row, string key, int employeeId, DateOnly from, DateOnly to)
@@ -199,22 +268,26 @@ public sealed class FirebaseAttendanceService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var startDt = from.ToDateTime(TimeOnly.MinValue);
+                var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                var query = db.AttendanceLogs.AsNoTracking()
+                    .Where(x => x.PunchTime >= startDt && x.PunchTime < endDt);
+                if (employeeId.HasValue && employeeId.Value > 0)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    var startDt = from.ToDateTime(TimeOnly.MinValue);
-                    var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
-                    var query = db.AttendanceLogs.AsNoTracking()
-                        .Where(x => x.PunchTime >= startDt && x.PunchTime < endDt);
-                    if (employeeId.HasValue && employeeId.Value > 0)
-                    {
-                        query = query.Where(x => x.EmployeeID == employeeId.Value);
-                    }
-                    return await query.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToListAsync(ct);
+                    query = query.Where(x => x.EmployeeID == employeeId.Value);
+                }
+                var localPunches = await query.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToListAsync(ct);
+
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+
+                if (localPunches.Count > 0 || isOffline)
+                {
+                    return localPunches;
                 }
             }
         }
@@ -312,19 +385,23 @@ public sealed class FirebaseAttendanceService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var startDt = from.ToDateTime(TimeOnly.MinValue);
+                var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                var localPunches = await db.AttendanceLogs.AsNoTracking()
+                    .Where(x => x.EmployeeID == employeeId && x.PunchTime >= startDt && x.PunchTime < endDt)
+                    .OrderBy(x => x.PunchTime)
+                    .ToListAsync(ct);
+
+                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+
+                if (localPunches.Count > 0 || isOffline)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    var startDt = from.ToDateTime(TimeOnly.MinValue);
-                    var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
-                    return await db.AttendanceLogs.AsNoTracking()
-                        .Where(x => x.EmployeeID == employeeId && x.PunchTime >= startDt && x.PunchTime < endDt)
-                        .OrderBy(x => x.PunchTime)
-                        .ToListAsync(ct);
+                    return localPunches;
                 }
             }
         }

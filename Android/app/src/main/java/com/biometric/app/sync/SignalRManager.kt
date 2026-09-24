@@ -48,6 +48,7 @@ class SignalRManager @Inject constructor(
     // Retry startup briefly so Admin realtime does not require logout/login.
     private var startRetryJob: Job? = null
     private var realtimeRecoveryJob: Job? = null
+    @Volatile private var isRecoveringFromAuth = false
     private var locationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
 
@@ -294,59 +295,13 @@ class SignalRManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                // IMPORTANT: Firebase may cancel a long-lived listener with
-                // PERMISSION_DENIED when the ID token/claims used by the
-                // listener are no longer accepted. Do NOT permanently ignore
-                // that callback. Previously this branch ignored
-                // PERMISSION_DENIED, leaving Android Admin with an old
-                // liveLocations StateFlow until logout/login recreated the
-                // Firebase listener.
                 Log.w(
                     "SignalRManager",
                     "Firebase live-location listener cancelled: code=${error.code}, message=${error.message}"
                 )
 
-                if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return
-
-                realtimeRecoveryJob?.cancel()
-                realtimeRecoveryJob = managerScope.launch {
-                    delay(500L)
-
-                    if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return@launch
-
-                    // Refresh the Firebase ID token first. Firebase Database
-                    // listeners created with the old credentials are then
-                    // rebuilt so recovery does not require manual logout/login.
-                    runCatching {
-                        FirebaseAuth.getInstance()
-                            .currentUser
-                            ?.getIdToken(true)
-                            ?.await()
-                    }.onFailure { refreshError ->
-                        Log.w(
-                            "SignalRManager",
-                            "Firebase Auth token refresh failed during live listener recovery.",
-                            refreshError
-                        )
-                    }
-
-                    if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
-                        runCatching {
-                            // stop() intentionally cancels any queued recovery
-                            // job. Clear this reference first so the current
-                            // recovery coroutine can perform the restart.
-                            realtimeRecoveryJob = null
-                            stop()
-                            delay(250L)
-                            start()
-                        }.onFailure { restartError ->
-                            Log.w(
-                                "SignalRManager",
-                                "Firebase live listener restart failed; automatic retry will continue.",
-                                restartError
-                            )
-                        }
-                    }
+                if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
+                    triggerAuthRecovery("live-location listener: ${error.message}")
                 }
             }
         }
@@ -398,26 +353,8 @@ class SignalRManager @Inject constructor(
 
             override fun onCancelled(error: DatabaseError) {
                 Log.w("SignalRManager", "Owner employee binding listener cancelled: code=${error.code}, message=${error.message}")
-
-                if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return
-
-                realtimeRecoveryJob?.cancel()
-                realtimeRecoveryJob = managerScope.launch {
-                    delay(500L)
-                    if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return@launch
-
-                    runCatching {
-                        FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
-                    }
-
-                    if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
-                        runCatching {
-                            realtimeRecoveryJob = null
-                            stop()
-                            delay(250L)
-                            start()
-                        }
-                    }
+                if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
+                    triggerAuthRecovery("employee binding listener: ${error.message}")
                 }
             }
         }
@@ -469,7 +406,17 @@ class SignalRManager @Inject constructor(
                 val now = System.currentTimeMillis()
                 if (now - lastTokenRefresh >= AUTH_TOKEN_REFRESH_INTERVAL_MS) {
                     runCatching {
-                        FirebaseAuth.getInstance().currentUser?.getIdToken(false)?.await()
+                        val user = FirebaseAuth.getInstance().currentUser
+                        val tokenResult = user?.getIdToken(true)?.await()
+                        tokenResult?.token?.let { freshToken ->
+                            sessionStore.saveLogin(
+                                token = freshToken,
+                                employeeId = sessionStore.employeeId(),
+                                name = sessionStore.employeeName(),
+                                email = user.email.orEmpty(),
+                                firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                            )
+                        }
                         lastTokenRefresh = now
                     }
                 }
@@ -496,6 +443,68 @@ class SignalRManager @Inject constructor(
                     start()
                     return@launch
                 }
+            }
+        }
+    }
+
+    private fun triggerAuthRecovery(reason: String) {
+        if (!sessionStore.isLoggedIn()) return
+        if (isRecoveringFromAuth) return
+        isRecoveringFromAuth = true
+
+        realtimeRecoveryJob?.cancel()
+        realtimeRecoveryJob = managerScope.launch {
+            try {
+                Log.w("SignalRManager", "Initiating Firebase Auth recovery ($reason)...")
+                val user = FirebaseAuth.getInstance().currentUser
+                if (user != null) {
+                    val tokenResult = runCatching { user.getIdToken(true).await() }.getOrNull()
+                    val freshToken = tokenResult?.token
+                    if (!freshToken.isNullOrBlank()) {
+                        sessionStore.saveLogin(
+                            token = freshToken,
+                            employeeId = sessionStore.employeeId(),
+                            name = sessionStore.employeeName(),
+                            email = user.email.orEmpty(),
+                            firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                        )
+                        Log.i("SignalRManager", "Firebase Auth ID token refreshed. Re-establishing listeners...")
+                    }
+                    delay(300L)
+                    stop()
+                    delay(200L)
+                    start()
+
+                    val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() }
+                    if (!ownerUid.isNullOrBlank()) {
+                        val role = sessionStore.userRole().orEmpty()
+                        val employeeId = sessionStore.employeeId()
+                        val liveRef = firebaseSync.getGlobalRef()
+                            .child("owners").child(ownerUid).child("tracking").child("live")
+                            .let { ref ->
+                                if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) ref.child(employeeId.toString()) else ref
+                            }
+                        val employeesRef = firebaseSync.getGlobalRef().child("owners").child(ownerUid).child("employees")
+
+                        runCatching {
+                            val liveSnap = liveRef.get().await()
+                            withContext(Dispatchers.Main.immediate) {
+                                locationListener?.onDataChange(liveSnap)
+                            }
+                        }
+                        runCatching {
+                            val empSnap = employeesRef.get().await()
+                            withContext(Dispatchers.Main.immediate) {
+                                employeeListener?.onDataChange(empSnap)
+                            }
+                        }
+                        Log.i("SignalRManager", "Successfully recovered live locations and employees after auth renewal!")
+                    }
+                }
+            } catch (ex: Exception) {
+                Log.e("SignalRManager", "Auth recovery failed: ${ex.message}", ex)
+            } finally {
+                isRecoveringFromAuth = false
             }
         }
     }
@@ -535,6 +544,8 @@ class SignalRManager @Inject constructor(
             }
 
         managerScope.launch {
+            var permissionDeniedOccurred = false
+
             runCatching {
                 val snapshot = liveRef.get().await()
                 withContext(Dispatchers.Main.immediate) {
@@ -545,6 +556,9 @@ class SignalRManager @Inject constructor(
                     "SignalRManager",
                     "Immediate live-location reconciliation skipped: ${error.message}"
                 )
+                if (error.message?.contains("permission", ignoreCase = true) == true) {
+                    permissionDeniedOccurred = true
+                }
             }
 
             // Also pull fresh employee directory so live markers always map to valid employees
@@ -559,6 +573,13 @@ class SignalRManager @Inject constructor(
                 }
             }.onFailure { error ->
                 Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
+                if (error.message?.contains("permission", ignoreCase = true) == true) {
+                    permissionDeniedOccurred = true
+                }
+            }
+
+            if (permissionDeniedOccurred) {
+                triggerAuthRecovery("reconcileLiveLocationsNow permission denied")
             }
         }
     }
