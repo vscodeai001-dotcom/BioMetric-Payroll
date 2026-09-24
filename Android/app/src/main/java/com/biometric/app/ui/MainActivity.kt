@@ -40,6 +40,7 @@ import com.biometric.app.ui.viewmodel.SharedViewModel
 import android.widget.TextView
 import com.biometric.app.sync.SignalRManager
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.FirebaseRoomHydrator
 import com.biometric.app.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
@@ -119,6 +120,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var brandingManager: BrandingManager
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
+    @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
     @Inject lateinit var osrmApi: OsrmApiService
 
     private val markers = mutableMapOf<Int, Marker>()
@@ -1197,6 +1199,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     override fun onResume() {
         super.onResume()
+        lastRenderedLiveSignature = null
+        firebaseRoomHydrator.forceRebind("MainActivity onResume")
         binding.tvLiveDate.text = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date())
         _binding?.adminMapView?.onResume()
         _binding?.adminMapView?.post { _binding?.adminMapView?.invalidate() }

@@ -11,6 +11,8 @@
 
 <PageTitle>GPS Connection & Offline Tracking</PageTitle>
 
+<AttendanceRefreshListener OnAttendanceChanged="Refresh" OnLocationChanged="Refresh" />
+
 <div class="container-fluid py-3 offline-tracking-page">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <div>
@@ -148,16 +150,18 @@
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();
 
-            var offlineEmployeeIds = offlineSyncRows
-                .Select(x => x.EmployeeId)
-                .Distinct()
-                .ToHashSet();
+            var trackedEmployees = employeeList;
 
-            // Only employees whose locations were actually captured offline
-            // belong on this screen. Live-only employees stay out of it.
-            var trackedEmployees = employeeList
-                .Where(e => offlineEmployeeIds.Contains(e.EmployeeID))
-                .ToList();
+            var trackedEmpIds = trackedEmployees.Select(e => e.EmployeeID).ToList();
+            var recentPoints = await db.EmployeeLocationHistory.AsNoTracking()
+                .Where(x => trackedEmpIds.Contains(x.EmployeeId))
+                .OrderByDescending(x => x.CapturedAtUtc)
+                .Take(500)
+                .ToListAsync();
+
+            var lastPointsMap = recentPoints
+                .GroupBy(x => x.EmployeeId)
+                .ToDictionary(g => g.Key, g => g.First());
 
             var liveLocations = LiveLocationStore.GetAll()
                 .ToDictionary(x => x.EmployeeId);
@@ -166,6 +170,25 @@
             {
                 if (!liveLocations.TryGetValue(employee.EmployeeID, out var location))
                 {
+                    if (lastPointsMap.TryGetValue(employee.EmployeeID, out var lastPoint))
+                    {
+                        var pointAge = DateTime.UtcNow - lastPoint.CapturedAtUtc;
+                        return new Row
+                        {
+                            EmployeeId = employee.EmployeeID,
+                            EmployeeName = employee.Name,
+                            Status = "Offline",
+                            StatusClass = "bg-danger-subtle text-danger",
+                            LastUpdatedUtc = lastPoint.CapturedAtUtc,
+                            Age = pointAge,
+                            MovementState = "No active session",
+                            SpeedMps = 0,
+                            Latitude = lastPoint.Latitude,
+                            Longitude = lastPoint.Longitude,
+                            Geofence = lastPoint.IsWithinAllowedRadius ? "Within range" : "Outside range"
+                        };
+                    }
+
                     return new Row
                     {
                         EmployeeId = employee.EmployeeID,

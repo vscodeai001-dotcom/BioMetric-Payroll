@@ -473,6 +473,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             employeeId, sessionId, latitude, longitude, distance, radius, within,
             accuracy, captured, captureSource);
 
+        try
+        {
+            await _refreshService.NotifyLocationChangedAsync(employeeId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to send SignalR location notification for employee {EmployeeId}", employeeId);
+        }
+
         // OfflineSync history is durable recovery evidence. If the live branch
         // could not complete attendance while the phone was offline, replay the
         // captured point through the existing server attendance engine. This
@@ -968,13 +977,13 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
 
             var normalizedJson = JsonSerializer.SerializeToElement(normalized);
-            return await UpsertTableAsync(entityName, normalizedJson, ct);
+            return await UpsertTableAsync(entityName, normalizedJson, ownerUid, ct);
         }
 
         if (json.Value.ValueKind != JsonValueKind.Object)
             return false;
 
-        return await UpsertTableAsync(entityName, json.Value, ct);
+        return await UpsertTableAsync(entityName, json.Value, ownerUid, ct);
     }
 
     private async Task<bool> SyncTrackingHistoryAsync(
@@ -1264,6 +1273,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private async Task<bool> UpsertTableAsync(
      string entityName,
      JsonElement table,
+     string ownerUid,
      CancellationToken ct)
     {
         // LeaveRequest requires special handling because its shared EF model
@@ -1374,6 +1384,115 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         await using var tableDb =
             await tableFactory.CreateDbContextAsync(ct);
+
+        // Strict Multi-Tenant Isolation for CompanySettings:
+        // Prevent tenant_2 or any other company from overwriting SettingID = 1 in SQLite!
+        if (entityName.Equals("CompanySetting", StringComparison.Ordinal))
+        {
+            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct);
+            var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : (string.Equals(ownerUid, TenantContextService.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ? 1 : 0);
+            if (targetSettingId <= 0)
+            {
+                var maxId = await tableDb.CompanySettings.MaxAsync(c => (int?)c.SettingID, ct) ?? 0;
+                targetSettingId = maxId + 1;
+                if (tenant != null)
+                {
+                    tenant.CompanySettingId = targetSettingId;
+                }
+            }
+
+            var existingSetting = await tableDb.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId, ct);
+            if (existingSetting == null)
+            {
+                existingSetting = new CompanySetting { SettingID = targetSettingId };
+                tableDb.CompanySettings.Add(existingSetting);
+            }
+
+            foreach (var child in table.EnumerateObject())
+            {
+                if (child.Value.ValueKind != JsonValueKind.Object) continue;
+
+                var compName = GetString(child.Value, "companyName", "CompanyName");
+                if (!string.IsNullOrWhiteSpace(compName))
+                {
+                    existingSetting.CompanyName = compName.Trim();
+                    if (tenant != null) tenant.CompanyName = compName.Trim();
+                }
+                var addr = GetString(child.Value, "addressLine1", "AddressLine1");
+                if (addr != null) existingSetting.AddressLine1 = addr;
+                var city = GetString(child.Value, "cityStatePincode", "CityStatePincode");
+                if (city != null) existingSetting.CityStatePincode = city;
+
+                var lat = GetDouble(child.Value, "officeLatitude", "OfficeLatitude", "latitude", "Latitude");
+                if (lat != 0) existingSetting.OfficeLatitude = lat;
+                var lon = GetDouble(child.Value, "officeLongitude", "OfficeLongitude", "longitude", "Longitude");
+                if (lon != 0) existingSetting.OfficeLongitude = lon;
+                var rad = GetInt(child.Value, "geoRadiusMeters", "GeoRadiusMeters", "radius", "Radius");
+                if (rad > 0) existingSetting.GeoRadiusMeters = rad;
+                var cutoff = GetInt(child.Value, "workDayCutoffHour", "WorkDayCutoffHour");
+                if (cutoff > 0) existingSetting.WorkDayCutoffHour = cutoff;
+                var late = GetInt(child.Value, "lateGraceMinutes", "LateGraceMinutes");
+                if (late >= 0) existingSetting.LateGraceMinutes = late;
+                var endGrace = GetInt(child.Value, "endTimeGraceMinutes", "EndTimeGraceMinutes");
+                if (endGrace >= 0) existingSetting.EndTimeGraceMinutes = endGrace;
+                break;
+            }
+
+            using var syncScope = _firebaseSyncWriteScope.Enter();
+            await tableDb.SaveChangesAsync(ct);
+            return true;
+        }
+
+        // Strict Multi-Tenant Isolation for FeatureSettings:
+        if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
+        {
+            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct);
+            var targetFeatureId = tenant?.FeatureSettingsId > 0 ? tenant.FeatureSettingsId : (string.Equals(ownerUid, TenantContextService.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ? 1 : 0);
+            if (targetFeatureId <= 0)
+            {
+                var maxId = await tableDb.FeatureSettings.MaxAsync(f => (int?)f.Id, ct) ?? 0;
+                targetFeatureId = maxId + 1;
+                if (tenant != null)
+                {
+                    tenant.FeatureSettingsId = targetFeatureId;
+                }
+            }
+
+            var existingFeature = await tableDb.FeatureSettings.FirstOrDefaultAsync(f => f.Id == targetFeatureId, ct);
+            if (existingFeature == null)
+            {
+                existingFeature = new FeatureSettings { Id = targetFeatureId };
+                tableDb.FeatureSettings.Add(existingFeature);
+            }
+
+            foreach (var child in table.EnumerateObject())
+            {
+                if (child.Value.ValueKind != JsonValueKind.Object) continue;
+
+                existingFeature.EnablePayroll = GetBool(child.Value, "enablePayroll", "EnablePayroll");
+                existingFeature.EnableGeoFencing = GetBool(child.Value, "enableGeoFencing", "EnableGeoFencing");
+                existingFeature.EnableDualAttendance = GetBool(child.Value, "enableDualAttendance", "EnableDualAttendance");
+                existingFeature.EnableSalaryAdvance = GetBool(child.Value, "enableSalaryAdvance", "EnableSalaryAdvance");
+                existingFeature.EnableBonusManagement = GetBool(child.Value, "enableBonusManagement", "EnableBonusManagement");
+                existingFeature.EnableLeaveManagement = GetBool(child.Value, "enableLeaveManagement", "EnableLeaveManagement");
+                existingFeature.EnableShiftScheduling = GetBool(child.Value, "enableShiftScheduling", "EnableShiftScheduling");
+                existingFeature.EnablePunchCorrection = GetBool(child.Value, "enablePunchCorrection", "EnablePunchCorrection");
+                existingFeature.EnableTaxDeclarations = GetBool(child.Value, "enableTaxDeclarations", "EnableTaxDeclarations");
+                existingFeature.EnableResignationModule = GetBool(child.Value, "enableResignationModule", "EnableResignationModule");
+                existingFeature.EnableFlexibleBenefits = GetBool(child.Value, "enableFlexibleBenefits", "EnableFlexibleBenefits");
+                existingFeature.EnableCompanyReports = GetBool(child.Value, "enableCompanyReports", "EnableCompanyReports");
+                existingFeature.AdminCanViewDashboard = GetBool(child.Value, "adminCanViewDashboard", "AdminCanViewDashboard");
+                existingFeature.AdminCanManageEmployees = GetBool(child.Value, "adminCanManageEmployees", "AdminCanManageEmployees");
+                existingFeature.AdminCanViewAttendance = GetBool(child.Value, "adminCanViewAttendance", "AdminCanViewAttendance");
+                existingFeature.AdminCanRunPayroll = GetBool(child.Value, "adminCanRunPayroll", "AdminCanRunPayroll");
+                existingFeature.AdminCanEditSettings = GetBool(child.Value, "adminCanEditSettings", "AdminCanEditSettings");
+                break;
+            }
+
+            using var syncScope = _firebaseSyncWriteScope.Enter();
+            await tableDb.SaveChangesAsync(ct);
+            return true;
+        }
 
         var tableEntityType =
             tableDb.Model.GetEntityTypes()

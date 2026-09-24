@@ -3,6 +3,7 @@ package com.biometric.app.sync
 import android.util.Log
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.entity.UserRole
+import com.biometric.app.sync.ssot.FirebaseSsotSchema
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -91,7 +92,8 @@ class FirebaseAuthSecurityGate @Inject constructor(
         }
 
         val ownerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
-            ?: if (role == UserRole.SuperAdmin.name && isCanonicalSuperAdmin) "biometricpayroll" else ""
+            ?: sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
+            ?: if (role == UserRole.SuperAdmin.name || isCanonicalSuperAdmin) FirebaseSsotSchema.DEFAULT_OWNER_UID else ""
 
         if (ownerUid.isBlank()) {
             return Result(false, message = "Firebase account is missing the required owner_uid claim.")

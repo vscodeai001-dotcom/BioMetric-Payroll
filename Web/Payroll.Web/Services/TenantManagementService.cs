@@ -95,11 +95,15 @@ namespace Payroll.Web.Services
 
                 await AppDbContext.EnsureSqliteSchemaUpdatedAsync(db);
 
-                var exists = await db.CompanyTenants.AnyAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
-                if (!exists)
+                var primaryTenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
+                if (primaryTenant == null)
                 {
                     var defaultCompany = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
-                    var companyName = defaultCompany?.CompanyName ?? "Primary Workspace";
+                    var companyName = defaultCompany?.CompanyName;
+                    if (string.IsNullOrWhiteSpace(companyName) || companyName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+                    {
+                        companyName = "Yes company";
+                    }
 
                     var tenant = new CompanyTenant
                     {
@@ -121,6 +125,22 @@ namespace Payroll.Web.Services
                     await db.SaveChangesAsync();
                     _logger.LogInformation("Seeded default primary tenant {TenantId} ({CompanyName})", tenant.TenantId, tenant.CompanyName);
                 }
+                else
+                {
+                    // Detect and repair any accidental name collision between primary and secondary tenants
+                    var secondaryTenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId != TenantContextService.DefaultTenantId);
+                    if (secondaryTenant != null && string.Equals(primaryTenant.CompanyName, secondaryTenant.CompanyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        primaryTenant.CompanyName = "Yes company";
+                        var setting1 = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
+                        if (setting1 != null)
+                        {
+                            setting1.CompanyName = "Yes company";
+                        }
+                        await db.SaveChangesAsync();
+                        _logger.LogInformation("Restored primary tenant {TenantId} to 'Yes company' after collision with tenant {SecondaryId}", primaryTenant.TenantId, secondaryTenant.TenantId);
+                    }
+                }
 
                 // Ensure every tenant has their initial company settings node in Firebase
                 var allTenants = await db.CompanyTenants.ToListAsync();
@@ -129,26 +149,42 @@ namespace Payroll.Web.Services
                     try
                     {
                         var cs = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == t.CompanySettingId);
-                        if (cs != null)
+                        if (cs == null)
                         {
-                            var existingFb = await _firebase.GetOwnerRecordAsync(t.TenantId, "company_settings", "1");
-                            if (!existingFb.HasValue || existingFb.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
+                            cs = new CompanySetting
                             {
-                                var compPayload = new Dictionary<string, object?>
-                                {
-                                    ["companyName"] = cs.CompanyName,
-                                    ["addressLine1"] = cs.AddressLine1,
-                                    ["cityStatePincode"] = cs.CityStatePincode,
-                                    ["officeLatitude"] = cs.OfficeLatitude,
-                                    ["officeLongitude"] = cs.OfficeLongitude,
-                                    ["geoRadiusMeters"] = cs.GeoRadiusMeters,
-                                    ["workDayCutoffHour"] = cs.WorkDayCutoffHour,
-                                    ["lateGraceMinutes"] = cs.LateGraceMinutes,
-                                    ["endTimeGraceMinutes"] = cs.EndTimeGraceMinutes
-                                };
-                                await _firebase.SetAsync($"owners/{t.TenantId}/company_settings/1", compPayload, default);
-                                _logger.LogInformation("Synchronized initial company setting for tenant {TenantId} to Firebase.", t.TenantId);
-                            }
+                                SettingID = t.CompanySettingId,
+                                CompanyName = t.CompanyName,
+                                AddressLine1 = "Office Location",
+                                CityStatePincode = "",
+                                OfficeLatitude = 11.9416,
+                                OfficeLongitude = 79.8083,
+                                GeoRadiusMeters = 100,
+                                WorkDayCutoffHour = 22,
+                                LateGraceMinutes = 15,
+                                EndTimeGraceMinutes = 15
+                            };
+                            db.CompanySettings.Add(cs);
+                            await db.SaveChangesAsync();
+                        }
+
+                        var existingFb = await _firebase.GetOwnerRecordAsync(t.TenantId, "company_settings", "1");
+                        if (!existingFb.HasValue || existingFb.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
+                        {
+                            var compPayload = new Dictionary<string, object?>
+                            {
+                                ["companyName"] = cs.CompanyName,
+                                ["addressLine1"] = cs.AddressLine1,
+                                ["cityStatePincode"] = cs.CityStatePincode,
+                                ["officeLatitude"] = cs.OfficeLatitude,
+                                ["officeLongitude"] = cs.OfficeLongitude,
+                                ["geoRadiusMeters"] = cs.GeoRadiusMeters,
+                                ["workDayCutoffHour"] = cs.WorkDayCutoffHour,
+                                ["lateGraceMinutes"] = cs.LateGraceMinutes,
+                                ["endTimeGraceMinutes"] = cs.EndTimeGraceMinutes
+                            };
+                            await _firebase.SetAsync($"owners/{t.TenantId}/company_settings/1", compPayload, default);
+                            _logger.LogInformation("Synchronized initial company setting for tenant {TenantId} to Firebase.", t.TenantId);
                         }
                     }
                     catch (Exception exSync)
@@ -481,6 +517,13 @@ namespace Payroll.Web.Services
             existing.PlanMode = updated.PlanMode;
             existing.IsActive = updated.IsActive;
 
+            // Keep CompanySettings in sync
+            var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == existing.CompanySettingId);
+            if (cs != null)
+            {
+                cs.CompanyName = existing.CompanyName;
+            }
+
             await db.SaveChangesAsync();
 
             // Sync tenant metadata to Firebase Realtime Database
@@ -498,7 +541,8 @@ namespace Payroll.Web.Services
                 };
                 await _firebase.UpdateAsync(new Dictionary<string, object?>
                 {
-                    [$"tenants/{existing.TenantId}"] = tenantPayload
+                    [$"tenants/{existing.TenantId}"] = tenantPayload,
+                    [$"owners/{existing.TenantId}/company_settings/1/companyName"] = existing.CompanyName
                 }, default);
             }
             catch (Exception ex)
@@ -605,6 +649,12 @@ namespace Payroll.Web.Services
                 existing.GeoRadiusMeters = setting.GeoRadiusMeters;
                 existing.ZktecoIP = setting.ZktecoIP;
                 existing.ZktecoPort = setting.ZktecoPort;
+
+                if (!string.IsNullOrWhiteSpace(setting.CompanyName))
+                {
+                    tenant.CompanyName = setting.CompanyName.Trim();
+                }
+
                 await db.SaveChangesAsync();
 
                 // Mirror to Firebase
@@ -613,17 +663,28 @@ namespace Payroll.Web.Services
                     var companyPayload = new Dictionary<string, object?>
                     {
                         ["companyName"] = existing.CompanyName,
+                        ["addressLine1"] = existing.AddressLine1,
+                        ["cityStatePincode"] = existing.CityStatePincode,
                         ["officeLatitude"] = existing.OfficeLatitude,
                         ["officeLongitude"] = existing.OfficeLongitude,
                         ["geoRadiusMeters"] = existing.GeoRadiusMeters,
-                        ["workDayCutoffHour"] = existing.WorkDayCutoffHour
+                        ["workDayCutoffHour"] = existing.WorkDayCutoffHour,
+                        ["lateGraceMinutes"] = existing.LateGraceMinutes,
+                        ["endTimeGraceMinutes"] = existing.EndTimeGraceMinutes
                     };
                     await _firebase.SetAsync($"owners/{tenant.TenantId}/company_settings/1", companyPayload, default);
+
+                    await _firebase.UpdateAsync(new Dictionary<string, object?>
+                    {
+                        [$"tenants/{tenant.TenantId}/companyName"] = tenant.CompanyName
+                    }, default);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to mirror tenant company setting to Firebase.");
                 }
+
+                await _refreshService.NotifyGlobalRefreshAsync("TENANTS_UPDATED");
                 return true;
             }
             return false;

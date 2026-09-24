@@ -40,7 +40,7 @@
                 {
                     <span class="badge bg-warning text-dark fw-bold rounded-pill px-3 py-1">👑 SuperAdmin Mode</span>
                 }
-                else if (activeTenant != null)
+                @if (activeTenant != null)
                 {
                     <span class="badge bg-info text-dark fw-bold rounded-pill px-3 py-1">🏢 @activeTenant.CompanyName</span>
                 }
@@ -180,19 +180,20 @@ else
             allEmployees = await FirebaseEmployees.GetEmployeesAsync();
             var rawUsers = await FirebaseUsers.GetAllUsersAsync(allEmployees);
 
-            if (!isSuperAdmin)
+            if (activeTenant != null)
             {
-                // Company Admin is strictly isolated:
-                // 1. Never see root SuperAdmin account
-                // 2. Never see administrators of other client companies
-                // 3. Only see their own admin account and employees belonging to this company!
+                // When inside a company workspace (either Company Admin OR SuperAdmin scoped to a company):
+                // 1. SuperAdmin sees SuperAdmin account
+                // 2. See active company's Admin account
+                // 3. See only employees belonging to this active company
+                // 4. Exclude all administrators and employees of other companies!
                 var otherAdmins = allTenants
-                    .Where(t => t.Id != activeTenant?.Id)
+                    .Where(t => t.Id != activeTenant.Id)
                     .Select(t => t.AdminEmail.Trim().ToLowerInvariant())
                     .ToHashSet();
 
-                var activeAdminEmail = activeTenant?.AdminEmail?.Trim().ToLowerInvariant();
-                var activeAdminUserId = activeTenant?.AdminUserId;
+                var activeAdminEmail = activeTenant.AdminEmail?.Trim().ToLowerInvariant();
+                var activeAdminUserId = activeTenant.AdminUserId;
 
                 var employeeIds = allEmployees.Select(e => e.EmployeeID).ToHashSet();
                 var employeeEmails = allEmployees.Where(e => !string.IsNullOrWhiteSpace(e.Email)).Select(e => e.Email!.Trim().ToLowerInvariant()).ToHashSet();
@@ -200,9 +201,14 @@ else
 
                 userList = rawUsers.Where(u =>
                 {
-                    if (string.Equals(u.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(u.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase))
-                        return false;
+                    var isSuperAdminAccount = string.Equals(u.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
+                                              string.Equals(u.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase);
+
+                    if (isSuperAdminAccount)
+                    {
+                        // Show SuperAdmin account only if current logged-in user is SuperAdmin
+                        return isSuperAdmin;
+                    }
 
                     if (!string.IsNullOrWhiteSpace(u.Email) && otherAdmins.Contains(u.Email.Trim().ToLowerInvariant()))
                         return false;

@@ -606,11 +606,15 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
+            var tenant = await TenantContext.GetActiveTenantAsync();
+            var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : 1;
+            var targetFeatureId = tenant?.FeatureSettingsId > 0 ? tenant.FeatureSettingsId : 1;
+
             // 1. Load Company Setting
-            var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
+            var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == targetSettingId);
             if (cs != null)
             {
-                companyName = cs.CompanyName ?? "BioMetric Payroll System";
+                companyName = cs.CompanyName ?? (tenant?.CompanyName ?? "BioMetric Payroll System");
                 addressLine1 = cs.AddressLine1 ?? "";
                 cityStatePincode = cs.CityStatePincode ?? "";
                 officeLatitude = cs.OfficeLatitude;
@@ -623,7 +627,7 @@
             }
 
             // 2. Load Feature Settings
-            var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == 1);
+            var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == targetFeatureId);
             if (fs != null)
             {
                 features = fs;
@@ -631,7 +635,10 @@
             }
 
             // 3. Load Tenant metadata if present
-            var tenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
+            if (tenant == null)
+            {
+                tenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
+            }
             if (tenant != null)
             {
                 companyCode = tenant.CompanyCode;
@@ -697,11 +704,16 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
+            var activeTenant = await TenantContext.GetActiveTenantAsync();
+            var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+            var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
+            var targetTenantId = activeTenant?.TenantId ?? TenantContextService.DefaultTenantId;
+
             // 1. Save CompanySettings
-            var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
+            var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == targetSettingId);
             if (cs == null)
             {
-                cs = new CompanySetting { SettingID = 1 };
+                cs = new CompanySetting { SettingID = targetSettingId };
                 db.CompanySettings.Add(cs);
             }
 
@@ -717,10 +729,10 @@
             cs.SalaryCalculationMethod = salaryCalcMethod;
 
             // 2. Save FeatureSettings
-            var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == 1);
+            var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == targetFeatureId);
             if (fs == null)
             {
-                fs = new FeatureSettings { Id = 1 };
+                fs = new FeatureSettings { Id = targetFeatureId };
                 db.FeatureSettings.Add(fs);
             }
 
@@ -739,13 +751,13 @@
             fs.IsOfflineMode = isOfflineMode;
             fs.DeploymentMode = isOfflineMode ? "Offline" : "Online";
 
-            // 3. Save Primary CompanyTenant record
-            var tenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
+            // 3. Save CompanyTenant record
+            var tenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == targetTenantId);
             if (tenant == null)
             {
                 tenant = new CompanyTenant
                 {
-                    TenantId = TenantContextService.DefaultTenantId,
+                    TenantId = targetTenantId,
                     CreatedAtUtc = DateTime.UtcNow
                 };
                 db.CompanyTenants.Add(tenant);
@@ -760,8 +772,8 @@
             tenant.IsOfflineMode = isOfflineMode;
             tenant.DeploymentMode = isOfflineMode ? "Offline" : "Online";
             tenant.IsActive = true;
-            tenant.CompanySettingId = 1;
-            tenant.FeatureSettingsId = 1;
+            tenant.CompanySettingId = targetSettingId;
+            tenant.FeatureSettingsId = targetFeatureId;
 
             await db.SaveChangesAsync();
 

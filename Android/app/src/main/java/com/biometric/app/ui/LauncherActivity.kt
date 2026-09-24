@@ -81,9 +81,7 @@ class LauncherActivity : AppCompatActivity() {
                 validation.role == UserRole.Admin.name || validation.role == UserRole.SuperAdmin.name
             ) MainActivity::class.java else EmployeeHomeActivity::class.java
 
-            if (validation.role == UserRole.Employee.name) {
-                sharedViewModel.warmUpDashboard()
-            }
+            sharedViewModel.warmUpDashboard()
 
             startActivity(Intent(this@LauncherActivity, destination))
             finish()
