@@ -39,13 +39,20 @@
     <color name="outline_variant">#475569</color>
 
     <color name="green_700">#34D399</color>
+    <color name="green_900">#064E3B</color>
     <color name="red_700">#F87171</color>
+    <color name="red_900">#7F1D1D</color>
+    <color name="blue_700">#60A5FA</color>
+    <color name="blue_900">#1E3A8A</color>
     <color name="amber_900">#F59E0B</color>
+    <color name="purple_900">#A855F7</color>
 
     <color name="red_light">#2D1A1A</color>
     <color name="blue_light">#1E293B</color>
     <color name="amber_light">#332A15</color>
     <color name="green_light">#152D20</color>
+    <color name="purple_light">#2A1D38</color>
+    <color name="grey_light">#1E293B</color>
 
     <!-- Gradient Colors -->
     <color name="grad_start">#6366F1</color>

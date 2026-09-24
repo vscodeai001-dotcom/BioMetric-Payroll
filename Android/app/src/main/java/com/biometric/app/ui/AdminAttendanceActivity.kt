@@ -1,107 +1,65 @@
 package com.biometric.app.ui
 
 import android.app.DatePickerDialog
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.Spinner
-import android.widget.Toast
 import androidx.core.view.isVisible
-import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
-import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.data.entity.Employee
-import com.biometric.app.data.entity.LocalDailySummary
+import com.biometric.app.databinding.ActivityAdminAttendanceBinding
+import com.biometric.app.databinding.ItemAdminAttendanceBinding
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.ui.viewmodel.SharedViewModel
-import com.google.android.material.appbar.MaterialToolbar
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class AdminAttendanceActivity : MotionBaseActivity() {
+
+    private lateinit var binding: ActivityAdminAttendanceBinding
+
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
 
     private lateinit var adapter: AttendanceAdapter
-    private val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    private var from = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
-    private var to = Calendar.getInstance()
-    private lateinit var tvFrom: TextView
-    private lateinit var tvTo: TextView
-    private lateinit var progress: View
-    private lateinit var empty: TextView
-    private lateinit var summary: TextView
-    private lateinit var spEmployee: Spinner
-    private lateinit var tvScheduled: TextView
-    private lateinit var tvWorked: TextView
-    private lateinit var tvOvertime: TextView
-    private lateinit var tvPenalty: TextView
-    private lateinit var tvLateness: TextView
-    private lateinit var tvBreakPenalty: TextView
+    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val displayDateFormat = SimpleDateFormat("dd-MMM-yyyy", Locale.getDefault())
+    private val punchTimeFormat = SimpleDateFormat("HH:mm", Locale.US)
+    private val shiftDateFormat = SimpleDateFormat("dd-MMM (EEE)", Locale.getDefault())
+
+    private var fromCalendar = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
+    private var toCalendar = Calendar.getInstance()
     private var employeeFilterId: Int? = null
+    private var statusFilter: String = "ALL" // ALL, PRESENT, ABSENT, HALFDAY, LATE
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_admin_attendance)
-        
-        applyWindowInsets(findViewById(R.id.clAdminAttendanceRoot))
-        
-        findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
-        tvFrom = findViewById(R.id.tvFrom)
-        tvTo = findViewById(R.id.tvTo)
-        progress = findViewById(R.id.progress)
-        empty = findViewById(R.id.empty)
-        summary = findViewById(R.id.tvSummary)
-        spEmployee = findViewById(R.id.spEmployee)
-        tvScheduled = findViewById(R.id.tvScheduled)
-        tvWorked = findViewById(R.id.tvWorked)
-        tvOvertime = findViewById(R.id.tvOvertime)
-        tvPenalty = findViewById(R.id.tvPenalty)
-        tvLateness = findViewById(R.id.tvLateness)
-        tvBreakPenalty = findViewById(R.id.tvBreakPenalty)
-        tvFrom.text = fmt.format(from.time)
-        tvTo.text = fmt.format(to.time)
-        tvFrom.setOnClickListener { pick(from) { from = it; tvFrom.text = fmt.format(from.time); render() } }
-        tvTo.setOnClickListener { pick(to) { to = it; tvTo.text = fmt.format(to.time); render() } }
-        findViewById<View>(R.id.btnGenerate).setOnClickListener { render() }
-        adapter = AttendanceAdapter()
-        findViewById<RecyclerView>(R.id.rvAttendance).layoutManager = LinearLayoutManager(this)
-        findViewById<RecyclerView>(R.id.rvAttendance).adapter = adapter
+        binding = ActivityAdminAttendanceBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        applyWindowInsets(binding.clAdminAttendanceRoot)
 
-        lifecycleScope.launch {
-            sharedViewModel.allDailySummaries.collectLatest { render() }
-        }
-        lifecycleScope.launch {
-            sharedViewModel.allEmployees.collectLatest {
-                val items = mutableListOf("All Employees")
-                items += sharedViewModel.allEmployees.value.sortedBy { it.name }.map { "${it.name} (#${it.employeeId})" }
-                spEmployee.adapter = ArrayAdapter(this@AdminAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, items)
-                spEmployee.setSelection(0)
-                render()
-            }
-        }
-        spEmployee.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { employeeFilterId = null; render() }
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                employeeFilterId = sharedViewModel.allEmployees.value.sortedBy { it.name }.getOrNull(position - 1)?.employeeId?.toIntOrNull()
-                render()
-            }
-        }
-        lifecycleScope.launch {
-            sharedViewModel.allAttendancePunches.collectLatest { render() }
-        }
+        setupToolbar()
+        setupDatePickers()
+        setupRecyclerView()
+        setupStatusFilterChips()
+        setupListeners()
+        observeData()
+
         realtimeCoordinator.start {
             if (!isFinishing && !isDestroyed) {
                 sharedViewModel.warmUpDashboard()
@@ -117,28 +75,175 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         super.onDestroy()
     }
 
-    private fun pick(base: Calendar, done: (Calendar) -> Unit) {
-        DatePickerDialog(this, { _, y, m, d ->
-            done(Calendar.getInstance().apply { set(y, m, d) })
-        }, base.get(Calendar.YEAR), base.get(Calendar.MONTH), base.get(Calendar.DAY_OF_MONTH)).show()
+    private fun setupToolbar() {
+        binding.toolbar.setNavigationOnClickListener { finish() }
+    }
+
+    private fun setupDatePickers() {
+        binding.tvFrom.text = displayDateFormat.format(fromCalendar.time)
+        binding.tvTo.text = displayDateFormat.format(toCalendar.time)
+
+        binding.cardFromDate.setOnClickListener {
+            showDatePicker(fromCalendar) { picked ->
+                fromCalendar = picked
+                binding.tvFrom.text = displayDateFormat.format(fromCalendar.time)
+                render()
+            }
+        }
+
+        binding.cardToDate.setOnClickListener {
+            showDatePicker(toCalendar) { picked ->
+                toCalendar = picked
+                binding.tvTo.text = displayDateFormat.format(toCalendar.time)
+                render()
+            }
+        }
+    }
+
+    private fun showDatePicker(base: Calendar, onDateSelected: (Calendar) -> Unit) {
+        DatePickerDialog(
+            this,
+            { _, year, month, dayOfMonth ->
+                val chosen = Calendar.getInstance().apply { set(year, month, dayOfMonth) }
+                onDateSelected(chosen)
+            },
+            base.get(Calendar.YEAR),
+            base.get(Calendar.MONTH),
+            base.get(Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    private fun setupRecyclerView() {
+        adapter = AttendanceAdapter { row ->
+            // On correction requested, find employee and open manual attendance correction dialog
+            val employee = sharedViewModel.allEmployees.value.find { it.employeeId.toIntOrNull() == row.employeeID }
+            if (employee != null) {
+                ManualAttendanceDialogFragment.newInstance(employee).show(
+                    supportFragmentManager,
+                    ManualAttendanceDialogFragment.TAG
+                )
+            }
+        }
+        binding.rvAttendance.layoutManager = LinearLayoutManager(this)
+        binding.rvAttendance.adapter = adapter
+    }
+
+    private fun setupStatusFilterChips() {
+        binding.chipGroupAttendanceFilter.setOnCheckedStateChangeListener { _, checkedIds ->
+            statusFilter = when (checkedIds.firstOrNull()) {
+                R.id.chipPresent -> "PRESENT"
+                R.id.chipAbsent -> "ABSENT"
+                R.id.chipHalfDay -> "HALFDAY"
+                R.id.chipLate -> "LATE"
+                else -> "ALL"
+            }
+            render()
+        }
+    }
+
+    private fun setupListeners() {
+        binding.btnGenerate.setOnClickListener {
+            render()
+        }
+
+        binding.swipeRefresh.setOnRefreshListener {
+            sharedViewModel.warmUpDashboard()
+            render()
+            binding.swipeRefresh.isRefreshing = false
+        }
+    }
+
+    private fun observeData() {
+        lifecycleScope.launch {
+            sharedViewModel.allDailySummaries.collectLatest { render() }
+        }
+        lifecycleScope.launch {
+            sharedViewModel.allAttendancePunches.collectLatest { render() }
+        }
+        lifecycleScope.launch {
+            sharedViewModel.allEmployees.collectLatest { employees ->
+                val items = mutableListOf("All Employees")
+                items += employees.sortedBy { it.name }.map { "${it.name} (#${it.employeeId})" }
+                val spinnerAdapter = ArrayAdapter(this@AdminAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, items)
+                binding.spEmployee.adapter = spinnerAdapter
+                binding.spEmployee.setSelection(0)
+                render()
+            }
+        }
+
+        binding.spEmployee.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+                employeeFilterId = null
+                render()
+            }
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                employeeFilterId = sharedViewModel.allEmployees.value.sortedBy { it.name }.getOrNull(position - 1)?.employeeId?.toIntOrNull()
+                render()
+            }
+        }
     }
 
     private fun render() {
         if (!::adapter.isInitialized) return
-        progress.isVisible = false
-        val f = fmt.format(from.time)
-        val t = fmt.format(to.time)
+        binding.progress.isVisible = false
+
+        val f = isoDateFormat.format(fromCalendar.time)
+        val t = isoDateFormat.format(toCalendar.time)
+
         val employees = sharedViewModel.allEmployees.value.associateBy { it.employeeId.toIntOrNull() ?: -1 }
-        val summaries = sharedViewModel.allDailySummaries.value.filter {
-            it.shiftDate >= f && it.shiftDate <= t && (employeeFilterId == null || it.employeeId == employeeFilterId)
+        val summariesInRange = sharedViewModel.allDailySummaries.value.filter {
+            it.shiftDate in f..t && (employeeFilterId == null || it.employeeId == employeeFilterId)
         }
-        val punches = sharedViewModel.allAttendancePunches.value.groupBy { it.date }
-        val rows = summaries.map { s ->
+        val punchesGrouped = sharedViewModel.allAttendancePunches.value.groupBy { it.date }
+
+        // Compute KPI Cumulative Metrics across all filtered summaries
+        val employeesProcessed = summariesInRange.map { it.employeeId }.distinct().count()
+        val scheduledMs = summariesInRange.sumOf { it.scheduledShiftDurationMs }
+        val workedHours = summariesInRange.sumOf { it.earnedStandardHours }
+        val otMs = summariesInRange.sumOf { it.totalOvertimeMs }
+        val penaltyMs = summariesInRange.sumOf { it.totalPenaltyMs }
+        val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }
+        val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
+
+        binding.tvScheduled.text = formatDurationMs(scheduledMs)
+        binding.tvWorked.text = String.format(Locale.US, "%.2fh", workedHours)
+        binding.tvOvertime.text = formatDurationMs(otMs)
+        binding.tvPenalty.text = formatDurationMs(penaltyMs)
+        binding.tvLateness.text = formatDurationMs(latenessMs)
+        binding.tvBreakPenalty.text = formatDurationMs(breakPenaltyMs)
+
+        binding.tvSummary.text = if (summariesInRange.isEmpty()) {
+            "No attendance logs recorded for selected period"
+        } else {
+            "👥 $employeesProcessed employees • ⏱️ Worked ${String.format(Locale.US, "%.2f", workedHours)}h • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
+        }
+
+        // Map to display row objects
+        val allRows = summariesInRange.map { s ->
             val emp = employees[s.employeeId]
+            val dateParsed = runCatching { isoDateFormat.parse(s.shiftDate) }.getOrNull()
+            val formattedDate = if (dateParsed != null) shiftDateFormat.format(dateParsed) else s.shiftDate
+
+            val rawPunchesText = punchesGrouped[s.shiftDate].orEmpty()
+                .filter { it.staffId == s.employeeId.toString() }
+                .sortedBy { it.timestamp }
+                .joinToString("  •  ") { p ->
+                    val time = punchTimeFormat.format(Date(p.timestamp))
+                    "$time ${p.type}"
+                }.ifBlank { "No punches recorded" }
+
+            val scheduledDuration = formatDurationMs(s.scheduledShiftDurationMs)
+            val scheduledShiftText = if (s.scheduledShiftDurationMs > 0) {
+                "⏰ Scheduled Shift: $scheduledDuration"
+            } else {
+                "⏰ Shift: Flexible / Unscheduled"
+            }
+
             AdminAttendanceRow(
                 employeeID = s.employeeId,
                 employeeName = emp?.name ?: "Employee #${s.employeeId}",
                 date = s.shiftDate,
+                formattedDate = formattedDate,
                 status = s.status.ifBlank { "Absent" },
                 workedHours = s.earnedStandardHours,
                 overtimeMinutes = s.totalOvertimeMs / 60000.0,
@@ -146,63 +251,123 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 latenessMinutes = s.totalLatenessMs / 60000.0,
                 breakPenaltyMinutes = s.totalBreakPenaltyMs / 60000.0,
                 scheduledMinutes = s.scheduledShiftDurationMs / 60000.0,
-                punches = punches[s.shiftDate].orEmpty()
-                    .filter { it.staffId == s.employeeId.toString() }
-                    .sortedBy { it.timestamp }
-                    .joinToString("  •  ") { p ->
-                        val time = SimpleDateFormat("HH:mm", Locale.US).format(java.util.Date(p.timestamp))
-                        "$time ${p.type}"
-                    }
+                scheduledShiftText = scheduledShiftText,
+                punches = rawPunchesText
             )
+        }
+
+        // Apply quick status chip filter
+        val filteredRows = when (statusFilter) {
+            "PRESENT" -> allRows.filter { it.status.equals("Present", ignoreCase = true) }
+            "ABSENT" -> allRows.filter { it.status.equals("Absent", ignoreCase = true) }
+            "HALFDAY" -> allRows.filter { it.status.contains("Half", ignoreCase = true) }
+            "LATE" -> allRows.filter { it.latenessMinutes > 0 }
+            else -> allRows
         }.sortedWith(compareByDescending<AdminAttendanceRow> { it.date }.thenBy { it.employeeName })
-        adapter.submit(rows)
-        empty.isVisible = rows.isEmpty()
 
-        val company = summaries
-        val employeesProcessed = company.map { it.employeeId }.distinct().count()
-        val scheduled = company.sumOf { it.scheduledShiftDurationMs } / 60000.0
-        val worked = company.sumOf { it.earnedStandardHours }
-        val ot = company.sumOf { it.totalOvertimeMs } / 60000.0
-        val penalty = company.sumOf { it.totalPenaltyMs } / 60000.0
-        val lateness = company.sumOf { it.totalLatenessMs } / 60000.0
-        val breakPenalty = company.sumOf { it.totalBreakPenaltyMs } / 60000.0
-
-        tvScheduled.text = "Scheduled\n${minutes(scheduled)}"
-        tvWorked.text = "Worked\n${String.format(Locale.US, "%.2f", worked)}h"
-        tvOvertime.text = "OT\n${minutes(ot)}"
-        tvPenalty.text = "Penalty\n${minutes(penalty)}"
-        tvLateness.text = "Lateness\n${minutes(lateness)}"
-        tvBreakPenalty.text = "Break Pen.\n${minutes(breakPenalty)}"
-
-        summary.text = if (company.isEmpty()) "" else
-            "👥 $employeesProcessed employees  •  ⏱️ Worked ${String.format(Locale.US, "%.2f", worked)}h  •  📅 Scheduled ${minutes(scheduled)}"
+        adapter.submit(filteredRows)
+        binding.llEmptyState.isVisible = filteredRows.isEmpty()
+        binding.rvAttendance.isVisible = filteredRows.isNotEmpty()
     }
 
-    private fun minutes(v: Double) = String.format(Locale.US, "%dh %02dm", (v / 60).toInt(), (v % 60).toInt())
+    private fun formatDurationMs(ms: Long): String {
+        val totalMinutes = ms / 60000
+        val hours = totalMinutes / 60
+        val minutes = totalMinutes % 60
+        return String.format(Locale.US, "%dh %02dm", hours, minutes)
+    }
 
     data class AdminAttendanceRow(
-        val employeeID: Int, val employeeName: String, val date: String, val status: String,
-        val workedHours: Double, val overtimeMinutes: Double, val penaltyMinutes: Double,
-        val latenessMinutes: Double, val breakPenaltyMinutes: Double, val scheduledMinutes: Double,
+        val employeeID: Int,
+        val employeeName: String,
+        val date: String,
+        val formattedDate: String,
+        val status: String,
+        val workedHours: Double,
+        val overtimeMinutes: Double,
+        val penaltyMinutes: Double,
+        val latenessMinutes: Double,
+        val breakPenaltyMinutes: Double,
+        val scheduledMinutes: Double,
+        val scheduledShiftText: String,
         val punches: String
     )
 
-    private class AttendanceAdapter : RecyclerView.Adapter<Holder>() {
-        private val data = mutableListOf<AdminAttendanceRow>()
-        fun submit(rows: List<AdminAttendanceRow>) { data.clear(); data.addAll(rows); notifyDataSetChanged() }
-        override fun onCreateViewHolder(p: ViewGroup, v: Int) = Holder(LayoutInflater.from(p.context).inflate(R.layout.item_admin_attendance, p, false))
-        override fun onBindViewHolder(h: Holder, i: Int) {
-            val x = data[i]
-            h.title.text = "${x.employeeName}  •  ${x.date}"
-            h.status.text = x.status
-            h.details.text = "Worked ${String.format(Locale.US, "%.2f", x.workedHours)}h  •  OT ${String.format(Locale.US, "%.0f", x.overtimeMinutes)}m  •  Penalty ${String.format(Locale.US, "%.0f", x.penaltyMinutes)}m\n${x.punches}"
-        }
-        override fun getItemCount() = data.size
-    }
+    private class AttendanceAdapter(
+        private val onCorrectionClick: (AdminAttendanceRow) -> Unit
+    ) : RecyclerView.Adapter<AttendanceAdapter.Holder>() {
 
-    private class Holder(v: View) : RecyclerView.ViewHolder(v) {
-        val title = v.findViewById<TextView>(R.id.tvTitle)
-        val status = v.findViewById<TextView>(R.id.tvStatus)
-        val details = v.findViewById<TextView>(R.id.tvDetails)
+        private val data = mutableListOf<AdminAttendanceRow>()
+
+        fun submit(rows: List<AdminAttendanceRow>) {
+            data.clear()
+            data.addAll(rows)
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+            val itemBinding = ItemAdminAttendanceBinding.inflate(
+                LayoutInflater.from(parent.context),
+                parent,
+                false
+            )
+            return Holder(itemBinding)
+        }
+
+        override fun onBindViewHolder(holder: Holder, position: Int) {
+            holder.bind(data[position])
+        }
+
+        override fun getItemCount() = data.size
+
+        inner class Holder(private val itemBinding: ItemAdminAttendanceBinding) :
+            RecyclerView.ViewHolder(itemBinding.root) {
+
+            fun bind(item: AdminAttendanceRow) {
+                itemBinding.tvTitle.text = item.employeeName
+                itemBinding.tvDateSubtitle.text = "${item.formattedDate} • Staff #${item.employeeID}"
+                itemBinding.tvStatus.text = item.status.uppercase(Locale.US)
+                itemBinding.tvScheduledShift.text = item.scheduledShiftText
+
+                // Status Badge Color
+                when {
+                    item.status.contains("Present", ignoreCase = true) -> {
+                        itemBinding.tvStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E8F5E9"))
+                        itemBinding.tvStatus.setTextColor(Color.parseColor("#2E7D32"))
+                    }
+                    item.status.contains("Absent", ignoreCase = true) -> {
+                        itemBinding.tvStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFEBEE"))
+                        itemBinding.tvStatus.setTextColor(Color.parseColor("#C62828"))
+                    }
+                    item.status.contains("Half", ignoreCase = true) -> {
+                        itemBinding.tvStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFF3E0"))
+                        itemBinding.tvStatus.setTextColor(Color.parseColor("#EF6C00"))
+                    }
+                    item.status.contains("Leave", ignoreCase = true) -> {
+                        itemBinding.tvStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#ECEFF1"))
+                        itemBinding.tvStatus.setTextColor(Color.parseColor("#546E7A"))
+                    }
+                    else -> {
+                        itemBinding.tvStatus.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EDE7F6"))
+                        itemBinding.tvStatus.setTextColor(Color.parseColor("#5E35B1"))
+                    }
+                }
+
+                // Metrics
+                itemBinding.tvMetricWorked.text = String.format(Locale.US, "%.2fh", item.workedHours)
+                itemBinding.tvMetricOt.text = if (item.overtimeMinutes > 0) "+${item.overtimeMinutes.toInt()}m" else "0m"
+                itemBinding.tvMetricLate.text = if (item.latenessMinutes > 0) "${item.latenessMinutes.toInt()}m" else "0m"
+                itemBinding.tvMetricPenalty.text = if (item.penaltyMinutes > 0) "${item.penaltyMinutes.toInt()}m" else "0m"
+                itemBinding.tvMetricBreak.text = if (item.breakPenaltyMinutes > 0) "${item.breakPenaltyMinutes.toInt()}m" else "0m"
+
+                // Raw Punches
+                itemBinding.tvDetails.text = item.punches
+
+                // Manual Punch Correction button
+                itemBinding.btnCorrectPunch.setOnClickListener {
+                    onCorrectionClick(item)
+                }
+            }
+        }
     }
 }

@@ -8,7 +8,19 @@ data class ConsolidatedAttendanceRow(
     val totalWorkedHours: Double,
     val totalOvertimeMs: Long,
     val totalPenaltyMs: Long,
+    val totalLatenessMs: Long = 0L,
+    val totalScheduledDurationMs: Long = 0L,
     val totalAbsentDays: Int
+) : Serializable
+
+data class CompanyCumulativeSummary(
+    val totalEmployeesProcessed: Int = 0,
+    val totalScheduledDurationMs: Long = 0L,
+    val totalWorkedHours: Double = 0.0,
+    val totalOvertimeMs: Long = 0L,
+    val totalOverallPenaltyMs: Long = 0L,
+    val totalLatenessMs: Long = 0L,
+    val totalBreakPenaltyMs: Long = 0L
 ) : Serializable
 
 data class PayrollVarianceRow(

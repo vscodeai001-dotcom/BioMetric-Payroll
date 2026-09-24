@@ -38,6 +38,8 @@ import com.biometric.app.ui.adapter.ShopAdapter
 import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import android.widget.TextView
+import android.widget.ImageView
+import com.biometric.app.ui.selfservice.*
 import com.biometric.app.sync.SignalRManager
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.sync.FirebaseRoomHydrator
@@ -1310,65 +1312,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             startActivity(Intent(this, AdminFinanceActivity::class.java))
         }
 
-        // Daily Operations Cards Navigation
-        binding.cardShiftsToday.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, ShiftManagerActivity::class.java))
-        }
-        binding.cardScheduledHours.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, ReportCenterActivity::class.java))
-        }
-
         // Live Map Card Navigation
         binding.cvLiveMapCard.setOnClickListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, TrackingMapActivity::class.java))
         }
 
-        // Quick Actions
-        binding.btnApproveRegs.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, RegularizationActivity::class.java))
-        }
-        binding.btnRunPayroll.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, AdminPayrollActivity::class.java))
-        }
-        binding.btnReportCenter.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, ReportCenterActivity::class.java))
-        }
-        binding.btnLeaveManagement.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, LeaveManagementActivity::class.java))
-        }
-        binding.btnAddEmployee.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, StaffActivity::class.java))
-        }
-        binding.btnAuditTrail.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, AuditTrailActivity::class.java))
-        }
-        binding.btnRecycleBin.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, RecycleBinActivity::class.java))
-        }
-        binding.btnUserManagement.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, UserManagementActivity::class.java))
-        }
-        binding.btnTroubleshoot.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, TroubleshootActivity::class.java))
-        }
-
-        // Recent Advances View All
-        binding.btnViewAllAdvances.setOnClickListener {
-            HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, AdminFinanceActivity::class.java))
-        }
+        // Web Mirror Application Menus
+        setupApplicationMenus()
     }
 
     private fun observeViewModel() {
@@ -1430,15 +1381,15 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             b.tvPayrollLabel.text = "PAYROLL ($month)".uppercase()
 
                             b.tvPayrollVariance.text = String.format(Locale.US, "📈 %.1f%% vs Last Month", stats.payrollVariancePercent)
-                            b.tvShiftsToday.text = stats.shiftsScheduledToday.toString()
-
-                            // Web Parity: Xh Ym formatting
-                            val totalMinutes = stats.totalMonthScheduledMs / (1000 * 60)
-                            val h = totalMinutes / 60
-                            val m = totalMinutes % 60
-                            b.tvScheduledHours.text = "${h}h ${m}m"
-
-                            updateRecentAdvances(stats.recentAdvances)
+                        }
+                    }
+                }
+                launch {
+                    sharedViewModel.allLeaveRequests.collectLatest { list ->
+                        _binding?.let { b ->
+                            val pendingCount = list.count { it.status.equals("Pending", ignoreCase = true) && !it.leaveType.equals("Loss of Pay (Auto)", ignoreCase = true) }
+                            b.appMenus.tvPendingLeaveBadge.text = pendingCount.toString()
+                            b.appMenus.tvPendingLeaveBadge.isVisible = pendingCount > 0
                         }
                     }
                 }
@@ -1456,16 +1407,57 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 _binding?.let { b ->
                     val s = settings ?: AdminFeatureSettingsDto()
 
-                    // Admin Hub Quick Actions
-                    b.btnRunPayroll.isVisible = isSuperAdmin || (s.enablePayroll && s.adminCanRunPayroll)
-                    b.btnApproveRegs.isVisible = isSuperAdmin || s.enableRegularizationRequest
-                    b.btnLeaveManagement.isVisible = isSuperAdmin || s.enableLeaveManagement
-                    b.btnReportCenter.isVisible = isSuperAdmin || (s.enableCompanyReports && s.adminCanViewReports)
-                    b.btnAddEmployee.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
-                    b.btnUserManagement.isVisible = isSuperAdmin
-                    b.btnTroubleshoot.isVisible = isSuperAdmin || s.adminCanViewAttendance
-                    b.btnRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
-                    b.btnAuditTrail.isVisible = isSuperAdmin || s.enableAuditLog
+                    // Application Menus Role & Permission Gating (Web 1:1 Mirror)
+                    val menus = b.appMenus
+                    menus.cardSuperAdminPortal.isVisible = isSuperAdmin
+                    menus.cardSectionEmployeeTools.isVisible = isSuperAdmin
+
+                    // 1. Payroll Section
+                    val payrollEnabled = isSuperAdmin || s.enablePayroll || s.enableSalaryAdvance || s.enableBonusManagement || s.enableResignationModule
+                    menus.cardSectionPayroll.isVisible = payrollEnabled
+                    menus.rowRunPayroll.isVisible = isSuperAdmin || (s.enablePayroll && s.adminCanRunPayroll)
+                    menus.rowYearEndSummary.isVisible = isSuperAdmin || (s.adminCanViewReports && s.enableYearEndSummary)
+                    menus.rowSalaryAdvances.isVisible = isSuperAdmin || s.enableSalaryAdvance
+                    menus.rowTaxDeclarations.isVisible = isSuperAdmin || (s.enablePayroll && s.enableTaxDeclarations)
+                    menus.rowBonusManagement.isVisible = isSuperAdmin || s.enableBonusManagement
+                    menus.rowFbpComponents.isVisible = isSuperAdmin || s.enableFlexibleBenefits
+                    menus.rowExitSettlement.isVisible = isSuperAdmin || (s.enablePayroll && s.enableResignationModule)
+
+                    // 2. Attendance & Tracking Section
+                    val attendanceEnabled = isSuperAdmin || s.adminCanViewAttendance
+                    menus.cardSectionAttendance.isVisible = attendanceEnabled
+                    menus.rowCompanyReport.isVisible = isSuperAdmin || (s.enableCompanyReports && s.adminCanViewReports)
+                    menus.rowLeaveManagement.isVisible = isSuperAdmin || s.enableLeaveManagement
+                    menus.rowShiftSchedule.isVisible = isSuperAdmin || (s.enableShiftScheduling && s.adminCanManageShifts)
+                    menus.rowPunchCorrection.isVisible = isSuperAdmin || s.enablePunchCorrection
+                    menus.rowPunchApprovals.isVisible = isSuperAdmin || (s.enablePunchCorrection && s.adminCanManagePunchApprovals)
+                    menus.rowRegularizationApproval.isVisible = isSuperAdmin || s.enableRegularizationRequest
+
+                    // 3. Admin & Settings Section
+                    menus.rowEmployeeRecords.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
+                    menus.rowUserRoleMgmt.isVisible = isSuperAdmin
+                    menus.rowCompanySetup.isVisible = isSuperAdmin || s.adminCanEditSettings
+                    menus.rowHolidayManagement.isVisible = isSuperAdmin || s.adminCanEditSettings
+                    menus.rowCompanySettings.isVisible = isSuperAdmin || s.adminCanEditSettings
+                    menus.rowRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
+                    menus.rowAuditLogs.isVisible = isSuperAdmin || s.enableAuditLog
+                    menus.rowAttendanceEventMonitoring.isVisible = isSuperAdmin || s.enableAuditLog
+                    menus.rowFeatureToggles.isVisible = isSuperAdmin || s.adminCanManageEmployeePermissions
+
+                    // 4. Employee Tools (SA View)
+                    if (isSuperAdmin) {
+                        menus.rowMyPayslips.isVisible = s.enablePayroll && s.employeeCanViewPayslip
+                        menus.rowMyAttendance.isVisible = s.employeeCanViewAttendance
+                        menus.rowRequestLeave.isVisible = s.enableLeaveManagement && s.employeeCanViewLeave
+                        menus.rowLeaveHistory.isVisible = s.enableLeaveManagement && s.employeeCanViewLeaveHistory
+                        menus.rowMyShiftSchedule.isVisible = s.enableShiftScheduling && s.employeeCanViewShifts
+                        menus.rowMySalaryAdvances.isVisible = s.enableSalaryAdvance && s.employeeCanViewAdvance
+                        menus.rowMyTaxDeclaration.isVisible = s.enableTaxDeclarations && s.employeeCanViewTax
+                        menus.rowMyBonuses.isVisible = s.enableBonusManagement && s.employeeCanViewBonus
+                        menus.rowMyResignation.isVisible = s.enableResignationModule && s.employeeCanViewResignation
+                        menus.rowMyRegularization.isVisible = s.enableRegularizationRequest
+                        menus.rowMyReports.isVisible = s.enableCustomReporting && s.employeeCanViewReports
+                    }
 
                     // The profile/role can arrive after the toolbar is first created.
                     // Rebuild the toolbar so Admin Modules becomes visible immediately.
@@ -1512,18 +1504,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         GlobalSwitcherDelegate.inflateMenu(menuInflater, menu, showShopSwitcher = false, activity = this)
-
-        val profile = sharedViewModel.userProfile.value
-        val role = getSharedPreferences("auth_prefs", MODE_PRIVATE)
-            .getString("user_role", UserRole.Employee.name)
-        val isAdmin = profile?.isAdmin() == true || profile?.isSuperAdmin() == true ||
-            role == UserRole.Admin.name || role == UserRole.SuperAdmin.name
-        if (isAdmin) {
-            menu?.add(Menu.NONE, ACTION_ADMIN_MODULES, Menu.NONE, "📱 Admin Modules")?.apply {
-                setIcon(R.drawable.ic_people)
-                setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
-            }
-        }
         return true
     }
 
@@ -1545,6 +1525,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         )
 
         if (isAdmin) {
+            extraActions.add(GlobalSwitcherDelegate.ActionItem("📱", "Admin Modules") {
+                startActivity(Intent(this, WebParityHubActivity::class.java))
+            })
             extraActions.add(GlobalSwitcherDelegate.ActionItem("⚙️", "Settings") {
                 startActivity(Intent(this, SettingsActivity::class.java))
             })
@@ -1562,35 +1545,184 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     override fun onPaymentSuccess(p0: String?) { Toast.makeText(this, "Subscription Successful! 💎 ✅", Toast.LENGTH_LONG).show() }
     override fun onPaymentError(p0: Int, p1: String?) { Toast.makeText(this, "Subscription Failed: $p1 ⚠️", Toast.LENGTH_LONG).show() }
 
-    private fun updateRecentAdvances(advances: List<AdvancePayment>) {
-        _binding?.let { b ->
-            b.tvRecentAdvancesCount.text = advances.size.toString()
-            b.tvNoAdvances.isVisible = advances.isEmpty()
-            b.llRecentAdvancesContainer.removeAllViews()
+    private fun setupApplicationMenus() {
+        val menus = binding.appMenus
 
-            val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN"))
-            val sdf = SimpleDateFormat("dd-MMM", Locale.US)
-            val employees = sharedViewModel.allEmployees.value
+        // Accordion Expand / Collapse toggles
+        setupAccordionToggle(menus.headerPayroll, menus.llPayrollContainer, menus.ivPayrollToggle)
+        setupAccordionToggle(menus.headerAttendance, menus.llAttendanceContainer, menus.ivAttendanceToggle)
+        setupAccordionToggle(menus.headerAdminSettings, menus.llSettingsContainer, menus.ivSettingsToggle)
+        setupAccordionToggle(menus.headerEmployeeTools, menus.llEmployeeToolsContainer, menus.ivEmployeeToolsToggle)
 
-            advances.take(4).forEach { adv ->
-                val row = LayoutInflater.from(this).inflate(R.layout.item_history_row, b.llRecentAdvancesContainer, false)
-                val tvTitle = row.findViewById<TextView>(R.id.tvHistoryTitle)
-                val tvDate = row.findViewById<TextView>(R.id.tvHistoryDate)
-                val tvReason = row.findViewById<TextView>(R.id.tvHistoryReason)
-                val tvIcon = row.findViewById<TextView>(R.id.tvHistoryIcon)
+        // 0. SuperAdmin Multi-Tenant Portal
+        menus.cardSuperAdminPortal.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, SuperAdminManagementActivity::class.java))
+        }
 
-                val emp = employees.find { it.employeeId == adv.employeeId }
+        // SECTION 1: Payroll Management
+        menus.rowRunPayroll.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminPayrollActivity::class.java))
+        }
+        menus.rowYearEndSummary.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, YearEndSummaryActivity::class.java))
+        }
+        menus.rowSalaryAdvances.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminFinanceActivity::class.java))
+        }
+        menus.rowTaxDeclarations.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminTaxDeclarationsActivity::class.java))
+        }
+        menus.rowBonusManagement.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminBonusActivity::class.java))
+        }
+        menus.rowFbpComponents.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, FbpComponentsActivity::class.java))
+        }
+        menus.rowExitSettlement.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ExitManagementActivity::class.java))
+        }
 
-                // Web Parity: Name, Date • Type, Amount
-                tvTitle.text = "👤 ${emp?.name ?: "Staff ID ${adv.employeeId}"}"
-                tvDate.text = "🗓️ ${sdf.format(Date(adv.date))} • Advance"
-                tvReason.text = "💰 ${currency.format(adv.amount)}"
-                tvReason.setTextColor(Color.parseColor("#EF4444")) // Danger red for unpaid
-                tvIcon.text = "💸"
+        // SECTION 2: Attendance & Tracking
+        menus.rowDailyLogs.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminAttendanceActivity::class.java))
+        }
+        menus.rowCompanyReport.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ReportCenterActivity::class.java))
+        }
+        menus.rowLeaveManagement.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, LeaveManagementActivity::class.java))
+        }
+        menus.rowShiftSchedule.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ShiftManagerActivity::class.java))
+        }
+        menus.rowPunchCorrection.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AdminManualPunchCorrectionActivity::class.java))
+        }
+        menus.rowPunchApprovals.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, PunchCorrectionApprovalActivity::class.java))
+        }
+        menus.rowRegularizationApproval.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, RegularizationActivity::class.java))
+        }
+        menus.rowOfflineTracking.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, OfflineTrackingActivity::class.java))
+        }
+        menus.rowLocationHistory.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, LocationStaysActivity::class.java))
+        }
 
-                b.llRecentAdvancesContainer.addView(row)
-            }
+        // SECTION 3: Admin & Settings
+        menus.rowEmployeeRecords.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, StaffActivity::class.java))
+        }
+        menus.rowUserRoleMgmt.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, UserManagementActivity::class.java))
+        }
+        menus.rowCompanySetup.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        menus.rowHolidayManagement.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ShopClosedDaysActivity::class.java))
+        }
+        menus.rowCompanySettings.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        menus.rowRecycleBin.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, RecycleBinActivity::class.java))
+        }
+        menus.rowAuditLogs.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AuditTrailActivity::class.java))
+        }
+        menus.rowAttendanceEventMonitoring.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AttendanceEventMonitoringActivity::class.java))
+        }
+        menus.rowFeatureToggles.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, StaffPermissionActivity::class.java))
+        }
+
+        // SECTION 4: Employee Tools (SuperAdmin View)
+        menus.rowEmployeeHome.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, EmployeeHomeActivity::class.java))
+        }
+        menus.rowMyPayslips.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, PayslipListActivity::class.java))
+        }
+        menus.rowMyAttendance.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, AttendanceLogsActivity::class.java))
+        }
+        menus.rowRequestLeave.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ApplyLeaveActivity::class.java))
+        }
+        menus.rowLeaveHistory.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, MyLeavesActivity::class.java))
+        }
+        menus.rowMyShiftSchedule.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ShiftScheduleActivity::class.java))
+        }
+        menus.rowMySalaryAdvances.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, SalaryAdvancesActivity::class.java))
+        }
+        menus.rowMyTaxDeclaration.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, TaxDeclarationActivity::class.java))
+        }
+        menus.rowMyBonuses.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, BonusesActivity::class.java))
+        }
+        menus.rowMyResignation.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, ResignationActivity::class.java))
+        }
+        menus.rowMyRegularization.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, MyRegularizationsActivity::class.java))
+        }
+        menus.rowMyReports.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, MyReportsActivity::class.java))
         }
     }
 
+    private fun setupAccordionToggle(header: View, container: View, icon: ImageView) {
+        header.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            val willBeVisible = !container.isVisible
+            container.isVisible = willBeVisible
+            icon.animate().rotation(if (willBeVisible) 0f else -90f).setDuration(200).start()
+        }
+    }
 }

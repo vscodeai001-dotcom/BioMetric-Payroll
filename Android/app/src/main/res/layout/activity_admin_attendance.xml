@@ -1,126 +1,640 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/clAdminAttendanceRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="@color/window_background">
 
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        app:title="Attendance Log Summary"
-        app:subtitle="Daily breakdown of punches and calculated hours"
-        app:navigationIcon="@drawable/ic_arrow_back" />
-
-    <HorizontalScrollView
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/appBarLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:scrollbars="none"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:paddingTop="10dp"
-            android:paddingBottom="8dp">
+        android:background="?attr/colorSurface"
+        app:elevation="2dp">
 
-            <TextView
-                android:id="@+id/tvFrom"
-                android:layout_width="132dp"
-                android:layout_height="46dp"
-                android:gravity="center"
-                android:textStyle="bold"
-                android:text="From"
-                android:drawableStart="@drawable/ic_calendar"
-                android:drawablePadding="6dp"
-                android:background="@drawable/bg_premium_card" />
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:navigationIcon="@drawable/ic_arrow_back"
+            app:title="Attendance Master Logs"
+            app:titleTextAppearance="@style/TextAppearance.Material3.TitleMedium"
+            app:subtitle="Daily breakdown of biometric &amp; mobile punches"
+            app:subtitleTextAppearance="@style/TextAppearance.Material3.BodySmall" />
 
-            <TextView
-                android:id="@+id/tvTo"
-                android:layout_width="132dp"
-                android:layout_height="46dp"
-                android:layout_marginStart="8dp"
-                android:gravity="center"
-                android:textStyle="bold"
-                android:text="To"
-                android:drawableStart="@drawable/ic_calendar"
-                android:drawablePadding="6dp"
-                android:background="@drawable/bg_premium_card" />
+    </com.google.android.material.appbar.AppBarLayout>
 
-            <Spinner
-                android:id="@+id/spEmployee"
-                android:layout_width="180dp"
-                android:layout_height="46dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/bg_premium_card" />
-        </LinearLayout>
-    </HorizontalScrollView>
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnGenerate"
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="12dp"
-        android:text="🔎 Search / Recalculate" />
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:scrollbars="none"
-        android:padding="12dp">
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-            <TextView android:id="@+id/tvScheduled" android:layout_width="130dp" android:layout_height="82dp" android:gravity="center" android:text="Scheduled
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-            <TextView android:id="@+id/tvWorked" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Worked
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-            <TextView android:id="@+id/tvOvertime" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="OT
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-            <TextView android:id="@+id/tvPenalty" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Penalty
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-            <TextView android:id="@+id/tvLateness" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Lateness
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-            <TextView android:id="@+id/tvBreakPenalty" android:layout_width="130dp" android:layout_height="82dp" android:layout_marginStart="8dp" android:gravity="center" android:text="Break Pen.
---" android:textStyle="bold" android:background="@drawable/bg_premium_card" />
-        </LinearLayout>
-    </HorizontalScrollView>
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
 
-    <TextView
-        android:id="@+id/tvSummary"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="8dp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
-    <ProgressBar
-        android:id="@+id/progress"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:visibility="gone" />
+                <!-- Header Banner -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutlineVariant"
+                    app:cardBackgroundColor="?attr/colorSurface">
 
-    <TextView
-        android:id="@+id/empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="24dp"
-        android:gravity="center"
-        android:text="No attendance logs found for the selected filters."
-        android:visibility="gone" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvAttendance"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="12dp"
-        android:clipToPadding="false" />
-</LinearLayout>
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:background="@drawable/bg_circle_icon"
+                                android:gravity="center"
+                                android:text="⏱️"
+                                android:textSize="22sp" />
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="12dp"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Attendance Master Logs"
+                                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📊 Daily breakdown of biometric &amp; mobile GPS punches, worked shifts &amp; lateness rules"
+                                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tvSummary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="?attr/colorPrimary"
+                            tools:text="👥 18 employees • ⏱️ Worked 142.50h • 📅 Scheduled 160h 00m" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Filter Controls Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="0dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutlineVariant"
+                    app:cardBackgroundColor="?attr/colorSurface">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Date &amp; Staff Filters"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                            android:textStyle="bold"
+                            android:layout_marginBottom="12dp" />
+
+                        <!-- Date Range Row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <!-- From Date -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="6dp"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📅 From Date"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold"
+                                    android:textColor="?android:attr/textColorSecondary"
+                                    android:layout_marginBottom="4dp" />
+
+                                <com.google.android.material.card.MaterialCardView
+                                    android:id="@+id/cardFromDate"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="44dp"
+                                    app:cardCornerRadius="10dp"
+                                    app:cardElevation="0dp"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant"
+                                    app:cardBackgroundColor="?attr/colorSurfaceVariant">
+
+                                    <TextView
+                                        android:id="@+id/tvFrom"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center"
+                                        android:textSize="13sp"
+                                        android:textStyle="bold"
+                                        tools:text="2026-09-01" />
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
+
+                            <!-- To Date -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="6dp"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📅 To Date"
+                                    android:textSize="12sp"
+                                    android:textStyle="bold"
+                                    android:textColor="?android:attr/textColorSecondary"
+                                    android:layout_marginBottom="4dp" />
+
+                                <com.google.android.material.card.MaterialCardView
+                                    android:id="@+id/cardToDate"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="44dp"
+                                    app:cardCornerRadius="10dp"
+                                    app:cardElevation="0dp"
+                                    app:strokeWidth="1dp"
+                                    app:strokeColor="?attr/colorOutlineVariant"
+                                    app:cardBackgroundColor="?attr/colorSurfaceVariant">
+
+                                    <TextView
+                                        android:id="@+id/tvTo"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:gravity="center"
+                                        android:textSize="13sp"
+                                        android:textStyle="bold"
+                                        tools:text="2026-09-24" />
+                                </com.google.android.material.card.MaterialCardView>
+                            </LinearLayout>
+                        </LinearLayout>
+
+                        <!-- Staff Picker Spinner -->
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="👤 Select Employee"
+                            android:textSize="12sp"
+                            android:textStyle="bold"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:layout_marginTop="12dp"
+                            android:layout_marginBottom="4dp" />
+
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            app:cardCornerRadius="10dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurfaceVariant">
+
+                            <Spinner
+                                android:id="@+id/spEmployee"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:paddingHorizontal="8dp" />
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnGenerate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="14dp"
+                            android:text="🔎 Search &amp; Recalculate"
+                            app:cornerRadius="10dp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- KPI Stats: 6 Horizontal Cards -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="16dp">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <!-- Scheduled -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📅 Scheduled"
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvScheduled"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0h 00m"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#7C4DFF"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Shift Plan"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Worked -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="✅ Worked"
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvWorked"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0.00h"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#2E7D32"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Actual Worked"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Overtime -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="⚡ Overtime"
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvOvertime"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0h 00m"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="?attr/colorPrimary"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Approved OT"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Penalty -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="📉 Penalty"
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvPenalty"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0h 00m"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#C62828"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Loss of Hours"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Lateness -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="6dp"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="⏳ Lateness"
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvLateness"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0h 00m"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#EF6C00"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Late Arrival"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <!-- Break Penalty -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="125dp"
+                            android:layout_height="wrap_content"
+                            app:cardCornerRadius="12dp"
+                            app:cardElevation="0dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="?attr/colorOutlineVariant"
+                            app:cardBackgroundColor="?attr/colorSurface">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp"
+                                android:gravity="center">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="☕ Break Pen."
+                                    android:textSize="11sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+
+                                <TextView
+                                    android:id="@+id/tvBreakPenalty"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0h 00m"
+                                    android:textSize="15sp"
+                                    android:textStyle="bold"
+                                    android:textColor="#00838F"
+                                    android:layout_marginTop="2dp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Excess Break"
+                                    android:textSize="10sp"
+                                    android:textColor="?android:attr/textColorSecondary" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                    </LinearLayout>
+                </HorizontalScrollView>
+
+                <!-- Status Filter Chips -->
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginBottom="12dp">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupAttendanceFilter"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipAll"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="All" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipPresent"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✅ Present" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipAbsent"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="❌ Absent" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipHalfDay"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="🌓 Half-Day" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chipLate"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⏳ Late Arrivals" />
+                    </com.google.android.material.chip.ChipGroup>
+                </HorizontalScrollView>
+
+                <!-- Loading State -->
+                <ProgressBar
+                    android:id="@+id/progress"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:visibility="gone"
+                    android:layout_margin="24dp" />
+
+                <!-- Empty State -->
+                <LinearLayout
+                    android:id="@+id/llEmptyState"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="32dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="📋"
+                        android:textSize="48sp" />
+
+                    <TextView
+                        android:id="@+id/empty"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="No attendance records found"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="No attendance logs found for the selected dates and filters."
+                        android:textAlignment="center"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?android:attr/textColorSecondary" />
+                </LinearLayout>
+
+                <!-- Attendance RecyclerView -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvAttendance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    tools:listitem="@layout/item_admin_attendance" />
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

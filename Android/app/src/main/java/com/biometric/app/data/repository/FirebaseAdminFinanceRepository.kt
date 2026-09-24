@@ -101,6 +101,41 @@ class FirebaseAdminFinanceRepository @Inject constructor(
             )
         }.sortedByDescending { it.declarationId }
 
+    suspend fun approveTaxDeclaration(declarationId: Int, remarks: String = "Approved by Admin") {
+        require(declarationId > 0) { "Valid declarationId is required." }
+        ownerRef().child("tax_declarations").child(declarationId.toString()).updateChildren(
+            mapOf(
+                "status" to "Approved",
+                "adminRemarks" to remarks,
+                "approvalDate" to System.currentTimeMillis()
+            )
+        ).await()
+        firebaseSync.notifyRealtimeChanged("TaxDeclaration", "UPDATED", declarationId.toString())
+    }
+
+    suspend fun rejectTaxDeclaration(declarationId: Int, remarks: String) {
+        require(declarationId > 0) { "Valid declarationId is required." }
+        ownerRef().child("tax_declarations").child(declarationId.toString()).updateChildren(
+            mapOf(
+                "status" to "Rejected",
+                "adminRemarks" to remarks,
+                "approvalDate" to null
+            )
+        ).await()
+        firebaseSync.notifyRealtimeChanged("TaxDeclaration", "UPDATED", declarationId.toString())
+    }
+
+    suspend fun unlockTaxDeclaration(declarationId: Int) {
+        require(declarationId > 0) { "Valid declarationId is required." }
+        ownerRef().child("tax_declarations").child(declarationId.toString()).updateChildren(
+            mapOf(
+                "status" to "Draft",
+                "approvalDate" to null
+            )
+        ).await()
+        firebaseSync.notifyRealtimeChanged("TaxDeclaration", "UPDATED", declarationId.toString())
+    }
+
     suspend fun createAdvance(employeeId: Int, amount: Double, type: String?, date: String?) {
         require(employeeId > 0) { "Valid employee is required." }
         require(amount > 0.0) { "Positive amount is required." }
@@ -122,6 +157,12 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "ADDED", id)
     }
 
+    suspend fun deleteAdvance(advanceId: String) {
+        require(advanceId.isNotBlank()) { "Valid advanceId is required." }
+        ownerRef().child("advance_payments").child(advanceId).removeValue().await()
+        firebaseSync.notifyRealtimeChanged("AdvancePayment", "DELETED", advanceId)
+    }
+
     suspend fun createBonus(employeeId: Int, amount: Double, description: String?, date: String?) {
         require(employeeId > 0) { "Valid employee is required." }
         require(amount > 0.0) { "Positive amount is required." }
@@ -137,6 +178,12 @@ class FirebaseAdminFinanceRepository @Inject constructor(
             )
         ).await()
         firebaseSync.notifyRealtimeChanged("BonusRecord", "ADDED", id.toString())
+    }
+
+    suspend fun deleteBonus(bonusId: Int) {
+        require(bonusId > 0) { "Valid bonusId is required." }
+        ownerRef().child("bonus_records").child(bonusId.toString()).removeValue().await()
+        firebaseSync.notifyRealtimeChanged("BonusRecord", "DELETED", bonusId.toString())
     }
 
     private suspend fun nextBonusId(): Int {

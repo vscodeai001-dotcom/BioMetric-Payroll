@@ -410,6 +410,8 @@
         <activity android:name=".ui.YearEndSummaryActivity" android:exported="false" />
         <activity android:name=".ui.LocationStaysActivity" android:exported="false" />
         <activity android:name=".ui.AttendanceEventMonitoringActivity" android:exported="false" />
+        <activity android:name=".ui.AdminTaxDeclarationsActivity" android:exported="false" />
+        <activity android:name=".ui.AdminBonusActivity" android:exported="false" />
     </application>
 
 </manifest>

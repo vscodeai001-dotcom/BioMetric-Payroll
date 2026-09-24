@@ -3,6 +3,7 @@ package com.biometric.app.data.repository
 import com.biometric.app.data.dao.LocalDailySummaryDao
 import com.biometric.app.data.dao.LocalEmployeeDao
 import com.biometric.app.data.dao.LocalPayrollHistoryDao
+import com.biometric.app.data.entity.CompanyCumulativeSummary
 import com.biometric.app.data.entity.ConsolidatedAttendanceRow
 import com.biometric.app.data.entity.FinancialRegisterRow
 import com.biometric.app.data.entity.PayrollVarianceRow
@@ -80,10 +81,39 @@ class ReportRepository @Inject constructor(
                         empSummaries.sumOf { it.totalOvertimeMs },
                     totalPenaltyMs =
                         empSummaries.sumOf { it.totalPenaltyMs },
+                    totalLatenessMs =
+                        empSummaries.sumOf { it.totalLatenessMs },
+                    totalScheduledDurationMs =
+                        empSummaries.sumOf { it.scheduledShiftDurationMs },
                     totalAbsentDays =
                         empSummaries.count { it.status == "Absent" }
                 )
             }
+    }
+
+    suspend fun calculateCompanyCumulativeSummary(
+        startDate: String,
+        endDate: String,
+        employeeId: Int? = null
+    ): CompanyCumulativeSummary = withContext(Dispatchers.IO) {
+        val summaries = summaryDao.getAllFlow()
+            .first()
+            .filter {
+                it.shiftDate in startDate..endDate &&
+                    (employeeId == null || it.employeeId == employeeId)
+            }
+
+        if (summaries.isEmpty()) return@withContext CompanyCumulativeSummary()
+
+        CompanyCumulativeSummary(
+            totalEmployeesProcessed = summaries.map { it.employeeId }.distinct().count(),
+            totalScheduledDurationMs = summaries.sumOf { it.scheduledShiftDurationMs },
+            totalWorkedHours = summaries.sumOf { it.earnedStandardHours + (it.totalOvertimeMs.toDouble() / 3600000.0) },
+            totalOvertimeMs = summaries.sumOf { it.totalOvertimeMs },
+            totalOverallPenaltyMs = summaries.sumOf { it.totalPenaltyMs },
+            totalLatenessMs = summaries.sumOf { it.totalLatenessMs },
+            totalBreakPenaltyMs = summaries.sumOf { it.totalBreakPenaltyMs }
+        )
     }
 
     suspend fun generatePayrollVariance(

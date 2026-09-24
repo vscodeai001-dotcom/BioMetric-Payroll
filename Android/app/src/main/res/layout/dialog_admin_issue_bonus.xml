@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <!-- Employee Selection -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="👤 Select Employee">
+
+        <Spinner
+            android:id="@+id/spDialogEmployee"
+            android:layout_width="match_parent"
+            android:layout_height="52dp" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Date Picker Input -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="📅 Bonus Date">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etDialogBonusDate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:cursorVisible="false"
+            android:focusable="false"
+            android:inputType="none" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Amount Input -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="💰 Amount (₹)"
+        app:prefixText="₹ ">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etDialogBonusAmount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="numberDecimal" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!-- Description / Note -->
+    <com.google.android.material.textfield.TextInputLayout
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:hint="📝 Description / Reason">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etDialogBonusDescription"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="e.g. Festival Bonus, Diwali Reward"
+            android:inputType="textCapSentences"
+            android:text="Festival Bonus" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+</LinearLayout>
