@@ -184,9 +184,7 @@ public sealed class PayrollFinalizationService
     }
 
     private string ResolveOwnerUid()
-        => (_configuration["Firebase:OwnerUid"]
-            ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-            ?? "biometricpayroll").Trim();
+        => _firebase.ResolveOwnerUid("payroll-finalization", "Admin");
 
     private static string PeriodKey(int year, int month) => $"{year:D4}-{month:D2}";
     private static bool IsValidPeriod(int year, int month) => year >= 2000 && year <= 2100 && month is >= 1 and <= 12;

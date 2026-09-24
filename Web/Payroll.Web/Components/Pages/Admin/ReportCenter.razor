@@ -32,16 +32,34 @@
 else
 {
     <div class="d-flex flex-column h-100">
-        <h3 class="text-dark fw-bold mb-4 flex-shrink-0">
-            <span class="text-primary me-2"><i class="bi bi-journal-check"></i></span> Report Center
-        </h3>
+        <div class="page-header-container">
+            <div class="d-flex align-items-center gap-3">
+                <div class="emoji-icon-badge emoji-icon-badge-primary">
+                    📊
+                </div>
+                <div>
+                    <h2 class="page-header-title">
+                        Report & Analytics Center
+                    </h2>
+                    <p class="page-header-subtitle">
+                        <span>📋 Generate statutory compliance registers, attendance muster rolls & financial ledgers</span>
+                    </p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-success bg-opacity-10 text-success rounded-pill px-3 py-2 fw-semibold border border-success border-opacity-25">
+                    <span>⚡ One-Click CSV & PDF Export</span>
+                </span>
+            </div>
+        </div>
 
         @* --- 1. REPORT SELECTION TILES --- *@
         <div class="row g-3 mb-4 flex-shrink-0">
             @foreach (var def in activeReports)
             {
                 <div class="col-6 col-md-4 col-xl-3">
-                    <div class="report-tile @(selectedReportType == def.ReportType ? "active" : "")" 
+                    <div class="report-tile @(selectedReportType == def.ReportType ? "active" : "") rounded-4" 
                          @onclick="() => SelectReport(def.ReportType)">
                         
                         <div class="tile-icon @GetIconColor(def.ReportType)">

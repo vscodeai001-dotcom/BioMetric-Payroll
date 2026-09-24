@@ -11,6 +11,9 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using System.Collections;
 using Google.Apis.Auth.OAuth2;
 using Payroll.Shared.Data;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using System.Security.Claims;
 
 namespace Payroll.Web.Services;
 
@@ -28,33 +31,138 @@ public sealed class FirebaseRealtimeService
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FirebaseRealtimeService> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly Lazy<Task<FirebaseContext?>> _context;
 
     public FirebaseRealtimeService(
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
-        ILogger<FirebaseRealtimeService> logger)
+        ILogger<FirebaseRealtimeService> logger,
+        IHttpContextAccessor httpContextAccessor,
+        IServiceScopeFactory scopeFactory)
     {
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
+        _scopeFactory = scopeFactory;
         _context = new Lazy<Task<FirebaseContext?>>(InitializeAsync);
     }
 
-    public string ResolveOwnerUid(string actorUid, string? role = null)
+    public string ResolveOwnerUid(string? actorUid = null, string? role = null)
     {
-        var configured = _configuration["Firebase:OwnerUid"]
-            ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID");
+        // 1. If actorUid is explicitly a tenant ID (e.g. starts with "tenant_" or equals "biometricpayroll"), return it
+        if (!string.IsNullOrWhiteSpace(actorUid))
+        {
+            if (actorUid.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(actorUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+            {
+                return actorUid.Trim();
+            }
+        }
 
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured.Trim();
+        // 2. Ambient context resolution: Check the current request or Blazor circuit's authenticated user
+        try
+        {
+            var httpContext = _httpContextAccessor?.HttpContext;
+            if (httpContext != null)
+            {
+                var user = httpContext.User;
+                if (user?.Identity?.IsAuthenticated == true)
+                {
+                    var isSuperAdmin = user.IsInRole("SuperAdmin") ||
+                        string.Equals(user.Identity?.Name, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase) ||
+                        user.HasClaim("IsSuperAdmin", "true");
 
-        // REQUIREMENT: Standardize on a shared tenant UID if not explicitly
-        // configured. This ensures that employees (Suresh, Nevetha, etc.)
-        // and the Admin always read/write to the same Firebase nodes.
-        // SuperAdmin can retain their own UID for multi-tenant governance.
-        if (role?.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase) == true)
-            return actorUid;
+                    if (isSuperAdmin)
+                    {
+                        // Check if SuperAdmin switched to a specific tenant workspace via cookie
+                        if (httpContext.Request.Cookies.TryGetValue("BioMetric_SuperAdmin_ActiveTenant", out var cookieTenant) &&
+                            !string.IsNullOrWhiteSpace(cookieTenant))
+                        {
+                            return cookieTenant.Trim();
+                        }
+
+                        // SuperAdmin defaults to default primary workspace
+                        return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
+                    }
+
+                    // Company Admin or Employee: Check explicit TenantId / OwnerUid claims
+                    var tenantClaim = user.FindFirst("TenantId")?.Value 
+                        ?? user.FindFirst("OwnerUid")?.Value;
+                    if (!string.IsNullOrWhiteSpace(tenantClaim))
+                    {
+                        return tenantClaim.Trim();
+                    }
+
+                    // If claims don't have it, query database by user ID or email
+                    var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
+                    var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+
+                    if (!string.IsNullOrWhiteSpace(userId) || !string.IsNullOrWhiteSpace(email))
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                        if (dbFactory != null)
+                        {
+                            using var db = dbFactory.CreateDbContext();
+                            var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t =>
+                                (userId != null && t.AdminUserId == userId) ||
+                                (email != null && t.AdminEmail.ToLower() == email.ToLower()));
+
+                            if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId))
+                            {
+                                return tenant.TenantId.Trim();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Ambient tenant resolution encountered an issue; falling back.");
+        }
+
+        // 3. Database lookup by actorUid if provided (for API calls or background tasks passing email or userId)
+        if (!string.IsNullOrWhiteSpace(actorUid))
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = dbFactory.CreateDbContext();
+                    var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t =>
+                        t.TenantId == actorUid ||
+                        t.AdminUserId == actorUid ||
+                        t.AdminEmail.ToLower() == actorUid.ToLower());
+
+                    if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId))
+                    {
+                        return tenant.TenantId.Trim();
+                    }
+
+                    // Check if actorUid matches an Employee (by email, aspNetUserId, or employeeId)
+                    var emp = db.Employees.AsNoTracking().FirstOrDefault(e =>
+                        (e.Email != null && e.Email.ToLower() == actorUid.ToLower()) ||
+                        (e.AspNetUserId != null && e.AspNetUserId == actorUid) ||
+                        e.EmployeeID.ToString() == actorUid ||
+                        actorUid == $"employee-{e.EmployeeID}");
+
+                    if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId))
+                    {
+                        return emp.TenantId.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Database tenant lookup for actorUid {ActorUid} encountered an issue; falling back.", actorUid);
+            }
+        }
 
         return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
     }

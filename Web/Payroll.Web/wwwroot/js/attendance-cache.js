@@ -48,6 +48,18 @@ window.attendanceCache = (function () {
         });
     }
 
+    async function remove(key) {
+        try {
+            const db = await openDb();
+            return new Promise(function (resolve, reject) {
+                const tx = db.transaction(STORE_NAME, 'readwrite');
+                tx.objectStore(STORE_NAME).delete(key);
+                tx.oncomplete = function () { resolve(); };
+                tx.onerror = function () { reject(tx.error || new Error('Attendance cache delete failed')); };
+            });
+        } catch (_) { }
+    }
+
     async function clear() {
         try {
             const db = await openDb();

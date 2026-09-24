@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Payroll.Shared.Data;
 using Payroll.Shared;
+using Microsoft.EntityFrameworkCore;
 
 namespace Payroll.Web.Services;
 
@@ -10,22 +11,25 @@ namespace Payroll.Web.Services;
 /// Final calculated DailySummary records and canonical AttendancePunch records
 /// are read from Firebase; SQL remains the authoritative mutation/calculation
 /// boundary for operations that still require the existing attendance engine.
+/// In Offline Standalone Mode, reads directly from local SQLite database.
 /// </summary>
 public sealed class FirebaseAttendanceService
 {
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
-    public FirebaseAttendanceService(FirebaseRealtimeService firebase, IConfiguration configuration)
+    public FirebaseAttendanceService(
+        FirebaseRealtimeService firebase,
+        IConfiguration configuration,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _firebase = firebase;
         _configuration = configuration;
+        _scopeFactory = scopeFactory;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("attendance-service", "Admin");
 
     public async Task<List<DailySummary>> GetDailySummariesAsync(
         DateOnly from,
@@ -33,6 +37,24 @@ public sealed class FirebaseAttendanceService
         CancellationToken ct = default)
     {
         if (from > to) return new();
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.DailySummaries.AsNoTracking()
+                        .Where(x => x.ShiftDate >= from && x.ShiftDate <= to)
+                        .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                        .ToListAsync(ct);
+                }
+            }
+        }
 
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, "daily_summaries", ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
@@ -93,6 +115,24 @@ public sealed class FirebaseAttendanceService
         CancellationToken ct = default)
     {
         if (employeeId <= 0 || from > to) return new();
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.DailySummaries.AsNoTracking()
+                        .Where(x => x.EmployeeID == employeeId && x.ShiftDate >= from && x.ShiftDate <= to)
+                        .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                        .ToListAsync(ct);
+                }
+            }
+        }
 
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "daily_summaries", "employeeId", employeeId, ct);
@@ -155,6 +195,29 @@ public sealed class FirebaseAttendanceService
         CancellationToken ct = default)
     {
         if (from > to) return new();
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var startDt = from.ToDateTime(TimeOnly.MinValue);
+                    var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                    var query = db.AttendanceLogs.AsNoTracking()
+                        .Where(x => x.PunchTime >= startDt && x.PunchTime < endDt);
+                    if (employeeId.HasValue && employeeId.Value > 0)
+                    {
+                        query = query.Where(x => x.EmployeeID == employeeId.Value);
+                    }
+                    return await query.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToListAsync(ct);
+                }
+            }
+        }
 
         var indiaZone = TimeZoneInfo.FindSystemTimeZoneById(GetIndiaTimeZoneId());
         var startLocal = from.ToDateTime(TimeOnly.MinValue);
@@ -245,6 +308,26 @@ public sealed class FirebaseAttendanceService
         CancellationToken ct = default)
     {
         if (employeeId <= 0 || from > to) return new();
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var startDt = from.ToDateTime(TimeOnly.MinValue);
+                    var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                    return await db.AttendanceLogs.AsNoTracking()
+                        .Where(x => x.EmployeeID == employeeId && x.PunchTime >= startDt && x.PunchTime < endDt)
+                        .OrderBy(x => x.PunchTime)
+                        .ToListAsync(ct);
+                }
+            }
+        }
 
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "attendance_punches", "staffId", employeeId, ct);

@@ -30,10 +30,25 @@ else
 {
     <AttendanceRefreshListener OnAttendanceChanged="HandleAttendanceRefresh" />
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <h3 class="mb-0">Leave Management</h3>
-            <p class="text-muted small mb-0">Approve requests and manage employee time-off.</p>
+    <div class="page-header-container">
+        <div class="d-flex align-items-center gap-3">
+            <div class="emoji-icon-badge emoji-icon-badge-warning">
+                🏖️
+            </div>
+            <div>
+                <h2 class="page-header-title">
+                    Leave & Time-Off Management
+                </h2>
+                <p class="page-header-subtitle">
+                    <span>🌴 Review employee leave requests, approve paid/sick off & track department coverage</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-3 py-2 fw-semibold">
+                <span>🏖️ Paid</span> • <span>🤒 Sick</span> • <span>🟣 Comp Off</span>
+            </span>
         </div>
     </div>
 

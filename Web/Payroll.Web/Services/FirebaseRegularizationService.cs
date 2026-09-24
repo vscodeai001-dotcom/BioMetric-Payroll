@@ -24,10 +24,7 @@ public sealed class FirebaseRegularizationService
         _configuration = configuration;
     }
 
-    private string OwnerUid =>
-        _configuration["Firebase:OwnerUid"]
-        ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-        ?? "biometricpayroll";
+    private string OwnerUid => _firebase.ResolveOwnerUid("regularization-service", "Admin");
 
     public async Task<bool> IsEnabledAsync(CancellationToken ct = default)
     {

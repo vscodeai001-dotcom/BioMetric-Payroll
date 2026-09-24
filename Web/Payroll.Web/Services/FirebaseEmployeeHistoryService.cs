@@ -21,10 +21,7 @@ public sealed class FirebaseEmployeeHistoryService
         _configuration = configuration;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("employee-history", "Admin");
 
     public async Task<List<SalaryAdvance>> GetAdvancesAsync(int employeeId, CancellationToken ct = default)
     {

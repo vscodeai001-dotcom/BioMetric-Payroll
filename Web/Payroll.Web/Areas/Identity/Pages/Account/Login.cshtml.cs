@@ -69,6 +69,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
         private readonly FirebaseRealtimeService
             _firebaseRealtime;
+        private readonly IAppModeService
+            _appMode;
 
 
         // ============================================================
@@ -85,7 +87,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             AttendanceEventMonitorService attendanceMonitor,
             FirebaseEmployeeManagementService firebaseEmployees,
             FirebaseEmployeePresenceService firebasePresence,
-            FirebaseRealtimeService firebaseRealtime)
+            FirebaseRealtimeService firebaseRealtime,
+            IAppModeService appMode)
         {
             _signInManager = signInManager;
             _userManager = userManager;
@@ -97,6 +100,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             _firebaseEmployees = firebaseEmployees;
             _firebasePresence = firebasePresence;
             _firebaseRealtime = firebaseRealtime;
+            _appMode = appMode;
         }
 
 
@@ -378,7 +382,68 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             }
 
             // ========================================================
-            // SINGLE SESSION FOR ALL ROLES
+            // SUPERADMIN & ADMIN: UNRESTRICTED INSTANT LOGIN
+            // ========================================================
+            // SuperAdmin and Company Admins are governance/management users
+            // and must NEVER be blocked by single-device employee locks or
+            // employee session replacement constraints.
+            // ========================================================
+
+            if (isSuperAdmin || isAdmin || !isEmployee)
+            {
+                var customClaims = new List<Claim>();
+
+                string? tenantId = null;
+                if (!isSuperAdmin)
+                {
+                    await using var db = await _dbFactory.CreateDbContextAsync();
+                    var tenant = await db.CompanyTenants
+                        .FirstOrDefaultAsync(t => (user.Id != null && t.AdminUserId == user.Id) ||
+                                                  (t.AdminEmail.ToLower() == email.ToLower()));
+                    if (tenant != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(tenant.AdminUserId) || tenant.AdminUserId != user.Id)
+                        {
+                            tenant.AdminUserId = user.Id;
+                            await db.SaveChangesAsync();
+                        }
+                        tenantId = tenant.TenantId;
+                        customClaims.Add(new Claim("TenantId", tenantId));
+                        customClaims.Add(new Claim("OwnerUid", tenantId));
+                        customClaims.Add(new Claim("CompanyName", tenant.CompanyName));
+                    }
+                }
+                else
+                {
+                    customClaims.Add(new Claim("IsSuperAdmin", "true"));
+                }
+
+                await _signInManager.SignInWithClaimsAsync(user, Input.RememberMe, customClaims);
+                _logger.LogInformation("ADMIN / SUPERADMIN LOGIN SUCCESS WITHOUT RESTRICTION. UserId={UserId}, Email={Email}, TenantId={TenantId}", user.Id, email, tenantId);
+
+                await _attendanceMonitor.RecordAsync(
+                    "LOGIN_SUCCESS", user.Id, user.Email ?? email, "WEB_ADMIN", "Web", "SUCCESS",
+                    "ADMIN_LOGIN_UNRESTRICTED", null, null);
+
+                if (isSuperAdmin)
+                {
+                    if (!await _appMode.IsOfflineModeAsync())
+                    {
+                        return LocalRedirect("/superadmin/tenants");
+                    }
+                    return LocalRedirect("/");
+                }
+
+                if (!string.IsNullOrWhiteSpace(ReturnUrl) && ReturnUrl != "/" && Url.IsLocalUrl(ReturnUrl))
+                {
+                    return LocalRedirect(ReturnUrl);
+                }
+
+                return LocalRedirect("/");
+            }
+
+            // ========================================================
+            // SINGLE SESSION FOR EMPLOYEES ONLY
             // ========================================================
 
             var deviceId =
@@ -640,7 +705,11 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
 
                 if (isSuperAdmin)
                 {
-                    return LocalRedirect("/superadmin/tenants");
+                    if (!await _appMode.IsOfflineModeAsync())
+                    {
+                        return LocalRedirect("/superadmin/tenants");
+                    }
+                    return LocalRedirect("/");
                 }
 
                 return LocalRedirect("/");

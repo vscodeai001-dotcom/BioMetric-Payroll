@@ -202,10 +202,14 @@ class FirebaseRoomHydrator @Inject constructor(
             ref.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     scope.launch {
-                        delay(2000L)
                         writeMutex.withLock {
                             runCatching {
                                 if (snapshot.exists() && snapshot.childrenCount > 0) {
+                                    // Guarantee immediate hydration of all records into Room
+                                    for (child in snapshot.children) {
+                                        runCatching { onUpsert(child) }
+                                    }
+
                                     val firebaseKeys = snapshot.children.mapNotNull { it.key }.toSet()
                                     val staleSynced = existing().asSequence()
                                         .filter { (id, syncState) -> syncState != 0 && id.isNotBlank() && id !in firebaseKeys }
@@ -218,14 +222,14 @@ class FirebaseRoomHydrator @Inject constructor(
                                     }
                                 }
                             }.onFailure { error ->
-                                Log.e("FirebaseRoomHydrator", "Failed to reconcile stale Room records for $table", error)
+                                Log.e("FirebaseRoomHydrator", "Failed to reconcile Room records for $table", error)
                             }
                         }
                     }
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table", error.toException())
+                    Log.w("FirebaseRoomHydrator", "Initial reconciliation cancelled for $table: ${error.message}")
                 }
             })
         }

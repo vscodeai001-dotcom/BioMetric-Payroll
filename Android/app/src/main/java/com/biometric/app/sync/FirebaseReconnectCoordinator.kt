@@ -53,13 +53,16 @@ class FirebaseReconnectCoordinator @Inject constructor(
                 val connected = snapshot.getValue(Boolean::class.java) == true
                 if (!connected) return
 
-                // Firebase has resumed transport. Its own pending writes will
-                // drain automatically. WorkManager handles the separate GPS
-                // Room queue with durable retry/backoff semantics.
+                // Firebase has resumed transport. Force a full listener rebind so
+                // stale ChildEventListeners (which silently stop delivering updates
+                // after a long background/idle period) are detached and reattached.
+                // Using forceRebind() bypasses the listeners.isNotEmpty() guard that
+                // made hydrator.start() a no-op after a long idle, which was the root
+                // cause of the "no live emp / stale data" bug after hours of inactivity.
                 scope.launch {
                     runCatching {
                         firebaseSync.startSync()
-                        hydrator.start()
+                        hydrator.forceRebind("Firebase transport reconnected after idle")
                         OfflineSyncWorker.schedule(context)
                     }.onFailure {
                         Log.w("FirebaseReconnect", "Reconnect recovery scheduling failed", it)

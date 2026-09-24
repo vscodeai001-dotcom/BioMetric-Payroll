@@ -83,6 +83,8 @@ public sealed class FirebaseUserManagementService
 
                 if (isCanonicalSuperAdmin)
                     role = "SuperAdmin";
+                else if (string.Equals(role, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+                    role = "Admin";
 
                 var key = !string.IsNullOrWhiteSpace(email) ? email.Trim().ToLowerInvariant() : u.Id;
 
@@ -119,7 +121,27 @@ public sealed class FirebaseUserManagementService
                         string.Equals(email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase);
 
                     if (isCanonicalSuperAdmin)
+                    {
                         fbRole = "SuperAdmin";
+                    }
+                    else if (string.Equals(fbRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        fbRole = "Admin";
+                        // Immediately correct custom claims in Firebase Auth asynchronously
+                        var targetUid = fbUser.Uid;
+                        var existingClaims = fbUser.CustomClaims != null
+                            ? new Dictionary<string, object>(fbUser.CustomClaims)
+                            : new Dictionary<string, object>();
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                existingClaims["role"] = "Admin";
+                                await auth.SetCustomUserClaimsAsync(targetUid, existingClaims);
+                            }
+                            catch { }
+                        });
+                    }
 
                     int? fbEmployeeId = null;
                     if (fbUser.CustomClaims != null &&
@@ -170,6 +192,11 @@ public sealed class FirebaseUserManagementService
                 user.CurrentRole = "SuperAdmin";
                 user.EmployeeName = "SuperAdmin";
                 continue;
+            }
+
+            if (string.Equals(user.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+            {
+                user.CurrentRole = "Admin";
             }
 
             Employee? linked = null;
@@ -317,6 +344,8 @@ public sealed class FirebaseUserManagementService
     public async Task<UserManagementResult> ChangeRoleAsync(string firebaseUid, string newRole, CancellationToken ct)
     {
         newRole = NormalizeRole(newRole);
+        if (string.Equals(newRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+            return Fail("Only prakashshiva368@gmail.com can be SuperAdmin. No other user can be assigned the SuperAdmin role.");
         if (!IsSupportedRole(newRole))
             return Fail("Only Admin and Employee roles can be assigned.");
         if (string.IsNullOrWhiteSpace(firebaseUid))
@@ -512,6 +541,73 @@ public sealed class FirebaseUserManagementService
         };
         if (!await _firebase.SetGlobalRecordAsync($"user_profiles/{uid}", profile, ct))
             throw new InvalidOperationException("Firebase user profile synchronization failed.");
+    }
+
+    public async Task<(bool Success, string Message)> ResetPasswordAsync(
+        string emailOrUid,
+        string newPassword,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(emailOrUid))
+            return (false, "User identifier is required.");
+
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+            return (false, "Password must be at least 6 characters.");
+
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(ct);
+            var user = await _users.FindByEmailAsync(emailOrUid) ?? await _users.FindByIdAsync(emailOrUid);
+
+            if (user != null)
+            {
+                var token = await _users.GeneratePasswordResetTokenAsync(user);
+                var resetResult = await _users.ResetPasswordAsync(user, token, newPassword);
+                if (!resetResult.Succeeded)
+                {
+                    var errors = string.Join("; ", resetResult.Errors.Select(e => e.Description));
+                    return (false, $"Password update failed: {errors}");
+                }
+            }
+
+            // Sync with Firebase Authentication
+            var auth = await _firebase.GetFirebaseAuthAsync(ct);
+            if (auth != null)
+            {
+                UserRecord? fbUser = null;
+                try
+                {
+                    fbUser = await auth.GetUserAsync(emailOrUid, ct);
+                }
+                catch
+                {
+                    try
+                    {
+                        fbUser = await auth.GetUserByEmailAsync(emailOrUid, ct);
+                    }
+                    catch
+                    {
+                        // Firebase user not found
+                    }
+                }
+
+                if (fbUser != null)
+                {
+                    await auth.UpdateUserAsync(new UserRecordArgs
+                    {
+                        Uid = fbUser.Uid,
+                        Password = newPassword
+                    }, ct);
+                }
+            }
+
+            return (true, "Password successfully updated.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting password for {User}", emailOrUid);
+            return (false, $"Error resetting password: {ex.Message}");
+        }
     }
 
     private static string NormalizeRole(string role) =>

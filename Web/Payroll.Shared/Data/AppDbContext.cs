@@ -428,6 +428,64 @@ public class AppDbContext
             });
         });
     }
+
+    public static async Task EnsureSqliteSchemaUpdatedAsync(DbContext dbContext, CancellationToken ct = default)
+    {
+        try
+        {
+            var connection = dbContext.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await connection.OpenAsync(ct);
+            }
+
+            // 1. Ensure newly added columns on feature_settings
+            await EnsureColumnExistsAsync(connection, "feature_settings", "firebase_plan_mode", "TEXT DEFAULT 'Spark'", ct);
+            await EnsureColumnExistsAsync(connection, "feature_settings", "is_offline_mode", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnExistsAsync(connection, "feature_settings", "deployment_mode", "TEXT DEFAULT 'Online'", ct);
+
+            // 2. Ensure newly added columns on CompanyTenants
+            await EnsureColumnExistsAsync(connection, "CompanyTenants", "is_offline_mode", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnExistsAsync(connection, "CompanyTenants", "deployment_mode", "TEXT DEFAULT 'Online'", ct);
+
+            // 3. Ensure tenant_id on employees
+            await EnsureColumnExistsAsync(connection, "employees", "tenant_id", "TEXT NULL", ct);
+        }
+        catch { }
+    }
+
+    private static async Task EnsureColumnExistsAsync(
+        System.Data.Common.DbConnection connection,
+        string tableName,
+        string columnName,
+        string columnDefinition,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = $"PRAGMA table_info({tableName});";
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            var exists = false;
+            while (await reader.ReadAsync(ct))
+            {
+                if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+            await reader.CloseAsync();
+
+            if (!exists)
+            {
+                await using var alterCmd = connection.CreateCommand();
+                alterCmd.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};";
+                await alterCmd.ExecuteNonQueryAsync(ct);
+            }
+        }
+        catch { }
+    }
 }
 
 

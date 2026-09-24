@@ -111,6 +111,7 @@ namespace Payroll.AttendanceService
                 using var initScope = _serviceProvider.CreateScope();
                 var initDb = initScope.ServiceProvider.GetRequiredService<AppDbContext>();
                 await initDb.Database.EnsureCreatedAsync(stoppingToken);
+                await AppDbContext.EnsureSqliteSchemaUpdatedAsync(initDb, stoppingToken);
                 _logger.LogInformation("Local SQLite compatibility database is ready.");
 
                 // REQUIREMENT: Hydrate the local operational cache from Firebase before
@@ -222,29 +223,7 @@ namespace Payroll.AttendanceService
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
                 await dbContext.Database.EnsureCreatedAsync(stoppingToken);
-                try
-                {
-                    var connection = dbContext.Database.GetDbConnection();
-                    await connection.OpenAsync(stoppingToken);
-                    await using var cmd = connection.CreateCommand();
-                    cmd.CommandText = "PRAGMA table_info(feature_settings);";
-                    await using var reader = await cmd.ExecuteReaderAsync(stoppingToken);
-                    var hasColumn = false;
-                    while (await reader.ReadAsync(stoppingToken))
-                    {
-                        if (string.Equals(reader.GetString(1), "firebase_plan_mode", StringComparison.OrdinalIgnoreCase))
-                        {
-                            hasColumn = true;
-                            break;
-                        }
-                    }
-                    if (!hasColumn)
-                    {
-                        await dbContext.Database.ExecuteSqlRawAsync(
-                            "ALTER TABLE feature_settings ADD COLUMN firebase_plan_mode TEXT DEFAULT 'Spark';", stoppingToken);
-                    }
-                }
-                catch { }
+                await AppDbContext.EnsureSqliteSchemaUpdatedAsync(dbContext, stoppingToken);
 
                 var settings = await dbContext.FeatureSettings
                     .AsNoTracking()

@@ -38,31 +38,125 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     {
         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
 
-        var ownerUid = _configuration["Firebase:OwnerUid"]?.Trim();
-        if (string.IsNullOrWhiteSpace(ownerUid))
-            ownerUid = Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")?.Trim();
-        if (string.IsNullOrWhiteSpace(ownerUid))
-            ownerUid = "biometricpayroll";
+        var activeTenants = new System.Collections.Concurrent.ConcurrentDictionary<string, (Task OwnerTask, Task TrackingTask)>(StringComparer.OrdinalIgnoreCase);
 
-        // First hydrate the local compatibility projection so the existing Web
-        // screens have a complete initial view of the Firebase SSOT.
-        await SyncAllTablesAsync(ownerUid, stoppingToken);
+        async Task StartTenantSyncAsync(string tenantId)
+        {
+            if (string.IsNullOrWhiteSpace(tenantId) || activeTenants.ContainsKey(tenantId))
+                return;
 
-        // From this point forward Firebase's REST event streams are the trigger.
-        // Owner CRUD and native Android GPS are separate Firebase trees but are
-        // consumed by this same compatibility bridge so the existing Web UI
-        // updates without a browser refresh.
-        var ownerTask = RunOwnerStreamLoopAsync(ownerUid, stoppingToken);
+            try
+            {
+                using (var checkScope = _scopeFactory.CreateScope())
+                {
+                    var appMode = checkScope.ServiceProvider.GetService<IAppModeService>();
+                    if (appMode != null && await appMode.IsOfflineModeAsync())
+                    {
+                        _logger.LogInformation("Skipping Firebase sync for tenant {TenantId}: Application is running in Offline Standalone Mode.", tenantId);
+                        return;
+                    }
 
-        // REQUIREMENT: Sync tracking history and events from the owner-scoped node.
-        // Android now writes history to /owners/{ownerUid}/tracking/history to
-        // maintain tenant isolation.
-        var trackingTask = RunGlobalStreamLoopAsync($"owners/{ownerUid}/tracking", async (path, data, ct) =>
-            await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
+                    var dbFactory = checkScope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                    if (dbFactory != null)
+                    {
+                        using var db = await dbFactory.CreateDbContextAsync(stoppingToken);
+                        var tenant = await db.CompanyTenants.AsNoTracking().FirstOrDefaultAsync(t => t.TenantId == tenantId, stoppingToken);
+                        if (tenant != null && (tenant.IsOfflineMode || string.Equals(tenant.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _logger.LogInformation("Skipping Firebase sync for tenant {TenantId}: Tenant is configured for Offline Standalone Mode.", tenantId);
+                            return;
+                        }
+                    }
+                }
 
-        var authTask = RunGlobalStreamLoopAsync("mobile_auth_events", async (path, data, ct) =>
-            await ProcessFirebaseMobileAuthEventAsync(path, data, ct), stoppingToken);
-        await Task.WhenAll(ownerTask, trackingTask, authTask);
+                _logger.LogInformation("Initializing SQLite sync and tracking stream for tenant {TenantId}", tenantId);
+                await SyncAllTablesAsync(tenantId, stoppingToken);
+
+                var ownerTask = RunOwnerStreamLoopAsync(tenantId, stoppingToken);
+                var trackingTask = RunGlobalStreamLoopAsync($"owners/{tenantId}/tracking", async (path, data, ct) =>
+                    await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
+
+                activeTenants[tenantId] = (ownerTask, trackingTask);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to initialize sync and tracking streams for tenant {TenantId}", tenantId);
+            }
+        }
+
+        // 1. Initial tenant discovery
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = dbFactory.CreateDbContext();
+                var tenantIds = await db.CompanyTenants.AsNoTracking().Where(t => t.IsActive).Select(t => t.TenantId).ToListAsync(stoppingToken);
+                foreach (var tid in tenantIds)
+                {
+                    await StartTenantSyncAsync(tid);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed initial tenant discovery for FirebaseSqliteSyncService.");
+        }
+
+        // Always ensure default primary tenant is streaming (if not offline)
+        await StartTenantSyncAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+
+        // Global mobile auth events stream (Online mode only)
+        var authTask = Task.Run(async () =>
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                _logger.LogInformation("Offline mode active: mobile_auth_events Firebase streaming paused.");
+                return;
+            }
+            await RunGlobalStreamLoopAsync("mobile_auth_events", async (path, data, ct) =>
+                await ProcessFirebaseMobileAuthEventAsync(path, data, ct), stoppingToken);
+        }, stoppingToken);
+
+        // Continuous watcher loop to dynamically discover any newly provisioned tenants
+        var watcherTask = Task.Run(async () =>
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+
+                    using var scope = _scopeFactory.CreateScope();
+                    var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                    if (dbFactory != null)
+                    {
+                        using var db = dbFactory.CreateDbContext();
+                        var currentTenantIds = await db.CompanyTenants.AsNoTracking().Where(t => t.IsActive).Select(t => t.TenantId).ToListAsync(stoppingToken);
+                        foreach (var tid in currentTenantIds)
+                        {
+                            if (!activeTenants.ContainsKey(tid))
+                            {
+                                await StartTenantSyncAsync(tid);
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Periodic tenant sync check encountered an issue.");
+                }
+            }
+        }, stoppingToken);
+
+        await Task.WhenAll(authTask, watcherTask);
     }
 
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
@@ -887,7 +981,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     string ownerUid,
     CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(ownerUid))
+        if (string.IsNullOrWhiteSpace(ownerUid) ||
+            ownerUid.Equals("tenant_nocompany", StringComparison.OrdinalIgnoreCase) ||
+            ownerUid.StartsWith("tenant_no", StringComparison.OrdinalIgnoreCase))
             return false;
 
         const int bootstrapHistoryLimitPerEmployee = 2000;

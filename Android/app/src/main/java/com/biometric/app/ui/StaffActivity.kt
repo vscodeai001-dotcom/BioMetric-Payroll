@@ -819,6 +819,12 @@ class StaffActivity : MotionBaseActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        sharedViewModel.warmUpDashboard()
+        refreshRealtime()
+    }
+
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         val extraActions = listOf(
             GlobalSwitcherDelegate.ActionItem("👤", "Add Staff") {

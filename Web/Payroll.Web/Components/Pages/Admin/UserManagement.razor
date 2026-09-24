@@ -26,20 +26,35 @@
 
 <PageTitle>👥 User & Role Management</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-    <div>
-        <div class="d-flex align-items-center gap-2">
-            <h3 class="fw-bold text-primary mb-0"><span class="me-2">👥</span>User &amp; Role Management</h3>
-            @if (isSuperAdmin)
-            {
-                <span class="badge bg-warning text-dark fw-bold">👑 SuperAdmin Mode</span>
-            }
-            else if (activeTenant != null)
-            {
-                <span class="badge bg-info text-dark fw-bold">🏢 @activeTenant.CompanyName</span>
-            }
+<div class="page-header-container mb-4">
+    <div class="d-flex align-items-center gap-3">
+        <div class="emoji-icon-badge emoji-icon-badge-primary">
+            👥
         </div>
-        <p class="text-muted small mb-0 mt-1">Manage staff user accounts, assign roles, and link credentials to employee records.</p>
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <h2 class="page-header-title">
+                    User &amp; Role Management
+                </h2>
+                @if (isSuperAdmin)
+                {
+                    <span class="badge bg-warning text-dark fw-bold rounded-pill px-3 py-1">👑 SuperAdmin Mode</span>
+                }
+                else if (activeTenant != null)
+                {
+                    <span class="badge bg-info text-dark fw-bold rounded-pill px-3 py-1">🏢 @activeTenant.CompanyName</span>
+                }
+            </div>
+            <p class="page-header-subtitle">
+                <span>🔐 Provision user accounts, assign role permissions, and link credentials to employee profiles</span>
+            </p>
+        </div>
+    </div>
+
+    <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-3 py-2 fw-semibold border border-primary border-opacity-25">
+            <span>🛡️ Identity & Access Control</span>
+        </span>
     </div>
 </div>
 
@@ -52,8 +67,8 @@
 }
 else
 {
-    <div class="row">
-        <div class="col-md-5 mb-4">
+    <div class="row g-3">
+        <div class="col-12 col-xxl-3 col-xl-4 col-lg-4 mb-4">
             <UserCreationForm NewUserForm="newUserForm"
                               UnlinkedEmployees="unlinkedEmployees"
                               IsSaving="isSaving"
@@ -62,7 +77,7 @@ else
                               OnCreateUser="CreateNewUser" />
         </div>
 
-        <div class="col-md-7 mb-4">
+        <div class="col-12 col-xxl-9 col-xl-8 col-lg-8 mb-4">
 
             @* ---- EVENT HANDLERS PASSED TO CHILD ---- *@
             @* ---- STATE BINDINGS PASSED TO CHILD ----- *@
@@ -72,6 +87,7 @@ else
                            IsSaving="isSaving"
                            IsSuperAdmin="isSuperAdmin"
                            OnEditRoleRequested="HandleEditRoleStart"
+                           OnResetPasswordRequested="HandlePasswordResetStart"
                            OnDeleteUser="ConfirmDeleteUser"
                            UpdateUserRole="UpdateUserRole"
                            ShowEditRoleModal="showEditRoleModal"
@@ -80,6 +96,39 @@ else
                            ShowEditRoleModalChanged="((bool v) => showEditRoleModal = v)"
                            UserToEditRoleChanged="((UserRoleViewModel? v) => userToEditRole = v)"
                            NewRoleForUserChanged="((string v) => newRoleForUser = v)" />
+        </div>
+    </div>
+}
+
+@if (showPasswordModal && userToResetPassword != null)
+{
+    <div class="modal fade show" style="display:block;background:rgba(0,0,0,0.65);" aria-modal="true" role="dialog">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg rounded-3">
+                <div class="modal-header bg-warning text-dark py-2">
+                    <h6 class="modal-title fw-bold mb-0">
+                        <i class="bi bi-key-fill me-2"></i>Change Password
+                    </h6>
+                    <button class="btn-close" @onclick="() => showPasswordModal = false" disabled="@isSaving"></button>
+                </div>
+                <div class="modal-body p-3">
+                    <div class="text-muted small mb-2 text-truncate" title="@userToResetPassword.Email">
+                        Account: <strong>@userToResetPassword.Email</strong>
+                    </div>
+                    <label class="form-label fw-bold small">New Password</label>
+                    <input type="password" class="form-control" @bind="newPasswordForUser" placeholder="Min 6 characters" />
+                </div>
+                <div class="modal-footer bg-light p-2">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => showPasswordModal = false" disabled="@isSaving">Cancel</button>
+                    <button class="btn btn-sm btn-warning text-dark fw-bold px-3" @onclick="ExecutePasswordReset" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Save Password
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 }
@@ -110,6 +159,10 @@ else
     private string newRoleForUser = "Employee";
     private bool showEditRoleModal = false;
 
+    private bool showPasswordModal = false;
+    private UserRoleViewModel? userToResetPassword;
+    private string newPasswordForUser = string.Empty;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadUsersAndRoles();
@@ -132,16 +185,46 @@ else
                 // Company Admin is strictly isolated:
                 // 1. Never see root SuperAdmin account
                 // 2. Never see administrators of other client companies
+                // 3. Only see their own admin account and employees belonging to this company!
                 var otherAdmins = allTenants
                     .Where(t => t.Id != activeTenant?.Id)
                     .Select(t => t.AdminEmail.Trim().ToLowerInvariant())
                     .ToHashSet();
 
+                var activeAdminEmail = activeTenant?.AdminEmail?.Trim().ToLowerInvariant();
+                var activeAdminUserId = activeTenant?.AdminUserId;
+
+                var employeeIds = allEmployees.Select(e => e.EmployeeID).ToHashSet();
+                var employeeEmails = allEmployees.Where(e => !string.IsNullOrWhiteSpace(e.Email)).Select(e => e.Email!.Trim().ToLowerInvariant()).ToHashSet();
+                var employeeUserIds = allEmployees.Where(e => !string.IsNullOrWhiteSpace(e.AspNetUserId)).Select(e => e.AspNetUserId!.Trim()).ToHashSet();
+
                 userList = rawUsers.Where(u =>
-                    !string.Equals(u.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(u.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase) &&
-                    (string.IsNullOrWhiteSpace(u.Email) || !otherAdmins.Contains(u.Email.Trim().ToLowerInvariant()))
-                ).ToList();
+                {
+                    if (string.Equals(u.CurrentRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(u.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    if (!string.IsNullOrWhiteSpace(u.Email) && otherAdmins.Contains(u.Email.Trim().ToLowerInvariant()))
+                        return false;
+
+                    // Current company admin
+                    var isCurrentCompanyAdmin = (!string.IsNullOrWhiteSpace(activeAdminEmail) && string.Equals(u.Email?.Trim(), activeAdminEmail, StringComparison.OrdinalIgnoreCase)) ||
+                                                (!string.IsNullOrWhiteSpace(activeAdminUserId) && u.UserId == activeAdminUserId);
+                    if (isCurrentCompanyAdmin)
+                        return true;
+
+                    // Linked to this company's employees
+                    if (u.EmployeeId.HasValue && employeeIds.Contains(u.EmployeeId.Value))
+                        return true;
+                    if (!string.IsNullOrWhiteSpace(u.Email) && employeeEmails.Contains(u.Email.Trim().ToLowerInvariant()))
+                        return true;
+                    if (!string.IsNullOrWhiteSpace(u.UserId) && employeeUserIds.Contains(u.UserId.Trim()))
+                        return true;
+                    if (!string.IsNullOrWhiteSpace(u.FirebaseUid) && employeeUserIds.Contains(u.FirebaseUid.Trim()))
+                        return true;
+
+                    return false;
+                }).ToList();
             }
             else
             {
@@ -213,13 +296,67 @@ else
         showEditRoleModal = true;
     }
 
+    private void HandlePasswordResetStart(UserRoleViewModel user)
+    {
+        userToResetPassword = user;
+        newPasswordForUser = string.Empty;
+        showPasswordModal = true;
+    }
+
+    private async Task ExecutePasswordReset()
+    {
+        if (userToResetPassword == null) return;
+        if (string.IsNullOrWhiteSpace(newPasswordForUser) || newPasswordForUser.Length < 6)
+        {
+            toastService.ShowWarning("Password must be at least 6 characters.");
+            return;
+        }
+
+        isSaving = true;
+        try
+        {
+            var targetId = userToResetPassword.Email ?? userToResetPassword.UserId;
+            var result = await FirebaseUsers.ResetPasswordAsync(targetId, newPasswordForUser, CancellationToken.None);
+            if (result.Success)
+            {
+                toastService.ShowSuccess($"Password successfully changed for {userToResetPassword.Email}.");
+                showPasswordModal = false;
+            }
+            else
+            {
+                toastService.ShowError(result.Message);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting password");
+            toastService.ShowError(ex.Message);
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
     private async Task UpdateUserRole()
     {
         if (userToEditRole == null) return;
 
+        if (string.Equals(newRoleForUser, "SuperAdmin", StringComparison.OrdinalIgnoreCase))
+        {
+            toastService.ShowWarning("Only prakashshiva368@gmail.com can be SuperAdmin. No other account can be assigned SuperAdmin.");
+            return;
+        }
+
+        if (string.Equals(userToEditRole.Email, TenantManagementService.AuthorizedSuperAdminDeleteEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            toastService.ShowWarning("The root SuperAdmin role cannot be changed.");
+            return;
+        }
+
         if (!isSuperAdmin && !string.Equals(newRoleForUser, "Employee", StringComparison.OrdinalIgnoreCase))
         {
-            toastService.ShowWarning("Only SuperAdmin can assign Admin or SuperAdmin roles.");
+            toastService.ShowWarning("Only SuperAdmin can assign Admin roles.");
             return;
         }
 

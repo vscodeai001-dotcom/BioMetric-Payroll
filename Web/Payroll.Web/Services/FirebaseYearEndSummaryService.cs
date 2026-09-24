@@ -30,9 +30,7 @@ public sealed class FirebaseYearEndSummaryService
     }
 
     public string ResolveOwnerUid()
-        => _configuration["Firebase:OwnerUid"]
-           ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-           ?? "biometricpayroll";
+        => _firebase.ResolveOwnerUid("year-end-summary", "Admin");
 
     public async Task PublishAsync(
         IReadOnlyCollection<YearEndSummary> summaries,

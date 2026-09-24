@@ -109,6 +109,51 @@ class BiometricApplication : Application(), Configuration.Provider {
         // the listener is registered.
         startRealtimeInfrastructure()
 
+        // Auto-heal realtime listeners whenever the app returns to foreground after background idle.
+        var foregroundActivityCount = 0
+        var isActivityChangingConfigs = false
+        var lastBackgroundTimestamp = 0L
+
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {
+                if (foregroundActivityCount == 0 && !isActivityChangingConfigs) {
+                    val idleTime = System.currentTimeMillis() - lastBackgroundTimestamp
+                    if (sessionStore.isLoggedIn() && FirebaseAuth.getInstance().currentUser != null) {
+                        Log.i("BiometricApplication", "App returned to foreground (idle: ${idleTime}ms) - healing realtime listeners")
+                        realtimeScope.launch {
+                            // Proactively refresh Firebase Auth token so expired tokens do not cause listener silence
+                            runCatching {
+                                FirebaseAuth.getInstance().currentUser?.getIdToken(false)
+                            }
+                            val role = sessionStore.userRole().trim().uppercase()
+                            val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+                            if (isAdmin) {
+                                firebaseRoomHydrator.forceRebind("Foreground resume after idle")
+                                adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
+                                runCatching { firebaseReconnectCoordinator.start() }
+                            }
+                            runCatching { signalRManager.start() }
+                            runCatching { signalRManager.reconcileLiveLocationsNow() }
+                        }
+                    }
+                }
+                foregroundActivityCount++
+            }
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {
+                isActivityChangingConfigs = activity.isChangingConfigurations
+                foregroundActivityCount--
+                if (foregroundActivityCount <= 0) {
+                    foregroundActivityCount = 0
+                    lastBackgroundTimestamp = System.currentTimeMillis()
+                }
+            }
+            override fun onActivitySaveInstanceState(activity: Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+
         // OSMDroid must be initialized BEFORE any Activity creates a MapView.
         // Moved to IO thread to prevent main-thread blockage during startup.
         CoroutineScope(Dispatchers.IO).launch {

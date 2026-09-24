@@ -118,12 +118,33 @@ public sealed class FirebaseEmployeeProvisioningService : BackgroundService
 
             if (firebaseUser == null) continue;
 
+            // Resolve which tenant this employee belongs to
+            string targetOwnerUid = employee.TenantId?.Trim() ?? string.Empty;
+
+            if (string.IsNullOrWhiteSpace(targetOwnerUid) &&
+                firebaseUser.CustomClaims != null &&
+                firebaseUser.CustomClaims.TryGetValue("owner_uid", out var existingOwner) &&
+                !string.IsNullOrWhiteSpace(existingOwner?.ToString()))
+            {
+                targetOwnerUid = existingOwner.ToString()!.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(targetOwnerUid))
+            {
+                targetOwnerUid = _firebase.ResolveOwnerUid(employee.Email, "Employee");
+            }
+
+            if (string.IsNullOrWhiteSpace(targetOwnerUid))
+            {
+                targetOwnerUid = Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
+            }
+
             // PERFORMANCE OPTIMIZATION: Check if claims are already accurately set.
             // Avoids making redundant Google Auth API write calls every cycle.
             if (firebaseUser.CustomClaims != null &&
                 firebaseUser.CustomClaims.TryGetValue("role", out var r) && r?.ToString() == "Employee" &&
                 firebaseUser.CustomClaims.TryGetValue("employee_id", out var eid) && Convert.ToInt32(eid) == employee.EmployeeID &&
-                firebaseUser.CustomClaims.TryGetValue("owner_uid", out var ouid) && ouid?.ToString() == ownerUid)
+                firebaseUser.CustomClaims.TryGetValue("owner_uid", out var ouid) && string.Equals(ouid?.ToString(), targetOwnerUid, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -138,7 +159,7 @@ public sealed class FirebaseEmployeeProvisioningService : BackgroundService
                     {
                         ["role"] = "Employee",
                         ["employee_id"] = employee.EmployeeID,
-                        ["owner_uid"] = ownerUid
+                        ["owner_uid"] = targetOwnerUid
                     },
                     opCts.Token);
 

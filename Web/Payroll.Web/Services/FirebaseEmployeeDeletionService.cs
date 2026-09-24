@@ -24,10 +24,7 @@ public sealed class FirebaseEmployeeDeletionService
         _logger = logger;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("employee-deletion", "Admin");
 
     public sealed class EmployeeDeletionDependencies
     {

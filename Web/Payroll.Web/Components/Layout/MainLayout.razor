@@ -14,6 +14,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject ITenantContextService TenantContext
+@inject IAppModeService AppMode
 
 <div class="page">
     <div class="sidebar">
@@ -25,13 +26,32 @@
     </div>
 
     <main>
-        <global::Payroll.Web.Components.UI.Layout.SuperAdminTenantBanner />
+        @if (!isOfflineMode)
+        {
+            <global::Payroll.Web.Components.UI.Layout.SuperAdminTenantBanner />
+        }
         <div class="top-row">
             <div class="header-content-wrapper">
-                <a class="navbar-brand d-flex align-items-center gap-2 fw-bold" href="">
-                    <span class="fs-4">🏢</span>
-                    <span>BioMetric <span class="text-primary">+ Payroll</span></span>
-                </a>
+                <div class="d-flex align-items-center gap-2">
+                    <a class="navbar-brand d-flex align-items-center gap-2 fw-bold" href="">
+                        <span class="fs-4">@(activeTenant?.IconEmoji ?? "🏢")</span>
+                        <span>BioMetric <span class="text-primary">+ Payroll</span></span>
+                    </a>
+                    @if (isOfflineMode)
+                    {
+                        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle px-2 py-1 d-inline-flex align-items-center gap-1 shadow-sm" title="Offline Standalone Mode: Local SQLite Database active without cloud dependencies">
+                            <span>📴</span>
+                            <span class="fw-bold">Offline Standalone</span>
+                        </span>
+                    }
+                    else if (activeTenant != null && !userIsSuperAdmin)
+                    {
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 d-none d-sm-inline-flex align-items-center gap-1 shadow-sm">
+                            <span>@(activeTenant.IconEmoji)</span>
+                            <span class="fw-bold">@activeTenant.CompanyName</span>
+                        </span>
+                    }
+                </div>
 
                 <div class="auth-section d-flex align-items-center">
                     @if (settings?.EnableInAppNotifications == true)
@@ -108,9 +128,11 @@
 </div>
 
 @code {
+    private bool isOfflineMode;
     private FeatureSettings? settings;
     private NavMenu? navMenuRef;
     private bool userIsSuperAdmin;
+    private CompanyTenant? activeTenant;
     private bool geoTrackingEnabled;
     private int employeeId;
     private string? themeUserId;
@@ -120,6 +142,9 @@
     {
         Theme.OnThemeChanged += StateHasChanged;
         Navigation.LocationChanged += HandleLocationChanged;
+
+        isOfflineMode = await AppMode.IsOfflineModeAsync();
+        AppMode.OnAppModeChanged += HandleAppModeChanged;
 
         var authState =
             await AuthState.GetAuthenticationStateAsync();
@@ -148,6 +173,9 @@
         userIsSuperAdmin =
             await TenantContext.IsSuperAdminAsync();
 
+        activeTenant =
+            await TenantContext.GetActiveTenantAsync();
+
         TenantContext.OnTenantChanged += HandleTenantChanged;
 
         await LoadFeatureSettings();
@@ -156,6 +184,14 @@
 
     private async void HandleTenantChanged()
     {
+        activeTenant = await TenantContext.GetActiveTenantAsync();
+        await LoadFeatureSettings();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async void HandleAppModeChanged()
+    {
+        isOfflineMode = await AppMode.IsOfflineModeAsync();
         await LoadFeatureSettings();
         await InvokeAsync(StateHasChanged);
     }
@@ -362,6 +398,7 @@
         Theme.OnThemeChanged -= StateHasChanged;
         Navigation.LocationChanged -= HandleLocationChanged;
         TenantContext.OnTenantChanged -= HandleTenantChanged;
+        AppMode.OnAppModeChanged -= HandleAppModeChanged;
     }
 
     private async Task LoadFeatureSettings()

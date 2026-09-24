@@ -21,6 +21,9 @@ namespace Payroll.Web.Services
         Task<FeatureSettings> GetActiveFeatureSettingsAsync();
         Task<CompanySetting> GetActiveCompanySettingAsync();
         Task<bool> IsSuperAdminAsync();
+        Task<bool> IsCurrentTenantOfflineModeAsync();
+        Task<string> GetCurrentTenantDeploymentModeAsync();
+        Task ClearActiveTenantAsync();
         event Action? OnTenantChanged;
     }
 
@@ -90,8 +93,17 @@ namespace Payroll.Web.Services
             // For regular Admin or Employee, resolve based on current user
             var authState = await _authStateProvider.GetAuthenticationStateAsync();
             var user = authState.User;
+
+            // 1. Direct claim check: instant resolution without DB query
+            var tenantClaim = user.FindFirst("TenantId")?.Value ?? user.FindFirst("OwnerUid")?.Value;
+            if (!string.IsNullOrWhiteSpace(tenantClaim))
+            {
+                return tenantClaim.Trim();
+            }
+
+            // 2. Database resolution by user identifier or email
             var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
-            var email = user.Identity?.Name;
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
 
             await using var db = await _dbFactory.CreateDbContextAsync();
 
@@ -143,6 +155,27 @@ namespace Payroll.Web.Services
             }
 
             OnTenantChanged?.Invoke();
+        }
+
+        public Task ClearActiveTenantAsync()
+        {
+            _superAdminSelectedTenantId = null;
+
+            try
+            {
+                var http = _httpContextAccessor.HttpContext;
+                if (http != null && !http.Response.HasStarted)
+                {
+                    http.Response.Cookies.Delete(TenantCookieName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not delete tenant cookie.");
+            }
+
+            OnTenantChanged?.Invoke();
+            return Task.CompletedTask;
         }
 
         public async Task<CompanyTenant?> GetActiveTenantAsync()
@@ -248,6 +281,25 @@ namespace Payroll.Web.Services
                 .FirstOrDefaultAsync(c => c.SettingID == 1);
 
             return defaultCompany ?? new CompanySetting();
+        }
+
+        public async Task<bool> IsCurrentTenantOfflineModeAsync()
+        {
+            var tenant = await GetActiveTenantAsync();
+            if (tenant != null)
+            {
+                if (tenant.IsOfflineMode || string.Equals(tenant.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+
+            var features = await GetActiveFeatureSettingsAsync();
+            return features.IsOfflineMode || string.Equals(features.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public async Task<string> GetCurrentTenantDeploymentModeAsync()
+        {
+            var isOffline = await IsCurrentTenantOfflineModeAsync();
+            return isOffline ? "Offline" : "Online";
         }
     }
 }

@@ -7,6 +7,7 @@ using FirebaseAdmin.Auth;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
 using Payroll.Shared.Data;
 
 namespace Payroll.Web.Services;
@@ -43,13 +44,27 @@ public sealed class FirebaseEmployeeManagementService
         _scopeFactory = scopeFactory;
     }
 
-    public string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    public string OwnerUid => _firebase.ResolveOwnerUid("employee-mgmt", "Admin");
 
     public async Task<List<Employee>> GetEmployeesAsync(CancellationToken ct = default)
     {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.Employees.AsNoTracking()
+                        .Where(x => !x.IsDeleted)
+                        .OrderBy(x => x.Name)
+                        .ToListAsync(ct);
+                }
+            }
+        }
+
         var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
         if (!snapshot.HasValue)
         {
@@ -129,6 +144,21 @@ public sealed class FirebaseEmployeeManagementService
     public async Task<Employee?> GetEmployeeAsync(int employeeId, CancellationToken ct = default)
     {
         if (employeeId <= 0) return null;
+
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeID == employeeId, ct);
+                }
+            }
+        }
+
         var snapshot = await _firebase.GetOwnerRecordAsync(
             OwnerUid, EmployeesTable, employeeId.ToString(CultureInfo.InvariantCulture), ct);
         return snapshot.HasValue && snapshot.Value.ValueKind == JsonValueKind.Object
@@ -169,6 +199,39 @@ public sealed class FirebaseEmployeeManagementService
     {
         if (employee == null) throw new ArgumentNullException(nameof(employee));
 
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    if (employee.EmployeeID <= 0)
+                    {
+                        var maxId = await db.Employees.Select(e => (int?)e.EmployeeID).MaxAsync(ct) ?? 0;
+                        employee.EmployeeID = maxId + 1;
+                        await db.Employees.AddAsync(employee, ct);
+                    }
+                    else
+                    {
+                        var existing = await db.Employees.FirstOrDefaultAsync(e => e.EmployeeID == employee.EmployeeID, ct);
+                        if (existing != null)
+                        {
+                            db.Entry(existing).CurrentValues.SetValues(employee);
+                        }
+                        else
+                        {
+                            await db.Employees.AddAsync(employee, ct);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
+                    return (true, employee, "Employee saved successfully to local database (Offline Standalone Mode).");
+                }
+            }
+        }
+
         var requestedId = employee.EmployeeID;
         var provisionalId = requestedId;
         if (provisionalId <= 0)
@@ -181,10 +244,30 @@ public sealed class FirebaseEmployeeManagementService
             try
             {
                 var all = await GetAllEmployeesIncludingDeletedAsync(ct);
-                provisionalId = all.Select(x => x.EmployeeID).Where(x => x > 0).DefaultIfEmpty(0).Max() + 1;
+                var maxLocal = all.Select(x => x.EmployeeID).Where(x => x > 0).DefaultIfEmpty(0).Max();
+
+                var maxDb = 0;
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                    if (dbFactory != null)
+                    {
+                        using var db = dbFactory.CreateDbContext();
+                        maxDb = db.Employees.Select(e => (int?)e.EmployeeID).Max() ?? 0;
+                    }
+                }
+                catch { }
+
+                provisionalId = Math.Max(maxLocal, maxDb) + 1;
             }
             finally { globalLock.Release(); }
             employee.EmployeeID = provisionalId;
+        }
+
+        if (string.IsNullOrWhiteSpace(employee.TenantId))
+        {
+            employee.TenantId = OwnerUid;
         }
 
         var gate = EmployeeWriteLocks.GetOrAdd(employee.EmployeeID, _ => new SemaphoreSlim(1, 1));
@@ -254,6 +337,27 @@ public sealed class FirebaseEmployeeManagementService
         int employeeId,
         CancellationToken ct = default)
     {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var existing = await db.Employees.FirstOrDefaultAsync(e => e.EmployeeID == employeeId, ct);
+                    if (existing != null)
+                    {
+                        existing.IsDeleted = true;
+                        await db.SaveChangesAsync(ct);
+                        return (true, existing, "Employee deleted from local database (Offline Standalone Mode).");
+                    }
+                    return (false, null, "Employee not found in local database.");
+                }
+            }
+        }
+
         var employee = await GetEmployeeAsync(employeeId, ct);
         if (employee == null)
             return (false, null, "Employee not found in Firebase.");
@@ -329,6 +433,15 @@ public sealed class FirebaseEmployeeManagementService
         if (employee.EmployeeID <= 0 || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             return null;
 
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                return "offline-user";
+            }
+        }
+
         // Reuse the existing provisioning path so Web and Android share the
         // same Firebase Auth UID, employee_id, role and owner_uid contract.
         var result = await ReconcileAuthAsync(employee, ct);
@@ -380,6 +493,15 @@ public sealed class FirebaseEmployeeManagementService
     {
         if (employee.EmployeeID <= 0)
             return (false, "Employee ID is invalid.");
+
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                return (true, "Offline mode active: Employee record created in local database without Firebase Auth.");
+            }
+        }
 
         if (string.IsNullOrWhiteSpace(employee.Email))
         {
@@ -612,14 +734,74 @@ public sealed class FirebaseEmployeeManagementService
 
     public async Task<CompanySetting?> GetCompanySettingsAsync(CancellationToken ct = default)
     {
-        var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, CompanySettingsTable, "1", ct);
-        return Deserialize<CompanySetting>(snapshot);
+        try
+        {
+            var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, CompanySettingsTable, "1", ct);
+            var res = Deserialize<CompanySetting>(snapshot);
+            if (res != null) return res;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read Firebase company setting for owner {OwnerUid}", OwnerUid);
+        }
+
+        // Fallback to SQLite company setting for this tenant
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = dbFactory.CreateDbContext();
+                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == OwnerUid);
+                var settingId = tenant?.CompanySettingId ?? 1;
+                var dbSetting = db.CompanySettings.AsNoTracking().FirstOrDefault(s => s.SettingID == settingId);
+                if (dbSetting != null)
+                    return dbSetting;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read fallback SQLite company settings for owner {OwnerUid}", OwnerUid);
+        }
+
+        return null;
     }
 
     public async Task<FeatureSettings?> GetFeatureSettingsAsync(CancellationToken ct = default)
     {
-        var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, FeatureSettingsTable, "1", ct);
-        return Deserialize<FeatureSettings>(snapshot);
+        try
+        {
+            var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, FeatureSettingsTable, "1", ct);
+            var res = Deserialize<FeatureSettings>(snapshot);
+            if (res != null) return res;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read Firebase feature setting for owner {OwnerUid}", OwnerUid);
+        }
+
+        // Fallback to SQLite feature setting for this tenant
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = dbFactory.CreateDbContext();
+                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == OwnerUid);
+                var featureId = tenant?.FeatureSettingsId ?? 1;
+                var dbFeatures = db.FeatureSettings.AsNoTracking().FirstOrDefault(f => f.Id == featureId);
+                if (dbFeatures != null)
+                    return dbFeatures;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read fallback SQLite feature settings for owner {OwnerUid}", OwnerUid);
+        }
+
+        return null;
     }
 
     public async Task<List<Employee>> GetAllEmployeesIncludingDeletedAsync(CancellationToken ct = default)
@@ -793,7 +975,8 @@ public sealed class FirebaseEmployeeManagementService
             RotationGroup = StringValue("rotationGroup"),
             ShiftRotationPattern = StringValue("shiftRotationPattern"),
             LastRotatedDate = DateValue("lastRotatedDate"),
-            CurrentShiftIndex = IntValue("currentShiftIndex")
+            CurrentShiftIndex = IntValue("currentShiftIndex"),
+            TenantId = StringValue("tenantId") ?? StringValue("ownerUid")
         };
 
         employee.DOB = DateValue("dob");
@@ -813,6 +996,8 @@ public sealed class FirebaseEmployeeManagementService
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["employeeId"] = employee.EmployeeID.ToString(CultureInfo.InvariantCulture),
+            ["tenantId"] = employee.TenantId,
+            ["ownerUid"] = employee.TenantId,
             ["shopId"] = string.Empty,
             ["name"] = employee.Name,
             ["email"] = employee.Email,

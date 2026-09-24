@@ -202,5 +202,13 @@ namespace Payroll.Shared.Data
         [Column("firebase_plan_mode")]
         public string FirebasePlanMode { get; set; } = "Spark";
 
+        // --- OPERATION / DEPLOYMENT MODE ---
+        // Online = Firebase Cloud based real-time sync
+        // Offline = 100% standalone built-in local SQLite database, zero internet required
+        [Column("is_offline_mode")]
+        public bool IsOfflineMode { get; set; } = false;
+
+        [Column("deployment_mode")]
+        public string DeploymentMode { get; set; } = "Online"; // "Online" or "Offline"
     }
 }

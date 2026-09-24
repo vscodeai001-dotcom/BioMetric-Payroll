@@ -29,44 +29,43 @@
 
 <PageTitle>Attendance Log Summary</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-        <h3 class="mb-0">
-            Attendance Log Summary
-        </h3>
-
-        <small class="text-muted">
-            Daily breakdown of punches and calculated hours.
-        </small>
+<div class="page-header-container">
+    <div class="d-flex align-items-center gap-3">
+        <div class="emoji-icon-badge emoji-icon-badge-primary">
+            ⏱️
+        </div>
+        <div>
+            <h2 class="page-header-title">
+                Attendance Master Logs
+            </h2>
+            <p class="page-header-subtitle">
+                <span>📊 Daily breakdown of biometric & mobile GPS punches, worked shifts & lateness rules</span>
+            </p>
+        </div>
     </div>
 
-    <div class="d-flex gap-2">
-
-        <button class="btn btn-outline-secondary"
+    <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-secondary action-pill-btn"
                 @onclick="ReprocessAttendance"
                 disabled="@isLoading">
-
             @if (isLoading)
             {
                 <span class="spinner-border spinner-border-sm"></span>
+                <span>Calculating...</span>
             }
             else
             {
-                <i class="bi bi-arrow-repeat"></i>
+                <span>🔄</span> <i class="bi bi-arrow-repeat"></i>
                 <span>Re-Process</span>
             }
-
         </button>
 
-        <button class="btn btn-outline-success"
+        <button class="btn btn-outline-success action-pill-btn"
                 @onclick="ExportCsv"
                 disabled="@(logs == null || !logs.Any())">
-
-            <i class="bi bi-file-earmark-spreadsheet"></i>
+            <span>📥</span> <i class="bi bi-file-earmark-spreadsheet-fill"></i>
             <span>Export CSV</span>
-
         </button>
-
     </div>
 </div>
 
@@ -80,80 +79,64 @@
 
 @if (cumulative != null)
 {
-    <div class="card mb-3 shadow-sm border-primary">
-
-        <div class="card-body py-3">
-
-            <div class="row text-center align-items-center">
-
-                <div class="col border-end">
-                    <h6 class="fw-bold mb-1"
-                        style="color:#663399 !important;">
-                        Scheduled
-                    </h6>
-
-                    <span class="fs-5"
-                          style="color:#663399;">
-                        @FormatTime(
-                            cumulative.TotalScheduledHours)
-                    </span>
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-purple text-center">
+                <div class="stat-label">📅 Scheduled</div>
+                <div class="stat-number text-purple" style="color: #8b5cf6;">
+                    @FormatTime(cumulative.TotalScheduledHours)
                 </div>
+                <div class="stat-sub">Shift Plan</div>
+            </div>
+        </div>
 
-                <div class="col border-end">
-                    <h6 class="fw-bold text-success mb-1">
-                        Worked
-                    </h6>
-
-                    <span class="fs-5 text-success fw-bold">
-                        @FormatDecimalHoursToTime(
-                            cumulative.TotalWorkedHours)
-                    </span>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-success text-center">
+                <div class="stat-label">✅ Worked</div>
+                <div class="stat-number text-success">
+                    @FormatDecimalHoursToTime(cumulative.TotalWorkedHours)
                 </div>
+                <div class="stat-sub">Actual Worked</div>
+            </div>
+        </div>
 
-                <div class="col border-end">
-                    <h6 class="fw-bold text-primary mb-1">
-                        OT
-                    </h6>
-
-                    <span class="fs-5 text-primary">
-                        @FormatTime(
-                            cumulative.TotalOvertime)
-                    </span>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-primary text-center">
+                <div class="stat-label">⚡ Overtime</div>
+                <div class="stat-number text-primary">
+                    @FormatTime(cumulative.TotalOvertime)
                 </div>
+                <div class="stat-sub">Approved OT</div>
+            </div>
+        </div>
 
-                <div class="col border-end">
-                    <h6 class="fw-bold text-danger mb-1">
-                        Penalty
-                    </h6>
-
-                    <span class="fs-5 text-danger">
-                        @FormatTime(
-                            cumulative.TotalOverallPenalty)
-                    </span>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-danger text-center">
+                <div class="stat-label">📉 Penalty</div>
+                <div class="stat-number text-danger">
+                    @FormatTime(cumulative.TotalOverallPenalty)
                 </div>
+                <div class="stat-sub">Loss of Hours</div>
+            </div>
+        </div>
 
-                <div class="col border-end">
-                    <h6 class="fw-bold text-warning mb-1">
-                        Lateness
-                    </h6>
-
-                    <span class="fs-5 text-warning">
-                        @FormatTime(
-                            cumulative.TotalLateness)
-                    </span>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-warning text-center">
+                <div class="stat-label">⏳ Lateness</div>
+                <div class="stat-number text-warning">
+                    @FormatTime(cumulative.TotalLateness)
                 </div>
+                <div class="stat-sub">Late Arrival</div>
+            </div>
+        </div>
 
-                <div class="col">
-                    <h6 class="fw-bold text-warning mb-1">
-                        Break Pen.
-                    </h6>
-
-                    <span class="fs-5 text-warning">
-                        @FormatTime(
-                            cumulative.TotalBreakPenalty)
-                    </span>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="premium-stat-card border-accent-info text-center">
+                <div class="stat-label">☕ Break Pen.</div>
+                <div class="stat-number text-info">
+                    @FormatTime(cumulative.TotalBreakPenalty)
                 </div>
-
+                <div class="stat-sub">Excess Break</div>
             </div>
         </div>
     </div>

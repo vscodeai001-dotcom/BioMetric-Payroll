@@ -33,10 +33,7 @@ public sealed class FirebaseShiftScheduleService
         _scopeFactory = scopeFactory;
     }
 
-    private string OwnerUid =>
-        _configuration["Firebase:OwnerUid"]
-        ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-        ?? "biometricpayroll";
+    private string OwnerUid => _firebase.ResolveOwnerUid("shift-service", "Admin");
 
     public async Task<List<ShiftSchedule>> GetSchedulesAsync(
         int employeeId = 0,

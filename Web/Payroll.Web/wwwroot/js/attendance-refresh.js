@@ -339,8 +339,23 @@ window.attendanceRefresh = (function () {
                                             notifyListeners('AttendanceChanged', {});
                                             notifyViewer();
                                         }).catch(scheduleRetry);
-                                    } else if (connection && connection.state === window.signalR.HubConnectionState.Connected) {
-                                        notifyViewer();
+                                function checkAndHealConnection() {
+                                    if (!firebaseStarted && !firebaseStarting) {
+                                        startFirebaseRealtime();
+                                    } else if (firebaseStarted && window.firebase && firebase.auth().currentUser) {
+                                        firebase.auth().currentUser.getIdToken(false).catch(function () {
+                                            firebaseStarted = false;
+                                            startFirebaseRealtime();
+                                        });
+                                    }
+                                    if (connection) {
+                                        if (connection.state === window.signalR.HubConnectionState.Disconnected) {
+                                            connection.start().then(function () {
+                                                notifyViewer();
+                                            }).catch(scheduleRetry);
+                                        } else if (connection.state === window.signalR.HubConnectionState.Connected) {
+                                            notifyViewer();
+                                        }
                                     }
                                 }
                                 window.addEventListener("visibilitychange", function () {
@@ -348,7 +363,7 @@ window.attendanceRefresh = (function () {
                                 });
                                 window.addEventListener("focus", checkAndHealConnection);
                                 window.addEventListener("online", checkAndHealConnection);
-                                setInterval(checkAndHealConnection, 120000);
+                                setInterval(checkAndHealConnection, 60000);
                             }
                         }
 

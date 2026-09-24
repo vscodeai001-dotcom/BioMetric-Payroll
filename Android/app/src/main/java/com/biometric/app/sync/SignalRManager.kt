@@ -397,8 +397,27 @@ class SignalRManager @Inject constructor(
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (error.code != DatabaseError.PERMISSION_DENIED) {
-                    Log.w("SignalRManager", "Owner employee binding listener cancelled: ${error.message}")
+                Log.w("SignalRManager", "Owner employee binding listener cancelled: code=${error.code}, message=${error.message}")
+
+                if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return
+
+                realtimeRecoveryJob?.cancel()
+                realtimeRecoveryJob = managerScope.launch {
+                    delay(500L)
+                    if (activeOwnerUid != ownerUid || !firebaseSync.isAuthenticated()) return@launch
+
+                    runCatching {
+                        FirebaseAuth.getInstance().currentUser?.getIdToken(true)?.await()
+                    }
+
+                    if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
+                        runCatching {
+                            realtimeRecoveryJob = null
+                            stop()
+                            delay(250L)
+                            start()
+                        }
+                    }
                 }
             }
         }
@@ -523,6 +542,22 @@ class SignalRManager @Inject constructor(
                     "SignalRManager",
                     "Immediate live-location reconciliation skipped: ${error.message}"
                 )
+            }
+
+            // Also pull fresh employee directory so live markers always map to valid employees
+            employeeListener?.let { empListener ->
+                val employeesRef = firebaseSync.getGlobalRef()
+                    .child("owners")
+                    .child(ownerUid)
+                    .child("employees")
+                runCatching {
+                    val empSnapshot = employeesRef.get().await()
+                    withContext(Dispatchers.Main.immediate) {
+                        empListener.onDataChange(empSnapshot)
+                    }
+                }.onFailure { error ->
+                    Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
+                }
             }
         }
     }

@@ -19,35 +19,40 @@
          LIVE STAFF HEADER
          ============================================================ -->
 
-    <div class="live-staff-header d-flex justify-content-between align-items-center">
+    <div class="live-staff-header d-flex justify-content-between align-items-center flex-wrap gap-2">
 
-        <div>
-            <h5 class="fw-bold mb-1">
-                <i class="bi bi-geo-alt-fill text-primary me-2"></i>
-                Live Staff Locations
-            </h5>
+        <div class="d-flex align-items-center gap-3">
+            <div class="emoji-icon-badge emoji-icon-badge-primary">
+                📍
+            </div>
+            <div>
+                <h5 class="fw-bold mb-0 d-flex align-items-center gap-2">
+                    <span>Live Staff GPS Radar</span>
+                    <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-2 py-1 fs-6">🛰️ Active</span>
+                </h5>
 
-            <small class="text-muted">
-                Current employee location from active GPS sessions
-            </small>
+                <small class="text-muted">
+                    ⚡ Real-time employee positioning from active mobile GPS tracking sessions
+                </small>
+            </div>
         </div>
 
-        <div class="d-flex align-items-center gap-2 live-staff-actions">
+        <div class="d-flex align-items-center gap-2 live-staff-actions flex-wrap">
 
-            <span class="live-count" data-live-count-for="@mapId">
-                <span class="live-count-dot"></span>
-                @liveCount Live / @employees.Count
+            <span class="live-count badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill fw-semibold" data-live-count-for="@mapId">
+                <span class="pulse-indicator pulse-indicator-success me-1"></span>
+                🟢 @liveCount Live Staff / @employees.Count
             </span>
 
             <button type="button"
-                    class="btn btn-outline-primary btn-sm"
+                    class="btn btn-outline-primary action-pill-btn btn-sm"
                     @onclick="RefreshLocations"
                     disabled="@isRefreshing">
 
                 <i class="bi bi-arrow-clockwise @(isRefreshing ? "spin" : "")"></i>
 
                 <span class="d-none d-md-inline ms-1">
-                    Refresh
+                    🔄 Refresh
                 </span>
 
             </button>

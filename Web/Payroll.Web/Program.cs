@@ -390,6 +390,8 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 builder.Services.AddScoped<TenantContextService>();
 builder.Services.AddScoped<TenantManagementService>();
+builder.Services.AddScoped<IAppModeService, AppModeService>();
+builder.Services.AddScoped<AppModeService>();
 
 builder.Services.AddHttpContextAccessor();
 
@@ -826,30 +828,7 @@ try
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
-
-    try
-    {
-        var connection = db.Database.GetDbConnection();
-        await connection.OpenAsync();
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "PRAGMA table_info(feature_settings);";
-        await using var reader = await cmd.ExecuteReaderAsync();
-        var hasColumn = false;
-        while (await reader.ReadAsync())
-        {
-            if (string.Equals(reader.GetString(1), "firebase_plan_mode", StringComparison.OrdinalIgnoreCase))
-            {
-                hasColumn = true;
-                break;
-            }
-        }
-        if (!hasColumn)
-        {
-            await db.Database.ExecuteSqlRawAsync(
-                "ALTER TABLE feature_settings ADD COLUMN firebase_plan_mode TEXT DEFAULT 'Spark';");
-        }
-    }
-    catch { }
+    await AppDbContext.EnsureSqliteSchemaUpdatedAsync(db);
 
     try
     {

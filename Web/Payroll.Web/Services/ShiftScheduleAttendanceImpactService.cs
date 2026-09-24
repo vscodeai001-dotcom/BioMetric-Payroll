@@ -38,10 +38,7 @@ public sealed class ShiftScheduleAttendanceImpactService
         _logger = logger;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("shift-impact", "Admin");
 
     public async Task RecalculateAsync(int employeeId, DateOnly date, CancellationToken ct = default)
     {

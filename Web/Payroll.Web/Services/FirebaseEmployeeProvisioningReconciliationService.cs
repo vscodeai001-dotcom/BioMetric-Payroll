@@ -73,17 +73,36 @@ public sealed class FirebaseEmployeeProvisioningReconciliationService : Backgrou
         if (employee.EmployeeID <= 0)
             return new(false, "Employee ID is invalid.");
 
-        var ownerUid = _configuration["Firebase:OwnerUid"]
-            ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-            ?? "biometricpayroll";
+        UserRecord? firebaseUser = await FindFirebaseUserAsync(employee, ct);
+
+        // Resolve target ownerUid for this employee
+        string ownerUid = employee.TenantId?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(ownerUid) && firebaseUser?.CustomClaims != null &&
+            firebaseUser.CustomClaims.TryGetValue("owner_uid", out var existingOwner) &&
+            !string.IsNullOrWhiteSpace(existingOwner?.ToString()))
+        {
+            ownerUid = existingOwner.ToString()!.Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(ownerUid))
+        {
+            ownerUid = _firebase.ResolveOwnerUid(employee.Email, "Employee");
+        }
+
+        if (string.IsNullOrWhiteSpace(ownerUid))
+        {
+            ownerUid = Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
+        }
 
         var firebaseRow = BuildEmployeeRow(employee);
+        firebaseRow["tenantId"] = ownerUid;
+        firebaseRow["ownerUid"] = ownerUid;
         var employeeWritten = await _firebase.SetOwnerRecordAsync(
             ownerUid, "employees", employee.EmployeeID.ToString(), firebaseRow, ct);
         if (!employeeWritten)
             return new(false, "Firebase employee record synchronization failed.");
 
-        UserRecord? firebaseUser = await FindFirebaseUserAsync(employee, ct);
         if (firebaseUser == null)
         {
             await _firebase.SetGlobalRecordAsync(

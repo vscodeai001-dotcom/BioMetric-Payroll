@@ -26,21 +26,23 @@ window.employeeCache = (function () {
         });
     }
 
-    async function put(payload) {
+    async function put(payload, tenantKey) {
         const db = await openDb();
+        const cacheKey = 'employee-roster-' + (tenantKey || 'default');
         return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).put({ key: KEY, savedAt: Date.now(), payload });
+            tx.objectStore(STORE).put({ key: cacheKey, savedAt: Date.now(), payload });
             tx.oncomplete = () => { db.close(); resolve(true); };
             tx.onerror = () => { db.close(); reject(tx.error || new Error('Cache write failed')); };
         });
     }
 
-    async function get() {
+    async function get(tenantKey) {
         const db = await openDb();
+        const cacheKey = 'employee-roster-' + (tenantKey || 'default');
         return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, 'readonly');
-            const request = tx.objectStore(STORE).get(KEY);
+            const request = tx.objectStore(STORE).get(cacheKey);
             request.onsuccess = () => {
                 const value = request.result;
                 db.close();
@@ -58,11 +60,12 @@ window.employeeCache = (function () {
         });
     }
 
-    async function clear() {
+    async function clear(tenantKey) {
         const db = await openDb();
+        const cacheKey = 'employee-roster-' + (tenantKey || 'default');
         return new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).delete(KEY);
+            tx.objectStore(STORE).delete(cacheKey);
             tx.oncomplete = () => { db.close(); resolve(true); };
             tx.onerror = () => { db.close(); reject(tx.error || new Error('Cache delete failed')); };
         });

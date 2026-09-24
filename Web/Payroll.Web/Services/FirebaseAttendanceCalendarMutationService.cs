@@ -26,10 +26,7 @@ public sealed class FirebaseAttendanceCalendarMutationService
         _logger = logger;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("attendance-cal-mutation", "Admin");
 
     public Task<bool> UpsertLeaveAsync(LeaveRequest leave, CancellationToken ct = default)
     {

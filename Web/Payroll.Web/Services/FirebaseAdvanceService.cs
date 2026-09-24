@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Payroll.Shared;
 using Payroll.Shared.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Payroll.Web.Services;
 
@@ -9,6 +10,7 @@ namespace Payroll.Web.Services;
 /// Firebase SSOT boundary for Salary Advances.
 /// Existing SalaryAdvance model, screens and payroll calculations remain intact.
 /// FirebaseKey is only the transport key for records created by Android using UUIDs.
+/// In Offline Standalone Mode, reads and writes directly to local SQLite database.
 /// </summary>
 public sealed class FirebaseAdvanceService
 {
@@ -18,17 +20,19 @@ public sealed class FirebaseAdvanceService
 
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
-    public FirebaseAdvanceService(FirebaseRealtimeService firebase, IConfiguration configuration)
+    public FirebaseAdvanceService(
+        FirebaseRealtimeService firebase,
+        IConfiguration configuration,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _firebase = firebase;
         _configuration = configuration;
+        _scopeFactory = scopeFactory;
     }
 
-    private string OwnerUid =>
-        _configuration["Firebase:OwnerUid"]
-        ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-        ?? "biometricpayroll";
+    private string OwnerUid => _firebase.ResolveOwnerUid("advance-service", "Admin");
 
     private static bool IsAdmin(System.Security.Claims.ClaimsPrincipal user) =>
         user.IsInRole("Admin") || user.IsInRole("SuperAdmin") ||
@@ -54,6 +58,21 @@ public sealed class FirebaseAdvanceService
 
     public async Task<List<Employee>> GetActiveEmployeesAsync(CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                }
+            }
+        }
+
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
@@ -105,6 +124,26 @@ public sealed class FirebaseAdvanceService
         bool unpaidOnly = false,
         CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var query = db.SalaryAdvances.AsNoTracking().AsQueryable();
+                    if (employeeId > 0) query = query.Where(a => a.EmployeeID == employeeId);
+                    if (from.HasValue) query = query.Where(a => a.AdvanceDate >= from.Value);
+                    if (to.HasValue) query = query.Where(a => a.AdvanceDate <= to.Value);
+                    if (unpaidOnly) query = query.Where(a => a.PayrollID_Paid == null);
+                    return await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
+                }
+            }
+        }
+
         var json = employeeId > 0
             ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, ct)
             : await _firebase.GetOwnerTableAsync(OwnerUid, Table, ct);
@@ -166,6 +205,40 @@ public sealed class FirebaseAdvanceService
     public async Task<bool> SaveAsync(SalaryAdvance advance, CancellationToken ct = default)
     {
         if (advance.EmployeeID <= 0 || advance.Amount <= 0m || !advance.AdvanceDate.HasValue) return false;
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    if (advance.AdvanceID <= 0)
+                    {
+                        var maxId = await db.SalaryAdvances.Select(a => (int?)a.AdvanceID).MaxAsync(ct) ?? 0;
+                        advance.AdvanceID = maxId + 1;
+                        await db.SalaryAdvances.AddAsync(advance, ct);
+                    }
+                    else
+                    {
+                        var existing = await db.SalaryAdvances.FirstOrDefaultAsync(a => a.AdvanceID == advance.AdvanceID, ct);
+                        if (existing != null)
+                        {
+                            db.Entry(existing).CurrentValues.SetValues(advance);
+                        }
+                        else
+                        {
+                            await db.SalaryAdvances.AddAsync(advance, ct);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
+                    return true;
+                }
+            }
+        }
 
         var key = !string.IsNullOrWhiteSpace(advance.FirebaseKey)
             ? advance.FirebaseKey!

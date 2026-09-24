@@ -393,9 +393,7 @@ namespace Payroll.Web.Services
     {
         try
         {
-            var owner = _configuration["Firebase:OwnerUid"]
-                ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-                ?? "biometricpayroll";
+            var owner = _firebase.ResolveOwnerUid(actorId, "Admin");
             var key = Guid.NewGuid().ToString("N");
             await _firebase.SetOwnerRecordAsync(owner, "audit_logs", key, new Dictionary<string, object?>
             {

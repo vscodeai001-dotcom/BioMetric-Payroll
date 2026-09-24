@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
@@ -93,6 +93,11 @@ namespace Payroll.Shared.Data
         [Column("AspNetUserId")]
         [StringLength(450)] // Standard size for IdentityUser ID
         public string? AspNetUserId { get; set; } // Nullable
+
+        [Column("tenant_id")]
+        [StringLength(100)]
+        public string? TenantId { get; set; } // Company tenant identifier (e.g. "biometricpayroll", "tenant_nocompany")
+
 
         [Column("enable_pf")]
         public bool EnablePF { get; set; } = false;

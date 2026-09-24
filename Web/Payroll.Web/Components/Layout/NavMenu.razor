@@ -1,9 +1,12 @@
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.Authorization
 @using global::Payroll.Shared.Data
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared
+@using global::Payroll.Web.Services
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ILogger<NavMenu> _logger
+@inject IAppModeService AppMode
 
 <input type="checkbox" title="Navigation menu" aria-label="Open navigation menu" class="navbar-toggler" />
 
@@ -23,8 +26,8 @@
                 <Authorized>
                     @* --- ADMIN/SUPERADMIN MENU --- *@
 
-                    @* 0. SuperAdmin Command Center *@
-                    @if (userIsSuperAdmin)
+                    @* 0. SuperAdmin Command Center (Online Multi-Tenant Mode Only) *@
+                    @if (userIsSuperAdmin && !AppMode.IsOfflineMode)
                     {
                         <div class="nav-item px-3 mb-2">
                             <NavLink class="nav-link text-warning fw-bold border border-warning rounded-2 py-2" href="superadmin/tenants">
@@ -224,13 +227,18 @@
                         @if (userIsSuperAdmin || settings.AdminCanEditSettings)
                         {
                             <div class="nav-item px-3">
+                                <NavLink class="nav-link text-info fw-bold" href="company-setup">
+                                    <span class="me-2">🏢</span> Company Setup
+                                </NavLink>
+                            </div>
+                            <div class="nav-item px-3">
                                 <NavLink class="nav-link" href="holidays">
                                     <span class="me-2">🏖️</span> Holiday Management
                                 </NavLink>
                             </div>
                             <div class="nav-item px-3">
                                 <NavLink class="nav-link" href="settings/company">
-                                    <span class="me-2">🏢</span> Company Settings
+                                    <span class="me-2">⚙️</span> Company Settings
                                 </NavLink>
                             </div>
                         }
@@ -566,6 +574,20 @@
         // -> OnParametersSetAsync -> StateHasChanged loop. Over time that
         // can hammer the database and eventually make the Blazor circuit
         // unresponsive, which matches the long-session navigation failure.
-        // Blazor automatically renders after OnParametersSetAsync completes.
+    }
+
+    protected override void OnInitialized()
+    {
+        AppMode.OnAppModeChanged += HandleAppModeChanged;
+    }
+
+    private void HandleAppModeChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        AppMode.OnAppModeChanged -= HandleAppModeChanged;
     }
 }

@@ -933,4 +933,341 @@ body.dark .avatar-circle {
     color: #93c5fd !important;
 }
 
+/* =========================================================
+   APPLICATION-WIDE PREMIUM UI/UX TOKENS & COMPONENTS
+   ========================================================= */
+
+/* 1. Page Header Container */
+.page-header-container {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.page-header-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 6px;
+    height: 100%;
+    background: linear-gradient(180deg, #3b82f6 0%, #8b5cf6 100%);
+    border-top-left-radius: 16px;
+    border-bottom-left-radius: 16px;
+}
+
+.page-header-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.page-header-subtitle {
+    font-size: 0.875rem;
+    color: #64748b;
+    margin-top: 0.25rem;
+    margin-bottom: 0;
+}
+
+/* 2. Emoji & Icon Badges */
+.emoji-icon-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    flex-shrink: 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    transition: transform 0.2s ease;
+}
+
+.emoji-icon-badge:hover {
+    transform: scale(1.06);
+}
+
+.emoji-icon-badge-sm {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    font-size: 1.05rem;
+}
+
+.emoji-icon-badge-lg {
+    width: 60px;
+    height: 60px;
+    border-radius: 18px;
+    font-size: 1.75rem;
+}
+
+.emoji-icon-badge-primary {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
+.emoji-icon-badge-success {
+    background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+    border-color: #bbf7d0;
+    color: #15803d;
+}
+
+.emoji-icon-badge-warning {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fde68a;
+    color: #b45309;
+}
+
+.emoji-icon-badge-danger {
+    background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+    border-color: #fecaca;
+    color: #b91c1c;
+}
+
+.emoji-icon-badge-purple {
+    background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
+    border-color: #e9d5ff;
+    color: #7e22ce;
+}
+
+.emoji-icon-badge-info {
+    background: linear-gradient(135deg, #ecfeff 0%, #cffafe 100%);
+    border-color: #a5f3fc;
+    color: #0e7490;
+}
+
+/* 3. Premium Stat KPI Cards */
+.premium-stat-card {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 1.25rem;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    height: 100%;
+}
+
+.premium-stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+}
+
+.premium-stat-card .stat-number {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+    margin-bottom: 0.2rem;
+}
+
+.premium-stat-card .stat-label {
+    font-size: 0.825rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin-bottom: 0.4rem;
+}
+
+.premium-stat-card .stat-sub {
+    font-size: 0.775rem;
+    color: #94a3b8;
+    margin: 0;
+}
+
+/* Card Accent Borders */
+.border-accent-primary { border-top: 4px solid #3b82f6 !important; }
+.border-accent-success { border-top: 4px solid #10b981 !important; }
+.border-accent-warning { border-top: 4px solid #f59e0b !important; }
+.border-accent-danger { border-top: 4px solid #ef4444 !important; }
+.border-accent-purple { border-top: 4px solid #8b5cf6 !important; }
+.border-accent-info { border-top: 4px solid #06b6d4 !important; }
+
+/* 4. Action Pill Buttons */
+.action-pill-btn {
+    border-radius: 50rem !important;
+    padding: 0.45rem 1.15rem !important;
+    font-weight: 600 !important;
+    font-size: 0.875rem !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 0.45rem !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+    transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.action-pill-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(0, 0, 0, 0.12);
+}
+
+.action-pill-btn-sm {
+    padding: 0.25rem 0.75rem !important;
+    font-size: 0.8rem !important;
+}
+
+/* 5. Status Pill Badges */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 50rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.status-pill-success {
+    background: #ecfdf5;
+    color: #065f46;
+    border-color: #a7f3d0;
+}
+
+.status-pill-danger {
+    background: #fef2f2;
+    color: #991b1b;
+    border-color: #fecaca;
+}
+
+.status-pill-warning {
+    background: #fffbeb;
+    color: #92400e;
+    border-color: #fde68a;
+}
+
+.status-pill-info {
+    background: #eff6ff;
+    color: #1e40af;
+    border-color: #bfdbfe;
+}
+
+.status-pill-purple {
+    background: #faf5ff;
+    color: #6b21a8;
+    border-color: #e9d5ff;
+}
+
+.status-pill-secondary {
+    background: #f1f5f9;
+    color: #475569;
+    border-color: #cbd5e1;
+}
+
+/* 6. Responsive Table Cards */
+.table-responsive-card {
+    background: #ffffff;
+    border-radius: 16px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03);
+    overflow: hidden;
+}
+
+.table-responsive-card .table {
+    margin-bottom: 0;
+}
+
+.table-responsive-card .table thead th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 700;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #e2e8f0;
+    padding: 0.85rem 1rem;
+    white-space: nowrap;
+}
+
+.table-responsive-card .table tbody td {
+    padding: 0.85rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.875rem;
+}
+
+/* 7. Action Button Group in Tables */
+.table-action-btns {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: nowrap;
+}
+
+/* 8. Pulsing Status Dot */
+.pulse-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    position: relative;
+}
+
+.pulse-indicator-success {
+    background-color: #10b981;
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0.7);
+    animation: pulse-green 1.8s infinite;
+}
+
+.pulse-indicator-danger {
+    background-color: #ef4444;
+    box-shadow: 0 0 0 rgba(239, 68, 68, 0.7);
+    animation: pulse-red 1.8s infinite;
+}
+
+@keyframes pulse-green {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@keyframes pulse-red {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+
+/* Responsive tweaks */
+@media (max-width: 576px) {
+    .page-header-container {
+        padding: 1rem;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .page-header-title {
+        font-size: 1.2rem;
+    }
+    .emoji-icon-badge {
+        width: 40px;
+        height: 40px;
+        font-size: 1.15rem;
+    }
+    .premium-stat-card {
+        padding: 1rem;
+    }
+    .premium-stat-card .stat-number {
+        font-size: 1.45rem;
+    }
+}
+
+
 

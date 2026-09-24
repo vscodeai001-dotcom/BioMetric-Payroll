@@ -2229,10 +2229,7 @@ public class GeoLocationService
             // punch calculation, audit values, schema, or existing UI flow.
             try
             {
-                var ownerUid =
-                    _configuration["Firebase:OwnerUid"]
-                    ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-                    ?? "biometricpayroll";
+                var ownerUid = _firebase.ResolveOwnerUid($"employee-{employeeId}", "Employee");
 
                 if (audit.Id > 0)
                 {

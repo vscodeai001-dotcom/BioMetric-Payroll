@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using Payroll.Shared;
 using Payroll.Shared.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Payroll.Web.Services;
 
@@ -11,6 +12,7 @@ namespace Payroll.Web.Services;
 /// The existing BonusRecord model, UI structure and payroll calculations
 /// remain unchanged. FirebaseKey is transport metadata used only for
 /// Firebase records.
+/// In Offline Standalone Mode, reads and writes directly to local SQLite database.
 /// </summary>
 public sealed class FirebaseBonusService
 {
@@ -20,19 +22,19 @@ public sealed class FirebaseBonusService
 
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
     public FirebaseBonusService(
         FirebaseRealtimeService firebase,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _firebase = firebase;
         _configuration = configuration;
+        _scopeFactory = scopeFactory;
     }
 
-    private string OwnerUid =>
-        _configuration["Firebase:OwnerUid"]
-        ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-        ?? "biometricpayroll";
+    private string OwnerUid => _firebase.ResolveOwnerUid("bonus-service", "Admin");
 
     public async Task<bool> IsEnabledAsync(
         CancellationToken ct = default)
@@ -77,6 +79,21 @@ public sealed class FirebaseBonusService
     public async Task<List<Employee>> GetActiveEmployeesAsync(
         CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                }
+            }
+        }
+
         var json = await _firebase.GetOwnerTableAsync(
             OwnerUid,
             EmployeeTable,
@@ -158,6 +175,25 @@ public sealed class FirebaseBonusService
         DateTime? to = null,
         CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var query = db.BonusRecords.AsNoTracking().AsQueryable();
+                    if (employeeId > 0) query = query.Where(b => b.EmployeeID == employeeId);
+                    if (from.HasValue) query = query.Where(b => b.BonusDate >= from.Value);
+                    if (to.HasValue) query = query.Where(b => b.BonusDate <= to.Value);
+                    return await query.OrderByDescending(b => b.BonusDate).ThenBy(b => b.EmployeeID).ToListAsync(ct);
+                }
+            }
+        }
+
         JsonElement? json;
 
         if (employeeId > 0)
@@ -281,6 +317,40 @@ public sealed class FirebaseBonusService
         if (bonus.Amount <= 0m)
         {
             return false;
+        }
+
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            if (appMode != null && await appMode.IsOfflineModeAsync())
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    if (bonus.BonusID <= 0)
+                    {
+                        var maxId = await db.BonusRecords.Select(b => (int?)b.BonusID).MaxAsync(ct) ?? 0;
+                        bonus.BonusID = maxId + 1;
+                        await db.BonusRecords.AddAsync(bonus, ct);
+                    }
+                    else
+                    {
+                        var existing = await db.BonusRecords.FirstOrDefaultAsync(b => b.BonusID == bonus.BonusID, ct);
+                        if (existing != null)
+                        {
+                            db.Entry(existing).CurrentValues.SetValues(bonus);
+                        }
+                        else
+                        {
+                            await db.BonusRecords.AddAsync(bonus, ct);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
+                    return true;
+                }
+            }
         }
 
         string key;

@@ -32,10 +32,7 @@ public sealed class FirebaseAttendanceMutationService
         _logger = logger;
     }
 
-    private string OwnerUid =>
-        (_configuration["Firebase:OwnerUid"]
-         ?? Environment.GetEnvironmentVariable("FIREBASE_OWNER_UID")
-         ?? Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid).Trim();
+    private string OwnerUid => _firebase.ResolveOwnerUid("attendance-mutation", "Admin");
 
     public async Task<bool> UpsertPunchAsync(
         AttendanceLog punch,

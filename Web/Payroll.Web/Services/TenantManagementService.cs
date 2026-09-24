@@ -17,6 +17,8 @@ namespace Payroll.Web.Services
         public string CompanyCode { get; set; } = string.Empty;
         public string IconEmoji { get; set; } = "🏢";
         public string PlanMode { get; set; } = "Spark"; // "Spark" or "Blaze"
+        public bool IsOfflineMode { get; set; } = false; // true = 100% standalone local SQLite DB, false = Firebase Cloud sync
+        public string DeploymentMode { get; set; } = "Online"; // "Online" or "Offline"
 
         public string AdminEmail { get; set; } = string.Empty;
         public string AdminPassword { get; set; } = string.Empty;
@@ -91,6 +93,8 @@ namespace Payroll.Web.Services
                     CREATE UNIQUE INDEX IF NOT EXISTS ""IX_CompanyTenants_company_code"" ON ""CompanyTenants"" (""company_code"");
                 ");
 
+                await AppDbContext.EnsureSqliteSchemaUpdatedAsync(db);
+
                 var exists = await db.CompanyTenants.AnyAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
                 if (!exists)
                 {
@@ -116,6 +120,41 @@ namespace Payroll.Web.Services
                     db.CompanyTenants.Add(tenant);
                     await db.SaveChangesAsync();
                     _logger.LogInformation("Seeded default primary tenant {TenantId} ({CompanyName})", tenant.TenantId, tenant.CompanyName);
+                }
+
+                // Ensure every tenant has their initial company settings node in Firebase
+                var allTenants = await db.CompanyTenants.ToListAsync();
+                foreach (var t in allTenants)
+                {
+                    try
+                    {
+                        var cs = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == t.CompanySettingId);
+                        if (cs != null)
+                        {
+                            var existingFb = await _firebase.GetOwnerRecordAsync(t.TenantId, "company_settings", "1");
+                            if (!existingFb.HasValue || existingFb.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
+                            {
+                                var compPayload = new Dictionary<string, object?>
+                                {
+                                    ["companyName"] = cs.CompanyName,
+                                    ["addressLine1"] = cs.AddressLine1,
+                                    ["cityStatePincode"] = cs.CityStatePincode,
+                                    ["officeLatitude"] = cs.OfficeLatitude,
+                                    ["officeLongitude"] = cs.OfficeLongitude,
+                                    ["geoRadiusMeters"] = cs.GeoRadiusMeters,
+                                    ["workDayCutoffHour"] = cs.WorkDayCutoffHour,
+                                    ["lateGraceMinutes"] = cs.LateGraceMinutes,
+                                    ["endTimeGraceMinutes"] = cs.EndTimeGraceMinutes
+                                };
+                                await _firebase.SetAsync($"owners/{t.TenantId}/company_settings/1", compPayload, default);
+                                _logger.LogInformation("Synchronized initial company setting for tenant {TenantId} to Firebase.", t.TenantId);
+                            }
+                        }
+                    }
+                    catch (Exception exSync)
+                    {
+                        _logger.LogWarning(exSync, "Could not verify/sync initial Firebase node for tenant {TenantId}", t.TenantId);
+                    }
                 }
             }
             catch (Exception ex)
@@ -190,19 +229,24 @@ namespace Payroll.Web.Services
                 await _userManager.AddToRoleAsync(adminUser, "Admin");
             }
 
-            // Provision Firebase Auth account for tenant admin
-            try
+            var isOffline = request.IsOfflineMode || string.Equals(request.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase);
+
+            // Provision Firebase Auth account for tenant admin (if online)
+            if (!isOffline)
             {
-                await _firebase.EnsureFirebaseUserAsync(
-                    request.AdminEmail.Trim(),
-                    request.AdminPassword,
-                    "Admin",
-                    displayName: string.IsNullOrWhiteSpace(request.AdminName) ? request.CompanyName.Trim() + " Admin" : request.AdminName.Trim(),
-                    updatePasswordIfExisting: true);
-            }
-            catch (Exception authEx)
-            {
-                _logger.LogWarning(authEx, "Firebase Auth provisioning deferred for admin {Email}", request.AdminEmail);
+                try
+                {
+                    await _firebase.EnsureFirebaseUserAsync(
+                        request.AdminEmail.Trim(),
+                        request.AdminPassword,
+                        "Admin",
+                        displayName: string.IsNullOrWhiteSpace(request.AdminName) ? request.CompanyName.Trim() + " Admin" : request.AdminName.Trim(),
+                        updatePasswordIfExisting: true);
+                }
+                catch (Exception authEx)
+                {
+                    _logger.LogWarning(authEx, "Firebase Auth provisioning deferred for admin {Email}", request.AdminEmail);
+                }
             }
 
             // Create CompanySetting
@@ -213,6 +257,9 @@ namespace Payroll.Web.Services
                 CompanyName = request.CompanyName.Trim(),
                 AddressLine1 = "Office Location",
                 CityStatePincode = "",
+                OfficeLatitude = request.OfficeLatitude,
+                OfficeLongitude = request.OfficeLongitude,
+                GeoRadiusMeters = request.GeoRadiusMeters,
                 WorkDayCutoffHour = request.WorkDayCutoffHour,
                 LateGraceMinutes = 15,
                 EndTimeGraceMinutes = 15
@@ -226,6 +273,8 @@ namespace Payroll.Web.Services
             var features = request.InitialFeatures ?? new FeatureSettings();
             features.Id = maxFeatureId + 1;
             features.FirebasePlanMode = request.PlanMode;
+            features.IsOfflineMode = isOffline;
+            features.DeploymentMode = isOffline ? "Offline" : "Online";
             db.FeatureSettings.Add(features);
             await db.SaveChangesAsync();
 
@@ -241,6 +290,8 @@ namespace Payroll.Web.Services
                 AdminPhone = request.AdminPhone,
                 IconEmoji = string.IsNullOrWhiteSpace(request.IconEmoji) ? "🏢" : request.IconEmoji.Trim(),
                 PlanMode = request.PlanMode,
+                IsOfflineMode = isOffline,
+                DeploymentMode = isOffline ? "Offline" : "Online",
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow,
                 CompanySettingId = companySetting.SettingID,
@@ -250,38 +301,43 @@ namespace Payroll.Web.Services
             db.CompanyTenants.Add(tenant);
             await db.SaveChangesAsync();
 
-            // Initialize Firebase tenant nodes
-            try
+            // Initialize Firebase tenant nodes (only if online)
+            if (!isOffline)
             {
-                var tenantPayload = new Dictionary<string, object?>
+                try
                 {
-                    ["tenantId"] = tenant.TenantId,
-                    ["companyName"] = tenant.CompanyName,
-                    ["companyCode"] = tenant.CompanyCode,
-                    ["adminEmail"] = tenant.AdminEmail,
-                    ["adminName"] = tenant.AdminName,
-                    ["iconEmoji"] = tenant.IconEmoji,
-                    ["planMode"] = tenant.PlanMode,
-                    ["isActive"] = tenant.IsActive,
-                    ["createdAtUtc"] = tenant.CreatedAtUtc.ToString("O")
-                };
+                    var tenantPayload = new Dictionary<string, object?>
+                    {
+                        ["tenantId"] = tenant.TenantId,
+                        ["companyName"] = tenant.CompanyName,
+                        ["companyCode"] = tenant.CompanyCode,
+                        ["adminEmail"] = tenant.AdminEmail,
+                        ["adminName"] = tenant.AdminName,
+                        ["iconEmoji"] = tenant.IconEmoji,
+                        ["planMode"] = tenant.PlanMode,
+                        ["isOfflineMode"] = false,
+                        ["deploymentMode"] = "Online",
+                        ["isActive"] = tenant.IsActive,
+                        ["createdAtUtc"] = tenant.CreatedAtUtc.ToString("O")
+                    };
 
-                await _firebase.SetAsync($"tenants/{tenant.TenantId}", tenantPayload, default);
+                    await _firebase.SetAsync($"tenants/{tenant.TenantId}", tenantPayload, default);
 
-                // Publish initial company setting to Firebase owner
-                var companyPayload = new Dictionary<string, object?>
+                    // Publish initial company setting to Firebase owner
+                    var companyPayload = new Dictionary<string, object?>
+                    {
+                        ["companyName"] = tenant.CompanyName,
+                        ["officeLatitude"] = request.OfficeLatitude,
+                        ["officeLongitude"] = request.OfficeLongitude,
+                        ["geoRadiusMeters"] = request.GeoRadiusMeters,
+                        ["workDayCutoffHour"] = request.WorkDayCutoffHour
+                    };
+                    await _firebase.SetAsync($"owners/{tenant.TenantId}/company_settings/1", companyPayload, default);
+                }
+                catch (Exception fbEx)
                 {
-                    ["companyName"] = tenant.CompanyName,
-                    ["officeLatitude"] = request.OfficeLatitude,
-                    ["officeLongitude"] = request.OfficeLongitude,
-                    ["geoRadiusMeters"] = request.GeoRadiusMeters,
-                    ["workDayCutoffHour"] = request.WorkDayCutoffHour
-                };
-                await _firebase.SetAsync($"owners/{tenant.TenantId}/company_settings/1", companyPayload, default);
-            }
-            catch (Exception fbEx)
-            {
-                _logger.LogWarning(fbEx, "Firebase tenant metadata write deferred for {TenantId}", tenant.TenantId);
+                    _logger.LogWarning(fbEx, "Firebase tenant metadata write deferred for {TenantId}", tenant.TenantId);
+                }
             }
 
             await _refreshService.NotifyGlobalRefreshAsync("TENANTS_UPDATED");
@@ -478,16 +534,23 @@ namespace Payroll.Web.Services
                 tenant.FeatureSettingsId = newSettings.Id;
             }
 
+            var isOffline = newSettings.IsOfflineMode || string.Equals(newSettings.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase);
+            tenant.IsOfflineMode = isOffline;
+            tenant.DeploymentMode = isOffline ? "Offline" : "Online";
+
             await db.SaveChangesAsync();
 
-            // Mirror feature settings to Firebase under tenant's owner node
-            try
+            // Mirror feature settings to Firebase under tenant's owner node (only if online)
+            if (!tenant.IsOfflineMode)
             {
-                await _firebase.SetAsync($"owners/{tenant.TenantId}/feature_settings/1", newSettings, default);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to mirror tenant feature settings to Firebase.");
+                try
+                {
+                    await _firebase.SetAsync($"owners/{tenant.TenantId}/feature_settings/1", newSettings, default);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to mirror tenant feature settings to Firebase.");
+                }
             }
 
             await _refreshService.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
@@ -589,6 +652,205 @@ namespace Payroll.Web.Services
 
             await _refreshService.NotifyGlobalRefreshAsync("TENANTS_UPDATED");
             return true;
+        }
+
+        public const string AuthorizedSuperAdminDeleteEmail = "prakashshiva368@gmail.com";
+
+        /// <summary>
+        /// Permanently deletes an entire company, all employee records, attendance logs, GPS tracking,
+        /// and operational records from BOTH SQLite Local Database and Firebase Realtime Cloud.
+        /// STRICTLY RESTRICTED: Executable ONLY by SuperAdmin prakashshiva368@gmail.com.
+        /// </summary>
+        public async Task<TenantOperationResult> DeleteEntireCompanyAsync(
+            string? tenantId,
+            string currentUserEmail,
+            CancellationToken ct = default)
+        {
+            // 1. Strict security check: Only SuperAdmin prakashshiva368@gmail.com can delete
+            if (!string.Equals(currentUserEmail?.Trim(), AuthorizedSuperAdminDeleteEmail, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(currentUserEmail?.Trim(), FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Unauthorized attempt to delete company by {UserEmail}", currentUserEmail);
+                return new TenantOperationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Unauthorized: Only SuperAdmin {AuthorizedSuperAdminDeleteEmail} is permitted to delete companies."
+                };
+            }
+
+            try
+            {
+                await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+                var targetTenantId = !string.IsNullOrWhiteSpace(tenantId)
+                    ? tenantId.Trim()
+                    : TenantContextService.DefaultTenantId;
+
+                var tenant = await db.CompanyTenants.FirstOrDefaultAsync(
+                    t => t.TenantId == targetTenantId || t.Id.ToString() == targetTenantId, ct);
+
+                var effectiveTenantId = tenant?.TenantId ?? targetTenantId;
+                var companyName = tenant?.CompanyName ?? "Company";
+
+                _logger.LogInformation("SuperAdmin {UserEmail} initiated permanent deletion of company {CompanyName} ({TenantId})",
+                    currentUserEmail, companyName, effectiveTenantId);
+
+                // 2. Cloud Wipe: Permanently delete entire company tree from Firebase Realtime Database
+                try
+                {
+                    await _firebase.DeletePathAsync($"owners/{effectiveTenantId}", ct);
+                    await _firebase.DeletePathAsync($"owner_events/{effectiveTenantId}", ct);
+                    await _firebase.DeletePathAsync($"shops/{effectiveTenantId}", ct);
+                    await _firebase.DeletePathAsync($"tenants/{effectiveTenantId}", ct);
+                    _logger.LogInformation("Firebase Realtime Cloud data purged for {TenantId}", effectiveTenantId);
+                }
+                catch (Exception fbEx)
+                {
+                    _logger.LogWarning(fbEx, "Firebase cloud deletion completed with warnings for {TenantId}", effectiveTenantId);
+                }
+
+                // 3. Local SQLite Wipe: Purge all operational and employee data tied to this tenant
+                var employeeIds = await db.Employees
+                    .Where(e => e.TenantId == effectiveTenantId || (effectiveTenantId == TenantContextService.DefaultTenantId && (e.TenantId == null || e.TenantId == "" || e.TenantId == TenantContextService.DefaultTenantId)))
+                    .Select(e => e.EmployeeID)
+                    .ToListAsync(ct);
+
+                if (employeeIds.Count > 0)
+                {
+                    var idList = string.Join(",", employeeIds);
+                    var deleteQueries = new[]
+                    {
+                        $"DELETE FROM \"AttendanceLogs\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"SalaryAdvances\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"PayrollHistories\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"LeaveRequests\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"ShiftSchedules\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"DailySummaries\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"employee_gps_sessions\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"employee_location_history\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"employee_device_locks\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"attendance_punches\" WHERE \"employeeid\" IN ({idList});",
+                        $"DELETE FROM \"bonus_records\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"tax_declarations\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"resignation_requests\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"flexible_benefit_declarations\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"fnf_settlements\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"attendance_regularizations\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"geo_punch_audits\" WHERE \"employee_id\" IN ({idList});",
+                        $"DELETE FROM \"Employees\" WHERE \"employeeid\" IN ({idList});"
+                    };
+
+                    foreach (var sql in deleteQueries)
+                    {
+                        try
+                        {
+                            await db.Database.ExecuteSqlRawAsync(sql, ct);
+                        }
+                        catch (Exception sqlEx)
+                        {
+                            _logger.LogDebug(sqlEx, "Wipe query ignored during company deletion: {Sql}", sql);
+                        }
+                    }
+                }
+
+                // Clean company-level tables (Holidays, Tax Slabs, Audit Logs)
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync("DELETE FROM \"CompanyHolidays\";", ct);
+                    await db.Database.ExecuteSqlRawAsync("DELETE FROM \"ProfessionalTaxSlabs\";", ct);
+                    await db.Database.ExecuteSqlRawAsync("DELETE FROM \"AuditLogs\";", ct);
+                }
+                catch { }
+
+                // Clean CompanySettings & FeatureSettings
+                if (tenant != null && tenant.CompanySettingId > 1)
+                {
+                    var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == tenant.CompanySettingId, ct);
+                    if (cs != null) db.CompanySettings.Remove(cs);
+                }
+                else
+                {
+                    // Reset setting 1 to pristine empty
+                    var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1, ct);
+                    if (cs != null)
+                    {
+                        cs.CompanyName = "";
+                        cs.AddressLine1 = "";
+                        cs.CityStatePincode = "";
+                        cs.OfficeLatitude = 0;
+                        cs.OfficeLongitude = 0;
+                        cs.GeoRadiusMeters = 100;
+                    }
+                }
+
+                if (tenant != null && tenant.FeatureSettingsId > 1)
+                {
+                    var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == tenant.FeatureSettingsId, ct);
+                    if (fs != null) db.FeatureSettings.Remove(fs);
+                }
+                else
+                {
+                    var fs = await db.FeatureSettings.FirstOrDefaultAsync(f => f.Id == 1, ct);
+                    if (fs != null)
+                    {
+                        fs.IsOfflineMode = false;
+                        fs.DeploymentMode = "Online";
+                    }
+                }
+
+                // Remove CompanyTenant record
+                if (tenant != null)
+                {
+                    db.CompanyTenants.Remove(tenant);
+                }
+
+                await db.SaveChangesAsync(ct);
+
+                // 4. Delete non-SuperAdmin Identity accounts from AspNetUsers
+                // NEVER delete the authorized SuperAdmin!
+                try
+                {
+                    var allUsers = await _userManager.Users.ToListAsync(ct);
+                    foreach (var user in allUsers)
+                    {
+                        var isSuperAdminUser = string.Equals(user.Email, AuthorizedSuperAdminDeleteEmail, StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(user.UserName, AuthorizedSuperAdminDeleteEmail, StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(user.Email, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(user.UserName, FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail, StringComparison.OrdinalIgnoreCase);
+
+                        if (!isSuperAdminUser)
+                        {
+                            await _userManager.DeleteAsync(user);
+                        }
+                    }
+                }
+                catch (Exception idEx)
+                {
+                    _logger.LogWarning(idEx, "Warning while purging employee identity users");
+                }
+
+                // 5. Invalidate global caches
+                await _refreshService.NotifyGlobalRefreshAsync($"COMPANY_DELETED:{effectiveTenantId}");
+
+                _logger.LogInformation("Company {CompanyName} ({TenantId}) deleted successfully from Cloud and Local DB.",
+                    companyName, effectiveTenantId);
+
+                return new TenantOperationResult
+                {
+                    Success = true,
+                    ErrorMessage = null,
+                    Tenant = null
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to delete company {TenantId}", tenantId);
+                return new TenantOperationResult
+                {
+                    Success = false,
+                    ErrorMessage = $"Error deleting company: {ex.Message}"
+                };
+            }
         }
     }
 }

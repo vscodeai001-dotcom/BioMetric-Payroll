@@ -30,12 +30,28 @@
     </div>
 }
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h3>Employee Management</h3>
+<div class="page-header-container">
+    <div class="d-flex align-items-center gap-3">
+        <div class="emoji-icon-badge emoji-icon-badge-primary">
+            👥
+        </div>
+        <div>
+            <h2 class="page-header-title">
+                Employee Directory
+            </h2>
+            <p class="page-header-subtitle">
+                <span>🏢 Manage staff profiles, compensation structures & biometric bindings</span>
+                @if (employees != null)
+                {
+                    <span>• <strong class="text-primary">@employees.Count()</strong> Team Members</span>
+                }
+            </p>
+        </div>
+    </div>
     @if (!showForm)
     {
-        <button class="btn btn-primary" @onclick="OpenAddForm">
-            <span class="bi bi-plus-lg"></span> Add New Employee
+        <button class="btn btn-primary action-pill-btn" @onclick="OpenAddForm">
+            <span>➕</span> <span class="bi bi-person-plus-fill"></span> Add New Employee
         </button>
     }
 </div>
@@ -43,16 +59,17 @@
 @* --- UNIFIED FORM CARD (Used for Add & Edit) --- *@
 @if (showForm)
 {
-    <div class="card shadow-sm mb-4 border-primary">
-        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-2">
-            <h5 class="mb-0">
-                <i class="bi @(currentEmployee.EmployeeID == 0 ? "bi-person-plus" : "bi-pencil-square") me-2"></i>
-                @(currentEmployee.EmployeeID == 0 ? "Add New Employee" : $"Edit {currentEmployee.Name}")
+    <div class="card shadow-sm mb-4 border-primary rounded-4 overflow-hidden">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center py-3 px-4">
+            <h5 class="mb-0 d-flex align-items-center gap-2">
+                <span>@(currentEmployee.EmployeeID == 0 ? "➕" : "✏️")</span>
+                <i class="bi @(currentEmployee.EmployeeID == 0 ? "bi-person-plus-fill" : "bi-pencil-square") me-1"></i>
+                @(currentEmployee.EmployeeID == 0 ? "Add New Employee Profile" : $"Edit Profile: {currentEmployee.Name}")
             </h5>
             <button type="button" class="btn-close btn-close-white" @onclick="CloseForm"></button>
         </div>
 
-        <div class="card-body">
+        <div class="card-body p-4">
             <EmployeeForm Employee="currentEmployee"
                           CompanySettings="companySettings"
                           FeatureSettings="featureSettings"
@@ -64,95 +81,161 @@
                           @bind-ShiftEndTime="modalShiftEndTime" />
         </div>
 
-        <div class="card-footer bg-light py-2 text-end">
-            <button type="button" class="btn btn-secondary me-2" @onclick="CloseForm">Cancel</button>
-            <button type="button" class="btn btn-success px-4" @onclick="SaveEmployee">
-                <span class="bi bi-check-lg"></span>
+        <div class="card-footer bg-light py-3 px-4 text-end d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-secondary action-pill-btn" @onclick="CloseForm">
+                <span>❌</span> Cancel
+            </button>
+            <button type="button" class="btn btn-success action-pill-btn px-4" @onclick="SaveEmployee">
+                <span>💾</span> <span class="bi bi-check-lg"></span>
                 @(currentEmployee.EmployeeID == 0 ? "Save Employee" : "Update Changes")
             </button>
         </div>
     </div>
 }
 
-@* --- EMPLOYEE LIST TABLE --- *@
+@* --- EMPLOYEE LIST TABLE (compact, no horizontal scroll) --- *@
 @if (employees == null)
 {
-    <p><em>Loading employees...</em></p>
+    <div class="text-center p-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-3 text-muted fw-semibold">Loading employees... 👥</p>
+    </div>
 }
 else
 {
-    <div class="table-responsive">
-        <table class="table table-striped table-hover table-sm" style="font-size: 0.9em;">
-            <thead class="table-dark" style="white-space: nowrap;">
-                <tr>
-                    <th>ID</th>
-                    <th>Bio ID</th>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Hire Date</th>
-                    <th>Term. Date</th>
-                    <th class="text-end">Pay Type</th>
-                    <th class="text-center">Shift Time</th>
-                    <th class="text-center">Break</th>
-                    <th class="text-center">Comp Off</th>
-                    <th>OT Rule</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (!employees.Any())
-                {
-                    <tr><td colspan="12"><p><em>No employees found. Click "Add New Employee".</em></p></td></tr>
-                }
-                else
-                {
-                    @foreach (var emp in employees)
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-body p-0">
+            <table class="table table-hover align-middle table-sm mb-0 w-100" style="table-layout: fixed;">
+                <colgroup>
+                    <col style="width:5%">    @* # *@
+                    <col style="width:22%">   @* Name + Bio ID *@
+                    <col style="width:13%">   @* Role *@
+                    <col style="width:14%">   @* Pay + Hire/Term *@
+                    <col style="width:20%">   @* Shift + Break *@
+                    <col style="width:14%">   @* Comp Off + OT *@
+                    <col style="width:12%">   @* Actions *@
+                </colgroup>
+                <thead class="table-light">
+                    <tr>
+                        <th class="small text-uppercase fw-bold ps-3">#</th>
+                        <th class="small text-uppercase fw-bold">👤 Employee</th>
+                        <th class="small text-uppercase fw-bold">💼 Role</th>
+                        <th class="small text-uppercase fw-bold">💵 Pay</th>
+                        <th class="small text-uppercase fw-bold text-center">⏰ Shift / Break</th>
+                        <th class="small text-uppercase fw-bold text-center">🏖️ Off / OT</th>
+                        <th class="small text-uppercase fw-bold text-center pe-3">⚙️ Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (!employees.Any())
                     {
-                        <tr class="@(currentEmployee?.EmployeeID == emp.EmployeeID ? "table-info" : "")">
-                            <td>@emp.EmployeeID</td>
-                            <td>@emp.BiometricID</td>
-                            <td>@emp.Name</td>
-                            <td>@emp.Role</td>
-                            <td>@emp.HireDate?.ToString("dd-MMM-yyyy")</td>
-                            <td>@(emp.TerminationDate.HasValue? emp.TerminationDate.Value.ToString("dd-MMM-yyyy") : "--")</td>
-                            <td class="text-end">
-                                @if (emp.DirectHourlyWage.HasValue && emp.DirectHourlyWage > 0)
-                                {
-                                    <span>@emp.DirectHourlyWage.Value.ToString("N2", inrCulture) / hr</span>
-                                }
-                                else
-                                {
-                                    <span>@emp.MonthlySalary.ToString("N0", inrCulture) / mo</span>
-                                }
-                            </td>
-                            <td class="text-center" style="white-space: nowrap;">@(emp.ShiftStartTime?.ToString("hh:mm tt") ?? "--") - @(emp.ShiftEndTime?.ToString("hh:mm tt") ?? "--")</td>
-                            <td class="text-center">@emp.StandardBreakMinutes m</td>
-                            <td class="text-center">@(emp.CompOffDayOfWeek?.ToString() ?? "None")</td>
-                            <td>
-                                @emp.OT_Rule
-                                @if (emp.OT_Rule == "Flat" && emp.OT_FlatRate > 0)
-                                {
-                                    <span class="text-muted">(@emp.OT_FlatRate.ToString("N0", inrCulture))</span>
-                                }
-                            </td>
-                            <td style="white-space: nowrap;">
-                                <button class="btn btn-sm btn-outline-info me-1" @onclick="() => GoToDetails(emp.EmployeeID)" title="Details">
-                                    <span class="bi bi-info-circle"></span>
-                                </button>
-
-                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenEditForm(emp)" title="Edit">
-                                    <span class="bi bi-pencil-square"></span>
-                                </button>
-
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteEmployee(emp)" title="Delete">
-                                    <span class="bi bi-trash"></span>
+                        <tr>
+                            <td colspan="7" class="text-center py-5 text-muted">
+                                <span class="fs-1 d-block mb-2">👥</span>
+                                <p class="mb-2 fw-semibold">No employees found in directory.</p>
+                                <button class="btn btn-primary action-pill-btn btn-sm" @onclick="OpenAddForm">
+                                    <span>➕</span> Add First Employee
                                 </button>
                             </td>
                         </tr>
                     }
-                }
-            </tbody>
-        </table>
+                    else
+                    {
+                        @foreach (var emp in employees)
+                        {
+                            <tr class="@(currentEmployee?.EmployeeID == emp.EmployeeID ? "table-info" : "")">
+
+                                @* ID *@
+                                <td class="fw-bold text-muted ps-3 small">#@emp.EmployeeID</td>
+
+                                @* Name + Bio ID *@
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="avatar-circle rounded-circle bg-primary bg-opacity-10 text-primary fw-bold d-flex align-items-center justify-content-center flex-shrink-0"
+                                             style="width:30px; height:30px; font-size:0.8rem;">
+                                            @(string.IsNullOrWhiteSpace(emp.Name) ? "?" : emp.Name.Substring(0, 1).ToUpper())
+                                        </div>
+                                        <div class="overflow-hidden">
+                                            <div class="fw-semibold text-truncate" style="max-width:130px;" title="@emp.Name">@emp.Name</div>
+                                            <div class="text-muted" style="font-size:0.72rem;">
+                                                🧬 @(string.IsNullOrWhiteSpace(emp.BiometricID) ? "--" : emp.BiometricID)
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+
+                                @* Role *@
+                                <td>
+                                    <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-2 py-1 small text-truncate d-inline-block" style="max-width:100%;" title="@emp.Role">
+                                        @(string.IsNullOrWhiteSpace(emp.Role) ? "Staff" : emp.Role)
+                                    </span>
+                                </td>
+
+                                @* Pay + Hire / Term dates *@
+                                <td>
+                                    <div class="fw-semibold small">
+                                        @if (emp.DirectHourlyWage.HasValue && emp.DirectHourlyWage > 0)
+                                        {
+                                            <span class="text-success">@emp.DirectHourlyWage.Value.ToString("C2", inrCulture)<span class="text-muted fw-normal">/hr</span></span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-primary">@emp.MonthlySalary.ToString("C0", inrCulture)<span class="text-muted fw-normal">/mo</span></span>
+                                        }
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.7rem;">
+                                        📅 @(emp.HireDate?.ToString("dd-MMM-yy") ?? "--")
+                                        @if (emp.TerminationDate.HasValue)
+                                        {
+                                            <span class="text-danger"> → @emp.TerminationDate.Value.ToString("dd-MMM-yy")</span>
+                                        }
+                                    </div>
+                                </td>
+
+                                @* Shift + Break *@
+                                <td class="text-center">
+                                    <div class="badge bg-light text-dark border rounded-pill px-2 small text-truncate d-inline-block" style="max-width:100%;">
+                                        @(emp.ShiftStartTime?.ToString("hh:mm tt") ?? "--") – @(emp.ShiftEndTime?.ToString("hh:mm tt") ?? "--")
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.7rem;">☕ @emp.StandardBreakMinutes min break</div>
+                                </td>
+
+                                @* Comp Off + OT *@
+                                <td class="text-center">
+                                    <div class="small">
+                                        <span class="badge bg-light text-dark border rounded-pill px-2">
+                                            🏖️ @(emp.CompOffDayOfWeek?.ToString() ?? "None")
+                                        </span>
+                                    </div>
+                                    <div class="text-muted" style="font-size:0.7rem;">
+                                        ⚡ @emp.OT_Rule
+                                        @if (emp.OT_Rule == "Flat" && emp.OT_FlatRate > 0)
+                                        {
+                                            <span>(@emp.OT_FlatRate.ToString("N0", inrCulture))</span>
+                                        }
+                                    </div>
+                                </td>
+
+                                @* Actions *@
+                                <td class="text-center pe-3">
+                                    <div class="d-inline-flex gap-1">
+                                        <button class="btn btn-sm btn-outline-info px-2 py-1" @onclick="() => GoToDetails(emp.EmployeeID)" title="View Details">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-primary px-2 py-1" @onclick="() => OpenEditForm(emp)" title="Edit">
+                                            <i class="bi bi-pencil-square"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger px-2 py-1" @onclick="() => DeleteEmployee(emp)" title="Delete">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 }
 
@@ -378,7 +461,7 @@ private DotNetObjectReference<EmployeeList>? employeeCacheRef;
             // replaces the browser read cache. No local write is replayed.
             try
             {
-                await JSRuntime.InvokeVoidAsync("employeeCache.save", employees);
+                await JSRuntime.InvokeVoidAsync("employeeCache.save", employees, FirebaseEmployees.OwnerUid);
             }
             catch (Exception cacheEx)
             {
@@ -412,7 +495,7 @@ private DotNetObjectReference<EmployeeList>? employeeCacheRef;
     {
         try
         {
-            var cached = await JSRuntime.InvokeAsync<EmployeeCacheEnvelope?>("employeeCache.load");
+            var cached = await JSRuntime.InvokeAsync<EmployeeCacheEnvelope?>("employeeCache.load", FirebaseEmployees.OwnerUid);
             if (cached?.payload == null || cached.payload.Count == 0)
                 return false;
 

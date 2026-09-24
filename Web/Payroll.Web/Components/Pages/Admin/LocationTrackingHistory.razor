@@ -17,15 +17,27 @@
 <PageTitle>Location Tracking History</PageTitle>
 
 <div class="location-stays-page container-fluid py-3">
-    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3 mb-3">
-        <div>
-            <div class="small text-uppercase fw-bold text-muted">GPS Operations</div>
-            <h3 class="fw-bold mb-1"><i class="bi bi-geo-alt-fill text-primary me-2"></i>Location Tracking History</h3>
-            <div class="text-muted">Historical GPS analysis showing locations where an employee was observed within approximately 10 metres for more than 10 minutes.</div>
+    <div class="page-header-container mb-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="emoji-icon-badge emoji-icon-badge-primary">
+                🛰️
+            </div>
+            <div>
+                <h2 class="page-header-title">
+                    Location Tracking History & GPS Radar
+                </h2>
+                <p class="page-header-subtitle">
+                    <span>📍 Historical GPS movement analysis: Dwell locations, stay duration (&gt;10 min) & travel trajectory</span>
+                </p>
+            </div>
         </div>
-        <button class="btn btn-outline-primary" @onclick="LoadAsync" disabled="@loading">
-            <i class="bi bi-arrow-clockwise me-1 @(loading ? "spin" : "")"></i>@(loading ? "Analyzing..." : "Refresh")
-        </button>
+
+        <div class="d-flex align-items-center gap-2">
+            <button class="action-pill-btn action-pill-btn-primary" @onclick="LoadAsync" disabled="@loading">
+                <i class="bi bi-arrow-clockwise me-1 @(loading ? "spin" : "")"></i>
+                <span>@(loading ? "Analyzing Radar..." : "🔄 Refresh Radar")</span>
+            </button>
+        </div>
     </div>
 
     <div class="card border-0 shadow-sm mb-3 filter-card">
