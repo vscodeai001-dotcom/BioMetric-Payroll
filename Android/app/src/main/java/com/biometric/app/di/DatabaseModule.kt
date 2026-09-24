@@ -52,7 +52,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "biometric_payroll.db"
         )
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(true)
             .build()
     }
 

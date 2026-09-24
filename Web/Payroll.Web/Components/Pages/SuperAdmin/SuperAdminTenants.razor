@@ -1,6 +1,7 @@
 @page "/superadmin/tenants"
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
 @using global::Payroll.Shared.Data
 @using global::Payroll.Web.Services
@@ -14,6 +15,7 @@
 @inject IToastService ToastService
 @inject IJSRuntime JSRuntime
 @inject ILogger<SuperAdminTenants> Logger
+@inject AuthenticationStateProvider AuthStateProvider
 
 <PageTitle>👑 SuperAdmin Multi-Tenant Command Center</PageTitle>
 
@@ -286,10 +288,15 @@ else
                                                 @onclick="() => OpenEditTenantModal(tenant)">
                                             <i class="bi bi-pencil me-1"></i>Edit
                                         </button>
-                                        <button class="btn btn-sm @(tenant.IsActive ? "btn-outline-danger" : "btn-outline-success")"
+                                        <button class="btn btn-sm @(tenant.IsActive ? "btn-outline-warning" : "btn-outline-success")"
                                                 title="@(tenant.IsActive ? "Suspend Tenant" : "Activate Tenant")"
                                                 @onclick="() => ToggleTenantStatus(tenant)">
                                             <i class="bi @(tenant.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                title="Delete Company Entirely (Local DB + Firebase Cloud)"
+                                                @onclick="() => OpenDeleteCompanyModal(tenant)">
+                                            <i class="bi bi-trash3-fill"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -1001,11 +1008,88 @@ else
             </div>
         </div>
     }
+
+    @* ========================================================================= *@
+    @* MODAL 5: DELETE COMPANY (CLOUD + LOCAL WIPE)                             *@
+    @* ========================================================================= *@
+    @if (showDeleteModal && tenantToDelete != null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.75);" aria-modal="true" role="dialog">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg rounded-3 border-top border-4 border-danger">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title fw-bold">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>Permanently Delete Company
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseDeleteCompanyModal" disabled="@isDeletingCompany"></button>
+                    </div>
+                    <div class="modal-body p-4">
+                        <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
+                            <i class="bi bi-shield-slash-fill fs-3 flex-shrink-0 text-danger"></i>
+                            <div>
+                                <strong class="fs-6">PERMANENT &amp; IRREVERSIBLE WIPE</strong>
+                                <div class="small mt-1">
+                                    You are about to completely delete <strong>@tenantToDelete.CompanyName (@tenantToDelete.CompanyCode)</strong>:
+                                </div>
+                                <ul class="mb-0 mt-2 small ps-3">
+                                    <li>All employee master records &amp; biometric IDs</li>
+                                    <li>All attendance logs, punches &amp; GPS history</li>
+                                    <li>All salary snapshots, advances &amp; payslips</li>
+                                    <li>All Firebase Cloud Realtime DB nodes under <code>owners/@tenantToDelete.TenantId</code></li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-body-tertiary rounded-2 mb-3 border small">
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-muted">Company:</span>
+                                <strong>@tenantToDelete.CompanyName</strong>
+                            </div>
+                            <div class="d-flex justify-content-between mb-1">
+                                <span class="text-muted">Tenant ID:</span>
+                                <code>@tenantToDelete.TenantId</code>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span class="text-muted">Company Admin:</span>
+                                <span>@tenantToDelete.AdminEmail</span>
+                            </div>
+                        </div>
+
+                        <div class="text-muted small mb-0">
+                            <i class="bi bi-lock-fill text-warning me-1"></i>
+                            Authorized exclusively for SuperAdmin <code>prakashshiva368@gmail.com</code>.
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(deleteErrorMessage))
+                        {
+                            <div class="alert alert-danger py-2 small mt-3 mb-0">@deleteErrorMessage</div>
+                        }
+                    </div>
+                    <div class="modal-footer bg-light-subtle">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseDeleteCompanyModal" disabled="@isDeletingCompany">Cancel</button>
+                        <button type="button" class="btn btn-danger fw-bold" @onclick="ConfirmDeleteCompanyAsync" disabled="@isDeletingCompany">
+                            @if (isDeletingCompany)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                                <span>Deleting Cloud &amp; Local DB...</span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-trash3-fill me-1"></i>
+                                <span>Yes, Delete Company Entirely</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
     private bool isLoading = true;
     private bool isSuperAdmin = false;
+    private string currentUserEmail = string.Empty;
     private CompanyTenant? activeTenant;
     private List<CompanyTenant> allTenants = new();
 
@@ -1037,6 +1121,12 @@ else
     private bool showEditPassword = false;
     private string? editErrorMessage;
 
+    // Delete Company Modal state
+    private bool showDeleteModal = false;
+    private bool isDeletingCompany = false;
+    private string? deleteErrorMessage;
+    private CompanyTenant? tenantToDelete;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadDataAsync();
@@ -1047,6 +1137,9 @@ else
         isLoading = true;
         try
         {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            currentUserEmail = authState.User.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
+
             isSuperAdmin = await TenantContext.IsSuperAdminAsync();
             if (isSuperAdmin)
             {
@@ -1110,6 +1203,11 @@ else
         try
         {
             await TenantContext.SetActiveTenantIdAsync(tenantId);
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("setTenantCookie", tenantId);
+            }
+            catch { }
             ToastService.ShowSuccess($"Workspace switched to tenant: {tenantId} 🚀");
             Navigation.NavigateTo("/", true);
         }
@@ -1414,6 +1512,63 @@ else
         catch
         {
             ToastService.ShowInfo($"Admin Email: {tenant.AdminEmail}");
+        }
+    }
+
+    // --- DELETE COMPANY MODAL ---
+    private void OpenDeleteCompanyModal(CompanyTenant tenant)
+    {
+        tenantToDelete = tenant;
+        deleteErrorMessage = null;
+        isDeletingCompany = false;
+        showDeleteModal = true;
+    }
+
+    private void CloseDeleteCompanyModal()
+    {
+        if (isDeletingCompany) return;
+        showDeleteModal = false;
+        tenantToDelete = null;
+        deleteErrorMessage = null;
+    }
+
+    private async Task ConfirmDeleteCompanyAsync()
+    {
+        if (tenantToDelete == null) return;
+
+        isDeletingCompany = true;
+        deleteErrorMessage = null;
+
+        try
+        {
+            var userEmail = string.IsNullOrWhiteSpace(currentUserEmail)
+                ? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail
+                : currentUserEmail;
+
+            var result = await TenantManager.DeleteEntireCompanyAsync(tenantToDelete.TenantId, userEmail);
+
+            if (result.Success)
+            {
+                ToastService.ShowSuccess($"Company '{tenantToDelete.CompanyName}' ({tenantToDelete.CompanyCode}) deleted successfully from Cloud and Local DB! 🗑️");
+                showDeleteModal = false;
+                tenantToDelete = null;
+                await LoadDataAsync();
+            }
+            else
+            {
+                deleteErrorMessage = result.ErrorMessage ?? "Failed to delete company.";
+                ToastService.ShowError(deleteErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting company tenant.");
+            deleteErrorMessage = "An unexpected error occurred: " + ex.Message;
+            ToastService.ShowError(deleteErrorMessage);
+        }
+        finally
+        {
+            isDeletingCompany = false;
         }
     }
 }

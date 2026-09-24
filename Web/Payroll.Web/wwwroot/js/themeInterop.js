@@ -7091,3 +7091,30 @@ function escapeStayMapHtml(value) {
     `;
     document.head.appendChild(style);
 })();
+
+// ============================================================
+// SUPERADMIN MULTI-TENANT WORKSPACE COOKIE SYNC
+// ============================================================
+window.setTenantCookie = function (tenantId) {
+    try {
+        var name = "BioMetric_SuperAdmin_ActiveTenant";
+        var value = encodeURIComponent(tenantId || "biometricpayroll");
+        var expires = "; max-age=" + (30 * 24 * 60 * 60) + "; path=/; SameSite=Lax";
+        document.cookie = name + "=" + value + expires;
+        try {
+            localStorage.setItem("BioMetric_SuperAdmin_ActiveTenant", tenantId || "biometricpayroll");
+        } catch (e) { }
+    } catch (e) {
+        console.warn("Unable to write tenant cookie", e);
+    }
+};
+
+window.clearTenantCookie = function () {
+    try {
+        document.cookie = "BioMetric_SuperAdmin_ActiveTenant=; max-age=0; path=/; SameSite=Lax";
+        try {
+            localStorage.removeItem("BioMetric_SuperAdmin_ActiveTenant");
+        } catch (e) { }
+    } catch (e) { }
+};
+

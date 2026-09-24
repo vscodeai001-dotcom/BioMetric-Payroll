@@ -44,16 +44,88 @@
                             <span class="fw-bold">Offline Standalone</span>
                         </span>
                     }
-                    else if (activeTenant != null && !userIsSuperAdmin)
-                    {
-                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 d-none d-sm-inline-flex align-items-center gap-1 shadow-sm">
-                            <span>@(activeTenant.IconEmoji)</span>
-                            <span class="fw-bold">@activeTenant.CompanyName</span>
-                        </span>
-                    }
                 </div>
 
-                <div class="auth-section d-flex align-items-center">
+                <div class="auth-section d-flex align-items-center gap-2">
+                    @* --- ACTIVE COMPANY BADGE & SMART SWITCHER (BESIDE THEME CONTROL) --- *@
+                    @if (!isOfflineMode && activeTenant != null)
+                    {
+                        @if (userIsSuperAdmin)
+                        {
+                            <div class="d-flex align-items-center gap-1 me-1">
+                                @* Active Company Badge *@
+                                <div class="badge bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1.5 rounded-pill d-inline-flex align-items-center gap-1.5 shadow-sm fw-semibold"
+                                     title="Active Workspace: @activeTenant.CompanyName (@activeTenant.CompanyCode)">
+                                    <span class="fs-6">@activeTenant.IconEmoji</span>
+                                    <span class="d-none d-sm-inline text-truncate" style="max-width: 140px;">@activeTenant.CompanyName</span>
+                                    <span class="badge bg-primary text-white py-0.5 px-1.5 rounded-pill font-monospace small">@activeTenant.CompanyCode</span>
+                                </div>
+
+                                @* Smart Company Switcher *@
+                                @if (allTenants.Count == 2)
+                                {
+                                    @* Exactly 2 companies: 1-click instant direct toggle *@
+                                    var otherTenant = allTenants.FirstOrDefault(t => t.TenantId != activeTenant.TenantId) ?? allTenants.First();
+                                    <button class="btn btn-sm btn-outline-primary rounded-pill px-2.5 py-1 d-inline-flex align-items-center gap-1 shadow-sm fw-semibold"
+                                            @onclick="() => SwitchTenantDirectly(otherTenant.TenantId)"
+                                            title="Switch directly to @otherTenant.CompanyName (@otherTenant.CompanyCode)">
+                                        <i class="bi bi-arrow-left-right"></i>
+                                        <span class="d-none d-lg-inline">Switch to @otherTenant.CompanyCode</span>
+                                    </button>
+                                }
+                                else if (allTenants.Count > 2)
+                                {
+                                    @* More than 2 companies: Dropdown selection *@
+                                    <div class="dropdown">
+                                        <button class="btn btn-sm btn-outline-primary dropdown-toggle rounded-pill px-2.5 py-1 d-inline-flex align-items-center gap-1 shadow-sm fw-semibold"
+                                                type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                                                title="Switch Company Workspace">
+                                            <i class="bi bi-arrow-left-right"></i>
+                                            <span class="d-none d-lg-inline">Switch</span>
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 rounded-3 p-2" style="min-width: 250px;">
+                                            <li class="dropdown-header text-uppercase fw-bold small text-muted px-2 py-1">
+                                                🏢 Select Company Workspace
+                                            </li>
+                                            @foreach (var tenant in allTenants)
+                                            {
+                                                var isSelected = tenant.TenantId == activeTenant.TenantId;
+                                                <li>
+                                                    <button class="dropdown-item rounded-2 py-2 px-2.5 d-flex align-items-center justify-content-between @(isSelected ? "active fw-bold" : "")"
+                                                            @onclick="() => SwitchTenantDirectly(tenant.TenantId)">
+                                                        <div class="d-flex align-items-center gap-2 text-truncate">
+                                                            <span class="fs-5">@tenant.IconEmoji</span>
+                                                            <div class="text-truncate">
+                                                                <div class="text-truncate @(isSelected ? "text-white" : "")">@tenant.CompanyName</div>
+                                                                <small class="@(isSelected ? "text-white-50" : "text-muted")">@tenant.AdminEmail</small>
+                                                            </div>
+                                                        </div>
+                                                        <span class="badge @(isSelected ? "bg-light text-dark" : "bg-secondary-subtle text-secondary") ms-2">@tenant.CompanyCode</span>
+                                                    </button>
+                                                </li>
+                                            }
+                                            <li><hr class="dropdown-divider my-1"></li>
+                                            <li>
+                                                <a class="dropdown-item rounded-2 small text-primary fw-semibold d-flex align-items-center gap-2 py-1.5" href="/superadmin/tenants">
+                                                    <i class="bi bi-grid-fill"></i>
+                                                    <span>👑 All Companies Hub</span>
+                                                </a>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2.5 py-1.5 rounded-pill d-inline-flex align-items-center gap-1.5 shadow-sm fw-semibold me-1"
+                                  title="@activeTenant.CompanyName">
+                                <span>@activeTenant.IconEmoji</span>
+                                <span class="d-none d-sm-inline text-truncate" style="max-width: 140px;">@activeTenant.CompanyName</span>
+                            </span>
+                        }
+                    }
+
                     @if (settings?.EnableInAppNotifications == true)
                     {
                         <AuthorizeView>
@@ -133,6 +205,7 @@
     private NavMenu? navMenuRef;
     private bool userIsSuperAdmin;
     private CompanyTenant? activeTenant;
+    private List<CompanyTenant> allTenants = new();
     private bool geoTrackingEnabled;
     private int employeeId;
     private string? themeUserId;
@@ -176,6 +249,11 @@
         activeTenant =
             await TenantContext.GetActiveTenantAsync();
 
+        if (userIsSuperAdmin)
+        {
+            allTenants = await TenantContext.GetAllTenantsAsync();
+        }
+
         TenantContext.OnTenantChanged += HandleTenantChanged;
 
         await LoadFeatureSettings();
@@ -185,8 +263,30 @@
     private async void HandleTenantChanged()
     {
         activeTenant = await TenantContext.GetActiveTenantAsync();
+        if (userIsSuperAdmin)
+        {
+            allTenants = await TenantContext.GetAllTenantsAsync();
+        }
         await LoadFeatureSettings();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SwitchTenantDirectly(string tenantId)
+    {
+        try
+        {
+            await TenantContext.SetActiveTenantIdAsync(tenantId);
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("setTenantCookie", tenantId);
+            }
+            catch { }
+            Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to switch tenant workspace to {TenantId}", tenantId);
+        }
     }
 
     private async void HandleAppModeChanged()

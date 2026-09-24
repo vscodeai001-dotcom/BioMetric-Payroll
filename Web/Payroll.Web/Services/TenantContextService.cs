@@ -29,6 +29,8 @@ namespace Payroll.Web.Services
 
     public class TenantContextService : ITenantContextService
     {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _superAdminSelectedTenantsByEmail = new(StringComparer.OrdinalIgnoreCase);
+
         private readonly IDbContextFactory<AppDbContext> _dbFactory;
         private readonly AuthenticationStateProvider _authStateProvider;
         private readonly IHttpContextAccessor _httpContextAccessor;
@@ -51,6 +53,13 @@ namespace Payroll.Web.Services
             _authStateProvider = authStateProvider;
             _httpContextAccessor = httpContextAccessor;
             _logger = logger;
+        }
+
+        public static bool TryGetSuperAdminTenant(string? email, out string? tenantId)
+        {
+            tenantId = null;
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            return _superAdminSelectedTenantsByEmail.TryGetValue(email.Trim(), out tenantId);
         }
 
         public async Task<bool> IsSuperAdminAsync()
@@ -79,6 +88,19 @@ namespace Payroll.Web.Services
                     return _superAdminSelectedTenantId;
                 }
 
+                // Check static cache by SuperAdmin email
+                try
+                {
+                    var authState = await _authStateProvider.GetAuthenticationStateAsync();
+                    var email = authState.User.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
+                    if (_superAdminSelectedTenantsByEmail.TryGetValue(email, out var cachedTenant) && !string.IsNullOrWhiteSpace(cachedTenant))
+                    {
+                        _superAdminSelectedTenantId = cachedTenant;
+                        return _superAdminSelectedTenantId;
+                    }
+                }
+                catch { }
+
                 // Check cookie fallback if available
                 var http = _httpContextAccessor.HttpContext;
                 if (http != null && http.Request.Cookies.TryGetValue(TenantCookieName, out var cookieTenant) && !string.IsNullOrWhiteSpace(cookieTenant))
@@ -91,8 +113,8 @@ namespace Payroll.Web.Services
             }
 
             // For regular Admin or Employee, resolve based on current user
-            var authState = await _authStateProvider.GetAuthenticationStateAsync();
-            var user = authState.User;
+            var authStateUser = await _authStateProvider.GetAuthenticationStateAsync();
+            var user = authStateUser.User;
 
             // 1. Direct claim check: instant resolution without DB query
             var tenantClaim = user.FindFirst("TenantId")?.Value ?? user.FindFirst("OwnerUid")?.Value;
@@ -103,16 +125,16 @@ namespace Payroll.Web.Services
 
             // 2. Database resolution by user identifier or email
             var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
-            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+            var userEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
 
             await using var db = await _dbFactory.CreateDbContextAsync();
 
-            if (!string.IsNullOrWhiteSpace(userId) || !string.IsNullOrWhiteSpace(email))
+            if (!string.IsNullOrWhiteSpace(userId) || !string.IsNullOrWhiteSpace(userEmail))
             {
                 var tenant = await db.CompanyTenants
                     .AsNoTracking()
                     .FirstOrDefaultAsync(t => (userId != null && t.AdminUserId == userId) ||
-                                              (email != null && t.AdminEmail.ToLower() == email.ToLower()));
+                                              (userEmail != null && t.AdminEmail.ToLower() == userEmail.ToLower()));
 
                 if (tenant != null)
                 {
@@ -136,12 +158,20 @@ namespace Payroll.Web.Services
 
             try
             {
+                var authState = await _authStateProvider.GetAuthenticationStateAsync();
+                var email = authState.User.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
+                _superAdminSelectedTenantsByEmail[email] = _superAdminSelectedTenantId;
+            }
+            catch { }
+
+            try
+            {
                 var http = _httpContextAccessor.HttpContext;
                 if (http != null && !http.Response.HasStarted)
                 {
                     http.Response.Cookies.Append(TenantCookieName, _superAdminSelectedTenantId, new CookieOptions
                     {
-                        HttpOnly = true,
+                        HttpOnly = false,
                         Secure = true,
                         SameSite = SameSiteMode.Lax,
                         MaxAge = TimeSpan.FromDays(30),
@@ -157,9 +187,17 @@ namespace Payroll.Web.Services
             OnTenantChanged?.Invoke();
         }
 
-        public Task ClearActiveTenantAsync()
+        public async Task ClearActiveTenantAsync()
         {
             _superAdminSelectedTenantId = null;
+
+            try
+            {
+                var authState = await _authStateProvider.GetAuthenticationStateAsync();
+                var email = authState.User.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
+                _superAdminSelectedTenantsByEmail.TryRemove(email, out _);
+            }
+            catch { }
 
             try
             {
@@ -175,7 +213,6 @@ namespace Payroll.Web.Services
             }
 
             OnTenantChanged?.Invoke();
-            return Task.CompletedTask;
         }
 
         public async Task<CompanyTenant?> GetActiveTenantAsync()

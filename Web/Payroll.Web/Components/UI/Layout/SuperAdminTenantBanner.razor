@@ -2,6 +2,7 @@
 @using global::Payroll.Shared.Data
 @inject ITenantContextService TenantContext
 @inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
 @implements IDisposable
 
 @if (isSuperAdmin && activeTenant != null)
@@ -26,7 +27,16 @@
             </div>
 
             <div class="d-flex align-items-center gap-2">
-                @if (allTenants.Count > 1)
+                @if (allTenants.Count == 2)
+                {
+                    var otherTenant = allTenants.FirstOrDefault(t => t.TenantId != activeTenant.TenantId) ?? allTenants.First();
+                    <button class="btn btn-sm btn-outline-light" type="button"
+                            @onclick="() => SwitchTenant(otherTenant.TenantId)"
+                            title="Switch directly to @otherTenant.CompanyName (@otherTenant.CompanyCode)">
+                        <i class="bi bi-arrow-left-right me-1"></i>Switch to @otherTenant.CompanyCode
+                    </button>
+                }
+                else if (allTenants.Count > 2)
                 {
                     <div class="dropdown">
                         <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -85,6 +95,11 @@
     private async Task SwitchTenant(string tenantId)
     {
         await TenantContext.SetActiveTenantIdAsync(tenantId);
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("setTenantCookie", tenantId);
+        }
+        catch { }
         await LoadStateAsync();
         Navigation.NavigateTo(Navigation.Uri, true);
     }

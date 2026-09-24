@@ -86,7 +86,7 @@ abstract class AppLocalDatabase : RoomDatabase() {
                     "biometric_local_db"
                 )
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigration(true)
                 .build()
                 INSTANCE = instance
                 instance

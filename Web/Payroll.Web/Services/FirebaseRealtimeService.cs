@@ -77,6 +77,13 @@ public sealed class FirebaseRealtimeService
 
                     if (isSuperAdmin)
                     {
+                        var superAdminEmail = user.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
+                        if (TenantContextService.TryGetSuperAdminTenant(superAdminEmail, out var cachedTenantId) &&
+                            !string.IsNullOrWhiteSpace(cachedTenantId))
+                        {
+                            return cachedTenantId.Trim();
+                        }
+
                         // Check if SuperAdmin switched to a specific tenant workspace via cookie
                         if (httpContext.Request.Cookies.TryGetValue("BioMetric_SuperAdmin_ActiveTenant", out var cookieTenant) &&
                             !string.IsNullOrWhiteSpace(cookieTenant))

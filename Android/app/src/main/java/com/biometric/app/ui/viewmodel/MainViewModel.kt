@@ -66,6 +66,7 @@ private data class WorkforceTrigger(
     val endDate: Long?
 )
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: MainRepository,
