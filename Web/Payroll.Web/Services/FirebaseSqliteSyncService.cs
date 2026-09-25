@@ -2005,6 +2005,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             ("otrule", "otrule") => true,
             ("otflatrate", "otflatrate") => true,
             ("compoffdayofweek", "compoffdayofweek") => true,
+            ("leavedate", "startdate") => true,
+            ("leavedate", "leavedate") => true,
+            ("notes", "reason") => true,
+            ("adminnotes", "adminremarks") => true,
+            ("isapproved", "status") => true,
+            ("advanceid", "id") => true,
+            ("advancedate", "date") => true,
+            ("dateofpunch", "date") => true,
+            ("isinpunch", "punchtype") => true,
+            ("punchtimenew", "requestedtime") => true,
+            ("submissiondate", "submittedat") => true,
+            ("desiredlastworkingday", "desiredlastworkingday") => true,
+            ("approvedlastworkingday", "approvedlastworkingday") => true,
             _ => false
         };
 
@@ -2135,6 +2148,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 if (value.Value.ValueKind == JsonValueKind.False) return false;
                 var text = value.Value.ToString();
                 if (bool.TryParse(text, out var b)) return b;
+                if (string.Equals(text, "Approved", StringComparison.OrdinalIgnoreCase)) return true;
+                if (string.Equals(text, "Pending", StringComparison.OrdinalIgnoreCase) || string.Equals(text, "Rejected", StringComparison.OrdinalIgnoreCase)) return false;
+                if (string.Equals(text, "IN", StringComparison.OrdinalIgnoreCase)) return true;
+                if (string.Equals(text, "OUT", StringComparison.OrdinalIgnoreCase)) return false;
                 if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) return n != 0;
                 return false;
             }
@@ -2197,10 +2214,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             if (type == typeof(TimeOnly))
             {
                 if (value.Value.ValueKind == JsonValueKind.Number &&
+                    value.Value.TryGetInt64(out var epochMs) && epochMs > 86400000L)
+                {
+                    return TimeOnly.FromTimeSpan(DateTimeOffset.FromUnixTimeMilliseconds(epochMs).ToOffset(TimeSpan.FromHours(5.5)).TimeOfDay);
+                }
+                if (value.Value.ValueKind == JsonValueKind.Number &&
                     value.Value.TryGetDouble(out var ms))
                     return TimeOnly.FromTimeSpan(TimeSpan.FromMilliseconds(ms));
 
                 var text = value.Value.ValueKind == JsonValueKind.String ? value.Value.GetString() : value.Value.ToString();
+                if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs) && pMs > 86400000L)
+                {
+                    return TimeOnly.FromTimeSpan(DateTimeOffset.FromUnixTimeMilliseconds(pMs).ToOffset(TimeSpan.FromHours(5.5)).TimeOfDay);
+                }
                 return TimeOnly.Parse(
                     text!,
                     CultureInfo.InvariantCulture);

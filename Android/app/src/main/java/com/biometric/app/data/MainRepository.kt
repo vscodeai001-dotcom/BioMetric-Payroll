@@ -649,6 +649,27 @@ class MainRepository(
             }
     }
 
+    suspend fun upsertLeaveRequests(requests: List<LeaveRequest>) = withContext(Dispatchers.IO) {
+        requests.forEach { req ->
+            localLeaveRequestDao.upsert(
+                com.biometric.app.data.entity.LocalLeaveRequest(
+                    id = req.id,
+                    staffId = req.staffId,
+                    staffName = req.staffName,
+                    leaveType = req.leaveType,
+                    startDate = req.startDate,
+                    endDate = req.endDate,
+                    reason = req.reason,
+                    status = req.status,
+                    adminNotes = req.adminNotes,
+                    isHalfDay = req.isHalfDay,
+                    createdAt = req.createdAt,
+                    syncState = 1
+                )
+            )
+        }
+    }
+
     // ---------------- RESIGNATION ----------------
     suspend fun updateResignationStatus(requestId: String, status: String, remarks: String?) = withContext(Dispatchers.IO) {
         val existing = localResignationRequestDao.getAllFlow().first().find { it.requestId == requestId }

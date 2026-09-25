@@ -279,6 +279,15 @@
                                 android:paddingHorizontal="8dp" />
                         </com.google.android.material.card.MaterialCardView>
 
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnSearchLeaves"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginTop="12dp"
+                            android:text="🔍 Search Leave Requests"
+                            android:textStyle="bold"
+                            app:cornerRadius="10dp" />
+
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 

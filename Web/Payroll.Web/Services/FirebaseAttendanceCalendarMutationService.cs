@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using Payroll.Shared;
 using Payroll.Shared.Data;
 
@@ -14,41 +15,71 @@ public sealed class FirebaseAttendanceCalendarMutationService
 {
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<FirebaseAttendanceCalendarMutationService> _logger;
 
     public FirebaseAttendanceCalendarMutationService(
         FirebaseRealtimeService firebase,
         IConfiguration configuration,
+        IServiceScopeFactory scopeFactory,
         ILogger<FirebaseAttendanceCalendarMutationService> logger)
     {
         _firebase = firebase;
         _configuration = configuration;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
     private string OwnerUid => _firebase.ResolveOwnerUid("attendance-cal-mutation", "Admin");
 
-    public Task<bool> UpsertLeaveAsync(LeaveRequest leave, CancellationToken ct = default)
+    public async Task<bool> UpsertLeaveAsync(LeaveRequest leave, string? employeeName = null, CancellationToken ct = default)
     {
         if (leave.LeaveRequestID <= 0 || leave.EmployeeID <= 0)
-            return Task.FromResult(false);
+            return false;
 
         var key = leave.LeaveRequestID.ToString(CultureInfo.InvariantCulture);
         var start = ToUnixMilliseconds(leave.LeaveDate);
         var end = ToUnixMilliseconds(leave.EndDate ?? leave.LeaveDate);
-        var status = leave.IsApproved ? "Approved" : "Rejected";
+        var status = !string.IsNullOrWhiteSpace(leave.Status)
+            ? leave.Status
+            : (leave.IsApproved ? "Approved" : "Pending");
+
+        var staffName = employeeName;
+        if (string.IsNullOrWhiteSpace(staffName))
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    await using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var emp = await db.Employees.FindAsync(new object[] { leave.EmployeeID }, ct);
+                    staffName = emp?.Name;
+                }
+            }
+            catch
+            {
+                // Fallback gracefully
+            }
+        }
+        staffName ??= "Employee";
 
         var row = new Dictionary<string, object?>
         {
             ["id"] = leave.LeaveRequestID,
             ["leaveRequestId"] = leave.LeaveRequestID,
             ["employeeId"] = leave.EmployeeID,
-            ["staffId"] = leave.EmployeeID,
+            ["staffId"] = leave.EmployeeID.ToString(CultureInfo.InvariantCulture),
+            ["staffName"] = staffName,
+            ["employeeName"] = staffName,
             ["leaveType"] = leave.LeaveType ?? string.Empty,
             ["startDate"] = start,
             ["endDate"] = end,
+            ["leaveDate"] = leave.LeaveDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["reason"] = leave.Notes ?? string.Empty,
-            ["adminNotes"] = leave.Notes ?? string.Empty,
+            ["notes"] = leave.Notes ?? string.Empty,
+            ["adminNotes"] = leave.AdminNotes ?? string.Empty,
             ["status"] = status,
             ["isApproved"] = leave.IsApproved,
             ["isHalfDay"] = leave.IsHalfDay,
@@ -58,7 +89,7 @@ public sealed class FirebaseAttendanceCalendarMutationService
             ["_updatedUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
         };
 
-        return WriteWithRetryAsync(
+        return await WriteWithRetryAsync(
             token => _firebase.SetOwnerRecordAsync(OwnerUid, "leave_requests", key, row, token),
             "LeaveRequest", "MODIFIED", key, ct);
     }

@@ -170,21 +170,26 @@ public sealed class FirebaseRegularizationService
                 ? request.RegularizationId.ToString(CultureInfo.InvariantCulture)
                 : (-DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()).ToString(CultureInfo.InvariantCulture);
 
+        var staffName = (await GetEmployeeAsync(request.EmployeeId, ct))?.Name ?? "Employee";
         var row = new Dictionary<string, object?>
         {
-            ["id"] = request.RegularizationId,
-            ["regularizationId"] = request.RegularizationId,
+            ["id"] = request.RegularizationId != 0 ? (object)request.RegularizationId : key,
+            ["regularizationId"] = request.RegularizationId != 0 ? (object)request.RegularizationId : key,
             ["staffId"] = request.EmployeeId.ToString(CultureInfo.InvariantCulture),
             ["employeeId"] = request.EmployeeId,
-            ["staffName"] = (await GetEmployeeAsync(request.EmployeeId, ct))?.Name ?? "Employee",
+            ["staffName"] = staffName,
+            ["employeeName"] = staffName,
             ["date"] = request.DateOfPunch.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            ["dateOfPunch"] = request.DateOfPunch.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["punchType"] = request.IsInPunch ? "IN" : "OUT",
             ["isInPunch"] = request.IsInPunch,
             ["requestedTime"] = new DateTimeOffset(request.DateOfPunch.ToDateTime(request.PunchTimeNew)).ToUnixTimeMilliseconds(),
+            ["punchTimeNew"] = request.PunchTimeNew.ToString("HH:mm"),
             ["reason"] = request.Reason.Trim(),
             ["status"] = string.IsNullOrWhiteSpace(request.Status) ? "Pending" : request.Status,
             ["adminRemarks"] = request.AdminRemarks,
             ["submittedAt"] = new DateTimeOffset(request.SubmissionDate).ToUnixTimeMilliseconds(),
+            ["submissionDate"] = new DateTimeOffset(request.SubmissionDate).ToUnixTimeMilliseconds(),
             ["_entity"] = "AttendanceRegularization",
             ["_key"] = key,
             ["_updatedUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)

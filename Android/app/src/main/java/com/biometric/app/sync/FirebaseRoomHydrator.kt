@@ -380,10 +380,27 @@ class FirebaseRoomHydrator @Inject constructor(
         syncState = 1,
         lastModified = l("lastModified")
     )
-    private fun DataSnapshot.toAdvancePayment() = AdvancePayment(
-        advanceId = s("advanceId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(),
-        shopId = s("shopId").orEmpty(), amount = d("amount"), date = l("date"), isRecovered = b("isRecovered"), recoveryPaymentId = s("recoveryPaymentId")
-    )
+    private fun DataSnapshot.toAdvancePayment(): AdvancePayment {
+        val eId = s("employeeId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: l("employeeId").takeIf { it > 0 }?.toString()
+            ?: l("staffId").takeIf { it > 0 }?.toString()
+            ?: ""
+        val advDate = l("date").takeIf { it > 0 }
+            ?: l("advanceDate").takeIf { it > 0 }
+            ?: s("advanceDate")?.let { str ->
+                runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time }.getOrNull()
+            } ?: System.currentTimeMillis()
+        return AdvancePayment(
+            advanceId = s("advanceId") ?: s("id") ?: key.orEmpty(),
+            employeeId = eId,
+            shopId = s("shopId").orEmpty(),
+            amount = d("amount"),
+            date = advDate,
+            isRecovered = b("isRecovered"),
+            recoveryPaymentId = s("recoveryPaymentId")
+        )
+    }
     private fun DataSnapshot.toEmployeeHistory() = EmployeeHistory(
         historyId = s("historyId") ?: key.orEmpty(),
         employeeId = s("employeeId") ?: l("employeeId").toString(),
@@ -417,11 +434,29 @@ class FirebaseRoomHydrator @Inject constructor(
     private fun DataSnapshot.toShopClosedDay() = ShopClosedDay(
         id = s("id") ?: key.orEmpty(), shopId = s("shopId").orEmpty(), date = l("date"), paySalary = b("paySalary", true), reason = s("reason"), affectedEmployeeIds = emptyList()
     )
-    private fun DataSnapshot.toRegularization() = RegularizationRequest(
-        id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(), date = s("date").orEmpty(),
-        punchType = s("punchType") ?: "IN", originalTime = l("originalTime").takeIf { it > 0 }, requestedTime = l("requestedTime"),
-        reason = s("reason").orEmpty(), status = s("status") ?: "Pending", adminRemarks = s("adminRemarks"), submittedAt = l("submittedAt")
-    )
+    private fun DataSnapshot.toRegularization(): RegularizationRequest {
+        val sId = s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: s("employeeId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: l("staffId").takeIf { it > 0 }?.toString()
+            ?: l("employeeId").takeIf { it > 0 }?.toString()
+            ?: ""
+        val sName = s("staffName")?.takeIf { it.isNotBlank() }
+            ?: s("employeeName")?.takeIf { it.isNotBlank() }
+            ?: ""
+        return RegularizationRequest(
+            id = s("id") ?: key.orEmpty(),
+            staffId = sId,
+            staffName = sName,
+            date = s("date") ?: s("dateOfPunch").orEmpty(),
+            punchType = s("punchType") ?: if (b("isInPunch", true)) "IN" else "OUT",
+            originalTime = l("originalTime").takeIf { it > 0 },
+            requestedTime = l("requestedTime").takeIf { it > 0 } ?: l("punchTimeNew"),
+            reason = s("reason").orEmpty(),
+            status = s("status") ?: "Pending",
+            adminRemarks = s("adminRemarks"),
+            submittedAt = l("submittedAt").takeIf { it > 0 } ?: l("submissionDate").takeIf { it > 0 } ?: System.currentTimeMillis()
+        )
+    }
     private fun DataSnapshot.toAttendancePunch() = AttendancePunch(
         punchId = s("punchId") ?: s("attendanceId") ?: key.orEmpty(),
         staffId = s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
@@ -443,16 +478,66 @@ class FirebaseRoomHydrator @Inject constructor(
         source = s("source") ?: "GEOFENCE",
         status = s("status") ?: "APPROVED"
     )
-    private fun DataSnapshot.toLeaveRequest() = LeaveRequest(
-        id = s("id") ?: key.orEmpty(), staffId = s("staffId") ?: l("staffId").toString(), staffName = s("staffName").orEmpty(),
-        leaveType = s("leaveType") ?: "Casual Leave", startDate = l("startDate"), endDate = l("endDate"), reason = s("reason").orEmpty(),
-        status = s("status") ?: "Pending", adminNotes = s("adminNotes"), isHalfDay = b("isHalfDay"), createdAt = l("createdAt")
-    )
-    private fun DataSnapshot.toResignation() = ResignationRequest(
-        requestId = s("requestId") ?: key.orEmpty(), employeeId = s("employeeId") ?: l("employeeId").toString(), submissionDate = l("submissionDate"),
-        desiredLastWorkingDay = l("desiredLastWorkingDay"), reason = s("reason"), status = s("status") ?: "Pending",
-        approvedLastWorkingDay = l("approvedLastWorkingDay").takeIf { it > 0 }, adminRemarks = s("adminRemarks"), isSettled = b("isSettled")
-    )
+    private fun DataSnapshot.toLeaveRequest(): LeaveRequest {
+        val sId = s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: s("employeeId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: l("staffId").takeIf { it > 0 }?.toString()
+            ?: l("employeeId").takeIf { it > 0 }?.toString()
+            ?: ""
+        val sName = s("staffName")?.takeIf { it.isNotBlank() }
+            ?: s("employeeName")?.takeIf { it.isNotBlank() }
+            ?: ""
+        val start = l("startDate").takeIf { it > 0 }
+            ?: s("leaveDate")?.let { str ->
+                runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time }.getOrNull()
+            } ?: 0L
+        val end = l("endDate").takeIf { it > 0 } ?: start
+        val isAppr = b("isApproved")
+        val stat = s("status")?.takeIf { it.isNotBlank() } ?: if (isAppr) "Approved" else "Pending"
+        val rsn = s("reason")?.takeIf { it.isNotBlank() } ?: s("notes").orEmpty()
+        val admNotes = s("adminNotes")?.takeIf { it.isNotBlank() } ?: s("adminRemarks")
+
+        return LeaveRequest(
+            id = s("id") ?: s("leaveRequestId") ?: key.orEmpty(),
+            staffId = sId,
+            staffName = sName,
+            leaveType = s("leaveType") ?: "Casual Leave",
+            startDate = start,
+            endDate = end,
+            reason = rsn,
+            status = stat,
+            adminNotes = admNotes,
+            isHalfDay = b("isHalfDay"),
+            createdAt = l("createdAt").takeIf { it > 0 } ?: start
+        )
+    }
+    private fun DataSnapshot.toResignation(): ResignationRequest {
+        val eId = s("employeeId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: s("staffId")?.takeIf { it.isNotBlank() && it != "0" }
+            ?: l("employeeId").takeIf { it > 0 }?.toString()
+            ?: l("staffId").takeIf { it > 0 }?.toString()
+            ?: ""
+        val subDate = l("submissionDate").takeIf { it > 0 } ?: System.currentTimeMillis()
+        val desDate = l("desiredLastWorkingDay").takeIf { it > 0 }
+            ?: s("desiredLastWorkingDay")?.let { str ->
+                runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time }.getOrNull()
+            } ?: subDate
+        val appDate = l("approvedLastWorkingDay").takeIf { it > 0 }
+            ?: s("approvedLastWorkingDay")?.let { str ->
+                runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time }.getOrNull()
+            }
+        return ResignationRequest(
+            requestId = s("requestId") ?: s("id") ?: key.orEmpty(),
+            employeeId = eId,
+            submissionDate = subDate,
+            desiredLastWorkingDay = desDate,
+            reason = s("reason"),
+            status = s("status") ?: "Pending",
+            approvedLastWorkingDay = appDate,
+            adminRemarks = s("adminRemarks"),
+            isSettled = b("isSettled")
+        )
+    }
 
     private fun DataSnapshot.toLocalCompanySettings() = LocalCompanySettings(
         id = 1,

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Payroll.Shared
@@ -25,12 +25,16 @@ namespace Payroll.Shared
         // --- END NEW ---
 
         [Column("isapproved")]
-        public bool IsApproved { get; set; } = true;
+        public bool IsApproved { get; set; } = false;
 
-       
+        [Column("Status")]
+        public string? Status { get; set; } = "Pending";
 
         [Column("notes")]
         public string? Notes { get; set; } // Nullable string
+
+        [Column("AdminNotes")]
+        public string? AdminNotes { get; set; }
 
         // --- NEW: Non-Database bound properties for Multi-Day UX ---
         [NotMapped]

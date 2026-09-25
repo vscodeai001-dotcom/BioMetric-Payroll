@@ -63,9 +63,11 @@ namespace Payroll.Web.Services
                 query = query.Where(lr => lr.LeaveDate < endDate.Value.Date.AddDays(1));
 
             if (filterStatus == "Pending")
-                query = query.Where(lr => !lr.IsApproved && lr.LeaveType != "Loss of Pay (Auto)");
+                query = query.Where(lr => (!lr.IsApproved || lr.Status == "Pending") && lr.Status != "Rejected" && lr.LeaveType != "Loss of Pay (Auto)");
             else if (filterStatus == "Approved")
-                query = query.Where(lr => lr.IsApproved);
+                query = query.Where(lr => lr.IsApproved || lr.Status == "Approved");
+            else if (filterStatus == "Rejected")
+                query = query.Where(lr => lr.Status == "Rejected");
 
             return await query
                 .OrderByDescending(lr => lr.LeaveDate)
@@ -91,12 +93,14 @@ namespace Payroll.Web.Services
 
             // Admin entry is auto-approved, exactly as in the existing flow.
             newRequest.IsApproved = true;
+            newRequest.Status = "Approved";
             newRequest.LeaveDate = requestedDate.Value;
 
             dbContext.LeaveRequests.Add(newRequest);
             await dbContext.SaveChangesAsync();
 
-            await _firebaseCalendar.UpsertLeaveAsync(newRequest);
+            var emp = await dbContext.Employees.FindAsync(newRequest.EmployeeID);
+            await _firebaseCalendar.UpsertLeaveAsync(newRequest, emp?.Name);
 
             // IMPORTANT: Keep DailySummary synchronized immediately.
             // This makes an approved admin leave appear in Attendance Log Summary
@@ -129,7 +133,7 @@ namespace Payroll.Web.Services
         }
 
         // --- 3. UPDATE STATUS (Approve/Revoke) ---
-        public async Task UpdateLeaveStatusAsync(int requestId, bool approved)
+        public async Task UpdateLeaveStatusAsync(int requestId, bool approved, string? explicitStatus = null)
         {
             await using var dbContext = await _dbFactory.CreateDbContextAsync();
             var dbReq = await dbContext.LeaveRequests.FindAsync(requestId);
@@ -151,9 +155,13 @@ namespace Payroll.Web.Services
             }
 
             dbReq.IsApproved = approved;
+            dbReq.Status = !string.IsNullOrWhiteSpace(explicitStatus)
+                ? explicitStatus
+                : (approved ? "Approved" : "Pending");
+
             await dbContext.SaveChangesAsync();
 
-            await _firebaseCalendar.UpsertLeaveAsync(dbReq);
+            await _firebaseCalendar.UpsertLeaveAsync(dbReq, emp?.Name);
 
             // IMPORTANT: Recalculate the affected attendance day immediately.
             // Approval -> Leave status in DailySummary.

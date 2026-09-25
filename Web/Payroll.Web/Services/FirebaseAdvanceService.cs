@@ -253,11 +253,14 @@ public sealed class FirebaseAdvanceService
 
         var row = new Dictionary<string, object?>
         {
-            ["advanceId"] = advance.AdvanceID > 0 ? advance.AdvanceID : key,
+            ["advanceId"] = advance.AdvanceID > 0 ? (object)advance.AdvanceID : key,
+            ["id"] = advance.AdvanceID > 0 ? (object)advance.AdvanceID : key,
             ["employeeId"] = advance.EmployeeID,
+            ["staffId"] = advance.EmployeeID.ToString(CultureInfo.InvariantCulture),
             ["shopId"] = shopId,
             ["amount"] = advance.Amount,
             ["date"] = new DateTimeOffset(advance.AdvanceDate.Value).ToUnixTimeMilliseconds(),
+            ["advanceDate"] = advance.AdvanceDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["isRecovered"] = advance.PayrollID_Paid.HasValue,
             ["recoveryPaymentId"] = advance.PayrollID_Paid?.ToString(CultureInfo.InvariantCulture),
             ["advanceType"] = advance.AdvanceType ?? "General",

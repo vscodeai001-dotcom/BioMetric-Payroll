@@ -521,7 +521,9 @@ data class AdminLeaveDto(
     @SerializedName("leaveType") val leaveType: String = "",
     @SerializedName("isHalfDay") val isHalfDay: Boolean = false,
     @SerializedName("approved") val approved: Boolean = false,
-    @SerializedName("notes") val notes: String? = null
+    @SerializedName("notes") val notes: String? = null,
+    @SerializedName("status") val status: String? = null,
+    @SerializedName("adminNotes") val adminNotes: String? = null
 )
 
 data class CreateAdminLeaveRequest(

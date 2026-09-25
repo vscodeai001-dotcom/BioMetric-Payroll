@@ -76,6 +76,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
         setupListeners()
 
         observeData()
+        fetchLeavesFromServer()
     }
 
     private fun setupToolbar() {
@@ -91,6 +92,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 filterStartDate = picked
                 binding.tvFilterStartDate.text = displayDateFormat.format(filterStartDate.time)
                 filterAndRender()
+                fetchLeavesFromServer()
             }
         }
 
@@ -99,6 +101,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 filterEndDate = picked
                 binding.tvFilterEndDate.text = displayDateFormat.format(filterEndDate.time)
                 filterAndRender()
+                fetchLeavesFromServer()
             }
         }
     }
@@ -139,8 +142,11 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
     private fun setupListeners() {
         binding.swipeRefresh.setOnRefreshListener {
-            filterAndRender()
-            binding.swipeRefresh.isRefreshing = false
+            fetchLeavesFromServer()
+        }
+
+        binding.btnSearchLeaves.setOnClickListener {
+            fetchLeavesFromServer()
         }
 
         binding.fabAddLeave.setOnClickListener {
@@ -180,6 +186,56 @@ class LeaveManagementActivity : MotionBaseActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 filterEmployeeId = allEmployees.getOrNull(position - 1)?.employeeId?.toIntOrNull()
                 filterAndRender()
+                fetchLeavesFromServer()
+            }
+        }
+    }
+
+    private fun fetchLeavesFromServer() {
+        lifecycleScope.launch {
+            binding.swipeRefresh.isRefreshing = true
+            try {
+                val fromStr = isoDateFormat.format(filterStartDate.time)
+                val toStr = isoDateFormat.format(filterEndDate.time)
+                val empId = filterEmployeeId ?: 0
+
+                val response = mobileApi.adminLeaves(
+                    authorization = apiAuth,
+                    employeeId = empId,
+                    status = "All",
+                    from = fromStr,
+                    to = toStr
+                )
+                if (response.isSuccessful) {
+                    val list = response.body().orEmpty()
+                    val entities = list.map { dto ->
+                        val dateMs = dto.leaveDate?.let { dateStr ->
+                            runCatching {
+                                isoDateFormat.parse(dateStr)?.time
+                            }.getOrNull()
+                        } ?: 0L
+
+                        LeaveRequest(
+                            id = dto.id.toString(),
+                            staffId = dto.employeeId.toString(),
+                            staffName = dto.employeeName.ifBlank { "Employee" },
+                            leaveType = dto.leaveType.ifBlank { "Paid Leave" },
+                            startDate = dateMs,
+                            endDate = dateMs,
+                            reason = dto.notes.orEmpty(),
+                            status = dto.status?.ifBlank { null } ?: if (dto.approved) "Approved" else "Pending",
+                            adminNotes = dto.adminNotes,
+                            isHalfDay = dto.isHalfDay,
+                            createdAt = dateMs
+                        )
+                    }
+                    repository.upsertLeaveRequests(entities)
+                }
+            } catch (e: Exception) {
+                // Network unavailable: local Room cache remains active
+            } finally {
+                binding.swipeRefresh.isRefreshing = false
+                filterAndRender()
             }
         }
     }
@@ -204,8 +260,12 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
         // Employee & Date filter
         val inScope = allRequests.filter { req ->
-            val matchesEmployee = filterEmployeeId == null || req.staffId.toIntOrNull() == filterEmployeeId
-            val matchesDate = req.startDate in startMs..endMs || req.endDate in startMs..endMs
+            val reqEmpId = req.staffId.toIntOrNull()
+            val matchesEmployee = filterEmployeeId == null || filterEmployeeId == 0 || reqEmpId == filterEmployeeId
+            val effectiveEnd = if (req.endDate > 0) req.endDate else req.startDate
+            val matchesDate = if (req.startDate > 0) {
+                req.startDate <= endMs && effectiveEnd >= startMs
+            } else true
             matchesEmployee && matchesDate
         }
 
@@ -260,6 +320,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                         request.status = if (approved) "Approved" else "Rejected"
                         request.adminNotes = remarks
                         filterAndRender()
+                        fetchLeavesFromServer()
                         toast("Leave request ${if (approved) "Approved ✅" else "Rejected ❌"}")
                     } catch (e: Exception) {
                         toast("Unable to update leave: ${e.message} ⚠️")
@@ -284,6 +345,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                         }
                         allRequests.removeAll { it.id == request.id }
                         filterAndRender()
+                        fetchLeavesFromServer()
                         toast("Leave record deleted / revoked 🗑️")
                     } catch (e: Exception) {
                         toast("Unable to delete record: ${e.message} ⚠️")
@@ -366,6 +428,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                             throw IllegalStateException("Server returned HTTP ${r.code()}")
                         }
                         toast("Approved leave granted for ${selectedEmp.name} ✅")
+                        fetchLeavesFromServer()
                     } catch (e: Exception) {
                         toast("Unable to grant leave: ${e.message} ⚠️")
                     }

@@ -12,6 +12,7 @@
 @inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject Payroll.Web.Services.FirebaseAttendanceCalendarMutationService FirebaseCalendar
 @attribute [Authorize(Roles = "Employee")]
 
 <PageTitle>Request Leave</PageTitle>
@@ -198,6 +199,7 @@ else
             var firstLeaveDate = (DateTime?)null;
             var lastLeaveDate = (DateTime?)null;
 
+            var addedEntries = new List<LeaveRequest>();
             for (DateTime day = startDate; day <= endDate; day = day.AddDays(1))
             {
                 bool exists = await dbContext.LeaveRequests.AnyAsync(lr =>
@@ -213,10 +215,12 @@ else
                     LeaveDate = day,
                     LeaveType = newLeaveRequest.LeaveType,
                     IsApproved = false,
+                    Status = "Pending",
                     IsHalfDay = newLeaveRequest.IsHalfDay,
                     Notes = newLeaveRequest.Notes
                 };
                 dbContext.LeaveRequests.Add(newEntry);
+                addedEntries.Add(newEntry);
                 
                 if (firstLeaveDate == null)
                     firstLeaveDate = day;
@@ -228,6 +232,11 @@ else
             if (successfullyAddedCount > 0)
             {
                 await dbContext.SaveChangesAsync();
+
+                foreach (var entry in addedEntries)
+                {
+                    await FirebaseCalendar.UpsertLeaveAsync(entry, linkedEmployee.Name);
+                }
 
                 var leaveEmployee = await FirebaseEmployees.GetEmployeeAsync(linkedEmployee!.EmployeeID);
                 if (leaveEmployee != null)

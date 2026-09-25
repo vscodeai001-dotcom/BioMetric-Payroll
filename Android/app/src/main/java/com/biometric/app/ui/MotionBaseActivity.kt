@@ -99,32 +99,9 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
             }
 
             // 2. Bottom Safe Area (Taskbar / Navigation buttons / Gestures)
-            val bottomNavId = resources.getIdentifier("bottomNavigation", "id", packageName)
-            val bottomNavigation = if (bottomNavId != 0) v.findViewById<View?>(bottomNavId) else null
-
-            val targetScroll = scrollContainer 
-                ?: findScrollableView(v)
-            
-            if (bottomNavigation != null) {
-                val baseBottomPadding = (bottomNavigation.getTag(R.id.bottom_inset_base_padding) as? Int)
-                    ?: bottomNavigation.paddingBottom.also {
-                        bottomNavigation.setTag(R.id.bottom_inset_base_padding, it)
-                    }
-                bottomNavigation.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
-                bottomNavigation.post {
-                    targetScroll?.updatePadding(bottom = bottomNavigation.height + systemBars.bottom)
-                }
-                v.updatePadding(bottom = 0)
-            } else if (targetScroll != null) {
-                val baseBottomPadding = (targetScroll.getTag(R.id.bottom_inset_base_padding) as? Int)
-                    ?: targetScroll.paddingBottom.also { targetScroll.setTag(R.id.bottom_inset_base_padding, it) }
-                targetScroll.updatePadding(bottom = baseBottomPadding + systemBars.bottom + 24)
-                v.updatePadding(bottom = 0)
-            } else {
-                val baseBottomPadding = (v.getTag(R.id.bottom_inset_base_padding) as? Int)
-                    ?: v.paddingBottom.also { v.setTag(R.id.bottom_inset_base_padding, it) }
-                v.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
-            }
+            val baseBottomPadding = (v.getTag(R.id.bottom_inset_base_padding) as? Int)
+                ?: v.paddingBottom.also { v.setTag(R.id.bottom_inset_base_padding, it) }
+            v.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
             
             insets
         }
