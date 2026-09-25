@@ -516,6 +516,7 @@ class FirebaseRoomHydrator @Inject constructor(
         enableTdsDeduction = b("enableTdsDeduction"),
         enableAutoShiftRotation = b("enableAutoShiftRotation"),
         enableShiftScheduling = b("enableShiftScheduling"),
+        enableShiftAllowance = b("enableShiftAllowance"),
         enableSandwichRule = b("enableSandwichRule"),
         enableLeaveAccrual = b("enableLeaveAccrual"),
         showThemeToggle = b("showThemeToggle", true),

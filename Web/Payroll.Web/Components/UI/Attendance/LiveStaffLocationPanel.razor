@@ -4,6 +4,8 @@
 @using Microsoft.JSInterop
 @using System.Text.Json
 @using System.Globalization
+@using Microsoft.Extensions.Logging
+@using System.Net.Sockets
 
 @implements IAsyncDisposable
 
@@ -12,6 +14,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FirebaseEmployeeManagementService FirebaseEmployees
 @inject FirebaseRealtimeService FirebaseRealtime
+@inject ILogger<LiveStaffLocationPanel> Logger
 
 <div class="live-staff-card card border-0 shadow-sm mb-4">
 
@@ -4234,8 +4237,14 @@ foreach (var point in ordered)
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine(
-                    $"Firebase owner live-location stream ended: {ex}");
+                if (IsConnectionReset(ex))
+                {
+                    Logger.LogInformation("Firebase stream reconnected after timeout.");
+                }
+                else
+                {
+                    Logger.LogWarning(ex, "Firebase owner live-location stream ended: {Message}", ex.Message);
+                }
             }
 
             if (token.IsCancellationRequested || disposed)
@@ -4252,6 +4261,26 @@ foreach (var point in ordered)
                 break;
             }
         }
+    }
+
+    private static bool IsConnectionReset(Exception? ex)
+    {
+        while (ex != null)
+        {
+            if (ex is SocketException sockEx &&
+                (sockEx.SocketErrorCode == SocketError.ConnectionReset || sockEx.ErrorCode == 10054))
+            {
+                return true;
+            }
+            if (ex.Message.Contains("10054") ||
+                ex.Message.Contains("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            ex = ex.InnerException;
+        }
+        return false;
     }
 
 

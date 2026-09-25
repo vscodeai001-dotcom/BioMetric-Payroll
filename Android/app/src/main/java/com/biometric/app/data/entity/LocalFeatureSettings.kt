@@ -32,6 +32,7 @@ data class LocalFeatureSettings(
     var enableTdsDeduction: Boolean = false,
     var enableAutoShiftRotation: Boolean = false,
     var enableShiftScheduling: Boolean = false,
+    var enableShiftAllowance: Boolean = false,
     var enableSandwichRule: Boolean = false,
     var enableLeaveAccrual: Boolean = false,
     var showThemeToggle: Boolean = true,

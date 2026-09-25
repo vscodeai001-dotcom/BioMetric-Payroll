@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using System.Net.Sockets;
 
 namespace Payroll.Web.Services;
 
@@ -231,7 +232,14 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Firebase owner realtime stream disconnected. Reconnecting.");
+                if (IsConnectionReset(ex))
+                {
+                    _logger.LogInformation("Firebase stream reconnected after timeout.");
+                }
+                else
+                {
+                    _logger.LogWarning(ex, "Firebase owner realtime stream disconnected. Reconnecting.");
+                }
                 await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
         }
@@ -254,10 +262,37 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Firebase {RootNode} realtime stream disconnected. Reconnecting.", rootNode);
+                if (IsConnectionReset(ex))
+                {
+                    _logger.LogInformation("Firebase stream reconnected after timeout.");
+                }
+                else
+                {
+                    _logger.LogWarning(ex, "Firebase {RootNode} realtime stream disconnected. Reconnecting.", rootNode);
+                }
                 await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
         }
+    }
+
+    private static bool IsConnectionReset(Exception? ex)
+    {
+        while (ex != null)
+        {
+            if (ex is SocketException sockEx &&
+                (sockEx.SocketErrorCode == SocketError.ConnectionReset || sockEx.ErrorCode == 10054))
+            {
+                return true;
+            }
+            if (ex.Message.Contains("10054") ||
+                ex.Message.Contains("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            ex = ex.InnerException;
+        }
+        return false;
     }
 
     private async Task ProcessFirebaseTrackingEventAsync(

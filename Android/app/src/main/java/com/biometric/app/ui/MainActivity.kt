@@ -1663,7 +1663,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         menus.rowFeatureToggles.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, StaffPermissionActivity::class.java))
+            startActivity(Intent(this, FeatureToggleManagerActivity::class.java))
         }
 
         // SECTION 4: Employee Tools (SuperAdmin View)
