@@ -85,6 +85,10 @@ class OfflineTrackingMonitor @Inject constructor(
         started = true
         networkAvailable = isNetworkAvailable()
 
+        if (!networkAvailable) {
+            markOfflineStarted(getDisconnectReason())
+        }
+
         val cb = object : ConnectivityManager.NetworkCallback() {
 
             override fun onAvailable(network: Network) {
@@ -93,38 +97,65 @@ class OfflineTrackingMonitor @Inject constructor(
                 networkAvailable = true
 
                 if (changed) {
+                    val offlinePeriod = markOfflineEnded()
+                    val now = System.currentTimeMillis()
+                    val durationText = if (offlinePeriod != null) {
+                        val durationMs = (now - offlinePeriod.first).coerceAtLeast(0L)
+                        val mins = durationMs / 60000
+                        val secs = (durationMs % 60000) / 1000
+                        "${mins}m ${secs}s (Reason: ${offlinePeriod.second})"
+                    } else {
+                        "N/A"
+                    }
+
                     record(
                         eventType = NETWORK_ONLINE,
                         severity = INFO,
-                        message = "Internet connectivity restored; queued GPS and pending local synchronization can resume"
+                        message = "Internet connectivity restored; offline period ended ($durationText); queued offline GPS syncing to cloud"
                     )
+
+                    if (offlinePeriod != null) {
+                        val durationMs = (now - offlinePeriod.first).coerceAtLeast(0L)
+                        val mins = durationMs / 60000
+                        val secs = (durationMs % 60000) / 1000
+                        val formattedDuration = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
+                        record(
+                            eventType = "OFFLINE_PERIOD",
+                            severity = INFO,
+                            message = "Offline Window Completed: $formattedDuration • Reason: ${offlinePeriod.second} • Start: ${offlinePeriod.first} • End: $now",
+                            correlationId = UUID.randomUUID().toString()
+                        )
+                    }
 
                     // Trigger the durable GPS queue immediately instead of
                     // waiting for the next 15-minute periodic window.
                     runCatching { OfflineSyncWorker.schedule(context) }
-
                 }
             }
 
             override fun onLost(network: Network) {
                 if (!isNetworkAvailable()) {
                     networkAvailable = false
+                    val reason = getDisconnectReason()
+                    markOfflineStarted(reason)
 
                     record(
                         eventType = NETWORK_OFFLINE,
                         severity = WARNING,
-                        message = "Internet connectivity lost; GPS continues locally"
+                        message = "Internet connectivity lost ($reason); app switched to offline mode, tracking saved locally"
                     )
                 }
             }
 
             override fun onUnavailable() {
                 networkAvailable = false
+                val reason = getDisconnectReason()
+                markOfflineStarted(reason)
 
                 record(
                     eventType = NETWORK_OFFLINE,
                     severity = WARNING,
-                    message = "Network unavailable; GPS continues locally"
+                    message = "Network unavailable ($reason); app switched to offline mode, tracking saved locally"
                 )
             }
         }
@@ -146,9 +177,55 @@ class OfflineTrackingMonitor @Inject constructor(
             message = if (networkAvailable) {
                 "Offline tracking monitor started online"
             } else {
-                "Offline tracking monitor started offline"
+                "Offline tracking monitor started offline (${getDisconnectReason()})"
             }
         )
+    }
+
+    fun isAirplaneModeOn(): Boolean {
+        return runCatching {
+            android.provider.Settings.Global.getInt(
+                context.contentResolver,
+                android.provider.Settings.Global.AIRPLANE_MODE_ON,
+                0
+            ) != 0
+        }.getOrDefault(false)
+    }
+
+    fun getDisconnectReason(): String {
+        return when {
+            isAirplaneModeOn() -> "Airplane Mode Enabled"
+            !isNetworkAvailable() -> "Wi-Fi & Mobile Data Turned Off"
+            else -> "Network Connection Lost"
+        }
+    }
+
+    fun getActiveOfflineStartTime(): Long {
+        return context.getSharedPreferences("offline_tracking_prefs", Context.MODE_PRIVATE)
+            .getLong("offline_start_time", 0L)
+    }
+
+    fun getActiveOfflineReason(): String {
+        return context.getSharedPreferences("offline_tracking_prefs", Context.MODE_PRIVATE)
+            .getString("offline_reason", "Network Disconnected") ?: "Network Disconnected"
+    }
+
+    private fun markOfflineStarted(reason: String) {
+        val prefs = context.getSharedPreferences("offline_tracking_prefs", Context.MODE_PRIVATE)
+        if (prefs.getLong("offline_start_time", 0L) == 0L) {
+            prefs.edit()
+                .putLong("offline_start_time", System.currentTimeMillis())
+                .putString("offline_reason", reason)
+                .apply()
+        }
+    }
+
+    private fun markOfflineEnded(): Pair<Long, String>? {
+        val prefs = context.getSharedPreferences("offline_tracking_prefs", Context.MODE_PRIVATE)
+        val start = prefs.getLong("offline_start_time", 0L)
+        val reason = prefs.getString("offline_reason", "Network Disconnected") ?: "Network Disconnected"
+        prefs.edit().remove("offline_start_time").remove("offline_reason").apply()
+        return if (start > 0L) Pair(start, reason) else null
     }
 
     fun isOnline(): Boolean {

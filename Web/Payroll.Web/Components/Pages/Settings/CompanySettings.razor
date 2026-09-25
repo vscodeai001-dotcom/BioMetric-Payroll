@@ -459,7 +459,8 @@ else
                         ["geoRadiusMeters"] = settings.GeoRadiusMeters,
                         ["workDayCutoffHour"] = settings.WorkDayCutoffHour,
                         ["lateGraceMinutes"] = settings.LateGraceMinutes,
-                        ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes
+                        ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes,
+                        ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                 }

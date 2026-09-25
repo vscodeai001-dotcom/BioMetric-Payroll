@@ -779,28 +779,73 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 // 2. Wipe operational tables from Local Room
                 withContext(Dispatchers.IO) {
                     val db = appDatabase.openHelper.writableDatabase
-                    db.execSQL("DELETE FROM local_attendance")
-                    db.execSQL("DELETE FROM local_attendance_punches")
-                    db.execSQL("DELETE FROM local_daily_summaries")
-                    db.execSQL("DELETE FROM payroll_history")
-                    db.execSQL("DELETE FROM local_advance_payments")
-                    db.execSQL("DELETE FROM local_bonus_records")
-                    db.execSQL("DELETE FROM local_leave_requests")
-                    db.execSQL("DELETE FROM local_resignation_requests")
-                    db.execSQL("DELETE FROM local_regularization_requests")
+                    val tablesToWipe = listOf(
+                        "local_attendance",
+                        "local_attendance_punches",
+                        "daily_summaries",
+                        "payroll_history",
+                        "local_advance_payments",
+                        "local_bonus_records",
+                        "local_leave_requests",
+                        "local_resignation_requests",
+                        "local_regularization_requests",
+                        "shift_schedules",
+                        "local_tax_declarations",
+                        "local_fbp_declarations",
+                        "local_fbp_components",
+                        "local_salary_snapshots",
+                        "local_audit_logs",
+                        "offline_tracking_events"
+                    )
+                    for (table in tablesToWipe) {
+                        try {
+                            db.execSQL("DELETE FROM $table")
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not clear table $table: ${e.message}")
+                        }
+                    }
                 }
 
                 // 3. Wipe operational nodes from Firebase Cloud
                 withContext(Dispatchers.IO) {
                     val root = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId")
-                    root.child("attendance").removeValue().await()
-                    root.child("attendance_punches").removeValue().await()
-                    root.child("tracking").removeValue().await()
-                    root.child("payroll_history").removeValue().await()
-                    root.child("advance_payments").removeValue().await()
-                    root.child("bonuses").removeValue().await()
-                    root.child("leave_requests").removeValue().await()
-                    root.child("resignation_requests").removeValue().await()
+                    val operationalNodes = listOf(
+                        "attendance",
+                        "attendance_punches",
+                        "daily_summaries",
+                        "tracking",
+                        "payroll_history",
+                        "payroll_previews",
+                        "payroll_finalization",
+                        "advance_payments",
+                        "bonuses",
+                        "bonus_records",
+                        "leave_requests",
+                        "resignation_requests",
+                        "regularizations",
+                        "shift_schedules",
+                        "tax_declarations",
+                        "fbp_declarations",
+                        "fbp_components",
+                        "salary_snapshots",
+                        "audit_logs",
+                        "fnf_settlements",
+                        "year_end_summaries",
+                        "report_definitions",
+                        "geo_punch_audits",
+                        "presence",
+                        "offline_tracking",
+                        "offline_tracking_events",
+                        "notifications",
+                        "events"
+                    )
+                    for (node in operationalNodes) {
+                        try {
+                            root.child(node).removeValue().await()
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
+                        }
+                    }
                 }
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Operational data wiped for $activeCompanyName! (Settings & Employees preserved)", Toast.LENGTH_LONG).show()
@@ -841,30 +886,80 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 // 2. Wipe employees & operational tables from Local Room
                 withContext(Dispatchers.IO) {
                     val db = appDatabase.openHelper.writableDatabase
-                    db.execSQL("DELETE FROM local_employees")
-                    db.execSQL("DELETE FROM local_attendance")
-                    db.execSQL("DELETE FROM local_attendance_punches")
-                    db.execSQL("DELETE FROM local_daily_summaries")
-                    db.execSQL("DELETE FROM payroll_history")
-                    db.execSQL("DELETE FROM local_advance_payments")
-                    db.execSQL("DELETE FROM local_bonus_records")
-                    db.execSQL("DELETE FROM local_leave_requests")
-                    db.execSQL("DELETE FROM local_resignation_requests")
-                    db.execSQL("DELETE FROM local_regularization_requests")
+                    val tablesToWipe = listOf(
+                        "local_employees",
+                        "local_employee_history",
+                        "local_shops",
+                        "local_shop_closed_days",
+                        "local_attendance",
+                        "local_attendance_punches",
+                        "daily_summaries",
+                        "payroll_history",
+                        "local_advance_payments",
+                        "local_bonus_records",
+                        "local_leave_requests",
+                        "local_resignation_requests",
+                        "local_regularization_requests",
+                        "shift_schedules",
+                        "local_tax_declarations",
+                        "local_fbp_declarations",
+                        "local_fbp_components",
+                        "local_salary_snapshots",
+                        "local_audit_logs",
+                        "offline_tracking_events"
+                    )
+                    for (table in tablesToWipe) {
+                        try {
+                            db.execSQL("DELETE FROM $table")
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not clear table $table: ${e.message}")
+                        }
+                    }
                 }
 
                 // 3. Wipe operational & employee nodes from Firebase Cloud
                 withContext(Dispatchers.IO) {
                     val root = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId")
-                    root.child("employees").removeValue().await()
-                    root.child("attendance").removeValue().await()
-                    root.child("attendance_punches").removeValue().await()
-                    root.child("tracking").removeValue().await()
-                    root.child("payroll_history").removeValue().await()
-                    root.child("advance_payments").removeValue().await()
-                    root.child("bonuses").removeValue().await()
-                    root.child("leave_requests").removeValue().await()
-                    root.child("resignation_requests").removeValue().await()
+                    val allNodes = listOf(
+                        "employees",
+                        "employee_history",
+                        "shops",
+                        "attendance",
+                        "attendance_punches",
+                        "daily_summaries",
+                        "tracking",
+                        "payroll_history",
+                        "payroll_previews",
+                        "payroll_finalization",
+                        "advance_payments",
+                        "bonuses",
+                        "bonus_records",
+                        "leave_requests",
+                        "resignation_requests",
+                        "regularizations",
+                        "shift_schedules",
+                        "tax_declarations",
+                        "fbp_declarations",
+                        "fbp_components",
+                        "salary_snapshots",
+                        "audit_logs",
+                        "fnf_settlements",
+                        "year_end_summaries",
+                        "report_definitions",
+                        "geo_punch_audits",
+                        "presence",
+                        "offline_tracking",
+                        "offline_tracking_events",
+                        "notifications",
+                        "events"
+                    )
+                    for (node in allNodes) {
+                        try {
+                            root.child(node).removeValue().await()
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
+                        }
+                    }
                 }
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Full system wipe completed for $activeCompanyName! (Local DB & Cloud)", Toast.LENGTH_LONG).show()

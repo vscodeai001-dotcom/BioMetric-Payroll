@@ -605,16 +605,21 @@ else if (locationUpdatesStarted) {
                 isOfflineCapture = false
             )
 
-            val delivered = try {
-                withTimeoutOrNull(DIRECT_GPS_DELIVERY_TIMEOUT_MS) {
-                    deliverLocationDirectToSsot(capture, recordHistory = recordHistory)
-                } ?: false
-            } catch (e: Exception) {
-                Log.w(
-                    "TrackingService",
-                    "Direct Firebase GPS delivery failed; queueing for retry",
-                    e
-                )
+            val isOnline = offlineMonitor.isOnline()
+            val delivered = if (isOnline) {
+                try {
+                    withTimeoutOrNull(DIRECT_GPS_DELIVERY_TIMEOUT_MS) {
+                        deliverLocationDirectToSsot(capture, recordHistory = recordHistory)
+                    } ?: false
+                } catch (e: Exception) {
+                    Log.w(
+                        "TrackingService",
+                        "Direct Firebase GPS delivery failed; queueing for retry",
+                        e
+                    )
+                    false
+                }
+            } else {
                 false
             }
 
@@ -632,7 +637,7 @@ else if (locationUpdatesStarted) {
             if (recordHistory) {
                 lastHistoryLocation = location
                 lastHistoryRecordedTimeMs = System.currentTimeMillis()
-                queueLocationForRetry(capture)
+                queueLocationForRetry(capture.copy(isOfflineCapture = !isOnline))
             }
         }
     }

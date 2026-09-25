@@ -27,15 +27,18 @@ public sealed class EmployeeLocationController : ControllerBase
 {
     private readonly GeoLocationService _geoLocationService;
     private readonly IHubContext<AttendanceRefreshHub> _attendanceHub;
+    private readonly FirebaseEmployeeManagementService _firebaseEmployees;
     private readonly ILogger<EmployeeLocationController> _logger;
 
     public EmployeeLocationController(
         GeoLocationService geoLocationService,
         IHubContext<AttendanceRefreshHub> attendanceHub,
+        FirebaseEmployeeManagementService firebaseEmployees,
         ILogger<EmployeeLocationController> logger)
     {
         _geoLocationService = geoLocationService;
         _attendanceHub = attendanceHub;
+        _firebaseEmployees = firebaseEmployees;
         _logger = logger;
     }
 
@@ -78,11 +81,32 @@ public sealed class EmployeeLocationController : ControllerBase
             if (User.IsInRole("Employee"))
             {
                 var claimedEmployeeId = 0;
-                var claimValue = User.FindFirst("employee_id")?.Value;
-                if (!int.TryParse(claimValue, out claimedEmployeeId) ||
-                    claimedEmployeeId <= 0 ||
-                    claimedEmployeeId != request.EmployeeId)
+                var claimValue = User.FindFirst("employee_id")?.Value
+                                ?? User.FindFirst("EmployeeID")?.Value;
+                if (int.TryParse(claimValue, out var cid) && cid > 0)
                 {
+                    claimedEmployeeId = cid;
+                }
+                else
+                {
+                    // Fallback for existing sessions where the cookie lacks the employee_id claim:
+                    // Match the authenticated user's email against the employee repository
+                    var email = User.Identity?.Name ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                    if (!string.IsNullOrWhiteSpace(email))
+                    {
+                        var emp = await _firebaseEmployees.GetEmployeeByEmailAsync(email);
+                        if (emp != null && emp.EmployeeID > 0)
+                        {
+                            claimedEmployeeId = emp.EmployeeID;
+                        }
+                    }
+                }
+
+                if (claimedEmployeeId <= 0 || claimedEmployeeId != request.EmployeeId)
+                {
+                    _logger.LogWarning(
+                        "Employee location update forbidden. ClaimedId={ClaimedId}, RequestId={RequestId}, User={User}",
+                        claimedEmployeeId, request.EmployeeId, User.Identity?.Name);
                     return Forbid();
                 }
             }

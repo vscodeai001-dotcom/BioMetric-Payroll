@@ -44,6 +44,20 @@
                     <small class="text-muted">Controls recorded GPS history/playback sampling. Live map updates remain independent.</small>
                 </div>
             </div>
+            <div class="col-12">
+                <div class="border rounded p-2 bg-body-tertiary">
+                    <label class="small fw-bold text-primary">Scheduled Auto-Backup Interval</label>
+                    <select class="form-select form-select-sm" @bind="Settings.AutoBackupIntervalHours">
+                        <option value="1">1 hour</option>
+                        <option value="6">6 hours</option>
+                        <option value="12">12 hours</option>
+                        <option value="24">24 hours (1 Day) - Default</option>
+                        <option value="48">48 hours (2 Days)</option>
+                        <option value="168">7 Days (Weekly)</option>
+                    </select>
+                    <small class="text-muted">Controls scheduled automatic database backups. Default: 24 hours.</small>
+                </div>
+            </div>
             <div class="row g-2 border-top pt-2 mt-2">
                 <div class="col-12 mb-1">
                     <label class="small fw-bold text-primary">Geo-Fencing (Office Location)</label>

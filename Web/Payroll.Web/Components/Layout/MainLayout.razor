@@ -423,6 +423,15 @@
                 return;
             }
 
+            var claimId = user.FindFirst("employee_id")?.Value
+                        ?? user.FindFirst("EmployeeID")?.Value;
+            if (int.TryParse(claimId, out var parsedId) && parsedId > 0)
+            {
+                employeeId = parsedId;
+                _logger.LogInformation("Employee layout loaded from claim. EmployeeId={EmployeeId}", employeeId);
+                return;
+            }
+
             var email =
                 user.Identity?.Name;
 

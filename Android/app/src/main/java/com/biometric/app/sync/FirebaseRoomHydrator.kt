@@ -490,6 +490,7 @@ class FirebaseRoomHydrator @Inject constructor(
         enableSandwichRule = b("enableSandwichRule"),
         enableLeaveManagement = b("enableLeaveManagement"),
         enableTdsDeduction = b("enableTdsDeduction"),
+        autoBackupIntervalHours = i("autoBackupIntervalHours").takeIf { it > 0 } ?: 24,
         syncState = 1
     )
 

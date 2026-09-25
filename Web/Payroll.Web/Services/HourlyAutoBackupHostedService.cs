@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Payroll.Shared.Data;
+
 namespace Payroll.Web.Services;
 
 public sealed class HourlyAutoBackupHostedService : BackgroundService
@@ -15,7 +18,7 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Hourly auto-backup service starting. Interval: 1 hour.");
+        _logger.LogInformation("Auto-backup background service initialized.");
 
         // Wait 30 seconds after server startup before initial check
         try
@@ -29,14 +32,22 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            int intervalHours = 24;
             try
             {
                 using var scope = _scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var settings = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(stoppingToken);
+                if (settings != null && settings.AutoBackupIntervalHours > 0)
+                {
+                    intervalHours = settings.AutoBackupIntervalHours;
+                }
+
                 var backupService = scope.ServiceProvider.GetRequiredService<DatabaseBackupRestoreService>();
 
-                _logger.LogInformation("Starting scheduled hourly database backup...");
+                _logger.LogInformation("Starting scheduled database auto-backup (configured interval: {IntervalHours}h)...", intervalHours);
                 var meta = await backupService.CreateBackupAsync("HourlyAuto", stoppingToken);
-                _logger.LogInformation("Scheduled hourly database backup finished: {FileName} ({Size})",
+                _logger.LogInformation("Scheduled database auto-backup finished: {FileName} ({Size})",
                     meta.FileName, meta.FormattedSize);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -45,12 +56,13 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Hourly database auto-backup encountered an error.");
+                _logger.LogError(ex, "Scheduled database auto-backup encountered an error.");
             }
 
             try
             {
-                await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+                _logger.LogInformation("Next scheduled auto-backup in {IntervalHours} hour(s).", intervalHours);
+                await Task.Delay(TimeSpan.FromHours(intervalHours), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -58,6 +70,6 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
             }
         }
 
-        _logger.LogInformation("Hourly auto-backup service stopped.");
+        _logger.LogInformation("Auto-backup service stopped.");
     }
 }

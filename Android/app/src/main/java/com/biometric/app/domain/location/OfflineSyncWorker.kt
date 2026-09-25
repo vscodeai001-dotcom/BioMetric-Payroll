@@ -9,6 +9,8 @@ import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.LocalLocation
 import com.biometric.app.data.dao.OfflineTrackingEventDao
 import com.biometric.app.data.entity.OfflineTrackingEvent
+import com.biometric.app.data.dao.LocalAttendancePunchDao
+import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.sync.FirebaseSyncManager
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -28,6 +30,7 @@ class OfflineSyncWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val locationDao: LocationDao,
     private val eventDao: OfflineTrackingEventDao,
+    private val punchDao: LocalAttendancePunchDao,
     private val sessionStore: MobileSessionStore,
     private val monitor: OfflineTrackingMonitor,
     private val firebaseSync: FirebaseSyncManager
@@ -47,6 +50,9 @@ class OfflineSyncWorker @AssistedInject constructor(
                 System.currentTimeMillis() - 2 * 60 * 1000L
             )
         }
+
+        // Synchronize any offline punches made while internet was disconnected
+        syncOfflinePunches()
 
         val deferredEndEvents = syncTrackingEvents()
         if (deferredEndEvents == null) {
@@ -272,6 +278,35 @@ class OfflineSyncWorker @AssistedInject constructor(
             }
         }
         return true
+    }
+
+    private suspend fun syncOfflinePunches() {
+        runCatching {
+            val unsynced = withContext(Dispatchers.IO) {
+                punchDao.getUnsynced()
+            }
+            for (local in unsynced) {
+                val punch = AttendancePunch(
+                    punchId = local.punchId,
+                    staffId = local.staffId,
+                    date = local.date,
+                    type = local.type,
+                    timestamp = local.timestamp,
+                    latitude = local.latitude,
+                    longitude = local.longitude,
+                    accuracy = local.accuracy,
+                    source = local.source,
+                    status = local.status
+                )
+                firebaseSync.pushAttendancePunch(punch)
+                withContext(Dispatchers.IO) {
+                    punchDao.upsert(local.copy(syncState = 1))
+                }
+                Log.i("OfflineSyncWorker", "Reconciled offline punch ${local.punchId} to Firebase")
+            }
+        }.onFailure {
+            Log.w("OfflineSyncWorker", "Failed syncing offline punches", it)
+        }
     }
 
     companion object {

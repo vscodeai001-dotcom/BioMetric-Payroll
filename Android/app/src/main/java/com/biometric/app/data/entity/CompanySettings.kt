@@ -36,5 +36,6 @@ data class CompanySettings(
     @SerializedName("leaveAccrualRate") var leaveAccrualRate: Double = 1.5,
     @SerializedName("enableSandwichRule") var enableSandwichRule: Boolean = false,
     @SerializedName("enableLeaveManagement") var enableLeaveManagement: Boolean = false,
-    @SerializedName("enableTdsDeduction") var enableTdsDeduction: Boolean = false
+    @SerializedName("enableTdsDeduction") var enableTdsDeduction: Boolean = false,
+    @SerializedName("autoBackupIntervalHours") var autoBackupIntervalHours: Int = 24
 )

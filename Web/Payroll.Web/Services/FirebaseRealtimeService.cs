@@ -122,6 +122,19 @@ public sealed class FirebaseRealtimeService
                             {
                                 return tenant.TenantId.Trim();
                             }
+
+                            // If user is Employee and CompanyTenants didn't match, check db.Employees
+                            if (user.IsInRole("Employee"))
+                            {
+                                var emp = db.Employees.AsNoTracking().FirstOrDefault(e =>
+                                    (!string.IsNullOrWhiteSpace(userId) && e.AspNetUserId == userId) ||
+                                    (!string.IsNullOrWhiteSpace(email) && e.Email != null && e.Email.ToLower() == email.ToLower()));
+
+                                if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId))
+                                {
+                                    return emp.TenantId.Trim();
+                                }
+                            }
                         }
                     }
                 }
@@ -2169,6 +2182,7 @@ public sealed class FirebaseRealtimeService
             "payroll_previews",
             "payroll_finalization",
             "bonus_records",
+            "bonuses",
             "tax_declarations",
             "fbp_components",
             "fbp_declarations",
@@ -2180,7 +2194,11 @@ public sealed class FirebaseRealtimeService
             "tracking/history",
             "tracking/sessions",
             "tracking/live",
-            "tracking"
+            "tracking",
+            "offline_tracking",
+            "offline_tracking_events",
+            "notifications",
+            "events"
         };
 
         var allOk = true;
@@ -2228,6 +2246,7 @@ public sealed class FirebaseRealtimeService
             "payroll_previews",
             "payroll_finalization",
             "bonus_records",
+            "bonuses",
             "tax_declarations",
             "fbp_components",
             "fbp_declarations",
@@ -2239,7 +2258,11 @@ public sealed class FirebaseRealtimeService
             "tracking/history",
             "tracking/sessions",
             "tracking/live",
-            "tracking"
+            "tracking",
+            "offline_tracking",
+            "offline_tracking_events",
+            "notifications",
+            "events"
         };
 
         var allOk = true;

@@ -1044,6 +1044,61 @@
         lastLocationTime = DateTime.Now;
         locationMessage = null;
         mapNeedsUpdate = true;
+
+        await SyncLiveGpsToServiceAsync(coords);
+    }
+
+    private async Task SyncLiveGpsToServiceAsync(LocationData coords)
+    {
+        if (coords == null || EmployeeId <= 0 || !hasLocation)
+            return;
+
+        try
+        {
+            var liveLocation = LiveLocationStore.Get(EmployeeId);
+            Guid sessionId = liveLocation?.SessionId ?? Guid.Empty;
+
+            if (sessionId == Guid.Empty)
+            {
+                try
+                {
+                    var sIdStr = await JSRuntime.InvokeAsync<string>(
+                        "getOrCreateEmployeeGpsSessionId",
+                        "payroll_employee_gps_session_id",
+                        EmployeeId);
+
+                    if (Guid.TryParse(sIdStr, out var parsedGuid) && parsedGuid != Guid.Empty)
+                    {
+                        sessionId = parsedGuid;
+                    }
+                }
+                catch
+                {
+                    sessionId = Guid.NewGuid();
+                }
+            }
+
+            if (sessionId == Guid.Empty)
+            {
+                sessionId = Guid.NewGuid();
+            }
+
+            await GeoService.UpdateGpsSessionAsync(
+                EmployeeId,
+                sessionId,
+                coords.Latitude,
+                coords.Longitude,
+                NormalizeAccuracy(coords.Accuracy),
+                distanceMeters,
+                radius,
+                isWithinRadius,
+                DateTime.UtcNow,
+                allowSessionRecovery: true);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to sync live GPS from widget: {ex.Message}");
+        }
     }
 
     private TimeSpan GetLiveDuration()

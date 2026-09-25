@@ -1090,6 +1090,7 @@ else
             if (result.Success)
             {
                 try { await JSRuntime.InvokeVoidAsync("attendanceCache.clear"); } catch { }
+                try { await JSRuntime.InvokeVoidAsync("employeeCache.clear", tid); } catch { }
                 toastService.ShowSuccess($"Full system wipe completed for {compName}! (Local DB and Firebase Cloud). Pre-wipe safety backup saved: {result.SafetyBackupFileName}");
                 await LoadAllSettings();
                 await LoadBackups();

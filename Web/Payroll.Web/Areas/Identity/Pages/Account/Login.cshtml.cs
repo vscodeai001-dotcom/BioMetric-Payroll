@@ -588,6 +588,18 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     customClaims.Add(new Claim("FirebaseUid", firebaseUid));
                 }
 
+                if (firebaseEmployee != null)
+                {
+                    customClaims.Add(new Claim("employee_id", firebaseEmployee.EmployeeID.ToString()));
+                    customClaims.Add(new Claim("EmployeeID", firebaseEmployee.EmployeeID.ToString()));
+
+                    if (!string.IsNullOrWhiteSpace(firebaseEmployee.TenantId))
+                    {
+                        customClaims.Add(new Claim("OwnerUid", firebaseEmployee.TenantId));
+                        customClaims.Add(new Claim("TenantId", firebaseEmployee.TenantId));
+                    }
+                }
+
                 await _signInManager.SignInWithClaimsAsync(
                     user,
                     Input.RememberMe,

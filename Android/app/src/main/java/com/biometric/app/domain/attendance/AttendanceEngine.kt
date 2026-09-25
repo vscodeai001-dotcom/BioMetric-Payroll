@@ -42,7 +42,10 @@ object AttendanceEngine {
         if (punches.isEmpty()) return AttendanceResult(date)
 
         val sortedPunches = punches.filter { it.status != "REJECTED" }.sortedBy { it.timestamp }
-        val isOpen = sortedPunches.size % 2 != 0 && sortedPunches.last().type in listOf("IN", "BREAK_IN")
+        val isOdd = sortedPunches.size % 2 != 0
+        val lastPunch = sortedPunches.last()
+        val isLastOut = lastPunch.type.equals("OUT", ignoreCase = true) || lastPunch.type.equals("BREAK_OUT", ignoreCase = true)
+        val isOpen = isOdd && !isLastOut
 
         val zdtNow = Instant.ofEpochMilli(now).atZone(INDIAN_ZONE)
         
@@ -59,34 +62,67 @@ object AttendanceEngine {
             shiftEndInstant = shiftEndInstant.plus(Duration.ofDays(1))
         }
 
+        val isShiftCrossed = zdtNow.toInstant().isAfter(shiftEndInstant)
+        val isToday = localDate == zdtNow.toLocalDate()
+        val isOvernightLive = shiftEndInstant.isAfter(ZonedDateTime.of(localDate, LocalTime.MIDNIGHT, INDIAN_ZONE).plusDays(1).toInstant()) && !isShiftCrossed
+        val isLive = (isToday || isOvernightLive) && !isShiftCrossed
+
+        val lastInstant = Instant.ofEpochMilli(lastPunch.timestamp)
+        val terminalInstant = if (isLive) {
+            if (zdtNow.toInstant().isAfter(lastInstant)) zdtNow.toInstant() else lastInstant
+        } else {
+            // Completed / historical day or shift time crossed: do NOT calculate throughout, credit up to scheduled ShiftEnd
+            if (lastInstant.isBefore(shiftEndInstant)) shiftEndInstant else lastInstant
+        }
+
         val workSegments = mutableListOf<Pair<Instant, Instant>>()
         val breakSegments = mutableListOf<Pair<Instant, Instant>>()
+        val completedWorkSegments = mutableListOf<Pair<Instant, Instant>>()
+        val completedBreakSegments = mutableListOf<Pair<Instant, Instant>>()
 
         var tempIn: Instant? = null
         var tempBreakIn: Instant? = null
 
         sortedPunches.forEach { p ->
             val pInstant = Instant.ofEpochMilli(p.timestamp)
-            when (p.type) {
+            when (p.type.uppercase()) {
                 "IN" -> tempIn = pInstant
                 "OUT" -> {
-                    tempIn?.let { workSegments.add(it to pInstant) }
+                    tempIn?.let { 
+                        workSegments.add(it to pInstant)
+                        completedWorkSegments.add(it to pInstant)
+                    }
                     tempIn = null
                 }
                 "BREAK_IN" -> tempBreakIn = pInstant
                 "BREAK_OUT" -> {
-                    tempBreakIn?.let { breakSegments.add(it to pInstant) }
+                    tempBreakIn?.let { 
+                        breakSegments.add(it to pInstant)
+                        completedBreakSegments.add(it to pInstant)
+                    }
                     tempBreakIn = null
+                }
+                else -> {
+                    if (tempIn == null) {
+                        tempIn = pInstant
+                    } else {
+                        workSegments.add(tempIn!! to pInstant)
+                        completedWorkSegments.add(tempIn!! to pInstant)
+                        tempIn = null
+                    }
                 }
             }
         }
 
-        // Open punch handling: use current time as terminal point for active punches
+        // Open punch handling: use terminal instant for active open work/break
         if (isOpen) {
-            val last = sortedPunches.last()
-            val lastInstant = Instant.ofEpochMilli(last.timestamp)
-            if (last.type == "IN") workSegments.add(lastInstant to zdtNow.toInstant())
-            else if (last.type == "BREAK_IN") breakSegments.add(lastInstant to zdtNow.toInstant())
+            if (tempBreakIn != null || lastPunch.type.equals("BREAK_IN", ignoreCase = true)) {
+                val start = tempBreakIn ?: lastInstant
+                breakSegments.add(start to terminalInstant)
+            } else {
+                val start = tempIn ?: lastInstant
+                workSegments.add(start to terminalInstant)
+            }
         }
 
         var totalRawWorkMs = 0L
@@ -118,21 +154,47 @@ object AttendanceEngine {
             }
         }
 
-        val totalNetWorkMin = (totalRawWorkMs - totalBreakMs) / 60000
+        // Overtime (OT): STRICTLY calculated from completed IN -> OUT pairs with a valid OUT punch!
+        // Open/odd punch segments never claim or calculate OT until a valid OUT is recorded.
+        var completedRawWorkMs = 0L
+        completedWorkSegments.forEach { (start, end) ->
+            completedRawWorkMs += Duration.between(start, end).toMillis()
+        }
+        var completedBreakMs = 0L
+        completedBreakSegments.forEach { (start, end) ->
+            completedBreakMs += Duration.between(start, end).toMillis()
+        }
+        var completedInsideShiftMs = 0L
+        completedWorkSegments.forEach { (start, end) ->
+            val overlapStart = if (start.isAfter(shiftStartInstant)) start else shiftStartInstant
+            val overlapEnd = if (end.isBefore(shiftEndInstant)) end else shiftEndInstant
+            if (overlapEnd.isAfter(overlapStart)) {
+                completedInsideShiftMs += Duration.between(overlapStart, overlapEnd).toMillis()
+            }
+        }
+        completedBreakSegments.forEach { (start, end) ->
+            val overlapStart = if (start.isAfter(shiftStartInstant)) start else shiftStartInstant
+            val overlapEnd = if (end.isBefore(shiftEndInstant)) end else shiftEndInstant
+            if (overlapEnd.isAfter(overlapStart)) {
+                completedInsideShiftMs -= Duration.between(overlapStart, overlapEnd).toMillis()
+            }
+        }
+        val completedNetWorkMin = (completedRawWorkMs - completedBreakMs) / 60000
+        val completedInsideShiftMin = max(0L, completedInsideShiftMs / 60000)
+        val validOvertimeMin = max(0L, completedNetWorkMin - completedInsideShiftMin)
+
         val insideShiftMin = max(0L, insideShiftMs / 60000)
         val breakMin = totalBreakMs / 60000
-        
-        // OT: Any work done outside the defined shift hours
-        val outsideShiftMin = max(0L, totalNetWorkMin - insideShiftMin)
+        val displayWorkMin = insideShiftMin + validOvertimeMin
 
         // Lateness & Early Leave detection
-        val firstIn = sortedPunches.firstOrNull { it.type == "IN" }?.let { Instant.ofEpochMilli(it.timestamp) }
-        val lastOut = if (isOpen && sortedPunches.last().type == "IN") zdtNow.toInstant() 
-                      else sortedPunches.lastOrNull { it.type == "OUT" }?.let { Instant.ofEpochMilli(it.timestamp) }
+        val firstIn = sortedPunches.firstOrNull { !it.type.equals("OUT", ignoreCase = true) && !it.type.equals("BREAK_OUT", ignoreCase = true) }?.let { Instant.ofEpochMilli(it.timestamp) }
+        val lastOut = if (isOpen) terminalInstant 
+                      else sortedPunches.lastOrNull { it.type.equals("OUT", ignoreCase = true) }?.let { Instant.ofEpochMilli(it.timestamp) }
 
         val lateMin = if (firstIn != null && firstIn.isAfter(shiftStartInstant.plusSeconds(60))) 
                       Duration.between(shiftStartInstant, firstIn).toMinutes() else 0L
-        val earlyMin = if (lastOut != null && lastOut.isBefore(shiftEndInstant.minusSeconds(60))) 
+        val earlyMin = if (!isOpen && lastOut != null && lastOut.isBefore(shiftEndInstant.minusSeconds(60))) 
                        Duration.between(lastOut, shiftEndInstant).toMinutes() else 0L
 
         // Break Penalty: Excess break time beyond threshold
@@ -140,22 +202,24 @@ object AttendanceEngine {
 
         return AttendanceResult(
             date = date,
-            totalWorkDurationMinutes = totalNetWorkMin,
+            totalWorkDurationMinutes = displayWorkMin,
             insideShiftDurationMinutes = insideShiftMin,
-            outsideShiftDurationMinutes = outsideShiftMin,
+            outsideShiftDurationMinutes = validOvertimeMin,
             lateArrivalMinutes = lateMin,
             earlyLeaveMinutes = earlyMin,
-            overtimeMinutes = outsideShiftMin,
+            overtimeMinutes = validOvertimeMin,
             breakDurationMinutes = breakMin,
             breakPenaltyMinutes = breakPenalty,
-            status = calculateStatus(totalNetWorkMin, lateMin, earlyMin, insideShiftMin),
+            status = calculateStatus(displayWorkMin, lateMin, earlyMin, insideShiftMin, isOpen, isLive),
             isOpenPunch = isOpen,
             punches = sortedPunches
         )
     }
 
-    private fun calculateStatus(netWorkMin: Long, lateMin: Long, earlyMin: Long, insideMin: Long): String {
+    private fun calculateStatus(netWorkMin: Long, lateMin: Long, earlyMin: Long, insideMin: Long, isOpen: Boolean, isLive: Boolean): String {
         return when {
+            isOpen && isLive -> "PRESENT"
+            isOpen && !isLive -> "MISSING_PUNCH"
             netWorkMin < 30 -> "ABSENT"
             insideMin < 240 -> "HALF_DAY"
             lateMin > 30 || earlyMin > 30 -> "LATE_OR_EARLY"

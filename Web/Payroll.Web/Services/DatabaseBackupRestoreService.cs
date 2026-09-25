@@ -385,104 +385,199 @@ public sealed class DatabaseBackupRestoreService
     private async Task WipeLocalOperationalDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var isSqlite = db.Database.IsSqlite();
 
-        // Fetch employee IDs for this tenant from Firebase
-        var tenantEmpIds = new HashSet<int>();
+        if (isSqlite)
+        {
+            try { await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;", cancellationToken); } catch { }
+        }
+
         try
         {
-            var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
-            if (employeesSnapshot.HasValue)
+            var connection = db.Database.GetDbConnection();
+            var wasOpen = connection.State == System.Data.ConnectionState.Open;
+            if (!wasOpen)
             {
-                if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                await connection.OpenAsync(cancellationToken);
+            }
+
+            // Discover all tables currently existing in the database
+            var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = isSqlite
+                    ? "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                    : "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';";
+
+                using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    foreach (var prop in employeesSnapshot.Value.EnumerateObject())
-                    {
-                        if (int.TryParse(prop.Name, out var id))
-                        {
-                            tenantEmpIds.Add(id);
-                        }
-                        else if (prop.Value.TryGetProperty("EmployeeID", out var eidProp) && eidProp.TryGetInt32(out var eid))
-                        {
-                            tenantEmpIds.Add(eid);
-                        }
-                        else if (prop.Value.TryGetProperty("employeeid", out var eidProp2) && eidProp2.TryGetInt32(out var eid2))
-                        {
-                            tenantEmpIds.Add(eid2);
-                        }
-                    }
-                }
-                else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
-                {
-                    var idx = 0;
-                    foreach (var elem in employeesSnapshot.Value.EnumerateArray())
-                    {
-                        if (elem.ValueKind != JsonValueKind.Null)
-                        {
-                            if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id))
-                            {
-                                tenantEmpIds.Add(id);
-                            }
-                            else
-                            {
-                                tenantEmpIds.Add(idx);
-                            }
-                        }
-                        idx++;
-                    }
+                    existingTables.Add(reader.GetString(0));
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}. Checking local fallback.", tenantId);
-        }
 
-        // If this is the default tenant and no Firebase employee IDs were found, include all local employees
-        if (tenantEmpIds.Count == 0 && tenantId == TenantContextService.DefaultTenantId)
-        {
-            var localEmpIds = await db.Employees.Select(e => e.EmployeeID).ToListAsync(cancellationToken);
-            foreach (var id in localEmpIds) tenantEmpIds.Add(id);
-        }
+            // Tables that must NEVER be wiped in Partial Wipe (Settings & Employee Master)
+            var preservedTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "__EFMigrationsHistory",
+                "feature_settings",
+                "CompanySettings",
+                "holidays",
+                "professional_tax_slabs",
+                "AspNetRoles",
+                "AspNetRoleClaims",
+                "AspNetUsers",
+                "AspNetUserRoles",
+                "AspNetUserClaims",
+                "AspNetUserLogins",
+                "AspNetUserTokens",
+                "CompanyTenants",
+                "user_theme_preferences",
+                "employees",
+                "shops"
+            };
 
-        if (tenantEmpIds.Count == 0)
-        {
-            _logger.LogInformation("No employees found for tenant {TenantId}. No local operational records to wipe.", tenantId);
-            return;
-        }
-
-        var idList = string.Join(",", tenantEmpIds);
-
-        // Delete records strictly tied to these employees
-        var deleteQueries = new[]
-        {
-            $"DELETE FROM \"AttendanceLogs\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"SalaryAdvances\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"PayrollHistories\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"LeaveRequests\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"ShiftSchedules\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"DailySummaries\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"employee_gps_sessions\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"employee_location_history\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"employee_device_locks\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"attendance_punches\" WHERE \"employeeid\" IN ({idList});",
-            $"DELETE FROM \"bonus_records\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"tax_declarations\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"resignation_requests\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"flexible_benefit_declarations\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"fnf_settlements\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"attendance_regularizations\" WHERE \"employee_id\" IN ({idList});",
-            $"DELETE FROM \"geo_punch_audits\" WHERE \"employee_id\" IN ({idList});"
-        };
-
-        foreach (var sql in deleteQueries)
-        {
+            // Fetch tenant employee IDs to scope operational deletions
+            var tenantEmpIds = new HashSet<int>();
             try
             {
-                await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+                var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
+                if (employeesSnapshot.HasValue)
+                {
+                    if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in employeesSnapshot.Value.EnumerateObject())
+                        {
+                            if (int.TryParse(prop.Name, out var id)) tenantEmpIds.Add(id);
+                            else if (prop.Value.TryGetProperty("EmployeeID", out var p1) && p1.TryGetInt32(out var eid)) tenantEmpIds.Add(eid);
+                            else if (prop.Value.TryGetProperty("employeeid", out var p2) && p2.TryGetInt32(out var eid2)) tenantEmpIds.Add(eid2);
+                        }
+                    }
+                    else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        var idx = 0;
+                        foreach (var elem in employeesSnapshot.Value.EnumerateArray())
+                        {
+                            if (elem.ValueKind != JsonValueKind.Null)
+                            {
+                                if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id)) tenantEmpIds.Add(id);
+                                else tenantEmpIds.Add(idx);
+                            }
+                            idx++;
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("Query skipped: {Sql} - {Message}", sql, ex.Message);
+                _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}.", tenantId);
+            }
+
+            // Include local SQLite employees for this tenant
+            try
+            {
+                var localEmployees = await db.Employees.AsNoTracking().ToListAsync(cancellationToken);
+                var matchingLocalEmpIds = localEmployees
+                    .Where(e => string.IsNullOrWhiteSpace(e.TenantId) || string.Equals(e.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || tenantId == TenantContextService.DefaultTenantId)
+                    .Select(e => e.EmployeeID)
+                    .ToList();
+
+                foreach (var id in matchingLocalEmpIds)
+                {
+                    tenantEmpIds.Add(id);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not query local employees for tenant {TenantId}.", tenantId);
+            }
+
+            // If tenant is default tenant OR if database is single-company:
+            // Wipe all operational tables found in SQLite!
+            var isPrimaryOrSoleCompany = tenantId == TenantContextService.DefaultTenantId ||
+                                         !await db.CompanyTenants.AnyAsync(cancellationToken);
+
+            var wipedTables = new List<string>();
+
+            if (isPrimaryOrSoleCompany)
+            {
+                foreach (var table in existingTables)
+                {
+                    if (preservedTables.Contains(table)) continue;
+
+                    try
+                    {
+                        var sql = $"DELETE FROM \"{table}\";";
+                        await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+                        wipedTables.Add(table);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Could not delete from table {Table}: {Message}", table, ex.Message);
+                    }
+                }
+            }
+            else if (tenantEmpIds.Count > 0)
+            {
+                // Scoped deletion for secondary tenant
+                var idList = string.Join(",", tenantEmpIds);
+                var stringIdList = string.Join(",", tenantEmpIds.Select(id => $"'{id}'"));
+
+                var scopedQueries = new List<string>
+                {
+                    $"DELETE FROM attendancelogs WHERE employeeid IN ({idList});",
+                    $"DELETE FROM attendance_punches WHERE employeeid IN ({idList});",
+                    $"DELETE FROM daily_summaries WHERE employeeid IN ({idList});",
+                    $"DELETE FROM salaryadvances WHERE employeeid IN ({idList});",
+                    $"DELETE FROM payrollhistory WHERE employeeid IN ({idList});",
+                    $"DELETE FROM leaverequests WHERE employeeid IN ({idList});",
+                    $"DELETE FROM shiftschedules WHERE employeeid IN ({idList});",
+                    $"DELETE FROM employee_gps_sessions WHERE employee_id IN ({idList});",
+                    $"DELETE FROM employee_location_history WHERE EmployeeId IN ({idList});",
+                    $"DELETE FROM employee_device_locks WHERE UserId IN (SELECT AspNetUserId FROM employees WHERE employeeid IN ({idList}));",
+                    $"DELETE FROM bonus_records WHERE employee_id IN ({idList});",
+                    $"DELETE FROM tax_declarations WHERE employee_id IN ({idList});",
+                    $"DELETE FROM resignation_requests WHERE employee_id IN ({idList});",
+                    $"DELETE FROM flexible_benefit_declarations WHERE employee_id IN ({idList});",
+                    $"DELETE FROM fnf_settlements WHERE employee_id IN ({idList});",
+                    $"DELETE FROM attendance_regularizations WHERE employee_id IN ({idList});",
+                    $"DELETE FROM geo_punch_audits WHERE employee_id IN ({idList});",
+                    $"DELETE FROM audit_logs WHERE entity_id IN ({stringIdList});",
+                    $"DELETE FROM year_end_summaries WHERE employee_id IN ({idList});",
+                    $"DELETE FROM notifications WHERE employee_id IN ({idList});"
+                };
+
+                foreach (var sql in scopedQueries)
+                {
+                    try
+                    {
+                        await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug("Scoped query skipped: {Sql} - {Message}", sql, ex.Message);
+                    }
+                }
+            }
+
+            if (isSqlite && wipedTables.Count > 0)
+            {
+                try
+                {
+                    var tableList = string.Join(",", wipedTables.Select(t => "'" + t.Replace("'", "''") + "'"));
+                    var seqSql = $"DELETE FROM sqlite_sequence WHERE name IN ({tableList});";
+                    await db.Database.ExecuteSqlRawAsync(seqSql, cancellationToken);
+                }
+                catch { }
+            }
+
+            _logger.LogInformation("WipeLocalOperationalDataForTenantAsync completed for tenant {TenantId}. Wiped operational tables: {Count}", tenantId, wipedTables.Count);
+        }
+        finally
+        {
+            if (isSqlite)
+            {
+                try { await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;", cancellationToken); } catch { }
             }
         }
     }
@@ -490,63 +585,56 @@ public sealed class DatabaseBackupRestoreService
     private async Task WipeLocalAllDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var isSqlite = db.Database.IsSqlite();
 
-        var tenantEmpIds = new HashSet<int>();
+        if (isSqlite)
+        {
+            try { await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;", cancellationToken); } catch { }
+        }
+
         try
         {
-            var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
-            if (employeesSnapshot.HasValue)
+            // 1. Wipe all operational tables first
+            await WipeLocalOperationalDataForTenantAsync(tenantId, cancellationToken);
+
+            // 2. Wipe employees and shops for this tenant
+            var isPrimaryOrSoleCompany = tenantId == TenantContextService.DefaultTenantId ||
+                                         !await db.CompanyTenants.AnyAsync(cancellationToken);
+
+            if (isPrimaryOrSoleCompany)
             {
-                if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                try { await db.Database.ExecuteSqlRawAsync("DELETE FROM employees;", cancellationToken); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("DELETE FROM shops;", cancellationToken); } catch { }
+                if (isSqlite)
                 {
-                    foreach (var prop in employeesSnapshot.Value.EnumerateObject())
-                    {
-                        if (int.TryParse(prop.Name, out var id)) tenantEmpIds.Add(id);
-                        else if (prop.Value.TryGetProperty("EmployeeID", out var eidProp) && eidProp.TryGetInt32(out var eid)) tenantEmpIds.Add(eid);
-                        else if (prop.Value.TryGetProperty("employeeid", out var eidProp2) && eidProp2.TryGetInt32(out var eid2)) tenantEmpIds.Add(eid2);
-                    }
-                }
-                else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
-                {
-                    var idx = 0;
-                    foreach (var elem in employeesSnapshot.Value.EnumerateArray())
-                    {
-                        if (elem.ValueKind != JsonValueKind.Null)
-                        {
-                            if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id)) tenantEmpIds.Add(id);
-                            else tenantEmpIds.Add(idx);
-                        }
-                        idx++;
-                    }
+                    try { await db.Database.ExecuteSqlRawAsync("DELETE FROM sqlite_sequence WHERE name IN ('employees', 'shops');", cancellationToken); } catch { }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}.", tenantId);
-        }
-
-        if (tenantEmpIds.Count == 0 && tenantId == TenantContextService.DefaultTenantId)
-        {
-            var localEmpIds = await db.Employees.Select(e => e.EmployeeID).ToListAsync(cancellationToken);
-            foreach (var id in localEmpIds) tenantEmpIds.Add(id);
-        }
-
-        // Wipe operational tables first
-        await WipeLocalOperationalDataForTenantAsync(tenantId, cancellationToken);
-
-        // Then wipe the employees themselves
-        if (tenantEmpIds.Count > 0)
-        {
-            var idList = string.Join(",", tenantEmpIds);
-            try
+            else
             {
-                var deleteEmployeesSql = $"DELETE FROM \"Employees\" WHERE \"employeeid\" IN ({idList});";
-                await db.Database.ExecuteSqlRawAsync(deleteEmployeesSql, cancellationToken);
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync($"DELETE FROM employees WHERE tenant_id = '{tenantId.Replace("'", "''")}';", cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Could not delete employees for tenant {TenantId}: {Message}", tenantId, ex.Message);
+                }
+
+                try
+                {
+                    await db.Database.ExecuteSqlRawAsync($"DELETE FROM shops WHERE tenant_id = '{tenantId.Replace("'", "''")}';", cancellationToken);
+                }
+                catch { }
             }
-            catch (Exception ex)
+
+            _logger.LogInformation("WipeLocalAllDataForTenantAsync completed for tenant {TenantId} (employees & shops wiped).", tenantId);
+        }
+        finally
+        {
+            if (isSqlite)
             {
-                _logger.LogDebug("Employees wipe query failed: {Message}", ex.Message);
+                try { await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;", cancellationToken); } catch { }
             }
         }
     }

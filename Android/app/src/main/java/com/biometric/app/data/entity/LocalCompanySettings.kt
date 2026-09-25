@@ -40,5 +40,6 @@ data class LocalCompanySettings(
     var enableSandwichRule: Boolean = false,
     var enableLeaveManagement: Boolean = false,
     var enableTdsDeduction: Boolean = false,
+    var autoBackupIntervalHours: Int = 24,
     val syncState: Int = 1
 )

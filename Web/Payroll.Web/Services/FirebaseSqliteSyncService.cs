@@ -160,89 +160,103 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         await Task.WhenAll(authTask, watcherTask);
     }
 
+    private static readonly (string EntityName, string FirebaseTable)[] ActiveStreamTables = new[]
+    {
+        ("CompanySetting", "company_settings"),
+        ("FeatureSettings", "feature_settings"),
+        ("AttendancePunch", "attendance_punches"),
+        ("AttendanceLog", "attendance"),
+        ("DailySummary", "daily_summaries"),
+        ("LeaveRequest", "leave_requests"),
+        ("SalaryAdvance", "advance_payments"),
+        ("AttendanceRegularization", "regularizations"),
+        ("ResignationRequest", "resignation_requests"),
+        ("Employee", "employees"),
+        ("Shop", "shops"),
+        ("ShiftSchedule", "shift_schedules"),
+    };
+
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        // BANDWIDTH OPTIMIZATION: Stream each operational table individually instead of
+        // streaming the entire root owners/{ownerUid}.
+        // Streaming the root node causes Firebase to dump the entire tracking/history
+        // subtree (tens of megabytes of raw GPS breadcrumbs) as an initial SSE snapshot.
+        var tasks = ActiveStreamTables.Select(t =>
+            RunTableStreamLoopAsync(ownerUid, t.EntityName, t.FirebaseTable, stoppingToken));
+
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task RunTableStreamLoopAsync(
+        string ownerUid,
+        string entityName,
+        string firebaseTable,
+        CancellationToken stoppingToken)
+    {
+        var nodePath = $"owners/{ownerUid}/{firebaseTable}";
+        await RunGlobalStreamLoopAsync(nodePath, async (relativePath, eventData, ct) =>
         {
-            try
+            var rawKey = (relativePath ?? "/").Trim('/');
+            bool changed = false;
+
+            if (string.IsNullOrEmpty(rawKey))
             {
-                await _firebase.StreamOwnerChangesAsync(
-                    ownerUid,
-                    async (relativePath, eventData, ct) =>
-                    {
-                        var target = ParseFirebasePath(relativePath);
-                        if (target is null) return;
-
-                        if (target.Value.EntityName.Equals("TrackingHistory", StringComparison.Ordinal))
-                        {
-                            await ProcessFirebaseTrackingEventAsync(relativePath, eventData, ct);
-                            return;
-                        }
-
-                        if (target.Value.EntityName.Equals("MobileAuthEvent", StringComparison.Ordinal))
-                        {
-                            await ProcessFirebaseMobileAuthEventAsync(relativePath, eventData, ct);
-                            return;
-                        }
-
-                        if (!Tables.TryGetValue(target.Value.EntityName, out var firebaseTable)) return;
-
-                        bool changed;
-                        if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Null)
-                        {
-                            changed = await DeleteLocalFirebaseRecordAsync(
-                                target.Value.EntityName, target.Value.RecordKey, ct);
-                        }
-                        else
-                        {
-                            changed = await SyncTableAsync(
-                                target.Value.EntityName, firebaseTable, ownerUid, ct);
-                        }
-
-                        if (changed)
-                        {
-                            await _refreshService.NotifyApplicationDataChangedAsync(
-                                new[] { target.Value.EntityName });
-
-                            // MIRROR: If company settings changed, notify live maps to update the geofence circle.
-                            if (target.Value.EntityName.Equals("CompanySetting", StringComparison.Ordinal))
-                            {
-                                var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
-                                if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
-                                {
-                                    var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
-                                    var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
-                                    var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
-                                    await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
-
-                                    // MIRROR: When Admin changes geofence radius on Android, immediately
-                                    // re-evaluate all active sessions on the server to ensure
-                                    // real-time attendance parity across platforms.
-                                    using var scope = _scopeFactory.CreateScope();
-                                    await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
-                                }
-                            }
-                        }
-                    },
-                    stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (Exception ex)
-            {
-                if (IsConnectionReset(ex))
+                if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Object)
                 {
-                    _logger.LogInformation("Firebase stream reconnected after timeout.");
+                    changed = await UpsertTableAsync(entityName, eventData.Value, ownerUid, ct);
+                }
+                else if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Null)
+                {
+                    changed = await DeleteLocalFirebaseRecordAsync(entityName, null, ct);
+                }
+            }
+            else
+            {
+                var recordKey = Uri.UnescapeDataString(rawKey)
+                    .Replace("%2E", ".", StringComparison.OrdinalIgnoreCase)
+                    .Replace("%23", "#", StringComparison.OrdinalIgnoreCase)
+                    .Replace("%24", "$", StringComparison.OrdinalIgnoreCase)
+                    .Replace("%5B", "[", StringComparison.OrdinalIgnoreCase)
+                    .Replace("%5D", "]", StringComparison.OrdinalIgnoreCase)
+                    .Replace("%2F", "/", StringComparison.OrdinalIgnoreCase);
+
+                if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Null)
+                {
+                    changed = await DeleteLocalFirebaseRecordAsync(entityName, recordKey, ct);
+                }
+                else if (eventData.HasValue && eventData.Value.ValueKind == JsonValueKind.Object)
+                {
+                    // BANDWIDTH OPTIMIZATION: Apply the single updated record from eventData directly.
+                    // Never call SyncTableAsync (which issues an HTTP GET to download the entire table).
+                    changed = await UpsertSingleFirebaseRecordAsync(entityName, recordKey, eventData.Value, ct);
                 }
                 else
                 {
-                    _logger.LogWarning(ex, "Firebase owner realtime stream disconnected. Reconnecting.");
+                    changed = await SyncTableAsync(entityName, firebaseTable, ownerUid, ct);
                 }
-                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
-        }
+
+            if (changed)
+            {
+                await _refreshService.NotifyApplicationDataChangedAsync(new[] { entityName });
+
+                if (entityName.Equals("CompanySetting", StringComparison.Ordinal))
+                {
+                    var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
+                    if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
+                        var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
+                        var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
+                        await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
+
+                        using var scope = _scopeFactory.CreateScope();
+                        await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
+                    }
+                }
+            }
+        }, stoppingToken);
     }
 
     private async Task RunGlobalStreamLoopAsync(
@@ -1341,6 +1355,49 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         db.Remove(existing);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private async Task<bool> UpsertSingleFirebaseRecordAsync(
+        string entityName,
+        string firebaseKey,
+        JsonElement recordJson,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await factory.CreateDbContextAsync(ct);
+
+            var entityType = db.Model.GetEntityTypes()
+                .FirstOrDefault(x => x.ClrType.Name == entityName);
+            if (entityType == null)
+                return false;
+
+            var keys = entityType.FindPrimaryKey()?.Properties;
+            if (keys == null || keys.Count == 0)
+                return false;
+
+            var rowChanged = await UpsertRecordAsync(
+                db,
+                entityType,
+                keys,
+                firebaseKey,
+                recordJson,
+                ct);
+
+            if (!rowChanged)
+                return false;
+
+            using var syncScope = _firebaseSyncWriteScope.Enter();
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to upsert single Firebase record for {Entity} key {Key}", entityName, firebaseKey);
+            return false;
+        }
     }
 
     private async Task<bool> UpsertTableAsync(

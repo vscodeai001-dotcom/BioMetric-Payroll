@@ -453,6 +453,9 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "employees", "tenant_id", "TEXT NULL", ct);
             await EnsureColumnExistsAsync(connection, "employees", "shift_mode", "TEXT DEFAULT 'SINGLE_DAY'", ct);
             await EnsureColumnExistsAsync(connection, "employees", "tracking_mode", "TEXT DEFAULT '24/7'", ct);
+
+            // 4. Ensure auto_backup_interval_hours on CompanySettings
+            await EnsureColumnExistsAsync(connection, "CompanySettings", "auto_backup_interval_hours", "INTEGER NOT NULL DEFAULT 24", ct);
         }
         catch { }
     }

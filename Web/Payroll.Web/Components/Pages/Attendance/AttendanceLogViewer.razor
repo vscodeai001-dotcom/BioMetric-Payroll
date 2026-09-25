@@ -22,6 +22,7 @@
 @inject IToastService toastService
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
 @inject Payroll.Web.Services.FirebaseAttendanceService FirebaseAttendanceService
+@inject Payroll.Web.Services.FirebaseAttendanceMutationService FirebaseAttendanceMutations
 @inject Payroll.Web.Services.AttendanceProcessingCoordinator AttendanceProcessingCoordinator
 @inject CsvExportService CsvService
 
@@ -45,18 +46,18 @@
     </div>
 
     <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-outline-secondary action-pill-btn"
-                @onclick="ReprocessAttendance"
+        <button class="btn btn-primary action-pill-btn"
+                @onclick="ExecuteSearchAndProcessAsync"
                 disabled="@isLoading">
             @if (isLoading)
             {
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>Calculating...</span>
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                <span>Searching...</span>
             }
             else
             {
-                <span>🔄</span> <i class="bi bi-arrow-repeat"></i>
-                <span>Re-Process</span>
+                <i class="bi bi-search me-1"></i>
+                <span>Search</span>
             }
         </button>
 
@@ -75,7 +76,7 @@
     @bind-StartDate="startDate"
     @bind-EndDate="endDate"
     IsLoading="isLoading"
-    OnSearch="@(() => LoadLogs(autoProcessNewPunches: true))" />
+    OnSearch="ExecuteSearchAndProcessAsync" />
 
 @if (cumulative != null)
 {
@@ -523,7 +524,8 @@
 
     private async Task LoadLogs(
         bool autoProcessNewPunches = false,
-        bool isBackgroundRefresh = false)
+        bool isBackgroundRefresh = false,
+        bool forceRecalculate = false)
     {
         if (!startDate.HasValue ||
             !endDate.HasValue)
@@ -637,7 +639,8 @@
                     activeEmployeeIds,
                     dStart,
                     dEnd,
-                    queryEndExclusive);
+                    queryEndExclusive,
+                    forceRecalculate);
             }
 
             // ----------------------------------------------------
@@ -1120,7 +1123,8 @@
         HashSet<int> activeEmployeeIds,
         DateOnly dStart,
         DateOnly dEnd,
-        DateTime queryEndExclusive)
+        DateTime queryEndExclusive,
+        bool forceRecalculate = false)
     {
         try
         {
@@ -1236,6 +1240,7 @@
                     .ToList();
 
             bool changed = false;
+            var updatedSummaries = new List<DailySummary>();
             var processedAfterSave = new List<(string Key, string Fingerprint, bool ManualOverride)>();
 
             foreach (var group in groups)
@@ -1316,7 +1321,13 @@
                 // Re-check after loading the current summary and after taking
                 // the employee/date lock. This closes the duplicate-processing
                 // window between two realtime callbacks.
-                if (AttendanceProcessingCoordinator.IsAlreadyProcessed(
+                bool isOddPunch = group.Count() % 2 != 0;
+                var indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, IndiaTimeZone);
+                bool isLiveDate = date == DateOnly.FromDateTime(indiaNow) ||
+                                  date == DateOnly.FromDateTime(indiaNow.AddDays(-1));
+
+                if (!forceRecalculate && !(isOddPunch && isLiveDate) &&
+                    AttendanceProcessingCoordinator.IsAlreadyProcessed(
                         cacheKey,
                         fingerprint,
                         existing?.IsManualOverride ?? false))
@@ -1442,6 +1453,7 @@
                     false;
 
                 changed = true;
+                updatedSummaries.Add(existing);
 
                 // ----------------------------------------------------
                 // Do not mark the fingerprint as committed until the EF save
@@ -1450,14 +1462,26 @@
                 // ----------------------------------------------------
 
                processedAfterSave.Add((
-    cacheKey,
-    fingerprint,
-    ManualOverride: false));
+                    cacheKey,
+                    fingerprint,
+                    ManualOverride: false));
             }
 
             if (changed)
             {
                 await dbContext.SaveChangesAsync();
+
+                foreach (var summaryToSync in updatedSummaries)
+                {
+                    try
+                    {
+                        await FirebaseAttendanceMutations.UpsertDailySummaryAsync(summaryToSync, "MODIFIED");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to sync daily summary to Firebase for EmpID {EmpId}, Date {Date}", summaryToSync.EmployeeID, summaryToSync.ShiftDate);
+                    }
+                }
 
                 foreach (var processed in processedAfterSave)
                 {
@@ -2056,324 +2080,45 @@
     }
 
     // ============================================================
-    // REPROCESS
+    // SEARCH & RE-PROCESS MERGED ACTION
+    // ============================================================
+
+    private async Task ExecuteSearchAndProcessAsync()
+    {
+        if (!startDate.HasValue || !endDate.HasValue)
+        {
+            return;
+        }
+
+        isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            // Merged Search + Re-Process:
+            // 1. Checks and processes any new or updated attendance punches and approved leaves.
+            // 2. Immediately loads and renders the attendance log summaries from local storage.
+            await LoadLogs(autoProcessNewPunches: true, forceRecalculate: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error executing attendance search and processing.");
+            toastService.ShowError("Error loading attendance data.");
+        }
+        finally
+        {
+            isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ============================================================
+    // REPROCESS (Backward compatibility forwarded to merged action)
     // ============================================================
 
     private async Task ReprocessAttendance()
     {
-        if (!startDate.HasValue ||
-            !endDate.HasValue)
-        {
-            return;
-        }
-
-        var scopeText = selectedEmployeeId > 0
-            ? $"selected employee #{selectedEmployeeId}"
-            : "ALL employees";
-
-        var confirm =
-            await JSRuntime.InvokeAsync<bool>(
-                "confirm",
-                $"This will re-calculate attendance for {scopeText} from {startDate:dd-MMM} to {endDate:dd-MMM}. Continue?");
-
-        if (!confirm)
-        {
-            return;
-        }
-
-        isLoading =
-            true;
-
-        await InvokeAsync(
-            StateHasChanged);
-
-        try
-        {
-            await using var dbContext =
-                await DbFactory.CreateDbContextAsync();
-
-            var allEmployees = await FirebaseEmployees.GetEmployeesAsync();
-            if (selectedEmployeeId > 0)
-            {
-                allEmployees = allEmployees.Where(e => e.EmployeeID == selectedEmployeeId).ToList();
-            }
-
-            var settings =
-                await dbContext.CompanySettings
-                    .FirstOrDefaultAsync(
-                        s =>
-                            s.SettingID == 1)
-                ?? new CompanySetting();
-
-            var featureSettings =
-                await dbContext.FeatureSettings
-                    .FirstOrDefaultAsync(
-                        f => f.Id == 1)
-                ?? new FeatureSettings();
-
-            var holidays =
-                await dbContext.CompanyHolidays
-                    .ToListAsync();
-
-            var dStart =
-                DateOnly.FromDateTime(
-                    startDate.Value.Date);
-
-            var dEnd =
-                DateOnly.FromDateTime(
-                    endDate.Value.Date);
-
-            int count = 0;
-            int skippedManualOverrides = 0;
-
-            for (
-                var day = dStart;
-                day <= dEnd;
-                day = day.AddDays(1))
-            {
-                var dayDateTime =
-                    day.ToDateTime(
-                        TimeOnly.MinValue);
-
-                var dayProcessingLeases =
-                    new List<IDisposable>();
-
-                var nextDayDateTime =
-                    dayDateTime.AddDays(1);
-
-                var allPunches =
-                    await dbContext.AttendanceLogs
-                        .Where(
-                            l =>
-                                l.PunchTime >=
-                                    dayDateTime &&
-                                l.PunchTime <
-                                    nextDayDateTime)
-                        .ToListAsync();
-
-                var allSchedules =
-                    await dbContext.ShiftSchedules
-                        .Where(
-                            s =>
-                                s.ShiftDate ==
-                                day)
-                        .ToListAsync();
-
-                var allLeaves =
-                    await dbContext.LeaveRequests
-                        .AsNoTracking()
-                        .Where(
-                            l =>
-                                l.LeaveDate.HasValue &&
-                                l.LeaveDate.Value >=
-                                    dayDateTime &&
-                                l.LeaveDate.Value <
-                                    nextDayDateTime &&
-                                l.IsApproved)
-                        .OrderBy(
-                            l =>
-                                l.LeaveType ==
-                                "Loss of Pay (Auto)"
-                                    ? 1
-                                    : 0)
-                        .ThenByDescending(
-                            l =>
-                                l.LeaveRequestID)
-                        .ToListAsync();
-
-                try
-                {
-                    foreach (var emp in allEmployees)
-                    {
-                        if (emp.HireDate > day)
-                        {
-                            continue;
-                        }
-
-                        var processingKey =
-                            $"{emp.EmployeeID}:{day:yyyy-MM-dd}";
-
-                        // Manual reprocessing must serialize with automatic
-                        // punch processing and manual corrections for the
-                        // exact employee/date being recalculated.
-                        dayProcessingLeases.Add(
-                            await AttendanceProcessingCoordinator.AcquireAsync(
-                                processingKey));
-
-                        var existing =
-                        await dbContext.DailySummaries
-                            .FirstOrDefaultAsync(
-                                s =>
-                                    s.EmployeeID ==
-                                        emp.EmployeeID &&
-                                    s.ShiftDate ==
-                                        day);
-
-                        if (
-                            existing != null &&
-                            existing.IsManualOverride)
-                        {
-                            skippedManualOverrides++;
-                            continue;
-                        }
-
-                    var empPunches =
-                        allPunches
-                            .Where(
-                                p =>
-                                    p.EmployeeID ==
-                                    emp.EmployeeID)
-                            .ToList();
-
-                    var empSchedule =
-                        allSchedules
-                            .FirstOrDefault(
-                                s =>
-                                    s.EmployeeID ==
-                                        emp.EmployeeID);
-
-                    var empLeave =
-                        allLeaves
-                            .Where(
-                                l =>
-                                    l.EmployeeID ==
-                                        emp.EmployeeID &&
-                                    l.IsApproved)
-                            .OrderBy(
-                                l =>
-                                    l.LeaveType ==
-                                    "Loss of Pay (Auto)"
-                                        ? 1
-                                        : 0)
-                            .ThenByDescending(
-                                l =>
-                                    l.LeaveRequestID)
-                            .FirstOrDefault();
-
-                    var result =
-                        Calculator.CalculateDailyResult(
-                            emp,
-                            dayDateTime,
-                            empPunches,
-                            empLeave,
-                            empSchedule,
-                            settings,
-                            holidays,
-                            featureSettings);
-
-                    if (existing == null)
-                    {
-                        existing =
-                            new DailySummary
-                            {
-                                EmployeeID =
-                                    emp.EmployeeID,
-
-                                ShiftDate =
-                                    day
-                            };
-
-                        dbContext.DailySummaries
-                            .Add(existing);
-                    }
-
-                    existing.Status =
-                        result.Status;
-
-                    existing.EarnedStandardHours =
-                        result
-                            .EarnedStandardDuration
-                            .TotalHours < 0
-                                ? 0
-                                : (decimal)
-                                    result
-                                        .EarnedStandardDuration
-                                        .TotalHours;
-
-                    existing.TotalOvertimeDuration =
-                        result.TotalOvertimeDuration;
-
-                    existing.TotalPenaltyDuration =
-                        result.TotalPenalty;
-
-                    existing.TotalLateness =
-                        result.TotalLateness;
-
-                    existing.TotalBreakPenalty =
-                        result.TotalBreakPenalty;
-
-                    existing.ScheduledShiftDuration =
-                        result.ScheduledShiftDuration;
-
-                    existing.ShiftAllowanceEarned =
-                        result.ShiftAllowanceEarned;
-
-                    existing.IsManualOverride =
-                        false;
-
-                        count++;
-                    }
-
-                    await dbContext.SaveChangesAsync();
-
-                    // The database save is now committed. Clear the old
-                    // in-memory fingerprints for this date so the next
-                    // automatic pass cannot rely on stale punch state.
-                    foreach (var emp in allEmployees)
-                    {
-                        if (emp.HireDate <= day)
-                        {
-                            AttendanceProcessingCoordinator.Invalidate(
-                                $"{emp.EmployeeID}:{day:yyyy-MM-dd}");
-                        }
-                    }
-                }
-                finally
-                {
-                    foreach (var lease in dayProcessingLeases)
-                        lease.Dispose();
-                }
-            }
-
-            await AuditService.LogAsync(
-                "UPDATE",
-                "Attendance",
-                $"Range:{dStart}-{dEnd}",
-                $"Mass attendance re-processed {count} daily summaries. Skipped {skippedManualOverrides} manual overrides.");
-
-            toastService.ShowSuccess(
-                $"Successfully re-processed {count} records. {skippedManualOverrides} manual overrides preserved.");
-
-            // ------------------------------------------------------------
-            // Refresh the fingerprint cache after manual re-processing.
-            // This prevents the next automatic page refresh from
-            // unnecessarily recalculating the same punches.
-            // ------------------------------------------------------------
-
-            await SeedProcessedPunchFingerprintsAsync(
-                dStart,
-                dEnd);
-
-            await LoadLogs(
-                autoProcessNewPunches: false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "Error re-processing attendance.");
-
-            toastService.ShowError(
-                $"Error: {ex.Message}");
-        }
-        finally
-        {
-            isLoading =
-                false;
-
-            await InvokeAsync(
-                StateHasChanged);
-        }
+        await ExecuteSearchAndProcessAsync();
     }
 
     private async Task HandleRealtimeRefresh()

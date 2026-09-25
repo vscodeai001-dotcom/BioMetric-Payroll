@@ -64,17 +64,127 @@
         </div>
     }
 
-    <div class="card border-0 shadow-sm mt-4 p-4">
-        <div class="d-flex align-items-start gap-3">
-            <i class="bi bi-database-check fs-3 text-primary"></i>
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-transparent d-flex justify-content-between align-items-center flex-wrap gap-2 py-3">
             <div>
-                <h5 class="fw-bold mb-1">Offline movement sync</h5>
-                <p class="text-muted mb-2">The web side is prepared to receive offline GPS batches. Android Phase 4 will add the device-side offline queue, connection-reason reporting, background collection, and chronological synchronization when the network returns.</p>
-                <div class="small text-muted">This screen intentionally does not guess whether a disconnect was caused by airplane mode, carrier loss, or another network problem. The Android device will report the exact reason when that phase is connected.</div>
-                <div class="mt-2">
-                    <span class="badge bg-primary-subtle text-primary">Today: @offlineSyncCount offline GPS points synced</span>
-                </div>
+                <h5 class="fw-bold mb-0"><i class="bi bi-clock-history text-warning me-2"></i>Offline Disconnection Intervals (Missing Window Reconciliation)</h5>
+                <small class="text-muted">Detected mobile offline windows (airplane mode, network disconnected) captured locally and synced to cloud.</small>
             </div>
+            <div class="d-flex align-items-center gap-2">
+                <a href="/admin/offline-tracking-details" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Full Audit Details
+                </a>
+                <span class="badge bg-warning text-dark">@offlinePeriods.Count offline periods</span>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            @if (offlinePeriods.Count == 0)
+            {
+                <div class="p-4 text-center text-muted">
+                    <i class="bi bi-check-circle text-success fs-3 d-block mb-2"></i>
+                    No offline tracking periods recorded today. All mobile tracking has been streaming live.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Offline Started</th>
+                                <th>Reconnected</th>
+                                <th>Duration</th>
+                                <th>Points Captured</th>
+                                <th>Distance Traveled</th>
+                                <th>Geofence</th>
+                                <th>Sync Status</th>
+                                <th class="text-end">Inspect</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var period in offlinePeriods)
+                        {
+                            var isSelected = period.Id == selectedOfflinePeriodId;
+                            <tr class="@(isSelected ? "table-warning fw-semibold" : "")">
+                                <td><strong>@period.EmployeeName</strong><div class="small text-muted">ID @period.EmployeeId</div></td>
+                                <td><i class="bi bi-wifi-off text-danger me-1"></i>@ToLocal(period.StartUtc).ToString("dd MMM HH:mm:ss")</td>
+                                <td><i class="bi bi-wifi text-success me-1"></i>@ToLocal(period.EndUtc).ToString("dd MMM HH:mm:ss")</td>
+                                <td><span class="badge bg-dark-subtle text-dark">@FormatAge(period.Duration)</span></td>
+                                <td><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span></td>
+                                <td>@FormatDistance(period.DistanceMeters)</td>
+                                <td>
+                                    <span class="badge bg-success-subtle text-success">@period.InRadiusCount In</span>
+                                    @if (period.PointCount - period.InRadiusCount > 0)
+                                    {
+                                        <span class="badge bg-danger-subtle text-danger ms-1">@(period.PointCount - period.InRadiusCount) Out</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (period.IsSynced)
+                                    {
+                                        <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm @(isSelected ? "btn-warning" : "btn-outline-primary")" @onclick="() => TogglePeriod(period.Id)">
+                                        <i class="bi @(isSelected ? "bi-check2-circle" : "bi-map") me-1"></i>@(isSelected ? "Selected" : "View Route")
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+
+                @if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
+                {
+                    var activePeriod = offlinePeriods.FirstOrDefault(x => x.Id == selectedOfflinePeriodId);
+                    if (activePeriod != null)
+                    {
+                        <div class="border-top p-3 bg-light-subtle">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <strong><i class="bi bi-geo-alt me-1 text-primary"></i>Offline Route Points for @activePeriod.EmployeeName (@activePeriod.Points.Count points captured while disconnected)</strong>
+                                <button class="btn btn-sm btn-link text-decoration-none" @onclick="() => selectedOfflinePeriodId = null">Close</button>
+                            </div>
+                            <div class="table-responsive" style="max-height: 280px; overflow-y: auto;">
+                                <table class="table table-sm table-bordered mb-0 bg-white">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Captured Time</th>
+                                            <th>Coordinates</th>
+                                            <th>Movement</th>
+                                            <th>Speed</th>
+                                            <th>Geofence</th>
+                                            <th>Sync Time</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    @{ int idx = 1; }
+                                    @foreach (var pt in activePeriod.Points.OrderBy(x => x.CapturedAtUtc))
+                                    {
+                                        <tr>
+                                            <td>@(idx++)</td>
+                                            <td>@ToLocal(pt.CapturedAtUtc).ToString("HH:mm:ss")</td>
+                                            <td><code>@pt.Latitude.ToString("F6"), @pt.Longitude.ToString("F6")</code></td>
+                                            <td>@pt.MovementState</td>
+                                            <td>@FormatSpeed(pt.SpeedMps)</td>
+                                            <td><span class="badge @(pt.IsWithinAllowedRadius ? "bg-success" : "bg-danger")">@(pt.IsWithinAllowedRadius ? "Within" : "Outside")</span></td>
+                                            <td>@(pt.SyncedAtUtc.HasValue ? ToLocal(pt.SyncedAtUtc.Value).ToString("HH:mm:ss") : "Pending")</td>
+                                        </tr>
+                                    }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    }
+                }
+            }
         </div>
     </div>
 </div>
@@ -90,8 +200,15 @@
     private DateTime? lastRefresh;
     private List<Row> rows = new();
     private List<OfflineSyncRow> offlineSyncRows = new();
+    private List<OfflinePeriodDisplay> offlinePeriods = new();
+    private string? selectedOfflinePeriodId;
     private PeriodicTimer? timer;
     private CancellationTokenSource? cts;
+
+    private void TogglePeriod(string id)
+    {
+        selectedOfflinePeriodId = selectedOfflinePeriodId == id ? null : id;
+    }
 
     private int liveCount => rows.Count(x => x.Status == "Live");
     private int staleCount => rows.Count(x => x.Status == "Stale");
@@ -149,6 +266,7 @@
 
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();
+            BuildOfflinePeriods();
 
             var trackedEmployees = employeeList;
 
@@ -314,7 +432,66 @@
 
     private static string FormatSpeed(double speedMps) => !double.IsFinite(speedMps) || speedMps <= .05 ? "0 km/h" : $"{speedMps * 3.6:F1} km/h";
     private static string FormatAge(TimeSpan age) => age == TimeSpan.MaxValue ? "Never" : age.TotalDays >= 1 ? $"{(int)age.TotalDays}d {age.Hours}h" : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h {age.Minutes}m" : $"{Math.Max(0, (int)age.TotalMinutes)}m {Math.Max(0, age.Seconds)}s";
+    private static string FormatDistance(double m) => m >= 1000 ? $"{m / 1000:F2} km" : $"{m:F0} m";
     private static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"));
+
+    private void BuildOfflinePeriods()
+    {
+        offlinePeriods.Clear();
+        if (offlineSyncRows.Count == 0) return;
+
+        foreach (var group in offlineSyncRows.GroupBy(x => x.EmployeeId))
+        {
+            var cluster = new List<OfflineSyncRow>();
+            OfflineSyncRow? last = null;
+
+            foreach (var pt in group.OrderBy(x => x.CapturedAtUtc))
+            {
+                if (last == null || (pt.CapturedAtUtc - last.CapturedAtUtc).TotalMinutes > 15)
+                {
+                    if (cluster.Any())
+                    {
+                        offlinePeriods.Add(CreateOfflinePeriod(cluster));
+                        cluster = new List<OfflineSyncRow>();
+                    }
+                }
+                cluster.Add(pt);
+                last = pt;
+            }
+
+            if (cluster.Any())
+            {
+                offlinePeriods.Add(CreateOfflinePeriod(cluster));
+            }
+        }
+
+        offlinePeriods = offlinePeriods.OrderByDescending(x => x.StartUtc).ToList();
+    }
+
+    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster)
+    {
+        var first = cluster.First();
+        var last = cluster.Last();
+        double dist = 0;
+        for (int i = 1; i < cluster.Count; i++)
+        {
+            dist += CalculateDistanceMeters(cluster[i - 1].Latitude, cluster[i - 1].Longitude, cluster[i].Latitude, cluster[i].Longitude);
+        }
+
+        return new OfflinePeriodDisplay
+        {
+            EmployeeId = first.EmployeeId,
+            EmployeeName = first.EmployeeName,
+            StartUtc = first.CapturedAtUtc,
+            EndUtc = last.CapturedAtUtc,
+            PointCount = cluster.Count,
+            DistanceMeters = dist,
+            InRadiusCount = cluster.Count(x => x.IsWithinAllowedRadius),
+            SyncedAtUtc = cluster.Select(x => x.SyncedAtUtc).Max(),
+            IsSynced = cluster.All(x => x.SyncedAtUtc.HasValue),
+            Points = cluster
+        };
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -350,5 +527,21 @@
         public double Latitude { get; set; }
         public double Longitude { get; set; }
         public string Geofence { get; set; } = "-";
+    }
+
+    private sealed class OfflinePeriodDisplay
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public int EmployeeId { get; set; }
+        public string EmployeeName { get; set; } = "Employee";
+        public DateTime StartUtc { get; set; }
+        public DateTime EndUtc { get; set; }
+        public TimeSpan Duration => EndUtc >= StartUtc ? EndUtc - StartUtc : TimeSpan.Zero;
+        public int PointCount { get; set; }
+        public double DistanceMeters { get; set; }
+        public int InRadiusCount { get; set; }
+        public DateTime? SyncedAtUtc { get; set; }
+        public bool IsSynced { get; set; }
+        public List<OfflineSyncRow> Points { get; set; } = new();
     }
 }

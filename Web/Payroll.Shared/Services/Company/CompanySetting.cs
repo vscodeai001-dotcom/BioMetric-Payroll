@@ -106,6 +106,9 @@ namespace Payroll.Shared.Data
 
         [Column("geo_radius_meters")]
         public int GeoRadiusMeters { get; set; } = 1000; 
-                                                       
+
+        // --- NEW: AUTO-BACKUP CONFIGURATION ---
+        [Column("auto_backup_interval_hours")]
+        public int AutoBackupIntervalHours { get; set; } = 24;
     }
 }

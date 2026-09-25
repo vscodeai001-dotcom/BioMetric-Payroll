@@ -56,6 +56,15 @@ class CompanySettingsActivity : MotionBaseActivity() {
         "5 minutes" to 300
     )
 
+    private val backupIntervalLabels = listOf(
+        "1 hour" to 1,
+        "6 hours" to 6,
+        "12 hours" to 12,
+        "24 hours (1 Day)" to 24,
+        "48 hours (2 Days)" to 48,
+        "168 hours (7 Days)" to 168
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCompanySettingsBinding.inflate(layoutInflater)
@@ -116,6 +125,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
         val intervalAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, intervalLabels.map { it.first })
         binding.spinnerGpsInterval.setAdapter(intervalAdapter)
+
+        val backupAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, backupIntervalLabels.map { it.first })
+        binding.spinnerBackupInterval.setAdapter(backupAdapter)
     }
 
     private fun setupListeners() {
@@ -197,6 +209,13 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             snapshot.child("companyName").getValue(String::class.java)?.let {
                                 if (binding.etGenCompanyName.text.isNullOrBlank()) binding.etGenCompanyName.setText(it)
                             }
+                            snapshot.child("autoBackupIntervalHours").getValue(Int::class.java)?.let { hours ->
+                                if (hours > 0) {
+                                    localCompany.autoBackupIntervalHours = hours
+                                    val backupItem = backupIntervalLabels.find { it.second == hours } ?: backupIntervalLabels.find { it.second == 24 }
+                                    backupItem?.let { binding.spinnerBackupInterval.setText(it.first, false) }
+                                }
+                            }
                         }
                     }
                     override fun onCancelled(error: DatabaseError) {}
@@ -238,6 +257,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
         // GPS Interval
         val intervalItem = intervalLabels.find { it.second == trackingIntervalSeconds } ?: intervalLabels[0]
         binding.spinnerGpsInterval.setText(intervalItem.first, false)
+
+        // Auto-Backup Interval (Default 24)
+        val backupIntervalItem = backupIntervalLabels.find { it.second == localCompany.autoBackupIntervalHours }
+            ?: backupIntervalLabels.find { it.second == 24 } ?: backupIntervalLabels[3]
+        binding.spinnerBackupInterval.setText(backupIntervalItem.first, false)
 
         binding.etGenLatitude.setText(if (localCompany.officeLatitude != 0.0) localCompany.officeLatitude.toString() else "")
         binding.etGenLongitude.setText(if (localCompany.officeLongitude != 0.0) localCompany.officeLongitude.toString() else "")
@@ -381,6 +405,16 @@ class CompanySettingsActivity : MotionBaseActivity() {
                     trackingConfiguration.save(currentCfg.copy(intervalSeconds = seconds))
                 }
 
+                // Save Auto-Backup Interval
+                val selectedBackupLabel = binding.spinnerBackupInterval.text?.toString()
+                val backupHours = backupIntervalLabels.find { it.first == selectedBackupLabel }?.second ?: 24
+                localCompany.autoBackupIntervalHours = backupHours
+
+                // Save into Room (with updated backup interval)
+                withContext(Dispatchers.IO) {
+                    localSettingsDao.upsertCompanySettings(localCompany)
+                }
+
                 // If online, sync to Firebase Realtime Database
                 val owner = firebaseSync.getOwnerRef()
                 if (owner != null) {
@@ -416,7 +450,8 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "smtpPass" to localCompany.smtpPass,
                             "enableLeaveAccrual" to localCompany.enableLeaveAccrual,
                             "leaveAccrualRate" to localCompany.leaveAccrualRate,
-                            "enableSandwichRule" to localCompany.enableSandwichRule
+                            "enableSandwichRule" to localCompany.enableSandwichRule,
+                            "autoBackupIntervalHours" to localCompany.autoBackupIntervalHours
                         )
                         owner.child("company_settings").child("1").setValue(companyPayload).await()
 

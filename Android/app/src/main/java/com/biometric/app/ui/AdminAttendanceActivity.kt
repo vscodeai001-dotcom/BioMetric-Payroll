@@ -143,6 +143,8 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
     private fun setupListeners() {
         binding.btnGenerate.setOnClickListener {
+            binding.progress.isVisible = true
+            sharedViewModel.warmUpDashboard()
             render()
         }
 
@@ -210,7 +212,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
 
         binding.tvScheduled.text = formatDurationMs(scheduledMs)
-        binding.tvWorked.text = String.format(Locale.US, "%.2fh", workedHours)
+        binding.tvWorked.text = formatWorkedHours(workedHours)
         binding.tvOvertime.text = formatDurationMs(otMs)
         binding.tvPenalty.text = formatDurationMs(penaltyMs)
         binding.tvLateness.text = formatDurationMs(latenessMs)
@@ -219,7 +221,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         binding.tvSummary.text = if (summariesInRange.isEmpty()) {
             "No attendance logs recorded for selected period"
         } else {
-            "👥 $employeesProcessed employees • ⏱️ Worked ${String.format(Locale.US, "%.2f", workedHours)}h • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
+            "👥 $employeesProcessed employees • ⏱️ Worked ${formatWorkedHours(workedHours)} • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
         }
 
         // Map to display row objects
@@ -314,6 +316,26 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         return String.format(Locale.US, "%dh %02dm", hours, minutes)
     }
 
+    private fun formatMinutesDuration(totalMinutes: Double, isOt: Boolean = false): String {
+        val totalMins = kotlin.math.round(totalMinutes).toInt()
+        if (totalMins <= 0) return "0m"
+        val prefix = if (isOt) "+" else ""
+        return if (totalMins >= 60) {
+            val hours = totalMins / 60
+            val mins = totalMins % 60
+            if (mins == 0) "$prefix${hours}h" else String.format(Locale.US, "%s%dh %02dm", prefix, hours, mins)
+        } else {
+            "$prefix${totalMins}m"
+        }
+    }
+
+    private fun formatWorkedHours(hoursDecimal: Double): String {
+        val totalMins = kotlin.math.round(hoursDecimal * 60.0).toInt()
+        val hours = totalMins / 60
+        val mins = totalMins % 60
+        return String.format(Locale.US, "%dh %02dm", hours, mins)
+    }
+
     data class AdminAttendanceRow(
         val employeeID: Int,
         val employeeName: String,
@@ -330,7 +352,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val punches: String
     )
 
-    private class AttendanceAdapter(
+    private inner class AttendanceAdapter(
         private val onCorrectionClick: (AdminAttendanceRow) -> Unit
     ) : RecyclerView.Adapter<AttendanceAdapter.Holder>() {
 
@@ -390,12 +412,12 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     }
                 }
 
-                // Metrics
-                itemBinding.tvMetricWorked.text = String.format(Locale.US, "%.2fh", item.workedHours)
-                itemBinding.tvMetricOt.text = if (item.overtimeMinutes > 0) "+${item.overtimeMinutes.toInt()}m" else "0m"
-                itemBinding.tvMetricLate.text = if (item.latenessMinutes > 0) "${item.latenessMinutes.toInt()}m" else "0m"
-                itemBinding.tvMetricPenalty.text = if (item.penaltyMinutes > 0) "${item.penaltyMinutes.toInt()}m" else "0m"
-                itemBinding.tvMetricBreak.text = if (item.breakPenaltyMinutes > 0) "${item.breakPenaltyMinutes.toInt()}m" else "0m"
+                // Metrics (Hours & Minutes format matching Web SSOT)
+                itemBinding.tvMetricWorked.text = formatWorkedHours(item.workedHours)
+                itemBinding.tvMetricOt.text = formatMinutesDuration(item.overtimeMinutes, isOt = true)
+                itemBinding.tvMetricLate.text = formatMinutesDuration(item.latenessMinutes)
+                itemBinding.tvMetricPenalty.text = formatMinutesDuration(item.penaltyMinutes)
+                itemBinding.tvMetricBreak.text = formatMinutesDuration(item.breakPenaltyMinutes)
 
                 // Raw Punches
                 itemBinding.tvDetails.text = item.punches

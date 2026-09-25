@@ -9,7 +9,6 @@
 @inject AuthenticationStateProvider AuthState
 @inject GeoFeatureAccessService GeoAccess
 @inject FirebaseAdminDashboardService FirebaseDashboard
-@inject FirebaseRealtimeService FirebaseDashboardOwnerService
 @using global::Payroll.Web.Components.UI.Attendance
 @attribute [Authorize]
 @implements IAsyncDisposable
@@ -151,7 +150,9 @@ else
 {
     <AttendanceRefreshListener OnAttendanceChanged="HandleLiveAttendanceChanged"
                                OnRegularizationChanged="HandleLiveRegularizationChanged"
-                               OnLocationChanged="HandleLiveLocationChanged" />
+                               OnLocationChanged="HandleLiveLocationChanged"
+                               OnSessionStarted="HandleLiveAttendanceChanged"
+                               OnGeoSettingsChanged="HandleLiveAttendanceChanged" />
     <div class="dashboard-container">
         <!-- Header Banner -->
         <div class="welcome-banner d-flex flex-wrap justify-content-between align-items-center gap-3">
@@ -428,11 +429,6 @@ else
             }
 
             await LoadAdminDashboard();
-            var actorUid = user.FindFirst("sub")?.Value
-                           ?? user.FindFirst("user_id")?.Value
-                           ?? user.Identity?.Name
-                           ?? string.Empty;
-            await StartFirebaseDashboardStreamsAsync(actorUid);
         }
         catch (Exception ex)
         {
@@ -560,10 +556,7 @@ else
                 "Live regularization dashboard refresh failed.");
         }
     }
-    private CancellationTokenSource? _dashboardCts;
     private CancellationTokenSource? _dashboardRefreshDebounceCts;
-    private Task? _dashboardOwnerStream;
-    private Task? _dashboardTrackingStream;
     private DateTime _lastDashboardLoadUtc = DateTime.MinValue;
     private readonly SemaphoreSlim _dashboardLoadGate = new(1, 1);
 
@@ -604,103 +597,11 @@ else
         });
     }
 
-    private Task StartFirebaseDashboardStreamsAsync(string actorUid)
+    public ValueTask DisposeAsync()
     {
-        _dashboardCts?.Cancel();
-        _dashboardCts?.Dispose();
-
-        _dashboardCts = new CancellationTokenSource();
-        var ct = _dashboardCts.Token;
-        var ownerUid = FirebaseDashboardOwnerUid(actorUid);
-
-        // CRUD/settings changes can refresh the KPI snapshot. GPS changes are
-        // intentionally NOT wired to LoadAdminDashboard. LiveStaffLocationPanel
-        // owns the high-frequency map stream. Reloading all employees, attendance,
-        // payroll and advances for every GPS point creates a request/render loop.
-        _dashboardOwnerStream = Task.Run(async () =>
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                try
-                {
-                    await FirebaseDashboardStream(ownerUid, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Firebase dashboard owner stream disconnected. Reconnecting in 3s.");
-                    try
-                    {
-                        await Task.Delay(3000, ct);
-                    }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                    {
-                        break;
-                    }
-                }
-            }
-        }, ct);
-
-        _dashboardTrackingStream = null;
-        return Task.CompletedTask;
-    }
-
-    private string FirebaseDashboardOwnerUid(string actorUid)
-        => FirebaseDashboardOwnerService.ResolveOwnerUid(actorUid, "Admin");
-
-   private async Task FirebaseDashboardStream(string ownerUid, CancellationToken ct)
-{
-    await FirebaseDashboardOwnerService.StreamOwnerChangesAsync(
-        ownerUid,
-        (path, _, token) =>
-        {
-            if (IsDashboardPath(path))
-            {
-                ScheduleDashboardRefresh();
-            }
-
-            return Task.CompletedTask;
-        },
-        ct);
-}
-
-    private static bool IsDashboardPath(string path)
-    {
-        var p = path.Trim('/');
-        return p.StartsWith("employees", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("attendance", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("attendance_punches", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("geo_punch_audits", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("regularizations", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("leave_requests", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("advance_payments", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("payroll_history", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("shift_schedules", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("daily_summaries", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("company_settings", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("feature_settings", StringComparison.OrdinalIgnoreCase)
-            || p.StartsWith("shops", StringComparison.OrdinalIgnoreCase);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        _dashboardCts?.Cancel();
-        if (_dashboardOwnerStream != null)
-            await IgnoreTask(_dashboardOwnerStream);
-        if (_dashboardTrackingStream != null)
-            await IgnoreTask(_dashboardTrackingStream);
-        _dashboardCts?.Dispose();
         _dashboardRefreshDebounceCts?.Cancel();
         _dashboardRefreshDebounceCts?.Dispose();
         _dashboardLoadGate.Dispose();
+        return ValueTask.CompletedTask;
     }
-
-    private static async Task IgnoreTask(Task task)
-    {
-        try { await task; } catch { }
-    }
-
 }
