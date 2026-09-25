@@ -99,6 +99,20 @@ class OfflineTrackingActivity : AppCompatActivity() {
     private var selectedPeriod: OfflinePeriodItem? = null
     private var refreshJob: Job? = null
     private var cloudLoadJob: Job? = null
+    private val cloudHistoryCache = mutableMapOf<Int, Pair<Long, List<SignalRManager.LiveLocation>>>()
+
+    private suspend fun getCachedOrFetchHistory(empId: Int, limit: Int = 200): List<SignalRManager.LiveLocation> {
+        val now = System.currentTimeMillis()
+        val cached = cloudHistoryCache[empId]
+        if (cached != null && (now - cached.first) < 60_000L) {
+            return cached.second
+        }
+        val fetched = signalR.loadTrackingHistory(empId, limit)
+        if (fetched.isNotEmpty()) {
+            cloudHistoryCache[empId] = now to fetched
+        }
+        return fetched
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -216,6 +230,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialButton>(R.id.btnRefreshOffline).setOnClickListener {
+            cloudHistoryCache.clear()
             signalR.reconcileLiveLocationsNow()
             refreshCloudAndLocal()
         }
@@ -337,7 +352,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
         refreshJob = lifecycleScope.launch {
             while (isActive) {
                 refreshOnce()
-                delay(2000L)
+                delay(5000L)
             }
         }
         refreshCloudAndLocal()
@@ -354,9 +369,9 @@ class OfflineTrackingActivity : AppCompatActivity() {
             val isOnline = monitor.isOnline()
             val pending = locationDao.getPendingCount()
             val total = locationDao.getTotalCount()
-            val recent = locationDao.getRecent(1500)
+            val recent = locationDao.getRecent(50)
             val lastSynced = locationDao.getLastSynced()
-            val events = eventDao.recent(200)
+            val events = eventDao.recent(50)
             val currentSession = sessionStore.gpsSessionId()
 
             withContext(Dispatchers.Main) {
@@ -399,14 +414,15 @@ class OfflineTrackingActivity : AppCompatActivity() {
     private fun refreshCloudAndLocal() {
         cloudLoadJob?.cancel()
         cloudLoadJob = lifecycleScope.launch(Dispatchers.IO) {
-            val localRecent = locationDao.getRecent(1500)
-            val localEvents = eventDao.recent(200)
+            val localRecent = locationDao.getRecent(300)
+            val localEvents = eventDao.recent(100)
 
-            // Load points from cloud history
+            // When "All Tracked Employees" is selected, do not eagerly pull 15,000 points from Firebase.
+            // Only pull cloud history when a specific employee is chosen by the admin.
             val empIdsToQuery = if (selectedEmployeeId > 0) {
                 listOf(selectedEmployeeId)
             } else {
-                activeEmployees.mapNotNull { it.employeeId.toIntOrNull() }
+                emptyList()
             }
 
             val empNameMap = activeEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
@@ -418,10 +434,10 @@ class OfflineTrackingActivity : AppCompatActivity() {
             allPeriods.addAll(localPeriods)
             allPointsForMap.addAll(localRecent)
 
-            // 2. Fetch history for selected employees
-            for (eid in empIdsToQuery.take(15)) {
+            // 2. Fetch history for selected employee (cached or targeted 200 points)
+            for (eid in empIdsToQuery) {
                 if (eid <= 0) continue
-                val hist = signalR.loadTrackingHistory(eid, 1000)
+                val hist = getCachedOrFetchHistory(eid, 200)
                 if (hist.isNotEmpty()) {
                     val localConverted = hist.map { h ->
                         val epoch = parseTrackingTimestamp(h.timestamp)
@@ -465,7 +481,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
                 if (activeSel != null) {
                     drawLocalRoute(activeSel.points, isOfflinePeriod = true, periodLabel = "${formatTimeOnly(activeSel.startTime)} - ${formatTimeOnly(activeSel.endTime)}")
                 } else if (allPointsForMap.isNotEmpty()) {
-                    drawLocalRoute(allPointsForMap.take(500))
+                    drawLocalRoute(allPointsForMap.take(300))
                 }
             }
         }
@@ -486,7 +502,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
                 return@launch
             }
 
-            val history = signalR.loadTrackingHistory(empId, 2000)
+            val history = getCachedOrFetchHistory(empId, 300)
             withContext(Dispatchers.Main) {
                 tvRemoteHistory.text = if (history.isEmpty()) {
                     "Cloud history: No Firebase history for employee #$empId"

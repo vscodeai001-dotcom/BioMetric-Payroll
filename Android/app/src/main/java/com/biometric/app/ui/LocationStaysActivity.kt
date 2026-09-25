@@ -293,9 +293,10 @@ class LocationStaysActivity : AppCompatActivity() {
             val empNameMap = activeEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
 
             val rawPoints = mutableListOf<SignalRManager.LiveLocation>()
-            val deferred = empIdsToQuery.map { eid ->
+            val queryLimit = if (selectedIndex > 0) 1000 else 200
+            val deferred = empIdsToQuery.take(15).map { eid ->
                 async {
-                    signal.loadTrackingHistory(eid, 1500)
+                    signal.loadTrackingHistory(eid, queryLimit)
                 }
             }
             val results = deferred.awaitAll()

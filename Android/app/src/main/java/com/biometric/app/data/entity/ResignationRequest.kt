@@ -6,6 +6,7 @@ import androidx.annotation.Keep
 data class ResignationRequest(
     var requestId: String = "",
     var employeeId: String = "",
+    var staffId: String = "",
     var submissionDate: Long = System.currentTimeMillis(),
     var desiredLastWorkingDay: Long = System.currentTimeMillis(),
     var reason: String? = null,

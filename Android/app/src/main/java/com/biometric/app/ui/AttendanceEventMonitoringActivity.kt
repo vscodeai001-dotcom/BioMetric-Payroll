@@ -207,7 +207,7 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
     }
 
     private fun syncWithFirebase() {
-        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(1000) ?: return
+        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(150) ?: return
         query.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lifecycleScope.launch(Dispatchers.Default) {

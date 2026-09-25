@@ -84,6 +84,8 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
+import android.view.MotionEvent
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -365,15 +367,67 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         return BoundingBox(north, east, south, west)
     }
 
+    private var hasInitialMapFocused = false
+    private val mapIdleHandler = Handler(Looper.getMainLooper())
+    private val mapIdleRunnable = Runnable {
+        if (isActivityUiActive && !isFinishing && !isDestroyed) {
+            Log.i("EmployeeHome", "Auto-focusing Company & Employee after idle period 🏢📍")
+            fitCompanyAndEmployee(animated = true)
+        }
+    }
+
+    private fun resetMapIdleTimer() {
+        mapIdleHandler.removeCallbacks(mapIdleRunnable)
+        mapIdleHandler.postDelayed(mapIdleRunnable, 120_000L) // 2 minutes idle auto-focus
+    }
+
+    private fun fitCompanyAndEmployee(animated: Boolean = true) {
+        val b = _binding ?: return
+        val points = mutableListOf<GeoPoint>()
+        if (officeLat != 0.0 && officeLon != 0.0) {
+            points.add(GeoPoint(officeLat, officeLon))
+        }
+        if (currentLat != 0.0 && currentLon != 0.0) {
+            points.add(GeoPoint(currentLat, currentLon))
+        }
+
+        if (points.size >= 2) {
+            createBoundingBox(points)?.let { box ->
+                b.mapview.zoomToBoundingBox(box, animated, 140)
+            }
+        } else if (points.size == 1) {
+            if (animated) {
+                b.mapview.controller.animateTo(points[0])
+            } else {
+                b.mapview.controller.setCenter(points[0])
+            }
+            b.mapview.controller.setZoom(16.0)
+        }
+    }
+
     private fun setupMap() {
         binding.mapview.apply {
             setTileSource(employeeOpenStreetMapSource())
             setMultiTouchControls(true)
+            val rotationGestureOverlay = RotationGestureOverlay(this).apply {
+                isEnabled = true
+            }
+            overlays.add(rotationGestureOverlay)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            controller.setZoom(17.0)
+            minZoomLevel = 3.0
+            maxZoomLevel = 20.0
+            controller.setZoom(16.0)
 
             applyCurrentThemeToMap()
+
+            setOnTouchListener { v, event ->
+                v.parent?.requestDisallowInterceptTouchEvent(event.action != MotionEvent.ACTION_UP)
+                resetMapIdleTimer()
+                false
+            }
         }
+
+        resetMapIdleTimer()
 
         lifecycleScope.launch {
             _binding?.llMapLoading?.visibility = View.GONE
@@ -543,41 +597,97 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun setupEmployeeMapControls() {
         val bInitial = _binding ?: return
-        bInitial.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
-        bInitial.btnEmployeeMapFollow.setOnClickListener {
-            val b = _binding ?: return@setOnClickListener
-            isAutoFocusEnabled = !isAutoFocusEnabled
-            b.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
-            Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
-            
-            if (isAutoFocusEnabled && currentLat != 0.0) {
-                b.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
-            }
+
+        bInitial.btnEmployeeMapFitBoth.setOnClickListener {
+            resetMapIdleTimer()
+            isAutoFocusEnabled = false
+            _binding?.btnEmployeeMapFollow?.alpha = 0.4f
+            fitCompanyAndEmployee(animated = true)
+            Toast.makeText(this, "Focusing Company & You 🏢📍", Toast.LENGTH_SHORT).show()
         }
-        bInitial.btnEmployeeMapRoute.setOnClickListener {
+
+        bInitial.btnEmployeeMapMe.setOnClickListener {
+            resetMapIdleTimer()
             val b = _binding ?: return@setOnClickListener
             isAutoFocusEnabled = false
             b.btnEmployeeMapFollow.alpha = 0.4f
-            showRouteToOffice = true
-            if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
-                val points = listOf(GeoPoint(currentLat, currentLon), GeoPoint(officeLat, officeLon))
-                createBoundingBox(points)?.let { b.mapview.zoomToBoundingBox(it, true, 120) }
-                updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
+            if (currentLat != 0.0 && currentLon != 0.0) {
+                b.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
+                b.mapview.controller.setZoom(17.0)
+                Toast.makeText(this, "Focusing My Location 📍", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Acquiring GPS location... 🛰️", Toast.LENGTH_SHORT).show()
             }
         }
+
         bInitial.btnEmployeeMapOffice.setOnClickListener {
+            resetMapIdleTimer()
             val b = _binding ?: return@setOnClickListener
             isAutoFocusEnabled = false
-            showRouteToOffice = true
+            b.btnEmployeeMapFollow.alpha = 0.4f
             if (officeLat != 0.0 && officeLon != 0.0) {
                 b.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 b.mapview.controller.setZoom(16.0)
+                Toast.makeText(this, "Focusing Office Hub 🏢", Toast.LENGTH_SHORT).show()
                 if (currentLat != 0.0) {
                     updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
                 }
             }
         }
+
+        bInitial.btnEmployeeMapRoute.setOnClickListener {
+            resetMapIdleTimer()
+            val b = _binding ?: return@setOnClickListener
+            showRouteToOffice = !showRouteToOffice
+            b.btnEmployeeMapRoute.alpha = if (showRouteToOffice) 1.0f else 0.6f
+            if (showRouteToOffice) {
+                fitCompanyAndEmployee(animated = true)
+                if (currentLat != 0.0 && currentLon != 0.0 && officeLat != 0.0 && officeLon != 0.0) {
+                    updateRoadRoute(GeoPoint(officeLat, officeLon), GeoPoint(currentLat, currentLon))
+                }
+                Toast.makeText(this, "Route to Office Enabled ↗", Toast.LENGTH_SHORT).show()
+            } else {
+                routePolyline?.let { it.outlinePaint.alpha = 0 }
+                routeCasing?.let { it.outlinePaint.alpha = 0 }
+                b.mapview.invalidate()
+                Toast.makeText(this, "Route Hidden", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        bInitial.btnEmployeeMapZoomIn.setOnClickListener {
+            resetMapIdleTimer()
+            _binding?.mapview?.controller?.zoomIn()
+        }
+
+        bInitial.btnEmployeeMapZoomOut.setOnClickListener {
+            resetMapIdleTimer()
+            _binding?.mapview?.controller?.zoomOut()
+        }
+
+        bInitial.btnEmployeeMapCompass.setOnClickListener {
+            resetMapIdleTimer()
+            _binding?.mapview?.apply {
+                mapOrientation = 0.0f
+                invalidate()
+            }
+            Toast.makeText(this, "Reset to North 🧭", Toast.LENGTH_SHORT).show()
+        }
+
+        bInitial.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+        bInitial.btnEmployeeMapFollow.setOnClickListener {
+            resetMapIdleTimer()
+            val b = _binding ?: return@setOnClickListener
+            isAutoFocusEnabled = !isAutoFocusEnabled
+            b.btnEmployeeMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+            Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
+
+            if (isAutoFocusEnabled && currentLat != 0.0) {
+                b.mapview.controller.animateTo(GeoPoint(currentLat, currentLon))
+            }
+        }
+
         bInitial.btnEmployeeMapLayers.setOnClickListener {
+            resetMapIdleTimer()
             val b = _binding ?: return@setOnClickListener
             val next = ((b.mapview.tag as? Int ?: 0) + 1) % 4
             b.mapview.tag = next
@@ -585,29 +695,30 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 0 -> {
                     b.mapview.setTileSource(TileSourceFactory.MAPNIK)
                     b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    Toast.makeText(this, "Layer: Standard OSM 🗺️", Toast.LENGTH_SHORT).show()
                 }
                 1 -> {
                     b.mapview.setTileSource(TileSourceFactory.USGS_SAT)
                     b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    Toast.makeText(this, "Layer: Satellite 🛰️", Toast.LENGTH_SHORT).show()
                 }
                 2 -> {
                     b.mapview.setTileSource(TileSourceFactory.OpenTopo)
                     b.mapview.overlayManager.tilesOverlay.setColorFilter(null)
+                    Toast.makeText(this, "Layer: Topographic 🏔️", Toast.LENGTH_SHORT).show()
                 }
                 else -> {
                     b.mapview.setTileSource(TileSourceFactory.MAPNIK)
                     applyDarkThemeFilter(b.mapview)
+                    Toast.makeText(this, "Layer: Night Theme 🌙", Toast.LENGTH_SHORT).show()
                 }
             }
             b.mapview.invalidate()
         }
-        // Full-screen live staff tracking is an Admin/SuperAdmin-only capability.
-        // Employee screens retain the existing layout but do not expose this action.
+
         bInitial.btnEmployeeMapFullscreen.visibility = View.GONE
         bInitial.btnEmployeeMapFullscreen.setOnClickListener(null)
         binding.mapview.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            // Use _binding? (nullable) instead of binding (non-null) to guard against
-            // the case where this posted callback runs after onDestroy nulls _binding.
             _binding?.mapview?.post {
                 _binding?.mapview?.invalidate()
             }
@@ -706,6 +817,13 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                         mapView.controller.animateTo(userPoint)
                     } catch (_: Exception) {
                         // Ignore a lifecycle/map transition race.
+                    }
+                }
+                // Default startup focus: Company and Employee in view
+                if (!hasInitialMapFocused && officeLat != 0.0 && currentLat != 0.0) {
+                    hasInitialMapFocused = true
+                    mapView.post {
+                        fitCompanyAndEmployee(animated = false)
                     }
                 }
             }
@@ -1361,6 +1479,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         dashboardJob?.cancel()
         dashboardRetryJob?.cancel()
         iconCache.clear()
+        mapIdleHandler.removeCallbacks(mapIdleRunnable)
 
         _binding?.mapview?.onDetach()
 

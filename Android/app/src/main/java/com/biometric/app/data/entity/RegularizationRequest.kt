@@ -6,6 +6,7 @@ import androidx.annotation.Keep
 data class RegularizationRequest(
     var id: String = "",
     var staffId: String = "",
+    var employeeId: String = "",
     var staffName: String = "",
     var date: String = "", // yyyy-MM-dd
     var punchType: String = "IN", // IN or OUT

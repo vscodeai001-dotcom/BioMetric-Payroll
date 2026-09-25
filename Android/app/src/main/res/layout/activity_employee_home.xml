@@ -262,11 +262,148 @@
                         android:textStyle="bold"
                         android:textColor="?attr/colorPrimary" />
 
-                    <!-- Swiggy Style Map Container -->
+                    <!-- TOP MAP CONTROLS STRIP (placed on TOP of the map, as on web dashboard map) -->
+                    <HorizontalScrollView
+                        android:id="@+id/employeeMapControlsScroll"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none"
+                        android:overScrollMode="never"
+                        android:layout_marginBottom="8dp">
+
+                        <LinearLayout
+                            android:id="@+id/employeeMapControls"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingVertical="2dp">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapFitBoth"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="⌖ Both"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapMe"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="📍 Me"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapOffice"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="🏢 Office"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapRoute"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="↗ Route"
+                                android:textSize="11sp"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapZoomIn"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="36dp"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="4dp"
+                                android:minWidth="0dp"
+                                android:padding="0dp"
+                                android:text="+"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapZoomOut"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="36dp"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:padding="0dp"
+                                android:text="−"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapCompass"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="36dp"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:padding="0dp"
+                                android:text="🧭"
+                                android:textSize="14sp"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapFollow"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginEnd="6dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="⦿ Follow"
+                                android:textSize="11sp"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapLayers"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:minWidth="0dp"
+                                android:paddingHorizontal="10dp"
+                                android:text="▦ Layers"
+                                android:textSize="11sp"
+                                app:cornerRadius="10dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnEmployeeMapFullscreen"
+                                android:layout_width="0dp"
+                                android:layout_height="0dp"
+                                android:visibility="gone" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+
+                    <!-- CLEAN MAP CONTAINER (Unobstructed full viewport) -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
-                        android:layout_height="240dp"
-                        app:cardCornerRadius="20dp"
+                        android:layout_height="260dp"
+                        app:cardCornerRadius="18dp"
                         app:strokeWidth="1dp"
                         app:strokeColor="#204F46E5">
 
@@ -274,148 +411,6 @@
                             android:id="@+id/mapview"
                             android:layout_width="match_parent"
                             android:layout_height="match_parent" />
-
-                        <LinearLayout
-                            android:id="@+id/employeeMapControls"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top|end"
-                            android:layout_margin="10dp"
-                            android:orientation="vertical"
-                            android:padding="4dp"
-                            android:background="@drawable/bg_premium_card"
-                            android:elevation="6dp">
-                            <LinearLayout
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:orientation="horizontal">
-                                <com.google.android.material.button.MaterialButton
-                                    android:id="@+id/btnEmployeeMapRoute"
-                                    style="@style/Widget.Material3.Button.TextButton"
-                                    android:layout_width="58dp"
-                                    android:layout_height="38dp"
-                                    android:minWidth="0dp"
-                                    android:text="↗ Route"
-                                    android:textSize="9sp"
-                                    android:maxLines="1"
-                                    app:cornerRadius="9dp" />
-                                <com.google.android.material.button.MaterialButton
-                                    android:id="@+id/btnEmployeeMapOffice"
-                                    style="@style/Widget.Material3.Button.TextButton"
-                                    android:layout_width="58dp"
-                                    android:layout_height="38dp"
-                                    android:minWidth="0dp"
-                                    android:text="⌂ Office"
-                                    android:textSize="9sp"
-                                    android:maxLines="1"
-                                    app:cornerRadius="9dp" />
-                            </LinearLayout>
-                            <LinearLayout
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:orientation="horizontal">
-                                <com.google.android.material.button.MaterialButton
-                                    android:id="@+id/btnEmployeeMapFollow"
-                                    style="@style/Widget.Material3.Button.TextButton"
-                                    android:layout_width="58dp"
-                                    android:layout_height="38dp"
-                                    android:minWidth="0dp"
-                                    android:text="⦿ Follow"
-                                    android:textSize="9sp"
-                                    android:maxLines="1"
-                                    app:cornerRadius="9dp" />
-                                <com.google.android.material.button.MaterialButton
-                                    android:id="@+id/btnEmployeeMapLayers"
-                                    style="@style/Widget.Material3.Button.TextButton"
-                                    android:layout_width="58dp"
-                                    android:layout_height="38dp"
-                                    android:minWidth="0dp"
-                                    android:text="▦ Layers"
-                                    android:textSize="9sp"
-                                    android:maxLines="1"
-                                    app:cornerRadius="9dp" />
-                                <com.google.android.material.button.MaterialButton
-                                    android:id="@+id/btnEmployeeMapFullscreen"
-                                    style="@style/Widget.Material3.Button.TextButton"
-                                    android:layout_width="58dp"
-                                    android:layout_height="38dp"
-                                    android:minWidth="0dp"
-                                    android:text="⛶ Full"
-                                    android:textSize="9sp"
-                                    android:maxLines="1"
-                                    app:cornerRadius="9dp" />
-                            </LinearLayout>
-                        </LinearLayout>
-
-                        <!-- Premium Swiggy Overlay -->
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_margin="12dp"
-                            app:cardCornerRadius="16dp"
-                            app:cardBackgroundColor="#CC1E293B"
-                            app:cardElevation="4dp"
-                            app:strokeWidth="0dp">
-                            <LinearLayout
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:padding="12dp">
-                                <TextView
-                                    android:id="@+id/tvMapUserLabel"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="Employee Name"
-                                    android:textColor="@color/white"
-                                    android:textStyle="bold"
-                                    android:textSize="14sp" />
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="📍 Destination • To Office"
-                                    android:textColor="#B0C4FF"
-                                    android:textSize="10sp" />
-
-                                <LinearLayout
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="horizontal"
-                                    android:layout_marginTop="8dp">
-                                    <LinearLayout
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:orientation="vertical"
-                                        android:gravity="center">
-                                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="REMAINING" android:textColor="#80FFFFFF" android:textSize="8sp" android:textStyle="bold" />
-                                        <TextView android:id="@+id/tvRemainingDist" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="---" android:textColor="@color/white" android:textSize="13sp" android:textStyle="bold" />
-                                    </LinearLayout>
-                                    <View android:layout_width="1dp" android:layout_height="20dp" android:background="#40FFFFFF" android:layout_marginHorizontal="12dp" android:layout_gravity="center_vertical" />
-                                    <LinearLayout
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:orientation="vertical"
-                                        android:gravity="center">
-                                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="ETA" android:textColor="#80FFFFFF" android:textSize="8sp" android:textStyle="bold" />
-                                        <TextView android:id="@+id/tvEta" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="---" android:textColor="@color/white" android:textSize="13sp" android:textStyle="bold" />
-                                    </LinearLayout>
-                                </LinearLayout>
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <TextView
-                            android:id="@+id/tvMapLiveBadge"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="top|end"
-                            android:layout_margin="12dp"
-                            android:background="@drawable/bg_pill_small"
-                            android:backgroundTint="#20000000"
-                            android:paddingHorizontal="8dp"
-                            android:paddingVertical="4dp"
-                            android:text="● LIVE"
-                            android:textColor="@color/white"
-                            android:textSize="10sp"
-                            android:textStyle="bold" />
 
                         <LinearLayout
                             android:id="@+id/llMapLoading"
@@ -433,10 +428,141 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Initializing Premium Map..."
+                                android:text="Initializing Live Map..."
                                 android:layout_marginStart="12dp"
                                 android:textSize="13sp"
                                 android:textColor="@color/text_secondary" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- BOTTOM EMPLOYEE DETAILS CARD (placed at the BOTTOM of the map, as on web dashboard map) -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/cardEmployeeMapDetails"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="3dp"
+                        app:cardBackgroundColor="?attr/colorSurface"
+                        app:strokeWidth="1dp"
+                        app:strokeColor="?attr/colorOutlineVariant">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="12dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+
+                                    <TextView
+                                        android:id="@+id/tvMapUserLabel"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="Employee Name"
+                                        android:textColor="?attr/colorOnSurface"
+                                        android:textStyle="bold"
+                                        android:textSize="14sp" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="📍 Destination • To Office Hub"
+                                        android:textColor="?attr/colorPrimary"
+                                        android:textSize="11sp" />
+                                </LinearLayout>
+
+                                <TextView
+                                    android:id="@+id/tvMapLiveBadge"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:background="@drawable/bg_pill_small"
+                                    android:backgroundTint="#2010B981"
+                                    android:paddingHorizontal="10dp"
+                                    android:paddingVertical="4dp"
+                                    android:text="● LIVE"
+                                    android:textColor="@color/green_700"
+                                    android:textSize="11sp"
+                                    android:textStyle="bold" />
+                            </LinearLayout>
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="1dp"
+                                android:background="?attr/colorOutlineVariant"
+                                android:layout_marginVertical="10dp" />
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:gravity="center_vertical">
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="REMAINING"
+                                        android:textColor="?attr/colorOnSurfaceVariant"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.05" />
+                                    <TextView
+                                        android:id="@+id/tvRemainingDist"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="---"
+                                        android:textColor="?attr/colorOnSurface"
+                                        android:textSize="14sp"
+                                        android:textStyle="bold" />
+                                </LinearLayout>
+
+                                <View
+                                    android:layout_width="1dp"
+                                    android:layout_height="28dp"
+                                    android:background="?attr/colorOutlineVariant"
+                                    android:layout_marginHorizontal="12dp" />
+
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:orientation="vertical">
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="ESTIMATED TIME"
+                                        android:textColor="?attr/colorOnSurfaceVariant"
+                                        android:textSize="9sp"
+                                        android:textStyle="bold"
+                                        android:letterSpacing="0.05" />
+                                    <TextView
+                                        android:id="@+id/tvEta"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="---"
+                                        android:textColor="?attr/colorPrimary"
+                                        android:textSize="14sp"
+                                        android:textStyle="bold" />
+                                </LinearLayout>
+                            </LinearLayout>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 

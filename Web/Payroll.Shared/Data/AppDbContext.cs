@@ -456,6 +456,25 @@ public class AppDbContext
 
             // 4. Ensure auto_backup_interval_hours on CompanySettings
             await EnsureColumnExistsAsync(connection, "CompanySettings", "auto_backup_interval_hours", "INTEGER NOT NULL DEFAULT 24", ct);
+
+            // 5. Ensure missing columns on leaverequests
+            await EnsureColumnExistsAsync(connection, "leaverequests", "AdminNotes", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "leaverequests", "Status", "TEXT DEFAULT 'Pending'", ct);
+            await EnsureColumnExistsAsync(connection, "leaverequests", "is_half_day", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnExistsAsync(connection, "leaverequests", "notes", "TEXT NULL", ct);
+
+            // 6. Ensure missing columns on salaryadvances
+            await EnsureColumnExistsAsync(connection, "salaryadvances", "advancetype", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "salaryadvances", "payrollid_paid", "INTEGER NULL", ct);
+
+            // 7. Ensure missing columns on attendance_regularizations
+            await EnsureColumnExistsAsync(connection, "attendance_regularizations", "admin_remarks", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "attendance_regularizations", "approved_by_id", "TEXT NULL", ct);
+
+            // 8. Ensure missing columns on resignation_requests
+            await EnsureColumnExistsAsync(connection, "resignation_requests", "admin_remarks", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "resignation_requests", "approved_last_working_day", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "resignation_requests", "is_settled", "INTEGER NOT NULL DEFAULT 0", ct);
         }
         catch { }
     }

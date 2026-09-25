@@ -566,74 +566,158 @@
 
                                 <HorizontalScrollView
                                     android:id="@+id/adminMapControls"
-                                    android:layout_width="wrap_content"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:layout_gravity="top|end"
+                                    android:layout_gravity="top|start"
                                     android:scrollbars="none"
+                                    android:overScrollMode="never"
                                     android:fillViewport="false"
                                     android:padding="0dp"
                                     android:layout_margin="8dp"
                                     android:background="@drawable/bg_premium_card"
                                     android:elevation="8dp"
-                                    android:visibility="gone">
+                                    android:visibility="visible">
 
-                                <LinearLayout
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:orientation="horizontal"
-                                    android:gravity="center"
-                                    android:padding="4dp">
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnAdminMapFollow"
-                                        style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="42dp"
-                                        android:layout_height="38dp"
-                                        android:minWidth="0dp"
-                                        android:text="⦿"
-                                        android:textSize="16sp"
-                                        android:contentDescription="Toggle auto-follow"
-                                        app:cornerRadius="10dp" />
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnAdminMapZone"
-                                        style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="42dp"
-                                        android:layout_height="38dp"
-                                        android:minWidth="0dp"
-                                        android:text="⌖"
-                                        android:textSize="16sp"
-                                        android:contentDescription="Toggle geofence zone"
-                                        app:cornerRadius="10dp" />
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnAdminMapTrail"
-                                        style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="42dp"
-                                        android:layout_height="38dp"
-                                        android:minWidth="0dp"
-                                        android:text="↝"
-                                        android:textSize="16sp"
-                                        android:contentDescription="Toggle movement trails"
-                                        app:cornerRadius="10dp" />
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnAdminMapLayer"
-                                        style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="42dp"
-                                        android:layout_height="38dp"
-                                        android:minWidth="0dp"
-                                        android:text="▦"
-                                        android:textSize="16sp"
-                                        android:contentDescription="Change map layer"
-                                        app:cornerRadius="10dp" />
-                                    <com.google.android.material.button.MaterialButton
-                                        android:id="@+id/btnAdminMapFullscreen"
-                                        style="@style/Widget.Material3.Button.TextButton"
-                                        android:layout_width="42dp"
-                                        android:layout_height="38dp"
-                                        android:minWidth="0dp"
-                                        android:text="⛶"
-                                        android:textSize="16sp"
-                                        android:contentDescription="Open full live map"
-                                        app:cornerRadius="10dp" />
-                                </LinearLayout>
+                                    <LinearLayout
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:orientation="horizontal"
+                                        android:gravity="center_vertical"
+                                        android:padding="4dp">
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapFitAll"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:paddingHorizontal="10dp"
+                                            android:text="⌖ All"
+                                            android:textSize="11sp"
+                                            android:textStyle="bold"
+                                            android:contentDescription="Fit all staff and company"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapOffice"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:paddingHorizontal="10dp"
+                                            android:text="🏢 Office"
+                                            android:textSize="11sp"
+                                            android:textStyle="bold"
+                                            android:contentDescription="Focus office location"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapFollow"
+                                            style="@style/Widget.Material3.Button.OutlinedButton"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:paddingHorizontal="10dp"
+                                            android:text="⦿ Follow"
+                                            android:textSize="11sp"
+                                            android:contentDescription="Toggle auto-follow"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapZoomIn"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="3dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="+"
+                                            android:textSize="16sp"
+                                            android:textStyle="bold"
+                                            android:contentDescription="Zoom In"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapZoomOut"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="−"
+                                            android:textSize="16sp"
+                                            android:textStyle="bold"
+                                            android:contentDescription="Zoom Out"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapCompass"
+                                            style="@style/Widget.Material3.Button.OutlinedButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="🧭"
+                                            android:textSize="13sp"
+                                            android:contentDescription="Reset Orientation to North"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapZone"
+                                            style="@style/Widget.Material3.Button.OutlinedButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="◎"
+                                            android:textSize="14sp"
+                                            android:contentDescription="Toggle geofence zone"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapTrail"
+                                            style="@style/Widget.Material3.Button.OutlinedButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="↝"
+                                            android:textSize="14sp"
+                                            android:contentDescription="Toggle movement trails"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapLayer"
+                                            style="@style/Widget.Material3.Button.OutlinedButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:layout_marginEnd="4dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="▦"
+                                            android:textSize="14sp"
+                                            android:contentDescription="Change map layer"
+                                            app:cornerRadius="10dp" />
+
+                                        <com.google.android.material.button.MaterialButton
+                                            android:id="@+id/btnAdminMapFullscreen"
+                                            style="@style/Widget.Material3.Button.TonalButton"
+                                            android:layout_width="36dp"
+                                            android:layout_height="36dp"
+                                            android:minWidth="0dp"
+                                            android:padding="0dp"
+                                            android:text="⛶"
+                                            android:textSize="14sp"
+                                            android:contentDescription="Open full live map"
+                                            app:cornerRadius="10dp" />
+                                    </LinearLayout>
                                 </HorizontalScrollView>
 
                                 <LinearLayout

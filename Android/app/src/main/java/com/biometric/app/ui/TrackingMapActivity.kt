@@ -371,24 +371,58 @@ class TrackingMapActivity : MotionBaseActivity() {
         selectedRailPaused = false
     }
 
+    private var hasTrackingInitialFocused = false
+    private val trackingMapIdleHandler = Handler(Looper.getMainLooper())
+    private val trackingMapIdleRunnable = Runnable {
+        if (!isFinishing && !isDestroyed) {
+            Log.i("TrackingMapActivity", "Admin auto-focusing Company & Staff after idle period 🏢👥")
+            fitCompanyAndStaff(animated = true)
+        }
+    }
+
+    private fun resetTrackingMapIdleTimer() {
+        trackingMapIdleHandler.removeCallbacks(trackingMapIdleRunnable)
+        trackingMapIdleHandler.postDelayed(trackingMapIdleRunnable, 120_000L) // 2 minutes idle auto-focus
+    }
+
+    private fun fitCompanyAndStaff(animated: Boolean = true) {
+        val points = mutableListOf<GeoPoint>()
+        if (officeLat != 0.0 && officeLon != 0.0) {
+            points.add(GeoPoint(officeLat, officeLon))
+        }
+        val followingId = followingEmployeeId
+        if (followingId != null) {
+            signalR.liveLocations.value[followingId]?.let {
+                points.add(GeoPoint(it.latitude, it.longitude))
+            }
+        } else {
+            signalR.liveLocations.value.values.forEach {
+                points.add(GeoPoint(it.latitude, it.longitude))
+            }
+        }
+        if (points.isNotEmpty()) {
+            if (points.size == 1) {
+                binding.mapview.controller.animateTo(points[0])
+                binding.mapview.controller.setZoom(16.0)
+            } else {
+                val bounds = BoundingBox.fromGeoPoints(points)
+                binding.mapview.zoomToBoundingBox(bounds, animated, 140)
+            }
+        }
+    }
+
     private fun setupPremiumMapControls() {
         binding.btnMapFit.setOnClickListener {
+            resetTrackingMapIdleTimer()
             isAutoFocusEnabled = false
             followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
-            
-            val points = signalR.liveLocations.value.values
-                .map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
-            if (officeLat != 0.0 && officeLon != 0.0) points.add(GeoPoint(officeLat, officeLon))
-            
-            if (points.isNotEmpty()) {
-                val bounds = BoundingBox.fromGeoPoints(points)
-                binding.mapview.zoomToBoundingBox(bounds, true, 150)
-            }
-            Toast.makeText(this, "Fitting all staff", Toast.LENGTH_SHORT).show()
+            fitCompanyAndStaff(animated = true)
+            Toast.makeText(this, "Fitting Company & All Staff 🏢👥", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnAdminMapOffice.setOnClickListener {
+            resetTrackingMapIdleTimer()
             isAutoFocusEnabled = false
             followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
@@ -396,11 +430,13 @@ class TrackingMapActivity : MotionBaseActivity() {
             if (officeLat != 0.0 && officeLon != 0.0) {
                 binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 binding.mapview.controller.setZoom(16.0)
+                Toast.makeText(this, "Focusing Office Location 🏢", Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
         binding.btnAdminMapFollow.setOnClickListener {
+            resetTrackingMapIdleTimer()
             isAutoFocusEnabled = !isAutoFocusEnabled
             followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
@@ -408,6 +444,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         }
 
         binding.btnAdminMapZone.setOnClickListener {
+            resetTrackingMapIdleTimer()
             adminZoneVisible = !adminZoneVisible
             val alpha = if (adminZoneVisible) 0x40 else 0
             officeCircle?.fillPaint?.alpha = alpha
@@ -417,6 +454,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         }
 
         binding.btnAdminMapTrail.setOnClickListener {
+            resetTrackingMapIdleTimer()
             adminTrailsVisible = !adminTrailsVisible
             val alpha = if (adminTrailsVisible) 255 else 0
             val casingAlpha = if (adminTrailsVisible) 150 else 0
@@ -429,6 +467,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         }
 
         binding.btnMapLayer.setOnClickListener {
+            resetTrackingMapIdleTimer()
             mapLayerIndex = (mapLayerIndex + 1) % 4
             val mapView = binding.mapview
             when (mapLayerIndex) {
@@ -451,33 +490,48 @@ class TrackingMapActivity : MotionBaseActivity() {
             }
             mapView.invalidate()
         }
-        binding.btnMapFullscreen.setOnClickListener { toggleMapFullscreen() }
+        binding.btnMapFullscreen.setOnClickListener {
+            resetTrackingMapIdleTimer()
+            toggleMapFullscreen()
+        }
         binding.btnMapToolsToggle.setOnClickListener {
+            resetTrackingMapIdleTimer()
             setMapControlsVisible(!mapControlsVisible)
         }
 
         // Google Maps-style Vertical Floating Navigation Widget Actions
         binding.btnZoomIn.setOnClickListener {
+            resetTrackingMapIdleTimer()
             binding.mapview.controller.zoomIn()
         }
 
         binding.btnZoomOut.setOnClickListener {
+            resetTrackingMapIdleTimer()
             binding.mapview.controller.zoomOut()
         }
 
         binding.btnCompass.setOnClickListener {
+            resetTrackingMapIdleTimer()
             binding.mapview.mapOrientation = 0.0f
             binding.mapview.invalidate()
             Toast.makeText(this, "Orientation Reset to North 🧭", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnRecenterStaff.setOnClickListener {
+            resetTrackingMapIdleTimer()
             val empId = followingEmployeeId
             val empLoc = if (empId != null) signalR.liveLocations.value[empId] else signalR.liveLocations.value.values.firstOrNull()
             if (empLoc != null) {
-                binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
-                binding.mapview.controller.setZoom(17.0)
-                Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"}", Toast.LENGTH_SHORT).show()
+                if (officeLat != 0.0 && officeLon != 0.0) {
+                    val points = listOf(GeoPoint(officeLat, officeLon), GeoPoint(empLoc.latitude, empLoc.longitude))
+                    val bounds = BoundingBox.fromGeoPoints(points)
+                    binding.mapview.zoomToBoundingBox(bounds, true, 140)
+                    Toast.makeText(this, "Focusing Office & Selected Staff 🏢📍", Toast.LENGTH_SHORT).show()
+                } else {
+                    binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
+                    binding.mapview.controller.setZoom(17.0)
+                    Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"}", Toast.LENGTH_SHORT).show()
+                }
             } else if (officeLat != 0.0 && officeLon != 0.0) {
                 binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 binding.mapview.controller.setZoom(16.0)
@@ -590,6 +644,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             applyCurrentThemeToMap(this)
 
             setOnTouchListener { v, event ->
+                resetTrackingMapIdleTimer()
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         mapTouchDownX = event.x
@@ -607,6 +662,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                 )
                 false
             }
+            resetTrackingMapIdleTimer()
         }
     }
 
@@ -988,6 +1044,11 @@ class TrackingMapActivity : MotionBaseActivity() {
             geoPoints.add(point)
         }
 
+        if (!hasTrackingInitialFocused && (locations.isNotEmpty() || (officeLat != 0.0 && officeLon != 0.0))) {
+            hasTrackingInitialFocused = true
+            fitCompanyAndStaff(animated = false)
+        }
+
         mapView.invalidate()
     }
 
@@ -1153,6 +1214,7 @@ class TrackingMapActivity : MotionBaseActivity() {
         markerAnimations.clear()
         collisionConnectors.clear()
         hideMapControlsRunnable?.let { mapControlsHandler.removeCallbacks(it) }
+        trackingMapIdleHandler.removeCallbacks(trackingMapIdleRunnable)
         stopSelectedRailAutoScroll()
         iconCache.clear()
         

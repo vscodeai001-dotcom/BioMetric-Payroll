@@ -242,7 +242,8 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     private fun DataSnapshot.toLeaveRequest(): LeaveRequest = LeaveRequest(
         id = string("id") ?: key.orEmpty(),
-        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        staffId = string("staffId") ?: string("employeeId") ?: valueOf("staffId")?.toString().orEmpty(),
+        employeeId = string("employeeId") ?: string("staffId") ?: valueOf("employeeId")?.toString().orEmpty(),
         staffName = string("staffName").orEmpty(),
         leaveType = string("leaveType") ?: "Casual Leave",
         startDate = long("startDate"),
@@ -255,18 +256,23 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     )
 
     private fun DataSnapshot.toAdvancePayment(): AdvancePayment = AdvancePayment(
-        advanceId = string("advanceId") ?: key.orEmpty(),
-        employeeId = string("employeeId") ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        advanceId = string("advanceId") ?: string("id") ?: key.orEmpty(),
+        employeeId = string("employeeId") ?: string("staffId") ?: valueOf("employeeId")?.toString().orEmpty(),
+        staffId = string("staffId") ?: string("employeeId") ?: valueOf("staffId")?.toString().orEmpty(),
         shopId = string("shopId").orEmpty(),
         amount = double("amount"),
         date = long("date"),
         isRecovered = bool("isRecovered"),
-        recoveryPaymentId = string("recoveryPaymentId")
+        recoveryPaymentId = string("recoveryPaymentId"),
+        reason = string("reason"),
+        status = string("status") ?: "Pending",
+        advanceType = string("advanceType") ?: "General"
     )
 
     private fun DataSnapshot.toRegularizationRequest(): RegularizationRequest = RegularizationRequest(
         id = string("id") ?: key.orEmpty(),
-        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        staffId = string("staffId") ?: string("employeeId") ?: valueOf("staffId")?.toString().orEmpty(),
+        employeeId = string("employeeId") ?: string("staffId") ?: valueOf("employeeId")?.toString().orEmpty(),
         staffName = string("staffName").orEmpty(),
         date = string("date").orEmpty(),
         punchType = string("punchType") ?: "IN",
@@ -279,8 +285,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     )
 
     private fun DataSnapshot.toResignationRequest(): ResignationRequest = ResignationRequest(
-        requestId = string("requestId") ?: key.orEmpty(),
-        employeeId = string("employeeId") ?: valueOf("employeeId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
+        requestId = string("requestId") ?: string("id") ?: key.orEmpty(),
+        employeeId = string("employeeId") ?: string("staffId") ?: valueOf("employeeId")?.toString().orEmpty(),
+        staffId = string("staffId") ?: string("employeeId") ?: valueOf("staffId")?.toString().orEmpty(),
         submissionDate = long("submissionDate"),
         desiredLastWorkingDay = long("desiredLastWorkingDay"),
         reason = string("reason"),
@@ -295,28 +302,59 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         // same employee key enforced by Firebase RTDB rules. Admin screens use
         // their own repositories and are not routed through this self-service class.
         val id = sessionStore.employeeId()
-        when (table) {
-            "payroll_history", "salary_snapshots" -> requireFeatureAllowed("payslip")
-            "attendance", "attendance_punches", "daily_summaries" -> requireFeatureAllowed("attendance")
-            "shift_schedules" -> requireFeatureAllowed("shift")
-            "leave_requests" -> requireFeatureAllowed("leave")
-            "advance_payments" -> requireFeatureAllowed("advance")
-            "bonus_records" -> requireFeatureAllowed("bonus")
-            "regularizations" -> requireFeatureAllowed("regularization")
-            "resignation_requests" -> requireFeatureAllowed("resignation")
-            "tax_declarations" -> requireFeatureAllowed("tax")
-            "fbp_declarations" -> requireFeatureAllowed("fbp")
+        val strId = id.toString()
+        runCatching {
+            when (table) {
+                "payroll_history", "salary_snapshots" -> requireFeatureAllowed("payslip")
+                "attendance", "attendance_punches", "daily_summaries" -> requireFeatureAllowed("attendance")
+                "shift_schedules" -> requireFeatureAllowed("shift")
+                "leave_requests" -> requireFeatureAllowed("leave")
+                "advance_payments" -> requireFeatureAllowed("advance")
+                "bonus_records" -> requireFeatureAllowed("bonus")
+                "regularizations" -> requireFeatureAllowed("regularization")
+                "resignation_requests" -> requireFeatureAllowed("resignation")
+                "tax_declarations" -> requireFeatureAllowed("tax")
+                "fbp_declarations" -> requireFeatureAllowed("fbp")
+            }
+        }.onFailure {
+            if (it is SecurityException) throw it
         }
-        val query = when (table) {
-            "payroll_history", "tax_declarations", "fbp_declarations", "bonus_records" ->
-                ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
+
+        val numId = id.toDouble()
+        val primaryQuery = when (table) {
+            "payroll_history", "tax_declarations", "fbp_declarations", "bonus_records",
+            "attendance", "salary_snapshots", "daily_summaries", "shift_schedules", "salary_payments" ->
+                ownerRef().child(table).orderByChild("employeeId").equalTo(numId)
             "attendance_punches", "regularizations", "leave_requests" ->
-                ownerRef().child(table).orderByChild("staffId").equalTo(id.toString())
-            "attendance", "salary_snapshots", "daily_summaries", "shift_schedules", "salary_payments", "resignation_requests", "advance_payments" ->
-                ownerRef().child(table).orderByChild("employeeId").equalTo(id.toDouble())
+                ownerRef().child(table).orderByChild("staffId").equalTo(strId)
+            "advance_payments", "resignation_requests" ->
+                ownerRef().child(table).orderByChild("employeeId").equalTo(numId)
             else -> ownerRef().child(table)
         }
-        return query.get().await().children.mapNotNull { mapper(it) }
+        val primarySnapshot = runCatching { primaryQuery.get().await() }.getOrNull()
+        val results = mutableListOf<T>()
+        if (primarySnapshot != null && primarySnapshot.hasChildren()) {
+            results.addAll(primarySnapshot.children.mapNotNull { mapper(it) })
+        }
+        // Fallback for cross-platform schema compatibility (e.g. if saved with String employeeId or alternate key)
+        if (results.isEmpty()) {
+            val fallbackQuery = when (table) {
+                "attendance_punches", "regularizations", "leave_requests" ->
+                    ownerRef().child(table).orderByChild("employeeId").equalTo(numId)
+                "advance_payments", "resignation_requests" ->
+                    ownerRef().child(table).orderByChild("employeeId").equalTo(strId)
+                "shift_schedules", "payroll_history", "bonus_records", "attendance" ->
+                    ownerRef().child(table).orderByChild("staffId").equalTo(strId)
+                else -> null
+            }
+            if (fallbackQuery != null) {
+                val fallbackSnapshot = runCatching { fallbackQuery.get().await() }.getOrNull()
+                if (fallbackSnapshot != null && fallbackSnapshot.hasChildren()) {
+                    results.addAll(fallbackSnapshot.children.mapNotNull { mapper(it) })
+                }
+            }
+        }
+        return results
     }
 
     private fun DataSnapshot.string(name: String): String? =
@@ -373,13 +411,17 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun featureSettings(): FeatureSettings {
-        val snapshot = ownerRef().child("feature_settings").child("1").get().await()
         return runCatching {
-            com.google.gson.Gson().fromJson(
-                com.google.gson.Gson().toJson(snapshot.value),
-                FeatureSettings::class.java
-            )
-        }.getOrNull() ?: FeatureSettings()
+            val snapshot = ownerRef().child("feature_settings").child("1").get().await()
+            if (snapshot.exists()) {
+                com.google.gson.Gson().fromJson(
+                    com.google.gson.Gson().toJson(snapshot.value),
+                    FeatureSettings::class.java
+                ) ?: FeatureSettings()
+            } else {
+                FeatureSettings()
+            }
+        }.getOrDefault(FeatureSettings())
     }
 
     private suspend fun requireFeatureAllowed(key: String) {
@@ -575,7 +617,20 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val id = UUID.randomUUID().toString()
         val date = LocalDate.parse(leaveDate, dateFormatter).toEpochDay() * 86_400_000L
         firebaseSync.pushLeaveRequest(
-            LeaveRequest(id, emp.employeeId, emp.name, leaveType, date, date, notes.orEmpty(), "Pending", null, isHalfDay, System.currentTimeMillis())
+            LeaveRequest(
+                id = id,
+                staffId = emp.employeeId,
+                employeeId = emp.employeeId,
+                staffName = emp.name,
+                leaveType = leaveType,
+                startDate = date,
+                endDate = date,
+                reason = notes.orEmpty(),
+                status = "Pending",
+                adminNotes = null,
+                isHalfDay = isHalfDay,
+                createdAt = System.currentTimeMillis()
+            )
         )
         notifyPortalChanged()
     }
@@ -583,16 +638,16 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun advances(): List<MoneyEntryDto> {
         val id = employeeId()
         return readList("advance_payments") { it.toAdvancePayment() }
-            .filter { it.employeeId == id }.sortedByDescending { it.date }
+            .filter { it.employeeId == id || it.staffId == id }.sortedByDescending { it.date }
             .map {
                 MoneyEntryDto(
                     id = stableIntId(it.advanceId),
                     date = formatDate(it.date),
                     amount = it.amount,
                     type = "Salary Advance",
-                    description = null,
+                    description = it.reason,
                     paid = it.isRecovered,
-                    employeeId = it.employeeId.toIntOrNull() ?: 0
+                    employeeId = it.employeeId.toIntOrNull() ?: it.staffId.toIntOrNull() ?: 0
                 )
             }
     }
@@ -603,9 +658,18 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val id = UUID.randomUUID().toString()
         ownerRef().child("advance_payments").child(id).setValue(
             mapOf(
-                "advanceId" to id, "employeeId" to emp.employeeId, "shopId" to emp.shopId,
-                "amount" to amount, "date" to System.currentTimeMillis(),
-                "isRecovered" to false, "recoveryPaymentId" to null, "reason" to reason
+                "advanceId" to id,
+                "id" to id,
+                "employeeId" to sessionStore.employeeId(),
+                "staffId" to emp.employeeId,
+                "shopId" to emp.shopId,
+                "amount" to amount,
+                "date" to System.currentTimeMillis(),
+                "isRecovered" to false,
+                "recoveryPaymentId" to null,
+                "reason" to reason,
+                "status" to "Pending",
+                "advanceType" to "General"
             )
         ).await()
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "ADDED", id)
@@ -613,11 +677,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     }
 
     suspend fun bonuses(): List<MoneyEntryDto> =
-        ownerRef().child("bonus_records")
-            .orderByChild("employeeId")
-            .equalTo(sessionStore.employeeId().toDouble())
-            .get().await().children.mapNotNull { s ->
-            if (s.int("employeeId") != sessionStore.employeeId()) return@mapNotNull null
+        readList("bonus_records") { s ->
+            val empId = s.int("employeeId")
+            if (empId > 0 && empId != sessionStore.employeeId()) return@readList null
             MoneyEntryDto(
                 id = s.int("bonusId"),
                 date = formatDate(s.long("bonusDate")),
@@ -625,13 +687,13 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 type = "Performance Bonus",
                 description = s.string("description"),
                 paid = s.int("payrollIdPaid") > 0,
-                employeeId = s.int("employeeId")
+                employeeId = if (empId > 0) empId else sessionStore.employeeId()
             )
         }.sortedByDescending { it.date }
 
     suspend fun regularizations(): List<RegularizationDto> =
         readList("regularizations") { it.toRegularizationRequest() }
-            .filter { it.staffId == employeeId() }
+            .filter { it.staffId == employeeId() || it.employeeId == employeeId() }
             .sortedByDescending { it.submittedAt }
             .map {
                 RegularizationDto(stableIntId(it.id), it.date, it.punchType.equals("IN", true),
@@ -650,10 +712,18 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val id = (-System.currentTimeMillis()).toString()
         firebaseSync.pushRegularization(
             RegularizationRequest(
-                id, emp.employeeId, emp.name, request.dateOfPunch,
-                if (request.isInPunch) "IN" else "OUT", null,
-                parseDateTime(request.dateOfPunch, request.punchTimeNew),
-                request.reason, "Pending", null, System.currentTimeMillis()
+                id = id,
+                staffId = emp.employeeId,
+                employeeId = emp.employeeId,
+                staffName = emp.name,
+                date = request.dateOfPunch,
+                punchType = if (request.isInPunch) "IN" else "OUT",
+                originalTime = null,
+                requestedTime = parseDateTime(request.dateOfPunch, request.punchTimeNew),
+                reason = request.reason,
+                status = "Pending",
+                adminRemarks = null,
+                submittedAt = System.currentTimeMillis()
             )
         )
         notifyPortalChanged()
@@ -661,7 +731,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun resignation(): ResignationDto? =
         readList("resignation_requests") { it.toResignationRequest() }
-            .filter { it.employeeId == employeeId() }.maxByOrNull { it.submissionDate }?.let {
+            .filter { it.employeeId == employeeId() || it.staffId == employeeId() }.maxByOrNull { it.submissionDate }?.let {
                 ResignationDto(stableIntId(it.requestId), formatDate(it.submissionDate),
                     formatDate(it.desiredLastWorkingDay), it.reason.orEmpty(), it.status,
                     it.approvedLastWorkingDay?.let(::formatDate), it.adminRemarks, it.isSettled)
@@ -672,15 +742,26 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
         val id = UUID.randomUUID().toString()
         firebaseSync.pushResignationRequest(
-            ResignationRequest(id, emp.employeeId, System.currentTimeMillis(),
-                parseDate(request.desiredLastWorkingDay), request.reason, "Pending", null, null, false)
+            ResignationRequest(
+                requestId = id,
+                employeeId = emp.employeeId,
+                staffId = emp.employeeId,
+                submissionDate = System.currentTimeMillis(),
+                desiredLastWorkingDay = parseDate(request.desiredLastWorkingDay),
+                reason = request.reason,
+                status = "Pending",
+                approvedLastWorkingDay = null,
+                adminRemarks = null,
+                isSettled = false
+            )
         )
         notifyPortalChanged()
     }
 
     suspend fun tax(financialYear: Int): TaxDeclarationDto? =
         readList("tax_declarations") { s ->
-            if (s.int("employeeId") != sessionStore.employeeId() || s.int("financialYear") != financialYear) null
+            val empId = s.int("employeeId")
+            if ((empId > 0 && empId != sessionStore.employeeId()) || s.int("financialYear") != financialYear) null
             else TaxDeclarationDto(
                 declarationId = s.int("declarationId"),
                 financialYear = s.int("financialYear"),
@@ -691,17 +772,19 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 otherExemptions = s.double("otherExemptions"),
                 status = s.string("status") ?: "Pending",
                 adminRemarks = s.string("adminRemarks"),
-                employeeId = s.int("employeeId")
+                employeeId = if (empId > 0) empId else sessionStore.employeeId()
             )
         }.maxByOrNull { it.declarationId }
 
     suspend fun saveTax(request: TaxDeclarationRequest): TaxDeclarationDto {
         requireFeatureAllowed("tax")
         val employeeId = sessionStore.employeeId()
+        val emp = employee()
         val declarationId = nextIntId("tax_declaration_id", "tax_declarations", "declarationId")
         ownerRef().child("tax_declarations").child(declarationId.toString()).setValue(
             mapOf(
                 "declarationId" to declarationId, "employeeId" to employeeId,
+                "staffId" to (emp?.employeeId ?: employeeId.toString()),
                 "financialYear" to request.financialYear, "regime" to request.regime,
                 "section80C" to request.section80C, "section80D" to request.section80D,
                 "hraRentPaid" to request.hraRentPaid, "otherExemptions" to request.otherExemptions,
@@ -727,7 +810,8 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun fbp(financialYear: Int): List<FbpDto> =
         readList("fbp_declarations") { s ->
-            if (s.int("employeeId") != sessionStore.employeeId() || s.int("financialYear") != financialYear) null
+            val empId = s.int("employeeId")
+            if ((empId > 0 && empId != sessionStore.employeeId()) || s.int("financialYear") != financialYear) null
             else FbpDto(s.int("declarationId"), s.int("financialYear"), s.string("componentName").orEmpty(),
                 s.double("annualAllocatedAmount"), s.double("monthlyAllocatedAmount"),
                 s.string("status") ?: "Draft", s.string("adminRemarks"))
@@ -736,11 +820,13 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun saveFbp(request: FbpRequest): FbpDto {
         requireFeatureAllowed("fbp")
         val employeeId = sessionStore.employeeId()
+        val emp = employee()
         val declarationId = nextIntId("fbp_declaration_id", "fbp_declarations", "declarationId")
         val monthly = request.annualAllocatedAmount / 12.0
         ownerRef().child("fbp_declarations").child(declarationId.toString()).setValue(
             mapOf(
                 "declarationId" to declarationId, "employeeId" to employeeId,
+                "staffId" to (emp?.employeeId ?: employeeId.toString()),
                 "financialYear" to request.financialYear, "componentName" to request.componentName,
                 "annualAllocatedAmount" to request.annualAllocatedAmount,
                 "monthlyAllocatedAmount" to monthly, "status" to "Draft",
@@ -755,7 +841,8 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     suspend fun shifts(month: String): List<ShiftDto> =
         readList("shift_schedules") { s ->
-            if (s.int("employeeId") != sessionStore.employeeId()) return@readList null
+            val empId = s.int("employeeId")
+            if (empId > 0 && empId != sessionStore.employeeId()) return@readList null
             val date = s.string("shiftDate").orEmpty()
             if (!date.startsWith(month)) return@readList null
             val d = runCatching { LocalDate.parse(date, dateFormatter) }.getOrNull() ?: return@readList null
@@ -768,12 +855,18 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         // cannot both observe the same counter and create the same numeric ID.
         // The existing table scan is retained as a migration-safe floor for
         // counters created before this transaction existed.
-        val existing = ownerRef().child(table).get().await().children.maxOfOrNull { it.int(field) } ?: 0
+        val existing = runCatching {
+            ownerRef().child(table).get().await().children.maxOfOrNull { it.int(field) } ?: 0
+        }.getOrDefault(0)
         val ref = ownerRef().child("counters").child(counterName)
-        return ref.runTransactionAwait { current ->
-            val stored = (current.value as? Number)?.toInt() ?: current.value?.toString()?.toIntOrNull() ?: 0
-            val next = maxOf(existing, stored) + 1
-            current.value = next
+        return runCatching {
+            ref.runTransactionAwait { current ->
+                val stored = (current.value as? Number)?.toInt() ?: current.value?.toString()?.toIntOrNull() ?: 0
+                val next = maxOf(existing, stored) + 1
+                current.value = next
+            }
+        }.getOrElse {
+            existing + 1
         }
     }
 
@@ -810,10 +903,12 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     private suspend fun notifyPortalChanged() {
         val uid = auth.currentUser?.uid ?: return
         val eventId = UUID.randomUUID().toString().replace("-", "")
-        ownerRef().child("employee_portal_changes").child(eventId).setValue(
-            mapOf("eventId" to eventId, "employeeId" to sessionStore.employeeId(),
-                "uid" to uid, "timestamp" to System.currentTimeMillis())
-        ).await()
+        runCatching {
+            ownerRef().child("employee_portal_changes").child(eventId).setValue(
+                mapOf("eventId" to eventId, "employeeId" to sessionStore.employeeId(),
+                    "uid" to uid, "timestamp" to System.currentTimeMillis())
+            ).await()
+        }
     }
 
     private fun stableIntId(value: String): Int = abs(value.hashCode()).coerceAtLeast(1)

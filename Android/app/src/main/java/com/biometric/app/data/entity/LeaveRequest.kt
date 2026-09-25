@@ -6,6 +6,7 @@ import androidx.annotation.Keep
 data class LeaveRequest(
     var id: String = "",
     var staffId: String = "",
+    var employeeId: String = "",
     var staffName: String = "",
     var leaveType: String = "Casual Leave", // Casual, Sick, Earned
     var startDate: Long = System.currentTimeMillis(),

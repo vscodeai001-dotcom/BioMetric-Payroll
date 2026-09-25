@@ -10,5 +10,9 @@ data class AdvancePayment(
     var amount: Double = 0.0,
     var date: Long = System.currentTimeMillis(),
     var isRecovered: Boolean = false,
-    var recoveryPaymentId: String? = null
+    var recoveryPaymentId: String? = null,
+    var staffId: String = "",
+    var reason: String? = null,
+    var status: String = "Pending",
+    var advanceType: String = "General"
 )

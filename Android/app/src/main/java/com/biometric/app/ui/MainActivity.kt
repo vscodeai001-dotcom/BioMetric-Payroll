@@ -102,6 +102,7 @@ import com.biometric.app.util.MarkerAnimationHelper
 import com.google.firebase.auth.FirebaseAuth
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.gestures.RotationGestureOverlay
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import java.text.NumberFormat
@@ -311,46 +312,60 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
     }
 
+    private var hasAdminInitialMapFocused = false
+    private val adminMapIdleHandler = Handler(Looper.getMainLooper())
+    private val adminMapIdleRunnable = Runnable {
+        if (!isFinishing && !isDestroyed) {
+            Log.i("MainActivity", "Admin auto-focusing Company & Staff after idle period 🏢👥")
+            fitAdminCompanyAndStaff(animated = true)
+        }
+    }
+
+    private fun resetAdminMapIdleTimer() {
+        adminMapIdleHandler.removeCallbacks(adminMapIdleRunnable)
+        adminMapIdleHandler.postDelayed(adminMapIdleRunnable, 120_000L) // 2 minutes idle auto-focus
+    }
+
+    private fun fitAdminCompanyAndStaff(animated: Boolean = true) {
+        val b = _binding ?: return
+        val points = signalR.liveLocations.value.values
+            .map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
+        officeMarker?.position?.let { points.add(it) }
+            ?: viewModel.companySettings.value?.let { s ->
+                if (s.officeLatitude != 0.0 && s.officeLongitude != 0.0) points.add(GeoPoint(s.officeLatitude, s.officeLongitude))
+            }
+
+        if (points.isNotEmpty()) {
+            createBoundingBox(points)?.let { bounds ->
+                b.adminMapView.zoomToBoundingBox(bounds, animated, 130)
+            }
+        }
+    }
+
     private fun configureAdminMap(map: MapView, allowNetwork: Boolean) {
         map.setUseDataConnection(allowNetwork)
         map.setTileSource(adminOpenStreetMapSource())
         map.setMultiTouchControls(true)
+        val rotationGestureOverlay = RotationGestureOverlay(map).apply {
+            isEnabled = true
+        }
+        map.overlays.add(rotationGestureOverlay)
         map.setBackgroundColor(Color.TRANSPARENT)
         map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         map.minZoomLevel = 3.0
         map.maxZoomLevel = 20.0
-        map.controller.setZoom(13.0)
+        map.controller.setZoom(14.0)
         map.controller.setCenter(GeoPoint(11.9139, 79.8145))
         applyCurrentThemeToMap(map)
 
-        // REQUIREMENT: Robustly prevent parent NestedScrollView from intercepting map touches (pinch-to-zoom fix)
+        // Robustly prevent parent NestedScrollView from intercepting map touches (pinch-to-zoom fix)
         map.setOnTouchListener { v, event ->
-            v.parent.requestDisallowInterceptTouchEvent(true)
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    adminMapTouchDownX = event.x
-                    adminMapTouchDownY = event.y
-                    adminMapTouchDownAt = SystemClock.elapsedRealtime()
-                }
-                MotionEvent.ACTION_UP -> {
-                    v.parent.requestDisallowInterceptTouchEvent(false)
-
-                    if (map.id == R.id.adminMapView) {
-                        val moved = kotlin.math.hypot(
-                            (event.x - adminMapTouchDownX).toDouble(),
-                            (event.y - adminMapTouchDownY).toDouble()
-                        )
-                        val quickTap =
-                            SystemClock.elapsedRealtime() - adminMapTouchDownAt < 600L
-
-                        if (moved < 18.0 && quickTap) {
-                            setAdminMapControlsVisible(!adminMapControlsVisible)
-                        }
-                    }
-                }
-            }
+            v.parent.requestDisallowInterceptTouchEvent(event.action != MotionEvent.ACTION_UP)
+            resetAdminMapIdleTimer()
             false
         }
+
+        resetAdminMapIdleTimer()
 
         map.post {
             map.invalidate()
@@ -398,20 +413,59 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             Toast.makeText(this, if (isAdminAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
         }
 
-        binding.btnRefreshMap.setOnClickListener {
+        binding.btnAdminMapFitAll.setOnClickListener {
+            resetAdminMapIdleTimer()
             isAdminAutoFocusEnabled = false
             adminFollowingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
-            
-            val points = signalR.liveLocations.value.values
-                .map { GeoPoint(it.latitude, it.longitude) }
-            val map = binding.adminMapView
-            if (points.isNotEmpty()) {
-                createBoundingBox(points)?.let { map.zoomToBoundingBox(it, true, 120) }
+            fitAdminCompanyAndStaff(animated = true)
+            Toast.makeText(this, "Focusing Company & All Staff 🏢👥", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnAdminMapOffice.setOnClickListener {
+            resetAdminMapIdleTimer()
+            isAdminAutoFocusEnabled = false
+            adminFollowingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = 0.4f
+            val shop = sharedViewModel.selectedShop.value
+            val officeLat = shop?.latitude ?: 0.0
+            val officeLon = shop?.longitude ?: 0.0
+            if (officeLat != 0.0 && officeLon != 0.0) {
+                binding.adminMapView.controller.animateTo(GeoPoint(officeLat, officeLon))
+                binding.adminMapView.controller.setZoom(16.0)
+                Toast.makeText(this, "Focusing Office Location 🏢", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Office location not set", Toast.LENGTH_SHORT).show()
             }
         }
 
+        binding.btnAdminMapZoomIn.setOnClickListener {
+            resetAdminMapIdleTimer()
+            binding.adminMapView.controller.zoomIn()
+        }
+
+        binding.btnAdminMapZoomOut.setOnClickListener {
+            resetAdminMapIdleTimer()
+            binding.adminMapView.controller.zoomOut()
+        }
+
+        binding.btnAdminMapCompass.setOnClickListener {
+            resetAdminMapIdleTimer()
+            binding.adminMapView.mapOrientation = 0.0f
+            binding.adminMapView.invalidate()
+            Toast.makeText(this, "Reset to North 🧭", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnRefreshMap.setOnClickListener {
+            resetAdminMapIdleTimer()
+            isAdminAutoFocusEnabled = false
+            adminFollowingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = 0.4f
+            fitAdminCompanyAndStaff(animated = true)
+        }
+
         binding.btnAdminMapLayer.setOnClickListener {
+            resetAdminMapIdleTimer()
             adminMapLayerIndex = (adminMapLayerIndex + 1) % 4
             val map = binding.adminMapView
             val filter = when (adminMapLayerIndex) {
@@ -442,6 +496,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
 
         binding.btnAdminMapZone.setOnClickListener {
+            resetAdminMapIdleTimer()
             adminZoneVisible = !adminZoneVisible
             val alpha = if (adminZoneVisible) 0x40 else 0
             geofenceCircle?.fillPaint?.alpha = alpha
@@ -451,13 +506,14 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
 
         binding.btnAdminMapTrail.setOnClickListener {
+            resetAdminMapIdleTimer()
             adminTrailsVisible = !adminTrailsVisible
             val alpha = if (adminTrailsVisible) 255 else 0
             val casingAlpha = if (adminTrailsVisible) 150 else 0
-            
+
             roadLines.values.forEach { it.outlinePaint.alpha = alpha }
             roadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
-            
+
             binding.adminMapView.invalidate()
             Toast.makeText(this, if (adminTrailsVisible) "Trails Enabled ↝" else "Trails Disabled 📍", Toast.LENGTH_SHORT).show()
         }
@@ -977,6 +1033,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val markerCount = geoPoints.size
             val prevCount = dashboardMap.tag as? Int ?: 0
             if (markerCount > 0 && (markerCount > prevCount || !adminMapAutoCentered)) {
+                officeMarker?.position?.let { geoPoints.add(it) }
                 createBoundingBox(geoPoints)?.let { box ->
                     dashboardMap.zoomToBoundingBox(box, true, 100)
                 }
@@ -1272,6 +1329,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         markerAnimations.clear()
         collisionConnectors.clear()
         mapControlsHandler.removeCallbacksAndMessages(null)
+        adminMapIdleHandler.removeCallbacks(adminMapIdleRunnable)
+        adminSelectedRailHandler.removeCallbacksAndMessages(null)
         refreshJob?.cancel()
         iconCache.clear()
 
