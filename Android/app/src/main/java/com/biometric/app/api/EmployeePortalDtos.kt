@@ -100,7 +100,9 @@ data class PayslipDto(
     @SerializedName("netSalary") val netSalary: Double = 0.0,
     @SerializedName("hourlyRate") val hourlyRate: Double = 0.0,
     @SerializedName("totalHoursWorked") val totalHoursWorked: Double = 0.0,
-    @SerializedName("totalDeductions") val totalDeductions: Double = 0.0
+    @SerializedName("totalDeductions") val totalDeductions: Double = 0.0,
+    @SerializedName("totalShiftAllowance") val totalShiftAllowance: Double = 0.0,
+    @SerializedName("penaltyDeduction") val penaltyDeduction: Double = 0.0
 )
 
 data class LeaveDto(

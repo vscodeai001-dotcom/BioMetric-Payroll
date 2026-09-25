@@ -567,6 +567,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             val tds = s.double("tdsDeduction")
             val advance = s.double("deductionsAdvance")
             val hours = s.double("deductionsHours")
+            val shift = s.double("totalShiftAllowance")
             PayslipDto(
                 payrollId = s.int("payrollId"),
                 month = s.int("payMonth"),
@@ -582,7 +583,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 netSalary = s.double("netSalary"),
                 hourlyRate = s.double("hourlyRate"),
                 totalHoursWorked = s.double("totalHoursWorked"),
-                totalDeductions = pf + esi + pt + tds + advance + hours
+                totalDeductions = pf + esi + pt + tds + advance + hours,
+                totalShiftAllowance = shift,
+                penaltyDeduction = hours
             )
         }
     }

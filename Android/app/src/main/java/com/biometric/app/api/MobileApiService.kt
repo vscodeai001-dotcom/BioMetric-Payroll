@@ -479,10 +479,13 @@ data class AdminPayrollRowDto(
 data class AdminPayrollHistoryRowDto(
     val payrollID: Int = 0, val employeeID: Int = 0, val employeeName: String? = null,
     val payMonth: Int = 0, val payYear: Int = 0, val baseSalary: Double? = null, val hourlyRate: Double = 0.0,
-    val totalHoursWorked: Double = 0.0, val totalOvertimeMinutes: Double = 0.0, val totalPenaltyMinutes: Double = 0.0,
-    val deductionsHours: Double = 0.0, val deductionsAdvance: Double = 0.0, val bonus: Double = 0.0,
-    val tdsDeduction: Double = 0.0, val totalShiftAllowance: Double = 0.0, val basicComponent: Double = 0.0,
-    val pfDeduction: Double = 0.0, val esiDeduction: Double = 0.0, val ptDeduction: Double = 0.0,
+    val totalHoursWorked: Double = 0.0, val earnedPay: Double = 0.0,
+    val totalOvertimeMinutes: Double = 0.0, val overtimePay: Double = 0.0,
+    val totalPenaltyMinutes: Double = 0.0, val penaltyDeduction: Double = 0.0,
+    val deductionsHours: Double = 0.0, val deductionsAdvance: Double = 0.0, val advanceDeduction: Double = 0.0,
+    val bonus: Double = 0.0, val tdsDeduction: Double = 0.0, val totalShiftAllowance: Double = 0.0,
+    val basicComponent: Double = 0.0, val pfDeduction: Double = 0.0, val esiDeduction: Double = 0.0,
+    val ptDeduction: Double = 0.0, val employerPfContribution: Double = 0.0, val employerEsiContribution: Double = 0.0,
     val absentDays: Int = 0, val manualLeaveDays: Int = 0, val netSalary: Double? = null
 )
 

@@ -66,7 +66,13 @@ class PayslipListFragment : Fragment() {
             append("Hourly Rate: ₹${String.format(Locale.US, "%,.2f", payslip.hourlyRate)} 🕒\n")
             append("Total Hours: ${String.format(Locale.US, "%.2f", payslip.totalHoursWorked)} hrs ⚡\n")
             append("Overtime Pay: ₹${String.format(Locale.US, "%,.2f", payslip.overtimePay)} 🔥\n")
+            if (payslip.totalShiftAllowance > 0) {
+                append("Night/Shift Allowance: ₹${String.format(Locale.US, "%,.2f", payslip.totalShiftAllowance)} 🌙\n")
+            }
             append("Bonus: ₹${String.format(Locale.US, "%,.2f", payslip.bonus)} 🌟\n")
+            if (payslip.penaltyDeduction > 0) {
+                append("Penalty/Lateness: -₹${String.format(Locale.US, "%,.2f", payslip.penaltyDeduction)} ⏱️\n")
+            }
             append("Advance Deduction: ₹${String.format(Locale.US, "%,.2f", payslip.advanceDeduction)} 💳\n")
             append("PF: ₹${String.format(Locale.US, "%,.2f", payslip.pfDeduction)} 🛡️\n")
             append("ESI: ₹${String.format(Locale.US, "%,.2f", payslip.esiDeduction)} 🏥\n")

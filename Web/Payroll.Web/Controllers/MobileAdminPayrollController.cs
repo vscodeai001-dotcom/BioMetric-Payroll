@@ -63,7 +63,14 @@ public sealed class MobileAdminPayrollController : ControllerBase
                 PtDeduction = x.PtDeduction,
                 AbsentDays = x.AbsentDays,
                 ManualLeaveDays = x.ManualLeaveDays,
-                NetSalary = x.NetSalary
+                NetSalary = x.NetSalary,
+                OvertimePay = x.OvertimePay ?? 0,
+                EarnedStandardHours = x.TotalHoursWorked ?? 0,
+                EarnedPay = (x.TotalHoursWorked ?? 0) * x.HourlyRate,
+                PenaltyDeduction = x.Deductions_Hours ?? 0,
+                AdvanceDeduction = x.Deductions_Advance ?? 0,
+                EmployerPfContribution = x.EmployerPfContribution,
+                EmployerEsiContribution = x.EmployerEsiContribution
             })
             .ToListAsync();
 

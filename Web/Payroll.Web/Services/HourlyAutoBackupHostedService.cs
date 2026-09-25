@@ -37,7 +37,9 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
             {
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                var settings = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(stoppingToken);
+                var settings = await db.CompanySettings.AsNoTracking()
+                    .OrderBy(s => s.SettingID)
+                    .FirstOrDefaultAsync(stoppingToken);
                 if (settings != null && settings.AutoBackupIntervalHours > 0)
                 {
                     intervalHours = settings.AutoBackupIntervalHours;
