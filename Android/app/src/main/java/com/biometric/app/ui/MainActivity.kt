@@ -147,6 +147,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var adminTrailsVisible = true
     private var isAdminAutoFocusEnabled = false
     private var adminFollowingEmployeeId: Int? = null
+    private var adminSelectedEmployeeId: Int? = null
 
     private val mapControlsHandler = Handler(Looper.getMainLooper())
     private var adminMapControlsVisible = false
@@ -177,7 +178,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         _binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        applyWindowInsets(binding.main, binding.appBar)
+        applyWindowInsets(binding.main, binding.appBar, binding.mainScrollView)
         binding.tvLiveDate.text = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date())
 
         if (viewModel.isLoading.value) {
@@ -282,42 +283,26 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         setupAdminDashboardMapControls()
 
         lifecycleScope.launch {
-            delay(800)
+            delay(500)
             _binding?.let { b ->
                 b.llAdminMapLoading.visibility = View.GONE
                 observeLiveLocations()
-                setAdminMapControlsVisible(false)
+                b.adminMapControlsScroll.visibility = View.VISIBLE
             }
         }
     }
 
     private fun setAdminMapControlsVisible(visible: Boolean) {
-        val controls = _binding?.adminMapControls ?: return
-        adminMapControlsVisible = visible
-        controls.visibility = if (visible) View.VISIBLE else View.GONE
-
-        adminMapControlsHideRunnable?.let {
-            mapControlsHandler.removeCallbacks(it)
-        }
-
-        if (visible) {
-            val hide = Runnable {
-                if (!isFinishing && !isDestroyed) {
-                    adminMapControlsVisible = false
-                    _binding?.adminMapControls?.visibility = View.GONE
-                }
-            }
-            adminMapControlsHideRunnable = hide
-            mapControlsHandler.postDelayed(hide, 5000L)
-        }
+        // Controls remain permanently docked at top outside map viewport
+        _binding?.adminMapControlsScroll?.visibility = View.VISIBLE
     }
 
     private var hasAdminInitialMapFocused = false
     private val adminMapIdleHandler = Handler(Looper.getMainLooper())
     private val adminMapIdleRunnable = Runnable {
         if (!isFinishing && !isDestroyed) {
-            Log.i("MainActivity", "Admin auto-focusing Company & Staff after idle period 🏢👥")
-            fitAdminCompanyAndStaff(animated = true)
+            Log.i("MainActivity", "Admin auto-focusing Company & Staff after 2 min idle 🏢👥")
+            fitAdminCompanyAndSelectedOrAll(animated = true)
         }
     }
 
@@ -327,18 +312,52 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun fitAdminCompanyAndStaff(animated: Boolean = true) {
-        val b = _binding ?: return
-        val points = signalR.liveLocations.value.values
-            .map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
-        officeMarker?.position?.let { points.add(it) }
-            ?: viewModel.companySettings.value?.let { s ->
-                if (s.officeLatitude != 0.0 && s.officeLongitude != 0.0) points.add(GeoPoint(s.officeLatitude, s.officeLongitude))
-            }
+        fitAdminCompanyAndSelectedOrAll(animated)
+    }
 
-        if (points.isNotEmpty()) {
-            createBoundingBox(points)?.let { bounds ->
-                b.adminMapView.zoomToBoundingBox(bounds, animated, 130)
+    private fun fitAdminCompanyAndSelectedOrAll(animated: Boolean = true) {
+        val b = _binding ?: return
+        val points = mutableListOf<GeoPoint>()
+
+        // 1. Office / Company point
+        officeMarker?.position?.let { points.add(it) }
+            ?: (sharedViewModel.selectedShop.value?.let { s ->
+                if (s.latitude != 0.0 && s.longitude != 0.0) GeoPoint(s.latitude, s.longitude) else null
+            } ?: viewModel.companySettings.value?.let { s ->
+                if (s.officeLatitude != 0.0 && s.officeLongitude != 0.0) GeoPoint(s.officeLatitude, s.officeLongitude) else null
+            })?.let { points.add(it) }
+
+        // 2. Selected Employee (if selected)
+        val selectedId = adminSelectedEmployeeId
+        if (selectedId != null && selectedId > 0) {
+            signalR.liveLocations.value[selectedId]?.let { loc ->
+                if (loc.latitude != 0.0 && loc.longitude != 0.0) {
+                    points.add(GeoPoint(loc.latitude, loc.longitude))
+                }
             }
+        }
+
+        // 3. All other staff locations
+        signalR.liveLocations.value.values.forEach { loc ->
+            if (loc.latitude != 0.0 && loc.longitude != 0.0) {
+                val pt = GeoPoint(loc.latitude, loc.longitude)
+                if (!points.contains(pt)) {
+                    points.add(pt)
+                }
+            }
+        }
+
+        if (points.size >= 2) {
+            createBoundingBox(points)?.let { bounds ->
+                b.adminMapView.zoomToBoundingBox(bounds, animated, 140)
+            }
+        } else if (points.size == 1) {
+            if (animated) {
+                b.adminMapView.controller.animateTo(points[0])
+            } else {
+                b.adminMapView.controller.setCenter(points[0])
+            }
+            b.adminMapView.controller.setZoom(16.0)
         }
     }
 
@@ -405,6 +424,35 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     }
 
     private fun setupAdminDashboardMapControls() {
+        binding.btnAdminMapFitBoth.setOnClickListener {
+            resetAdminMapIdleTimer()
+            isAdminAutoFocusEnabled = false
+            adminFollowingEmployeeId = null
+            binding.btnAdminMapFollow.alpha = 0.4f
+            fitAdminCompanyAndSelectedOrAll(animated = true)
+            Toast.makeText(this, "Focusing Company & Staff 🏢👤", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnAdminMapEmp.setOnClickListener {
+            resetAdminMapIdleTimer()
+            isAdminAutoFocusEnabled = false
+            binding.btnAdminMapFollow.alpha = 0.4f
+            val targetEmp = adminSelectedEmployeeId?.let { id ->
+                signalR.liveLocations.value[id]
+            } ?: signalR.liveLocations.value.values.firstOrNull { it.latitude != 0.0 && it.longitude != 0.0 }
+
+            if (targetEmp != null) {
+                binding.adminMapView.controller.animateTo(GeoPoint(targetEmp.latitude, targetEmp.longitude))
+                binding.adminMapView.controller.setZoom(17.0)
+                val targetEmpName = sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == targetEmp.employeeId.toString() }?.name
+                    ?: signalR.ownerEmployees.value[targetEmp.employeeId]?.name
+                    ?: "Employee #${targetEmp.employeeId}"
+                Toast.makeText(this, "Focusing $targetEmpName 📍", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "No active employee location available 🛰️", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         binding.btnAdminMapFollow.setOnClickListener {
             isAdminAutoFocusEnabled = !isAdminAutoFocusEnabled
             adminFollowingEmployeeId = null
@@ -461,7 +509,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             isAdminAutoFocusEnabled = false
             adminFollowingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
-            fitAdminCompanyAndStaff(animated = true)
+            fitAdminCompanyAndSelectedOrAll(animated = true)
         }
 
         binding.btnAdminMapLayer.setOnClickListener {
@@ -521,6 +569,13 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         binding.btnAdminMapFullscreen.setOnClickListener {
             startActivity(Intent(this, TrackingMapActivity::class.java))
         }
+
+        binding.btnAdminRailClose.setOnClickListener {
+            binding.cardAdminSelectedEmployeeRail.visibility = View.GONE
+            adminSelectedEmployeeId = null
+            adminFollowingEmployeeId = null
+            stopAdminSelectedRailAutoScroll()
+        }
     }
 
     private fun setupAdminSelectedEmployeeRail() {
@@ -569,6 +624,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         withinCurrentRadius: Boolean,
         status: String
     ) {
+        adminSelectedEmployeeId = loc.employeeId
         val employee = sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == loc.employeeId.toString() }
         binding.cardAdminSelectedEmployeeRail.visibility = View.VISIBLE
         binding.tvAdminRailEmployee.text = employeeName

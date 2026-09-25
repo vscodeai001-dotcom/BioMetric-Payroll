@@ -99,9 +99,13 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
             }
 
             // 2. Bottom Safe Area (Taskbar / Navigation buttons / Gestures)
-            val baseBottomPadding = (v.getTag(R.id.bottom_inset_base_padding) as? Int)
-                ?: v.paddingBottom.also { v.setTag(R.id.bottom_inset_base_padding, it) }
-            v.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
+            val bottomTarget = scrollContainer ?: v
+            val baseBottomPadding = (bottomTarget.getTag(R.id.bottom_inset_base_padding) as? Int)
+                ?: bottomTarget.paddingBottom.also { bottomTarget.setTag(R.id.bottom_inset_base_padding, it) }
+            bottomTarget.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
+            if (scrollContainer != null && scrollContainer != v) {
+                v.updatePadding(bottom = 0)
+            }
             
             insets
         }

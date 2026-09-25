@@ -24,13 +24,14 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="?attr/colorSurface"
+        android:fitsSystemWindows="true"
         app:elevation="4dp">
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/toolbar"
             style="@style/Widget.App.Toolbar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:layout_scrollFlags="scroll|enterAlways"
+            android:layout_height="wrap_content"
+            android:minHeight="?attr/actionBarSize"
             app:titleCentered="false">
 
             <com.google.android.material.imageview.ShapeableImageView
@@ -354,12 +355,15 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="vertical">
+                            <!-- 1. Map Header -->
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:gravity="center_vertical"
                                 android:orientation="horizontal"
-                                android:padding="16dp">
+                                android:paddingHorizontal="16dp"
+                                android:paddingTop="16dp"
+                                android:paddingBottom="8dp">
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
@@ -391,122 +395,7 @@
                                     app:icon="@drawable/ic_search" />
                             </LinearLayout>
 
-                            <!-- Selected employee horizontal information rail: intentionally between header and filters. -->
-                            <com.google.android.material.card.MaterialCardView
-                                android:id="@+id/cardAdminSelectedEmployeeRail"
-                                android:layout_width="match_parent"
-                                android:layout_height="68dp"
-                                android:layout_marginStart="16dp"
-                                android:layout_marginEnd="16dp"
-                                android:layout_marginBottom="8dp"
-                                android:visibility="gone"
-                                app:cardBackgroundColor="?attr/colorSurface"
-                                app:cardCornerRadius="14dp"
-                                app:cardElevation="3dp"
-                                app:strokeColor="?attr/colorOutlineVariant"
-                                app:strokeWidth="1dp">
-                                <HorizontalScrollView
-                                    android:id="@+id/adminSelectedEmployeeRailScroll"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="match_parent"
-                                    android:fillViewport="false"
-                                    android:overScrollMode="never"
-                                    android:scrollbars="none">
-                                    <LinearLayout
-                                        android:id="@+id/adminSelectedEmployeeRail"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="match_parent"
-                                        android:gravity="center_vertical"
-                                        android:orientation="horizontal"
-                                        android:paddingHorizontal="8dp">
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="175dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="EMPLOYEE" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp" android:textStyle="bold" android:letterSpacing="0.08"/>
-                                                <TextView android:id="@+id/tvAdminRailEmployee" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:ellipsize="end" android:maxLines="1" android:text="Employee" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailEmployeeMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="#0 · Staff" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="265dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CURRENT LOCATION" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold" android:letterSpacing="0.08"/>
-                                                <TextView android:id="@+id/tvAdminRailLocation" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:ellipsize="end" android:maxLines="1" android:text="GPS location" android:textColor="?attr/colorOnSurface" android:textSize="10sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailLocationMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="Lat / Long" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="120dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SPEED" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="0 km/h" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailMovement" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Stopped" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="125dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="GPS ACCURACY" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailAccuracy" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Precision" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="145dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SHOP DISTANCE" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailDistance" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailRadius" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Radius" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                        <com.google.android.material.card.MaterialCardView
-                                            android:layout_width="125dp"
-                                            android:layout_height="54dp"
-                                            android:layout_marginEnd="7dp"
-                                            app:cardBackgroundColor="?attr/colorSurfaceVariant"
-                                            app:cardCornerRadius="10dp"
-                                            app:strokeColor="?attr/colorOutlineVariant"
-                                            app:strokeWidth="1dp">
-                                            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
-                                                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="LAST UPDATED" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailUpdated" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--:--:--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
-                                                <TextView android:id="@+id/tvAdminRailStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Live" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
-                                            </LinearLayout>
-                                        </com.google.android.material.card.MaterialCardView>
-                                    </LinearLayout>
-                                </HorizontalScrollView>
-                            </com.google.android.material.card.MaterialCardView>
-
+                            <!-- 2. Staff Status Filter Chips -->
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
@@ -553,188 +442,383 @@
                                 </HorizontalScrollView>
                             </LinearLayout>
 
-                            <FrameLayout
-                                android:id="@+id/adminMapFrame"
+                            <!-- 3. TOP MAP CONTROLS STRIP (placed on TOP of the map outside viewport, matching web dashboard map) -->
+                            <HorizontalScrollView
+                                android:id="@+id/adminMapControlsScroll"
                                 android:layout_width="match_parent"
-                                android:layout_height="320dp"
-                                android:background="@android:color/transparent">
-
-                                <org.osmdroid.views.MapView
-                                    android:id="@+id/adminMapView"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="match_parent" />
-
-                                <HorizontalScrollView
-                                    android:id="@+id/adminMapControls"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_gravity="top|start"
-                                    android:scrollbars="none"
-                                    android:overScrollMode="never"
-                                    android:fillViewport="false"
-                                    android:padding="0dp"
-                                    android:layout_margin="8dp"
-                                    android:background="@drawable/bg_premium_card"
-                                    android:elevation="8dp"
-                                    android:visibility="visible">
-
-                                    <LinearLayout
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:orientation="horizontal"
-                                        android:gravity="center_vertical"
-                                        android:padding="4dp">
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapFitAll"
-                                            style="@style/Widget.Material3.Button.TonalButton"
-                                            android:layout_width="wrap_content"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:paddingHorizontal="10dp"
-                                            android:text="⌖ All"
-                                            android:textSize="11sp"
-                                            android:textStyle="bold"
-                                            android:contentDescription="Fit all staff and company"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapOffice"
-                                            style="@style/Widget.Material3.Button.TonalButton"
-                                            android:layout_width="wrap_content"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:paddingHorizontal="10dp"
-                                            android:text="🏢 Office"
-                                            android:textSize="11sp"
-                                            android:textStyle="bold"
-                                            android:contentDescription="Focus office location"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapFollow"
-                                            style="@style/Widget.Material3.Button.OutlinedButton"
-                                            android:layout_width="wrap_content"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:paddingHorizontal="10dp"
-                                            android:text="⦿ Follow"
-                                            android:textSize="11sp"
-                                            android:contentDescription="Toggle auto-follow"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapZoomIn"
-                                            style="@style/Widget.Material3.Button.TonalButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="3dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="+"
-                                            android:textSize="16sp"
-                                            android:textStyle="bold"
-                                            android:contentDescription="Zoom In"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapZoomOut"
-                                            style="@style/Widget.Material3.Button.TonalButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="−"
-                                            android:textSize="16sp"
-                                            android:textStyle="bold"
-                                            android:contentDescription="Zoom Out"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapCompass"
-                                            style="@style/Widget.Material3.Button.OutlinedButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="🧭"
-                                            android:textSize="13sp"
-                                            android:contentDescription="Reset Orientation to North"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapZone"
-                                            style="@style/Widget.Material3.Button.OutlinedButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="◎"
-                                            android:textSize="14sp"
-                                            android:contentDescription="Toggle geofence zone"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapTrail"
-                                            style="@style/Widget.Material3.Button.OutlinedButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="↝"
-                                            android:textSize="14sp"
-                                            android:contentDescription="Toggle movement trails"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapLayer"
-                                            style="@style/Widget.Material3.Button.OutlinedButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:layout_marginEnd="4dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="▦"
-                                            android:textSize="14sp"
-                                            android:contentDescription="Change map layer"
-                                            app:cornerRadius="10dp" />
-
-                                        <com.google.android.material.button.MaterialButton
-                                            android:id="@+id/btnAdminMapFullscreen"
-                                            style="@style/Widget.Material3.Button.TonalButton"
-                                            android:layout_width="36dp"
-                                            android:layout_height="36dp"
-                                            android:minWidth="0dp"
-                                            android:padding="0dp"
-                                            android:text="⛶"
-                                            android:textSize="14sp"
-                                            android:contentDescription="Open full live map"
-                                            app:cornerRadius="10dp" />
-                                    </LinearLayout>
-                                </HorizontalScrollView>
+                                android:layout_height="wrap_content"
+                                android:scrollbars="none"
+                                android:overScrollMode="never"
+                                android:paddingHorizontal="16dp"
+                                android:paddingBottom="8dp">
 
                                 <LinearLayout
-                                    android:id="@+id/llAdminMapLoading"
+                                    android:id="@+id/adminMapControls"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:paddingVertical="2dp">
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapFitBoth"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="⌖ Both"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Focus Company and Selected Employee"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapEmp"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="👤 Emp"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Focus Selected Employee"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapOffice"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="🏢 Office"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Focus office location"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapFitAll"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="👥 All"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Fit all staff and company"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapFollow"
+                                        style="@style/Widget.Material3.Button.OutlinedButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="⦿ Follow"
+                                        android:textSize="11sp"
+                                        android:contentDescription="Toggle auto-follow"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapZoomIn"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="36dp"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="4dp"
+                                        android:minWidth="0dp"
+                                        android:padding="0dp"
+                                        android:text="+"
+                                        android:textSize="16sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Zoom In"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapZoomOut"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="36dp"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:padding="0dp"
+                                        android:text="−"
+                                        android:textSize="16sp"
+                                        android:textStyle="bold"
+                                        android:contentDescription="Zoom Out"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapCompass"
+                                        style="@style/Widget.Material3.Button.OutlinedButton"
+                                        android:layout_width="36dp"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:padding="0dp"
+                                        android:text="🧭"
+                                        android:textSize="14sp"
+                                        android:contentDescription="Reset Orientation to North"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapZone"
+                                        style="@style/Widget.Material3.Button.OutlinedButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="◎ Zone"
+                                        android:textSize="11sp"
+                                        android:contentDescription="Toggle geofence zone"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapTrail"
+                                        style="@style/Widget.Material3.Button.OutlinedButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="↝ Trail"
+                                        android:textSize="11sp"
+                                        android:contentDescription="Toggle movement trails"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapLayer"
+                                        style="@style/Widget.Material3.Button.OutlinedButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="▦ Layers"
+                                        android:textSize="11sp"
+                                        android:contentDescription="Change map layer"
+                                        app:cornerRadius="10dp" />
+
+                                    <com.google.android.material.button.MaterialButton
+                                        android:id="@+id/btnAdminMapFullscreen"
+                                        style="@style/Widget.Material3.Button.TonalButton"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="36dp"
+                                        android:minWidth="0dp"
+                                        android:paddingHorizontal="10dp"
+                                        android:text="⛶ Full"
+                                        android:textSize="11sp"
+                                        android:contentDescription="Open full live map"
+                                        app:cornerRadius="10dp" />
+                                </LinearLayout>
+                            </HorizontalScrollView>
+
+                            <!-- 4. CLEAN UNOBSTRUCTED MAP CONTAINER -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/adminMapCard"
+                                android:layout_width="match_parent"
+                                android:layout_height="280dp"
+                                android:layout_marginHorizontal="16dp"
+                                android:layout_marginBottom="10dp"
+                                app:cardCornerRadius="18dp"
+                                app:strokeWidth="1dp"
+                                app:strokeColor="#204F46E5">
+
+                                <FrameLayout
+                                    android:id="@+id/adminMapFrame"
                                     android:layout_width="match_parent"
                                     android:layout_height="match_parent"
-                                    android:background="@android:color/transparent"
-                                    android:gravity="center"
-                                    android:orientation="horizontal">
-                                    <com.google.android.material.progressindicator.CircularProgressIndicator
-                                        android:layout_width="wrap_content"
+                                    android:background="@android:color/transparent">
+
+                                    <org.osmdroid.views.MapView
+                                        android:id="@+id/adminMapView"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent" />
+
+                                    <LinearLayout
+                                        android:id="@+id/llAdminMapLoading"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="match_parent"
+                                        android:background="#80000000"
+                                        android:gravity="center"
+                                        android:orientation="horizontal"
+                                        android:visibility="gone">
+                                        <com.google.android.material.progressindicator.CircularProgressIndicator
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:indeterminate="true"
+                                            app:indicatorSize="24dp"
+                                            app:trackThickness="3dp" />
+                                    </LinearLayout>
+                                </FrameLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <!-- 5. BOTTOM EMPLOYEE DETAILS CARD (outside map viewport, matching web dashboard map) -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/cardAdminSelectedEmployeeRail"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginHorizontal="16dp"
+                                android:layout_marginBottom="12dp"
+                                android:visibility="gone"
+                                app:cardBackgroundColor="?attr/colorSurface"
+                                app:cardCornerRadius="16dp"
+                                app:cardElevation="3dp"
+                                app:strokeColor="?attr/colorOutlineVariant"
+                                app:strokeWidth="1dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="8dp">
+
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
                                         android:layout_height="wrap_content"
-                                        android:indeterminate="true"
-                                        app:indicatorSize="24dp"
-                                        app:trackThickness="3dp" />
+                                        android:gravity="center_vertical"
+                                        android:orientation="horizontal"
+                                        android:paddingHorizontal="4dp"
+                                        android:paddingBottom="4dp">
+
+                                        <TextView
+                                            android:layout_width="0dp"
+                                            android:layout_weight="1"
+                                            android:layout_height="wrap_content"
+                                            android:text="Employee Live Details 👤"
+                                            android:textSize="12sp"
+                                            android:textStyle="bold"
+                                            android:textColor="?attr/colorPrimary" />
+
+                                        <ImageButton
+                                            android:id="@+id/btnAdminRailClose"
+                                            android:layout_width="28dp"
+                                            android:layout_height="28dp"
+                                            android:background="?attr/selectableItemBackgroundBorderless"
+                                            android:src="@drawable/ic_cancel"
+                                            android:scaleType="centerInside"
+                                            android:contentDescription="Close details"
+                                            app:tint="?attr/colorOnSurfaceVariant" />
+                                    </LinearLayout>
+
+                                    <HorizontalScrollView
+                                        android:id="@+id/adminSelectedEmployeeRailScroll"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:fillViewport="false"
+                                        android:overScrollMode="never"
+                                        android:scrollbars="none">
+
+                                        <LinearLayout
+                                            android:id="@+id/adminSelectedEmployeeRail"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:gravity="center_vertical"
+                                            android:orientation="horizontal">
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="175dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="EMPLOYEE" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp" android:textStyle="bold" android:letterSpacing="0.08"/>
+                                                    <TextView android:id="@+id/tvAdminRailEmployee" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:ellipsize="end" android:maxLines="1" android:text="Employee" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailEmployeeMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="#0 · Staff" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="265dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CURRENT LOCATION" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold" android:letterSpacing="0.08"/>
+                                                    <TextView android:id="@+id/tvAdminRailLocation" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:ellipsize="end" android:maxLines="1" android:text="GPS location" android:textColor="?attr/colorOnSurface" android:textSize="10sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailLocationMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="Lat / Long" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="120dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SPEED" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="0 km/h" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailMovement" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Stopped" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="125dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="GPS ACCURACY" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailAccuracy" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Precision" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="145dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="SHOP DISTANCE" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailDistance" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailRadius" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Radius" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+
+                                            <com.google.android.material.card.MaterialCardView
+                                                android:layout_width="125dp"
+                                                android:layout_height="54dp"
+                                                android:layout_marginEnd="7dp"
+                                                app:cardBackgroundColor="?attr/colorSurfaceVariant"
+                                                app:cardCornerRadius="10dp"
+                                                app:strokeColor="?attr/colorOutlineVariant"
+                                                app:strokeWidth="1dp">
+                                                <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="7dp">
+                                                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="LAST UPDATED" android:textColor="?attr/colorPrimary" android:textSize="7sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailUpdated" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:text="--:--:--" android:textColor="?attr/colorOnSurface" android:textSize="11sp" android:textStyle="bold"/>
+                                                    <TextView android:id="@+id/tvAdminRailStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Live" android:textColor="?attr/colorOnSurfaceVariant" android:textSize="7sp"/>
+                                                </LinearLayout>
+                                            </com.google.android.material.card.MaterialCardView>
+                                        </LinearLayout>
+                                    </HorizontalScrollView>
                                 </LinearLayout>
-                            </FrameLayout>
+                            </com.google.android.material.card.MaterialCardView>
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
