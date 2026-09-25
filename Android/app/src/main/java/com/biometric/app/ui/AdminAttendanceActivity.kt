@@ -228,7 +228,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             val dateParsed = runCatching { isoDateFormat.parse(s.shiftDate) }.getOrNull()
             val formattedDate = if (dateParsed != null) shiftDateFormat.format(dateParsed) else s.shiftDate
 
-            // 1. Direct punches from attendance_punches (mobile, web, biometric sync)
+            // 1. Direct punches from attendance_punches (SSOT ledger matching Web)
             val directPunches = allPunches.filter { p ->
                 val idMatches = p.staffId == s.employeeId.toString() ||
                     p.staffId.toIntOrNull() == s.employeeId ||
@@ -240,27 +240,28 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 Pair(p.timestamp, p.type.ifBlank { "IN" })
             }
 
-            // 2. Attendance check-in / check-out pairs from attendance table
-            val attendancePunches = allAttendance.filter { a ->
-                val idMatches = a.employeeId == s.employeeId.toString() ||
-                    a.employeeId.toIntOrNull() == s.employeeId ||
-                    (emp != null && emp.biometricId.isNotBlank() && a.employeeId == emp.biometricId)
-                val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == s.shiftDate
-                idMatches && dateMatches
-            }.flatMap { a ->
-                val list = mutableListOf<Pair<Long, String>>()
-                if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
-                val outTime = a.checkOutTime ?: 0L
-                if (outTime > 0) list.add(Pair(outTime, "OUT"))
-                list
-            }
+            // 2. Only fall back to attendance session table if no direct punches exist
+            val resolvedPunches = if (directPunches.isNotEmpty()) {
+                directPunches
+            } else {
+                allAttendance.filter { a ->
+                    val idMatches = a.employeeId == s.employeeId.toString() ||
+                        a.employeeId.toIntOrNull() == s.employeeId ||
+                        (emp != null && emp.biometricId.isNotBlank() && a.employeeId == emp.biometricId)
+                    val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == s.shiftDate
+                    idMatches && dateMatches
+                }.flatMap { a ->
+                    val list = mutableListOf<Pair<Long, String>>()
+                    if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
+                    val outTime = a.checkOutTime ?: 0L
+                    if (outTime > 0) list.add(Pair(outTime, "OUT"))
+                    list
+                }
+            }.distinctBy { Pair(it.first / 60000, it.second) }
+             .sortedBy { it.first }
 
-            val mergedPunches = (directPunches + attendancePunches)
-                .distinctBy { Pair(it.first / 60000, it.second) } // deduplicate within same minute & type
-                .sortedBy { it.first }
-
-            val rawPunchesText = if (mergedPunches.isNotEmpty()) {
-                mergedPunches.joinToString("  •  ") { (timeMs, type) ->
+            val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
+                resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
                     val time = punchTimeFormat.format(Date(timeMs))
                     "$time $type"
                 }

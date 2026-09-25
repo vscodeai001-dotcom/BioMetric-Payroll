@@ -1438,7 +1438,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     // 3. Admin & Settings Section
                     menus.rowEmployeeRecords.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
                     menus.rowUserRoleMgmt.isVisible = isSuperAdmin
-                    menus.rowCompanySetup.isVisible = isSuperAdmin || s.adminCanEditSettings
+                    menus.rowCompanySetup.isVisible = false // Merged into Company Settings
                     menus.rowHolidayManagement.isVisible = isSuperAdmin || s.adminCanEditSettings
                     menus.rowCompanySettings.isVisible = isSuperAdmin || s.adminCanEditSettings
                     menus.rowRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
@@ -1641,7 +1641,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         menus.rowCompanySetup.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, CompanySetupActivity::class.java))
+            startActivity(Intent(this, CompanySettingsActivity::class.java))
         }
         menus.rowHolidayManagement.setOnClickListener {
             HapticUtil.vibrateClick(it)

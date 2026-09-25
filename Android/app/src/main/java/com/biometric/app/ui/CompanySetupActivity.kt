@@ -68,17 +68,11 @@ class CompanySetupActivity : MotionBaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityCompanySetupBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        applyWindowInsets(binding.clCompanySetupRoot, binding.appBar)
-
-        setupToolbar()
-        setupDropdowns()
-        setupModeSelectors()
-        setupListeners()
-        observeProfile()
-        loadInitialData()
+        val forwardIntent = Intent(this, CompanySettingsActivity::class.java).apply {
+            intent.extras?.let { putExtras(it) }
+        }
+        startActivity(forwardIntent)
+        finish()
     }
 
     private fun setupToolbar() {

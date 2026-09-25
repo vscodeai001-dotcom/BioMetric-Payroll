@@ -120,13 +120,14 @@
                                         android:alpha="0.8" />
                                 </LinearLayout>
 
-                                <!-- Center: Dropdown + Nav -->
+                                <!-- Center: Staff Navigation (Hidden from Main Card) -->
                                 <LinearLayout
                                     android:id="@+id/llStaffNavigation"
                                     android:layout_width="0dp"
                                     android:layout_height="wrap_content"
                                     android:orientation="horizontal"
                                     android:gravity="center_vertical"
+                                    android:visibility="gone"
                                     android:layout_marginHorizontal="8dp"
                                     app:layout_constraintStart_toEndOf="@id/llLabels"
                                     app:layout_constraintEnd_toStartOf="@id/llValues"

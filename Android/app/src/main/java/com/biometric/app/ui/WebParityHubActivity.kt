@@ -65,8 +65,7 @@ class WebParityHubActivity : MotionBaseActivity() {
 
             // ADMIN & SETTINGS
             Module("ADMIN & SETTINGS", "👥", "Employee Records", "Employees • CRUD • details") { Intent(this, StaffActivity::class.java) },
-            Module("ADMIN & SETTINGS", "🏢", "Company Setup", "Profile • admin credentials • geofence") { Intent(this, CompanySetupActivity::class.java) },
-            Module("ADMIN & SETTINGS", "⚙️", "Company Settings", "Rules • statutory tax • email • leave") { Intent(this, CompanySettingsActivity::class.java) },
+            Module("ADMIN & SETTINGS", "⚙️", "Company Settings", "Rules • admin credentials • statutory • email • leave") { Intent(this, CompanySettingsActivity::class.java) },
             Module("ADMIN & SETTINGS", "🏝️", "Holiday Management", "Shop closed days") { Intent(this, ShopClosedDaysActivity::class.java) },
             Module("ADMIN & SETTINGS", "⚙️", "Feature Settings", "Feature flags and permissions") { Intent(this, FeatureToggleManagerActivity::class.java) },
             Module("ADMIN & SETTINGS", "👤", "User & Role Management", "Admin • staff • permissions") { Intent(this, UserManagementActivity::class.java) },

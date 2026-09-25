@@ -655,6 +655,30 @@
             android:text="Eligible for Paid Leave"
             android:checked="true" />
 
+        <LinearLayout
+            android:id="@+id/llPaidLeaveSubOptions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginStart="24dp">
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbPaidLeaveWeekdays"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Weekdays"
+                android:checked="true" />
+
+            <com.google.android.material.checkbox.MaterialCheckBox
+                android:id="@+id/cbPaidLeaveWeekends"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="Weekends"
+                android:checked="false" />
+        </LinearLayout>
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnIndividualRules"
             style="@style/Widget.Material3.Button.TextButton"

@@ -159,12 +159,16 @@ class StaffDetailActivity : MotionBaseActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
-        binding.toolbar.setNavigationOnClickListener { finish() }
-        updateToolbarTitle(sharedViewModel.selectedShop.value?.name ?: "Shop")
+        val intentEmployeeName = intent.getStringExtra("EMPLOYEE_NAME")
+        if (!intentEmployeeName.isNullOrBlank()) {
+            updateToolbarTitle("$intentEmployeeName 👤", "Employee Insights 📊")
+        } else {
+            updateToolbarTitle("Employee Insights 📊", "Staff Performance & Payroll 🛡️")
+        }
     }
 
-    private fun updateToolbarTitle(shopName: String) {
-        setupDualHeader(binding.toolbar, "$shopName 🏪", "Staff Insights 📊")
+    private fun updateToolbarTitle(title: String, subtitle: String = "Employee Insights 📊") {
+        setupDualHeader(binding.toolbar, title, subtitle)
     }
 
     private fun setupUI() {
@@ -297,8 +301,7 @@ class StaffDetailActivity : MotionBaseActivity() {
     private fun updateStaffDropdown() {
         if (eligibleStaffInPeriod.isEmpty()) {
             binding.actvStaffName.setAdapter(null)
-            binding.actvStaffName.setText("No attendance records", false)
-            binding.actvStaffName.textSize = 11f
+            binding.actvStaffName.setText("", false)
             return
         }
 
@@ -443,11 +446,9 @@ class StaffDetailActivity : MotionBaseActivity() {
 
     private fun updateProfileHeader(emp: Employee) {
         binding.actvStaffName.setText(emp.name, false)
-        val shopName = sharedViewModel.selectedShop.value?.name ?: "Shop"
-        updateToolbarTitle(shopName)
-        
-        // Porting Informative Header from Web Details
-        // We can add logic to update extra fields if they are in the XML
+        val empTitle = if (emp.name.isNotBlank()) "${emp.name} 👤" else "Employee #${emp.employeeId} 👤"
+        val subtitle = if (emp.role.isNotBlank()) "${emp.role} • #${emp.employeeId} • Insights 📊" else "Employee Insights • #${emp.employeeId} 📊"
+        updateToolbarTitle(empTitle, subtitle)
     }
 
     private fun updateMetricsForRange(startTs: Long, endTs: Long) {

@@ -83,6 +83,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
     private fun setupTabs() {
         val tabs = listOf(
             "🏢 General & Rules",
+            "👑 Admin Credentials",
             "🏛️ Statutory (Tax)",
             "📧 Email Config",
             "🏖️ Leave Rules"
@@ -103,9 +104,10 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
     private fun switchTab(position: Int) {
         binding.containerGeneralTab.visibility = if (position == 0) View.VISIBLE else View.GONE
-        binding.containerStatutoryTab.visibility = if (position == 1) View.VISIBLE else View.GONE
-        binding.containerEmailTab.visibility = if (position == 2) View.VISIBLE else View.GONE
-        binding.containerLeaveTab.visibility = if (position == 3) View.VISIBLE else View.GONE
+        binding.containerAdminTab.visibility = if (position == 1) View.VISIBLE else View.GONE
+        binding.containerStatutoryTab.visibility = if (position == 2) View.VISIBLE else View.GONE
+        binding.containerEmailTab.visibility = if (position == 3) View.VISIBLE else View.GONE
+        binding.containerLeaveTab.visibility = if (position == 4) View.VISIBLE else View.GONE
     }
 
     private fun setupDropdowns() {
@@ -182,10 +184,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
             val config = trackingConfiguration.load()
             trackingIntervalSeconds = config.intervalSeconds
 
+            // Populate UI
             populateUi()
             binding.loadingOverlay.visibility = View.GONE
 
-            // Sync latest from Firebase if available
+            // Sync latest company and admin details from Firebase
             val owner = firebaseSync.getOwnerRef()
             if (owner != null) {
                 owner.child("company_settings").child("1").addListenerForSingleValueEvent(object : ValueEventListener {
@@ -195,6 +198,19 @@ class CompanySettingsActivity : MotionBaseActivity() {
                                 if (binding.etGenCompanyName.text.isNullOrBlank()) binding.etGenCompanyName.setText(it)
                             }
                         }
+                    }
+                    override fun onCancelled(error: DatabaseError) {}
+                })
+
+                // Load Admin Details from Owner root node
+                owner.addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val email = snapshot.child("adminEmail").getValue(String::class.java)
+                        val name = snapshot.child("adminName").getValue(String::class.java)
+                        val phone = snapshot.child("adminPhone").getValue(String::class.java)
+                        if (!email.isNullOrBlank()) binding.etAdminEmail.setText(email)
+                        if (!name.isNullOrBlank()) binding.etAdminName.setText(name)
+                        if (!phone.isNullOrBlank()) binding.etAdminPhone.setText(phone)
                     }
                     override fun onCancelled(error: DatabaseError) {}
                 })
@@ -231,7 +247,28 @@ class CompanySettingsActivity : MotionBaseActivity() {
         binding.etZktecoPort.setText(localCompany.zktecoPort.toString())
         binding.etZktecoMachineNo.setText(localCompany.zktecoMachineNumber.toString())
 
-        // Tab 2: Statutory
+        // Tab 2: Admin Credentials Pre-fill
+        val sessionEmail = sessionStore.userEmail()
+        val sessionName = sessionStore.employeeName()
+        if (sessionEmail.isNotBlank() && binding.etAdminEmail.text.isNullOrBlank()) {
+            binding.etAdminEmail.setText(sessionEmail)
+        }
+        if (sessionName.isNotBlank() && binding.etAdminName.text.isNullOrBlank()) {
+            binding.etAdminName.setText(sessionName)
+        }
+
+        val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+        if (binding.etAdminEmail.text.isNullOrBlank() && !fbUser?.email.isNullOrBlank()) {
+            binding.etAdminEmail.setText(fbUser?.email)
+        }
+        if (binding.etAdminName.text.isNullOrBlank() && !fbUser?.displayName.isNullOrBlank()) {
+            binding.etAdminName.setText(fbUser?.displayName)
+        }
+        if (binding.etAdminPhone.text.isNullOrBlank() && !fbUser?.phoneNumber.isNullOrBlank()) {
+            binding.etAdminPhone.setText(fbUser?.phoneNumber)
+        }
+
+        // Tab 3: Statutory
         binding.swPfEsiSystem.isChecked = localCompany.enablePfEsiSystem
         binding.layoutPfEsiFields.visibility = if (localCompany.enablePfEsiSystem) View.VISIBLE else View.GONE
         binding.etEsiWageLimit.setText(localCompany.esiWageLimit.toString())
@@ -244,7 +281,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         binding.swProfessionalTax.isChecked = localCompany.enableProfessionalTax
         binding.swShiftAllowance.isChecked = localCompany.enableShiftAllowance
 
-        // Tab 3: Email
+        // Tab 4: Email
         binding.swEmailNotifications.isChecked = localCompany.enableEmailNotifications
         binding.layoutEmailFields.visibility = if (localCompany.enableEmailNotifications) View.VISIBLE else View.GONE
         binding.etSmtpHost.setText(localCompany.smtpHost.orEmpty())
@@ -253,7 +290,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         binding.etSmtpUser.setText(localCompany.smtpUser.orEmpty())
         binding.etSmtpPass.setText(localCompany.smtpPass.orEmpty())
 
-        // Tab 4: Leave Rules
+        // Tab 5: Leave Rules
         binding.swLeaveAccrual.isChecked = localCompany.enableLeaveAccrual
         binding.etLeaveAccrualRate.setText(localCompany.leaveAccrualRate.toString())
         binding.swSandwichRule.isChecked = localCompany.enableSandwichRule
@@ -266,6 +303,27 @@ class CompanySettingsActivity : MotionBaseActivity() {
             binding.tabLayout.getTabAt(0)?.select()
             binding.etGenCompanyName.requestFocus()
             return
+        }
+
+        val adminEmail = binding.etAdminEmail.text?.toString()?.trim().orEmpty()
+        val adminName = binding.etAdminName.text?.toString()?.trim().orEmpty()
+        val adminPhone = binding.etAdminPhone.text?.toString()?.trim().orEmpty()
+        val adminPass = binding.etAdminPassword.text?.toString()?.trim().orEmpty()
+        val confirmPass = binding.etConfirmAdminPassword.text?.toString()?.trim().orEmpty()
+
+        if (adminPass.isNotBlank()) {
+            if (adminPass.length < 6) {
+                binding.etAdminPassword.error = "Password must be at least 6 characters"
+                binding.tabLayout.getTabAt(1)?.select()
+                binding.etAdminPassword.requestFocus()
+                return
+            }
+            if (adminPass != confirmPass) {
+                binding.etConfirmAdminPassword.error = "Passwords do not match"
+                binding.tabLayout.getTabAt(1)?.select()
+                binding.etConfirmAdminPassword.requestFocus()
+                return
+            }
         }
 
         binding.loadingOverlay.visibility = View.VISIBLE
@@ -361,6 +419,22 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "enableSandwichRule" to localCompany.enableSandwichRule
                         )
                         owner.child("company_settings").child("1").setValue(companyPayload).await()
+
+                        // Sync Admin Credentials to owner root node
+                        val adminUpdates = mutableMapOf<String, Any>()
+                        if (adminEmail.isNotBlank()) adminUpdates["adminEmail"] = adminEmail
+                        if (adminName.isNotBlank()) adminUpdates["adminName"] = adminName
+                        if (adminPhone.isNotBlank()) adminUpdates["adminPhone"] = adminPhone
+                        if (adminUpdates.isNotEmpty()) {
+                            owner.updateChildren(adminUpdates).await()
+                        }
+
+                        // Update Firebase Auth password if changed
+                        if (adminPass.isNotBlank()) {
+                            val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
+                            user?.updatePassword(adminPass)?.await()
+                        }
+
                         firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
                     }
                 }

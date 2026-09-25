@@ -204,6 +204,7 @@ class StaffViewModel @Inject constructor(
         allowance: Double, nightAllowance: Double,
         enableRotation: Boolean, rotGroup: String?, rotPattern: String?,
         bonusEligible: Boolean, plEligible: Boolean,
+        plWeekdays: Boolean = true, plWeekends: Boolean = false,
     ): Boolean {
         val sId = _shopId.value ?: run {
             Log.e("StaffViewModel", "Cannot add employee: No shop selected")
@@ -223,7 +224,8 @@ class StaffViewModel @Inject constructor(
                     uanNumber = uan, esiNumber = esiNum, enablePf = enablePf, enableEsi = enableEsi, tdsRatePercent = tdsRate,
                     dailyAllowance = allowance, nightShiftAllowance = nightAllowance,
                     enableShiftRotation = enableRotation, rotationGroup = rotGroup, shiftRotationPattern = rotPattern,
-                    isBonusEligibleRule = bonusEligible, isPaidLeaveEligibleRule = plEligible
+                    isBonusEligibleRule = bonusEligible, isPaidLeaveEligibleRule = plEligible,
+                    paidLeaveOnWeekdays = plWeekdays, paidLeaveOnWeekends = plWeekends
                 )
                 repository.insertEmployee(newEmployee)
 
@@ -261,6 +263,7 @@ class StaffViewModel @Inject constructor(
         allowance: Double, nightAllowance: Double,
         enableRotation: Boolean, rotGroup: String?, rotPattern: String?,
         bonusEligible: Boolean, plEligible: Boolean,
+        plWeekdays: Boolean = true, plWeekends: Boolean = false,
         effectiveDate: Long
     ) {
         viewModelScope.launch {
@@ -277,7 +280,8 @@ class StaffViewModel @Inject constructor(
                     uanNumber = uan, esiNumber = esiNum, enablePf = enablePf, enableEsi = enableEsi, tdsRatePercent = tdsRate,
                     dailyAllowance = allowance, nightShiftAllowance = nightAllowance,
                     enableShiftRotation = enableRotation, rotationGroup = rotGroup, shiftRotationPattern = rotPattern,
-                    isBonusEligibleRule = bonusEligible, isPaidLeaveEligibleRule = plEligible
+                    isBonusEligibleRule = bonusEligible, isPaidLeaveEligibleRule = plEligible,
+                    paidLeaveOnWeekdays = plWeekdays, paidLeaveOnWeekends = plWeekends
                 )
                 repository.updateEmployee(updated)
 

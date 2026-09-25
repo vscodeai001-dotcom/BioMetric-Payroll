@@ -108,6 +108,14 @@ class AddStaffDialogFragment : DialogFragment() {
             binding.etRotationGroup.isEnabled = isChecked
             binding.etRotationPattern.isEnabled = isChecked
         }
+        binding.cbPaidLeaveEligible.setOnCheckedChangeListener { _, isChecked ->
+            binding.cbPaidLeaveWeekdays.isEnabled = isChecked
+            binding.cbPaidLeaveWeekends.isEnabled = isChecked
+            if (!isChecked) {
+                binding.cbPaidLeaveWeekdays.isChecked = false
+                binding.cbPaidLeaveWeekends.isChecked = false
+            }
+        }
         binding.toggleSalaryType.addOnButtonCheckedListener { _, _, _ ->
             HapticUtil.vibrateClick(binding.root)
         }
@@ -251,6 +259,10 @@ class AddStaffDialogFragment : DialogFragment() {
 
                                 binding.cbBonusEligible.isChecked = it.isBonusEligibleRule
                                 binding.cbPaidLeaveEligible.isChecked = it.isPaidLeaveEligibleRule
+                                binding.cbPaidLeaveWeekdays.isChecked = it.paidLeaveOnWeekdays
+                                binding.cbPaidLeaveWeekends.isChecked = it.paidLeaveOnWeekends
+                                binding.cbPaidLeaveWeekdays.isEnabled = it.isPaidLeaveEligibleRule
+                                binding.cbPaidLeaveWeekends.isEnabled = it.isPaidLeaveEligibleRule
                                 salaryRulesOverride = it.salaryRulesOverride
                                 isDataInitialized = true
                             }
@@ -268,6 +280,10 @@ class AddStaffDialogFragment : DialogFragment() {
                             binding.etShiftEnd.setText(rules.defaultShiftEnd)
                             binding.cbBonusEligible.isChecked = rules.isBonusEligibleDefault
                             binding.cbPaidLeaveEligible.isChecked = rules.isPaidLeaveEligibleDefault
+                            binding.cbPaidLeaveWeekdays.isChecked = true
+                            binding.cbPaidLeaveWeekends.isChecked = false
+                            binding.cbPaidLeaveWeekdays.isEnabled = rules.isPaidLeaveEligibleDefault
+                            binding.cbPaidLeaveWeekends.isEnabled = rules.isPaidLeaveEligibleDefault
                         }
                     }
                 }
@@ -344,7 +360,8 @@ class AddStaffDialogFragment : DialogFragment() {
                         nightAllowance = binding.etNightAllowance.text.toString().toDoubleOrNull() ?: 0.0,
                         enableRotation = binding.cbEnableRotation.isChecked,
                         rotGroup = binding.etRotationGroup.text.toString(), rotPattern = binding.etRotationPattern.text.toString(),
-                        bonusEligible = binding.cbBonusEligible.isChecked, plEligible = binding.cbPaidLeaveEligible.isChecked
+                        bonusEligible = binding.cbBonusEligible.isChecked, plEligible = binding.cbPaidLeaveEligible.isChecked,
+                        plWeekdays = binding.cbPaidLeaveWeekdays.isChecked, plWeekends = binding.cbPaidLeaveWeekends.isChecked
                     )
                     if (!success) {
                         Toast.makeText(context, "Error: No workplace selected. Please select a shop first.", Toast.LENGTH_LONG).show()
@@ -372,6 +389,7 @@ class AddStaffDialogFragment : DialogFragment() {
                         enableRotation = binding.cbEnableRotation.isChecked,
                         rotGroup = binding.etRotationGroup.text.toString(), rotPattern = binding.etRotationPattern.text.toString(),
                         bonusEligible = binding.cbBonusEligible.isChecked, plEligible = binding.cbPaidLeaveEligible.isChecked,
+                        plWeekdays = binding.cbPaidLeaveWeekdays.isChecked, plWeekends = binding.cbPaidLeaveWeekends.isChecked,
                         effectiveDate = effectiveDate
                     )
                 }

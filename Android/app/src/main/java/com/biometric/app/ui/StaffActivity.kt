@@ -101,25 +101,33 @@ class StaffActivity : MotionBaseActivity() {
 
     private fun setupUI() {
         adapter = StaffAdapter(
-            onViewClick = { employee ->
+            onCardClick = { employee ->
+                // Card click opens Employee Insights
                 val intent = Intent(this, StaffDetailActivity::class.java).apply {
                     putExtra("EMPLOYEE_ID", employee.employeeId)
+                    putExtra("EMPLOYEE_NAME", employee.name)
                     putExtra("SHOP_ID", viewModel.shopId.value)
                 }
                 startActivity(intent)
             },
+            onViewClick = { employee ->
+                // View button opens full Employee Profile Details (matching Web)
+                EmployeeDetailsDialogFragment.newInstance(employee.employeeId)
+                    .show(supportFragmentManager, EmployeeDetailsDialogFragment.TAG)
+            },
             onEditClick = { employee ->
+                // Edit button opens comprehensive Employee Form (matching Web)
                 AddStaffDialogFragment.newInstance(employee.employeeId)
                     .show(supportFragmentManager, AddStaffDialogFragment.TAG)
             },
             onDeleteClick = { employee ->
                 MaterialAlertDialogBuilder(this)
                     .setTitle("🗑️ Delete Employee: ${employee.name}")
-                    .setMessage("Move ${employee.name} to Recycle Bin? Record will be hidden from directory but history is preserved for reporting.")
+                    .setMessage("Move ${employee.name} to Recycle Bin?\n\nRecord will be soft-deleted. Related records (Attendance, Advances, Payroll) are preserved for reporting.")
                     .setPositiveButton("Move to Recycle Bin") { _, _ ->
                         viewModel.deleteEmployee(employee)
                         HapticUtil.vibrateDeletion(binding.root)
-                        Toast.makeText(this, "${employee.name} moved to Recycle Bin", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, "'${employee.name}' moved to Recycle Bin. Related records preserved.", Toast.LENGTH_SHORT).show()
                     }
                     .setNegativeButton("Cancel", null)
                     .show()

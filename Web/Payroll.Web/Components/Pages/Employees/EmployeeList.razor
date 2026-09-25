@@ -222,6 +222,9 @@ else
                                 @* Actions *@
                                 <td class="text-center pe-3">
                                     <div class="d-inline-flex gap-1">
+                                        <a class="btn btn-sm btn-outline-success px-2 py-1" href="/employees/insights/@emp.EmployeeID" title="Employee Insights 📊">
+                                            <i class="bi bi-graph-up-arrow"></i>
+                                        </a>
                                         <button class="btn btn-sm btn-outline-info px-2 py-1" @onclick="() => GoToDetails(emp.EmployeeID)" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </button>

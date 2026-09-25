@@ -34,6 +34,9 @@ else
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h3>Details for @employee.Name</h3>
         <div>
+            <a class="btn btn-outline-info me-2" href="/employees/insights/@EmployeeId" title="Employee Insights">
+                <i class="bi bi-graph-up-arrow me-1"></i> Employee Insights 📊
+            </a>
             <button class="btn btn-primary me-2" @onclick="ShowEditEmployeeModal" title="Edit Profile">
                 <i class="bi bi-pencil-square me-2"></i> Edit Employee
             </button>

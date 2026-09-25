@@ -26,21 +26,23 @@
                 </span>
             </div>
 
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2 flex-shrink-0">
                 @if (allTenants.Count == 2)
                 {
                     var otherTenant = allTenants.FirstOrDefault(t => t.TenantId != activeTenant.TenantId) ?? allTenants.First();
-                    <button class="btn btn-sm btn-outline-light" type="button"
+                    <button class="btn btn-sm btn-outline-light rounded-pill px-2.5 py-1 text-nowrap d-inline-flex align-items-center gap-1 shadow-sm" type="button"
                             @onclick="() => SwitchTenant(otherTenant.TenantId)"
                             title="Switch directly to @otherTenant.CompanyName (@otherTenant.CompanyCode)">
-                        <i class="bi bi-arrow-left-right me-1"></i>Switch to @otherTenant.CompanyCode
+                        <i class="bi bi-arrow-left-right"></i>
+                        <span>Switch to @otherTenant.CompanyCode</span>
                     </button>
                 }
                 else if (allTenants.Count > 2)
                 {
                     <div class="dropdown">
-                        <button class="btn btn-sm btn-outline-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-arrow-left-right me-1"></i>Switch Company
+                        <button class="btn btn-sm btn-outline-light dropdown-toggle rounded-pill px-2.5 py-1 text-nowrap d-inline-flex align-items-center gap-1 shadow-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-arrow-left-right"></i>
+                            <span>Switch Company</span>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end shadow">
                             @foreach (var tenant in allTenants)

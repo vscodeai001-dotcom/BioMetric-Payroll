@@ -14,6 +14,7 @@ import java.util.Date
 import java.util.Locale
 
 class StaffAdapter(
+    private val onCardClick: (Employee) -> Unit,
     private val onViewClick: (Employee) -> Unit,
     private val onEditClick: (Employee) -> Unit,
     private val onDeleteClick: (Employee) -> Unit
@@ -90,10 +91,10 @@ class StaffAdapter(
             binding.tvTrackingMode.text = if (isShiftTracking) "🛰️ Shift Time Only" else "🛰️ 24/7 Tracking"
 
             // Click Actions
+            binding.root.setOnClickListener { onCardClick(employee) }
             binding.btnViewRecords.setOnClickListener { onViewClick(employee) }
             binding.btnEditStaff.setOnClickListener { onEditClick(employee) }
             binding.btnDeleteStaff.setOnClickListener { onDeleteClick(employee) }
-            binding.root.setOnClickListener { onViewClick(employee) }
         }
 
         private fun formatTimeAmPm(timeStr: String?): String {

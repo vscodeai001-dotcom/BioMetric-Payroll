@@ -1,4 +1,5 @@
 @page "/settings/company"
+@page "/company-setup"
 @using Microsoft.AspNetCore.Authorization
 @using global::Payroll.Web.Components.Pages.Settings
 @using global::Payroll.Shared.Data
@@ -65,6 +66,15 @@ else
             </button>
         </li>
 
+        @if (isSuperAdmin || !string.IsNullOrWhiteSpace(adminEmail))
+        {
+            <li class="nav-item">
+                <button class="nav-link rounded-pill @(activeTab == "admin" ? "active" : "")" @onclick="@(() => activeTab = "admin")">
+                    <span>👑 Admin Credentials</span>
+                </button>
+            </li>
+        }
+
         @if (isSuperAdmin || features?.EnableStatutoryCompliance == true || features?.EnableProfessionalTax == true)
         {
             <li class="nav-item">
@@ -97,6 +107,45 @@ else
 
             <div class="@(activeTab == "general" ? "" : "d-none")">
                 <GeneralTab Settings="settings" TrackingIntervalSeconds="trackingIntervalSeconds" TrackingIntervalSecondsChanged="OnTrackingIntervalChanged" />
+            </div>
+
+            <div class="@(activeTab == "admin" ? "" : "d-none")">
+                <h6 class="text-primary border-bottom pb-2 mb-3">👑 Administrator Credentials</h6>
+                <p class="text-muted small mb-3">SuperAdmin / Company Admin login details to manage staff, run payroll, and configure policies.</p>
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold small">Admin Email Address <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control rounded-3" placeholder="admin@company.com" @bind="adminEmail" />
+                        <div class="form-text small">Used for application sign-in</div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold small">Admin Full Name</label>
+                        <input type="text" class="form-control rounded-3" placeholder="e.g. Administrator" @bind="adminName" />
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold small">New Password (Leave blank to keep existing)</label>
+                        <input type="password" class="form-control rounded-3" placeholder="••••••••" @bind="adminPassword" />
+                        <div class="form-text small">Min 6 characters if changing</div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold small">Confirm New Password</label>
+                        <input type="password" class="form-control rounded-3" placeholder="••••••••" @bind="adminPasswordConfirm" />
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label fw-bold small">Admin Contact Phone</label>
+                        <input type="tel" class="form-control rounded-3" placeholder="+91 98765 43210" @bind="adminPhone" />
+                    </div>
+                    <div class="col-12">
+                        <div class="p-3 bg-light rounded-3 border">
+                            <div class="d-flex align-items-center gap-2 text-muted small">
+                                <i class="bi bi-shield-lock-fill text-primary fs-5"></i>
+                                <div>
+                                    <strong>Security Notice:</strong> The Admin account has root permissions to manage staff rosters, run payroll formulas, and adjust attendance policies.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="@(activeTab == "statutory" ? "" : "d-none")">
@@ -254,6 +303,13 @@ else
 
     private CompanyTenant? activeTenant;
 
+    // Administrator Credentials
+    private string adminEmail = "";
+    private string adminName = "";
+    private string adminPassword = "";
+    private string adminPasswordConfirm = "";
+    private string adminPhone = "";
+
     // Delete Company Security
     private bool isAuthorizedDeleteSuperAdmin = false;
     private string currentUserEmail = "";
@@ -275,6 +331,13 @@ else
         try
         {
             activeTenant = await TenantContext.GetActiveTenantAsync();
+            if (activeTenant != null)
+            {
+                adminEmail = activeTenant.AdminEmail;
+                adminName = activeTenant.AdminName;
+                adminPhone = activeTenant.AdminPhone;
+            }
+
             var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
             var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
 
@@ -415,6 +478,27 @@ else
             catch (Exception fbEx)
             {
                 _logger.LogWarning(fbEx, "Could not mirror company settings to Firebase for {OwnerUid}", firebaseOwnerUid);
+            }
+
+            // Update Administrator Credentials if provided
+            if (!string.IsNullOrWhiteSpace(adminEmail) && activeTenant != null)
+            {
+                if (!string.IsNullOrWhiteSpace(adminPassword) && adminPassword != adminPasswordConfirm)
+                {
+                    toastService.ShowError("Admin passwords do not match.");
+                    return;
+                }
+
+                activeTenant.AdminName = adminName;
+                activeTenant.AdminPhone = adminPhone;
+                var credsResult = await TenantManager.UpdateTenantProfileAndCredentialsAsync(
+                    activeTenant,
+                    adminEmail,
+                    string.IsNullOrWhiteSpace(adminPassword) ? null : adminPassword);
+                if (!credsResult.Success)
+                {
+                    toastService.ShowWarning($"Settings saved, but admin update: {credsResult.ErrorMessage}");
+                }
             }
 
             toastService.ShowSuccess("Settings saved successfully!");

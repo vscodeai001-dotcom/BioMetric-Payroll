@@ -61,58 +61,28 @@
                                     <span class="badge bg-primary text-white py-0.5 px-1.5 rounded-pill font-monospace small">@activeTenant.CompanyCode</span>
                                 </div>
 
-                                @* Smart Company Switcher *@
+                                @* Smart Company Switcher (Rich Icon Only) *@
                                 @if (allTenants.Count == 2)
                                 {
                                     @* Exactly 2 companies: 1-click instant direct toggle *@
                                     var otherTenant = allTenants.FirstOrDefault(t => t.TenantId != activeTenant.TenantId) ?? allTenants.First();
-                                    <button class="btn btn-sm btn-outline-primary rounded-pill px-2.5 py-1 d-inline-flex align-items-center gap-1 shadow-sm fw-semibold"
+                                    <button class="btn btn-sm btn-outline-primary rounded-circle p-0 d-inline-flex align-items-center justify-content-center shadow-sm flex-shrink-0"
+                                            style="width: 32px; height: 32px; min-width: 32px;"
                                             @onclick="() => SwitchTenantDirectly(otherTenant.TenantId)"
                                             title="Switch directly to @otherTenant.CompanyName (@otherTenant.CompanyCode)">
-                                        <i class="bi bi-arrow-left-right"></i>
-                                        <span class="d-none d-lg-inline">Switch to @otherTenant.CompanyCode</span>
+                                        <i class="bi bi-arrow-left-right fs-6"></i>
                                     </button>
                                 }
                                 else if (allTenants.Count > 2)
                                 {
-                                    @* More than 2 companies: Dropdown selection *@
-                                    <div class="dropdown">
-                                        <button class="btn btn-sm btn-outline-primary dropdown-toggle rounded-pill px-2.5 py-1 d-inline-flex align-items-center gap-1 shadow-sm fw-semibold"
-                                                type="button" data-bs-toggle="dropdown" aria-expanded="false"
-                                                title="Switch Company Workspace">
-                                            <i class="bi bi-arrow-left-right"></i>
-                                            <span class="d-none d-lg-inline">Switch</span>
-                                        </button>
-                                        <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 rounded-3 p-2" style="min-width: 250px;">
-                                            <li class="dropdown-header text-uppercase fw-bold small text-muted px-2 py-1">
-                                                🏢 Select Company Workspace
-                                            </li>
-                                            @foreach (var tenant in allTenants)
-                                            {
-                                                var isSelected = tenant.TenantId == activeTenant.TenantId;
-                                                <li>
-                                                    <button class="dropdown-item rounded-2 py-2 px-2.5 d-flex align-items-center justify-content-between @(isSelected ? "active fw-bold" : "")"
-                                                            @onclick="() => SwitchTenantDirectly(tenant.TenantId)">
-                                                        <div class="d-flex align-items-center gap-2 text-truncate">
-                                                            <span class="fs-5">@tenant.IconEmoji</span>
-                                                            <div class="text-truncate">
-                                                                <div class="text-truncate @(isSelected ? "text-white" : "")">@tenant.CompanyName</div>
-                                                                <small class="@(isSelected ? "text-white-50" : "text-muted")">@tenant.AdminEmail</small>
-                                                            </div>
-                                                        </div>
-                                                        <span class="badge @(isSelected ? "bg-light text-dark" : "bg-secondary-subtle text-secondary") ms-2">@tenant.CompanyCode</span>
-                                                    </button>
-                                                </li>
-                                            }
-                                            <li><hr class="dropdown-divider my-1"></li>
-                                            <li>
-                                                <a class="dropdown-item rounded-2 small text-primary fw-semibold d-flex align-items-center gap-2 py-1.5" href="/superadmin/tenants">
-                                                    <i class="bi bi-grid-fill"></i>
-                                                    <span>👑 All Companies Hub</span>
-                                                </a>
-                                            </li>
-                                        </ul>
-                                    </div>
+                                    @* More than 2 companies: Rich Icon Button opens modal dialog *@
+                                    <button class="btn btn-sm btn-outline-primary rounded-circle p-0 d-inline-flex align-items-center justify-content-center shadow-sm flex-shrink-0"
+                                            style="width: 32px; height: 32px; min-width: 32px;"
+                                            type="button"
+                                            @onclick="OpenCompanySwitcherModal"
+                                            title="Switch Company Workspace (@allTenants.Count available)">
+                                        <i class="bi bi-arrow-left-right fs-6"></i>
+                                    </button>
                                 }
                             </div>
                         }
@@ -196,6 +166,59 @@
         @* Central realtime invalidation fallback for pages that do not
            have a domain-specific AttendanceRefreshListener. *@
         <global::Payroll.Web.Components.UI.Attendance.ApplicationRealtimeRefreshListener />
+
+        @* --- COMPANY WORKSPACE SWITCHER MODAL DIALOG (>2 COMPANIES) --- *@
+        @if (showCompanySwitcherModal)
+        {
+            <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.65); z-index: 3100;" role="dialog">
+                <div class="modal-dialog modal-dialog-centered modal-sm" style="max-width: 440px;">
+                    <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+                        <div class="modal-header bg-primary text-white px-3 py-2.5">
+                            <h6 class="modal-title fw-bold d-flex align-items-center gap-2 mb-0">
+                                <span>🏢</span> Switch Company Workspace
+                            </h6>
+                            <button type="button" class="btn-close btn-close-white" @onclick="CloseCompanySwitcherModal"></button>
+                        </div>
+                        <div class="modal-body p-2" style="max-height: 60vh; overflow-y: auto;">
+                            <div class="list-group list-group-flush">
+                                @foreach (var tenant in allTenants)
+                                {
+                                    var isSelected = tenant.TenantId == activeTenant?.TenantId;
+                                    <button type="button" 
+                                            class="list-group-item list-group-item-action border-0 rounded-3 py-2.5 px-3 mb-1 d-flex align-items-center justify-content-between @(isSelected ? "bg-primary text-white shadow-sm" : "")"
+                                            @onclick="async () => { await SwitchTenantDirectly(tenant.TenantId); CloseCompanySwitcherModal(); }">
+                                        <div class="d-flex align-items-center gap-2.5 text-truncate me-2">
+                                            <span class="fs-4">@tenant.IconEmoji</span>
+                                            <div class="text-truncate text-start">
+                                                <div class="fw-bold text-truncate @(isSelected ? "text-white" : "text-dark")">@tenant.CompanyName</div>
+                                                <div class="small @(isSelected ? "text-white-50" : "text-muted") text-truncate">@tenant.AdminEmail</div>
+                                            </div>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-1.5 flex-shrink-0">
+                                            <span class="badge @(isSelected ? "bg-white text-primary" : "bg-primary-subtle text-primary") rounded-pill font-monospace small">
+                                                @tenant.CompanyCode
+                                            </span>
+                                            @if (isSelected)
+                                            {
+                                                <i class="bi bi-check-circle-fill text-white fs-5 ms-1"></i>
+                                            }
+                                        </div>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="modal-footer bg-light px-3 py-2 d-flex justify-content-between">
+                            <a href="/superadmin/tenants" class="btn btn-sm btn-link text-decoration-none text-primary fw-semibold p-0" @onclick="CloseCompanySwitcherModal">
+                                👑 Manage All Companies
+                            </a>
+                            <button type="button" class="btn btn-sm btn-secondary rounded-pill px-3" @onclick="CloseCompanySwitcherModal">
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
     </main>
 </div>
 
@@ -206,10 +229,14 @@
     private bool userIsSuperAdmin;
     private CompanyTenant? activeTenant;
     private List<CompanyTenant> allTenants = new();
+    private bool showCompanySwitcherModal = false;
     private bool geoTrackingEnabled;
     private int employeeId;
     private string? themeUserId;
     private string? persistedTheme;
+
+    private void OpenCompanySwitcherModal() => showCompanySwitcherModal = true;
+    private void CloseCompanySwitcherModal() => showCompanySwitcherModal = false;
 
     protected override async Task OnInitializedAsync()
     {
