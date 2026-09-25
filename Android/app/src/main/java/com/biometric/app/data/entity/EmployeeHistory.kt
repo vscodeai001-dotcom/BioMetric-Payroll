@@ -15,6 +15,7 @@ data class EmployeeHistory(
     var newValue: Double = 0.0,
     var shiftStart: String = "",
     var shiftEnd: String = "",
+    var shiftMode: String = "SINGLE_DAY",
     var breakHours: Double = 0.0,
     var shift2Start: String? = null,
     var shift2End: String? = null,

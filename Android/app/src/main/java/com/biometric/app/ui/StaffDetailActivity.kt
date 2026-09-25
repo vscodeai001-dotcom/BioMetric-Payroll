@@ -737,7 +737,8 @@ class StaffDetailActivity : MotionBaseActivity() {
                     var eDecimal = (eParts.getOrNull(0)?.toInt() ?: 0) + (eParts.getOrNull(1)?.toInt() ?: 0) / 60.0
                     if (eDecimal < sDecimal) eDecimal += 24.0
                     val duration = (eDecimal - sDecimal - breakHrs).coerceAtLeast(0.0)
-                    "Executive Shift: $start - $end (%.1f h) 🏢".format(duration)
+                    val modeLabel = if (item.shiftMode == "CONTINUOUS") "Continuous" else "Single Day"
+                    "Executive Shift: $start - $end (%.1f h) [$modeLabel] 🏢".format(duration)
                 }
             }
             "SALARY" -> {

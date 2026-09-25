@@ -46,7 +46,12 @@ class StaffViewModel @Inject constructor(
         flow.map { list ->
             list.filter { emp ->
                 val isActive = (emp.isActive || emp.terminateDate == null)
-                val matchesQuery = query.isBlank() || emp.name.contains(query, ignoreCase = true)
+                val matchesQuery = query.isBlank() ||
+                    emp.name.contains(query, ignoreCase = true) ||
+                    emp.biometricId.contains(query, ignoreCase = true) ||
+                    emp.role.contains(query, ignoreCase = true) ||
+                    emp.phone.contains(query, ignoreCase = true) ||
+                    emp.employeeId.contains(query, ignoreCase = true)
                 isActive && matchesQuery
             }
         }.onEach { _isStaffLoading.value = false }
@@ -189,6 +194,8 @@ class StaffViewModel @Inject constructor(
         salaryRate: Double, type: String, calcMethod: String,
         basic: Double = 0.0, hra: Double = 0.0, da: Double = 0.0,
         start: String, end: String, breakHours: Double,
+        shiftMode: String = "SINGLE_DAY",
+        trackingMode: String = "24/7",
         otRule: String, otFlatRate: Double, compOff: Int?,
         hireDate: Long, dob: Long?,
         loginId: String, password: String,
@@ -209,7 +216,7 @@ class StaffViewModel @Inject constructor(
                     employeeId = empId, shopId = sId, name = name, biometricId = bioId, role = role, email = email, phone = phone,
                     salaryType = type, salaryRate = salaryRate, salaryCalculationMethod = calcMethod,
                     basicSalaryComponent = basic, hraComponent = hra, daComponent = da,
-                    shiftStart = start, shiftEnd = end, breakHours = breakHours,
+                    shiftStart = start, shiftEnd = end, shiftMode = shiftMode, trackingMode = trackingMode, breakHours = breakHours,
                     otRule = otRule, otFlatRate = otFlatRate, compOffDayOfWeek = compOff,
                     hireDate = hireDate, dob = dob,
                     bankAccountNumber = bankAccount, bankIfscCode = bankIfsc, bankName = bankName,
@@ -228,7 +235,7 @@ class StaffViewModel @Inject constructor(
                 
                 repository.pushHistoryAtomic(EmployeeHistory(
                     employeeId = empId, type = "SALARY", salaryType = type, oldValue = 0.0, newValue = salaryRate,
-                    shiftStart = start, shiftEnd = end, breakHours = breakHours, changeDate = System.currentTimeMillis(),
+                    shiftStart = start, shiftEnd = end, shiftMode = shiftMode, breakHours = breakHours, changeDate = System.currentTimeMillis(),
                     effectiveDate = hireDate, changeReason = "Hired"
                 ))
                 sharedViewModel.triggerDashboardRefresh()
@@ -244,6 +251,8 @@ class StaffViewModel @Inject constructor(
         salaryRate: Double, type: String, calcMethod: String,
         basic: Double = 0.0, hra: Double = 0.0, da: Double = 0.0,
         start: String, end: String, breakHours: Double,
+        shiftMode: String = "SINGLE_DAY",
+        trackingMode: String = "24/7",
         otRule: String, otFlatRate: Double, compOff: Int?,
         hireDate: Long, dob: Long?, terminateDate: Long?,
         loginId: String, password: String,
@@ -261,7 +270,7 @@ class StaffViewModel @Inject constructor(
                     name = name, biometricId = bioId, role = role, email = email, phone = phone,
                     salaryType = type, salaryRate = salaryRate, salaryCalculationMethod = calcMethod,
                     basicSalaryComponent = basic, hraComponent = hra, daComponent = da,
-                    shiftStart = start, shiftEnd = end, breakHours = breakHours,
+                    shiftStart = start, shiftEnd = end, shiftMode = shiftMode, trackingMode = trackingMode, breakHours = breakHours,
                     otRule = otRule, otFlatRate = otFlatRate, compOffDayOfWeek = compOff,
                     hireDate = hireDate, dob = dob, terminateDate = terminateDate, isActive = terminateDate == null,
                     bankAccountNumber = bankAccount, bankIfscCode = bankIfsc, bankName = bankName,
@@ -302,23 +311,24 @@ class StaffViewModel @Inject constructor(
     private fun addHistoryRecord(
         employeeId: String, type: String, effectiveDate: Long, endDate: Long?, newValue: Double, oldValue: Double,
         changeReason: String, employee: Employee, salaryType: String? = null, shiftStart: String? = null,
-        shiftEnd: String? = null, breakHours: Double? = null
+        shiftEnd: String? = null, breakHours: Double? = null, shiftMode: String? = null
     ) {
         val record = EmployeeHistory(
             employeeId = employeeId, type = type, salaryType = salaryType ?: employee.salaryType,
             oldValue = oldValue, newValue = newValue, shiftStart = shiftStart ?: employee.shiftStart,
-            shiftEnd = shiftEnd ?: employee.shiftEnd, breakHours = breakHours ?: employee.breakHours,
+            shiftEnd = shiftEnd ?: employee.shiftEnd, shiftMode = shiftMode ?: employee.shiftMode,
+            breakHours = breakHours ?: employee.breakHours,
             changeDate = System.currentTimeMillis(), effectiveDate = effectiveDate, endDate = endDate, changeReason = changeReason
         )
         repository.pushHistoryAtomic(record)
     }
 
-    fun updateShiftTiming(employee: Employee, start: String, end: String, breakHours: Double, wStart: String?, wEnd: String?, wBreak: Double?, effectiveDate: Long, endDate: Long? = null, changeReason: String? = null, s2Start: String? = null, s2End: String? = null, ws2Start: String? = null, ws2End: String? = null) {
+    fun updateShiftTiming(employee: Employee, start: String, end: String, breakHours: Double, wStart: String?, wEnd: String?, wBreak: Double?, effectiveDate: Long, endDate: Long? = null, changeReason: String? = null, s2Start: String? = null, s2End: String? = null, ws2Start: String? = null, ws2End: String? = null, shiftMode: String? = null) {
         viewModelScope.launch {
             try {
-                val updatedEmployee = employee.copy(shiftStart = start, shiftEnd = end, breakHours = breakHours, shift2Start = s2Start, shift2End = s2End, weekendShiftStart = wStart, weekendShiftEnd = wEnd, weekendBreakHours = wBreak, weekendShift2Start = ws2Start, weekendShift2End = ws2End)
+                val updatedEmployee = employee.copy(shiftStart = start, shiftEnd = end, shiftMode = shiftMode ?: employee.shiftMode, breakHours = breakHours, shift2Start = s2Start, shift2End = s2End, weekendShiftStart = wStart, weekendShiftEnd = wEnd, weekendBreakHours = wBreak, weekendShift2Start = ws2Start, weekendShift2End = ws2End)
                 repository.updateEmployee(updatedEmployee)
-                addHistoryRecord(employee.employeeId, "SHIFT", effectiveDate, endDate, 0.0, 0.0, changeReason ?: "Shift Updated", updatedEmployee, shiftStart = start, shiftEnd = end, breakHours = breakHours)
+                addHistoryRecord(employee.employeeId, "SHIFT", effectiveDate, endDate, 0.0, 0.0, changeReason ?: "Shift Updated", updatedEmployee, shiftStart = start, shiftEnd = end, breakHours = breakHours, shiftMode = shiftMode ?: employee.shiftMode)
                 sharedViewModel.triggerDashboardRefresh()
             } catch (e: Exception) { Log.e("StaffViewModel", "Update shift failed", e) }
         }

@@ -1,0 +1,114 @@
+Summary of Completed Changes
+1. Elimination of Duplicate & Second-by-Second Route Playback Logs
+Web (
+GeoLocationService.cs
+):
+Suppressed duplicate burst coordinates arriving within 
+<
+5
+ seconds
+<5 seconds or in the same second.
+Enforced a 
+15
+m 
+/
+ 
+60
+s
+15m / 60s displacement deadband before inserting into SQLite EmployeeLocationHistory.
+Android (
+TrackingService.kt
+):
+Added lastHistoryLocation and lastHistoryRecordedTimeMs state trackers.
+In handleLocationUpdate, evaluated if a GPS fix qualifies as a route breadcrumb:
+Normal displacement: 
+≥
+60
+s
+≥60s elapsed AND moved 
+≥
+10
+m
+≥10m.
+Fast/Transit displacement: 
+≥
+30
+s
+≥30s elapsed AND moved 
+≥
+25
+m
+≥25m.
+Stationary heartbeat: 
+≥
+300
+s
+≥300s (
+5
+ minutes
+5 minutes) elapsed to maintain connectivity proof.
+Live updates remain real-time: Frequent live location pings continue updating the live marker (tracking/live/$employeeId), but only qualified fixes write to history (tracking/history/$employeeId/$clientEventId).
+Offline queue protection: When disconnected, Room only enqueues qualified route history points instead of flooding the local database with redundant stationary coordinates.
+2. Elimination of High Bandwidth & Firebase Spark Plan Protection
+Web (
+FirebaseRealtimeService.cs
+):
+Removed per-ping JSON GET downloads: Previously, PurgeOldTrackingHistoryAsync ran on every single incoming GPS ping, issuing an HTTP GET to download up to 2,000 JSON history points (
+≈
+200
+ MB/day per active employee
+≈200 MB/day per active employee). That loop has been eliminated.
+Set recordHistory = false on PublishLiveLocationAsync so that web updates to live markers do not bounce back and duplicate history breadcrumbs.
+Android (
+FirebaseSyncManager.kt
+):
+Added recordHistory: Boolean = true to pushLiveLocation. When false, the live marker is updated in place (
+≈
+120
+ bytes
+≈120 bytes), saving up to 
+95
+%
+95% of previous historical writes.
+3. Employee Tracking Type ("24/7 Tracking" vs "Shift Time Only")
+Web UI & Database:
+Added TrackingMode column to 
+Employee.cs
+ and auto-sync in 
+AppDbContext.cs
+.
+Added "Tracking Type 🛰️" dropdown to 
+EmployeeForm.razor
+ ("24/7 Tracking" vs "Shift Time Only").
+Exported trackingMode and shiftMode to Firebase in BuildFirebaseRow.
+Android UI & Entities:
+Added trackingMode: String = "24/7" to 
+Employee.kt
+ and 
+LocalEmployee.kt
+.
+Bumped Room version to 19 in 
+AppDatabase.kt
+.
+Added dropdown to 
+dialog_add_staff.xml
+, 
+StaffViewModel.kt
+, and 
+AddStaffDialogFragment.kt
+.
+Hydrated trackingMode in 
+FirebaseRoomHydrator.kt
+.
+Shift Window Enforcement (
+TrackingWindowResolver.kt
+ & 
+TrackingService.kt
+):
+When set to "Shift Time Only":
+During off-shift hours, TrackingService completely stops location hardware and schedules an AlarmManager.RTC_WAKEUP for the start time of the next shift (
+0
+0 battery and 
+0
+0 Firebase bandwidth).
+When the employee's tracking mode or shift changes, observeEmployeeChanges() immediately refreshes the tracking window in real time.

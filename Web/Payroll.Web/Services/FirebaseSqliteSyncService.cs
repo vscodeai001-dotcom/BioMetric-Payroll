@@ -74,7 +74,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 await SyncAllTablesAsync(tenantId, stoppingToken);
 
                 var ownerTask = RunOwnerStreamLoopAsync(tenantId, stoppingToken);
-                var trackingTask = RunGlobalStreamLoopAsync($"owners/{tenantId}/tracking", async (path, data, ct) =>
+                var trackingTask = RunGlobalStreamLoopAsync($"owners/{tenantId}/tracking/live", async (path, data, ct) =>
                     await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
 
                 activeTenants[tenantId] = (ownerTask, trackingTask);
@@ -284,9 +284,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             {
                 return true;
             }
+            if (ex is System.IO.IOException ioEx &&
+                (ioEx.Message.Contains("unexpected EOF", StringComparison.OrdinalIgnoreCase) ||
+                 ioEx.Message.Contains("0 bytes", StringComparison.OrdinalIgnoreCase) ||
+                 ioEx.Message.Contains("aborted", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
             if (ex.Message.Contains("10054") ||
                 ex.Message.Contains("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase))
+                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("unexpected EOF", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -348,6 +356,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                                 node.Clone(), ct);
                         index++;
                     }
+                }
+            }
+            else if (eventData.Value.ValueKind == JsonValueKind.Object &&
+                     !eventData.Value.TryGetProperty("sessions", out _) &&
+                     !eventData.Value.TryGetProperty("history", out _))
+            {
+                // Scoped tracking/live root payload: root keys are Employee IDs
+                foreach (var employeeNode in eventData.Value.EnumerateObject())
+                {
+                    if (employeeNode.Value.ValueKind == JsonValueKind.Object)
+                        await ProcessFirebaseLiveLocationAsync(
+                            $"/live/{employeeNode.Name}",
+                            employeeNode.Value.Clone(), ct);
                 }
             }
 
@@ -437,7 +458,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return;
         }
 
-        if (parts.Any(p => p.Equals("live", StringComparison.OrdinalIgnoreCase)))
+        if (parts.Any(p => p.Equals("live", StringComparison.OrdinalIgnoreCase)) ||
+            (parts.Length == 1 && int.TryParse(parts[0], out _)))
         {
             await ProcessFirebaseLiveLocationAsync(
                 relativePath ?? "/",
@@ -765,6 +787,21 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             within,
             captured);
 
+        if (accepted)
+        {
+            await geoLocationService.SaveLocationHistoryAsync(
+                employeeId,
+                sessionId,
+                latitude,
+                longitude,
+                distance,
+                radius,
+                within,
+                accuracy,
+                captured,
+                "Online");
+        }
+
         if (!accepted)
         {
             // SQL may already have ended this session while Firebase still
@@ -965,9 +1002,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // functional benefit — the SSE stream delivers all future deltas correctly.
         var skipOnBootstrap = new HashSet<string>(StringComparer.Ordinal)
         {
-            "AuditLog",         // audit_logs       — append-only, large
-            "AttendancePunch",  // attendance_punches — append-only, large
-            "GeoPunchAudit",    // geo_punch_audits  — append-only, large
+            "AuditLog",                 // audit_logs         — append-only, large
+            "AttendancePunch",          // attendance_punches — append-only, large
+            "GeoPunchAudit",            // geo_punch_audits   — append-only, large
+            "EmployeeLocationHistory",  // tracking/history   — append-only, large
         };
 
         foreach (var table in Tables)

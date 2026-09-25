@@ -197,7 +197,10 @@ else
                                     <div class="badge bg-light text-dark border rounded-pill px-2 small text-truncate d-inline-block" style="max-width:100%;">
                                         @(emp.ShiftStartTime?.ToString("hh:mm tt") ?? "--") – @(emp.ShiftEndTime?.ToString("hh:mm tt") ?? "--")
                                     </div>
-                                    <div class="text-muted" style="font-size:0.7rem;">☕ @emp.StandardBreakMinutes min break</div>
+                                    <div class="text-muted" style="font-size:0.7rem;">
+                                        ☕ @emp.StandardBreakMinutes min break
+                                        <span class="badge @(emp.ShiftMode == "CONTINUOUS" ? "bg-info text-white" : "bg-light text-secondary border") ms-1" style="font-size:0.65rem;">@(emp.ShiftMode == "CONTINUOUS" ? "Continuous" : "Single Day")</span>
+                                    </div>
                                 </td>
 
                                 @* Comp Off + OT *@

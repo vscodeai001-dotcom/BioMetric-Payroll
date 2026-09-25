@@ -253,6 +253,7 @@ class FirebaseSyncManager @Inject constructor(
                         ?: "Pro-Rata Hourly",
                     shiftStart = snapshot.child("shiftStart").value?.toString() ?: "10:00",
                     shiftEnd = snapshot.child("shiftEnd").value?.toString() ?: "22:00",
+                    shiftMode = snapshot.child("shiftMode").value?.toString() ?: "SINGLE_DAY",
                     breakHours = snapshot.child("breakHours").value.numberOrDouble(),
                     compOffDayOfWeek = snapshot.child("compOffDayOfWeek").value.intOrNull(),
                     otRule = snapshot.child("otRule").value?.toString() ?: "No Overtime",
@@ -743,7 +744,8 @@ class FirebaseSyncManager @Inject constructor(
         bearing: Double = 0.0,
         batteryLevel: Int,
         timestamp: Long,
-        isOffline: Boolean = false
+        isOffline: Boolean = false,
+        recordHistory: Boolean = true
     ): Boolean {
         if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank() || sequence <= 0L) return false
 
@@ -863,12 +865,14 @@ class FirebaseSyncManager @Inject constructor(
             if (!accepted) return false
 
             // Immutable history is written only after the live/session checks
-            // succeed. This prevents stale GPS from an old session from being
-            // stored as a new active stream.
-            getGlobalRef()
-                .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
-                .setValue(payload)
-                .await()
+            // succeed and only when recordHistory is true. This throttles stationary/burst
+            // points to preserve Firebase Spark plan bandwidth while keeping the live marker real-time.
+            if (recordHistory) {
+                getGlobalRef()
+                    .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
+                    .setValue(payload)
+                    .await()
+            }
 
             // Legacy compatibility stream receives only the newest accepted
             // point. It is never allowed to overwrite a newer owner-scoped

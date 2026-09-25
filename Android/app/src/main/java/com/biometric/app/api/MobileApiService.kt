@@ -429,6 +429,7 @@ data class AdminFeatureSettingsDto(
     @SerializedName("employeeToolsVisible") var employeeToolsVisible: Boolean = true,
     @SerializedName("showThemeToggle") var showThemeToggle: Boolean = true,
     @SerializedName("adminCanManageEmployeePermissions") var adminCanManageEmployeePermissions: Boolean = false,
+    @SerializedName("adminCanManageFeatureToggles") var adminCanManageFeatureToggles: Boolean = false,
     @SerializedName("enableProfessionalTax") var enableProfessionalTax: Boolean = false,
     @SerializedName("enableEmailNotifications") var enableEmailNotifications: Boolean = false,
     @SerializedName("enableLeaveAccrual") var enableLeaveAccrual: Boolean = true,

@@ -15,8 +15,11 @@ import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalDailySummaryDao
 import com.biometric.app.data.dao.LocalPayrollHistoryDao
+import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.entity.AuditLog
 import com.biometric.app.data.entity.Employee
+import com.biometric.app.data.entity.LocalDailySummary
+import com.biometric.app.data.entity.LocalFeatureSettings
 import com.biometric.app.data.entity.LocalPayrollHistory
 import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
 import com.biometric.app.ui.selfservice.PayslipListActivity
@@ -45,6 +48,7 @@ class AdminPayrollActivity : MotionBaseActivity() {
     @Inject lateinit var mainRepository: MainRepository
     @Inject lateinit var localDailySummaryDao: LocalDailySummaryDao
     @Inject lateinit var localPayrollHistoryDao: LocalPayrollHistoryDao
+    @Inject lateinit var localSettingsDao: LocalSettingsDao
     @Inject lateinit var financeRepository: FirebaseAdminFinanceRepository
     private lateinit var session: MobileSessionStore
 
@@ -181,6 +185,13 @@ class AdminPayrollActivity : MotionBaseActivity() {
         }
     }
 
+    private fun formatMinutesToHhMm(totalMinutes: Double): String {
+        val totalM = Math.round(totalMinutes).toLong()
+        val hours = totalM / 60
+        val mins = totalM % 60
+        return String.format(Locale.US, "%02d:%02d", hours, mins)
+    }
+
     private fun loadPreview() = lifecycleScope.launch {
         setBusy(true, "Calculating payroll preview… ⚡")
         isViewingHistory = false
@@ -192,12 +203,45 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
             // 1. Fetch active employees from SharedViewModel or Room or Firebase
             var employees = sharedViewModel.allEmployees.value.filter { it.isActive }
-            if (employees.isEmpty()) {
+            if (employees.isEmpty() || employees.all { it.salaryRate <= 0.0 }) {
                 employees = runCatching { mainRepository.allEmployeesFlow.first() }.getOrDefault(emptyList()).filter { it.isActive }
             }
-            if (employees.isEmpty()) {
+            if (employees.isEmpty() || employees.all { it.salaryRate <= 0.0 }) {
                 val snapshot = runCatching { firebaseSync.getOwnerRef()?.child("employees")?.get()?.await() }.getOrNull()
-                employees = snapshot?.children?.mapNotNull { it.getValue(Employee::class.java) }?.filter { it.isActive } ?: emptyList()
+                if (snapshot != null && snapshot.exists()) {
+                    val fbEmployees = snapshot.children.mapNotNull { child ->
+                        val empId = child.child("employeeId").value?.toString() ?: child.child("id").value?.toString() ?: child.key ?: ""
+                        val name = child.child("name").value?.toString() ?: ""
+                        val active = child.child("isActive").value?.toString()?.toBooleanStrictOrNull() ?: true
+                        if (!active || name.isBlank()) return@mapNotNull null
+
+                        val salaryRate = child.child("salaryRate").value?.toString()?.toDoubleOrNull()
+                            ?: child.child("monthlySalary").value?.toString()?.toDoubleOrNull()
+                            ?: child.child("salary").value?.toString()?.toDoubleOrNull()
+                            ?: 0.0
+
+                        Employee(
+                            employeeId = empId,
+                            name = name,
+                            salaryRate = salaryRate,
+                            role = child.child("role").value?.toString() ?: "Staff",
+                            isActive = true,
+                            salaryCalculationMethod = child.child("salaryCalculationMethod").value?.toString() ?: "Days in Month",
+                            standardHours = child.child("standardHours").value?.toString()?.toIntOrNull() ?: 8,
+                            otRule = child.child("otRule").value?.toString() ?: "No Overtime",
+                            otFlatRate = child.child("otFlatRate").value?.toString()?.toDoubleOrNull() ?: 0.0,
+                            otRateMultiplier = child.child("otRateMultiplier").value?.toString()?.toDoubleOrNull() ?: 1.0,
+                            basicSalaryComponent = child.child("basicSalaryComponent").value?.toString()?.toDoubleOrNull() ?: 0.0,
+                            compOffDayOfWeek = child.child("compOffDayOfWeek").value?.toString()?.toIntOrNull(),
+                            enablePf = child.child("enablePf").value?.toString()?.toBooleanStrictOrNull() ?: false,
+                            enableEsi = child.child("enableEsi").value?.toString()?.toBooleanStrictOrNull() ?: false,
+                            tdsRatePercent = child.child("tdsRatePercent").value?.toString()?.toDoubleOrNull() ?: 0.0
+                        )
+                    }
+                    if (fbEmployees.isNotEmpty()) {
+                        employees = fbEmployees
+                    }
+                }
             }
 
             if (employees.isEmpty()) {
@@ -208,55 +252,146 @@ class AdminPayrollActivity : MotionBaseActivity() {
             val monthStr = if (m < 10) "0$m" else "$m"
             val periodPrefix = "$y-$monthStr"
             val allSummaries = runCatching { localDailySummaryDao.getAllFlow().first() }.getOrDefault(emptyList())
-            val monthSummaries = allSummaries.filter { it.shiftDate.startsWith(periodPrefix) }
+            var monthSummaries = allSummaries.filter { it.shiftDate.startsWith(periodPrefix) }
 
-            // 3. Fetch unpaid advances and bonuses
+            if (monthSummaries.isEmpty()) {
+                val dsSnapshot = runCatching { firebaseSync.getOwnerRef()?.child("daily_summaries")?.get()?.await() }.getOrNull()
+                if (dsSnapshot != null && dsSnapshot.exists()) {
+                    val fbSummaries = dsSnapshot.children.mapNotNull { snap ->
+                        val shiftDate = snap.child("shiftDate").value?.toString() ?: snap.child("date").value?.toString() ?: ""
+                        if (!shiftDate.startsWith(periodPrefix)) return@mapNotNull null
+                        val eId = snap.child("employeeId").value?.toString()?.toIntOrNull()
+                            ?: snap.child("staffId").value?.toString()?.toIntOrNull() ?: 0
+                        val rawId = snap.child("summaryId").value?.toString()?.toIntOrNull()
+                            ?: snap.key?.toIntOrNull()
+                        val sId = rawId?.takeIf { it > 0 } ?: (eId.toString() + "_" + shiftDate).hashCode().let { if (it == 0) 1 else if (it < 0) Math.abs(it) else it }
+                        LocalDailySummary(
+                            summaryId = sId,
+                            employeeId = eId,
+                            shiftDate = shiftDate,
+                            status = snap.child("status").value?.toString() ?: "Absent",
+                            earnedStandardHours = snap.child("earnedStandardHours").value?.toString()?.toDoubleOrNull() ?: 0.0,
+                            totalOvertimeMs = snap.child("totalOvertimeMs").value?.toString()?.toLongOrNull() ?: 0L,
+                            totalPenaltyMs = snap.child("totalPenaltyMs").value?.toString()?.toLongOrNull() ?: 0L,
+                            totalLatenessMs = snap.child("totalLatenessMs").value?.toString()?.toLongOrNull() ?: 0L,
+                            totalBreakPenaltyMs = snap.child("totalBreakPenaltyMs").value?.toString()?.toLongOrNull() ?: 0L,
+                            scheduledShiftDurationMs = snap.child("scheduledShiftDurationMs").value?.toString()?.toLongOrNull() ?: 0L,
+                            shiftAllowanceEarned = snap.child("shiftAllowanceEarned").value?.toString()?.toDoubleOrNull() ?: 0.0,
+                            isManualOverride = snap.child("isManualOverride").value?.toString()?.toBooleanStrictOrNull() ?: false,
+                            syncState = 1
+                        )
+                    }
+                    if (fbSummaries.isNotEmpty()) {
+                        localDailySummaryDao.upsertAll(fbSummaries)
+                        monthSummaries = fbSummaries
+                    }
+                }
+            }
+
+            // 3. Fetch settings
+            val companySettings = runCatching { localSettingsDao.getCompanySettings() }.getOrNull()
+            val featureSettings = runCatching { localSettingsDao.getFeatureSettings() }.getOrNull() ?: LocalFeatureSettings()
+
+            // 4. Fetch unpaid advances and bonuses
             val unpaidAdvances = runCatching { financeRepository.advances(unpaidOnly = true) }.getOrDefault(emptyList())
             val allBonuses = runCatching { financeRepository.bonuses() }.getOrDefault(emptyList())
             val monthBonuses = allBonuses.filter { !it.paid && it.date.startsWith(periodPrefix) }
 
-            // 4. Calculate for each employee (1:1 with Web RunPayroll.razor & PayrollProcessorService)
+            // 5. Days in month and past days limit (matching Web PayrollProcessorService.cs)
+            val cal = Calendar.getInstance().apply { set(y, m - 1, 1) }
+            val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+            val todayCal = Calendar.getInstance()
+            val isCurrentPeriod = todayCal.get(Calendar.YEAR) == y && (todayCal.get(Calendar.MONTH) + 1) == m
+            val isPastPeriod = y < todayCal.get(Calendar.YEAR) || (y == todayCal.get(Calendar.YEAR) && m < todayCal.get(Calendar.MONTH) + 1)
+            val yesterdayDayOfMonth = when {
+                isPastPeriod -> daysInMonth
+                isCurrentPeriod -> (todayCal.get(Calendar.DAY_OF_MONTH) - 1).coerceAtLeast(0)
+                else -> 0
+            }
+
+            // 6. Calculate for each employee (1:1 with Web RunPayroll.razor & PayrollProcessorService)
             val generatedRows = mutableListOf<AdminPayrollRowDto>()
 
             for (emp in employees) {
                 val empIdInt = emp.employeeId.toIntOrNull() ?: 0
                 val empSummaries = monthSummaries.filter { it.employeeId == empIdInt }
 
-                val baseSalary = if (emp.salaryRate > 0) emp.salaryRate else if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else 15000.0
-                val dailyRate = baseSalary / 26.0
+                val baseSalary = if (emp.salaryRate > 0) emp.salaryRate else if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else 0.0
+                val calcMethod = emp.salaryCalculationMethod.takeIf { !it.isNullOrBlank() } ?: companySettings?.salaryCalculationMethod ?: "Days in Month"
                 val standardHrs = if (emp.standardHours > 0) emp.standardHours else 8
-                val hourlyRate = dailyRate / standardHrs
+
+                val dailyRate = when {
+                    calcMethod.contains("Fixed 30", ignoreCase = true) -> baseSalary / 30.0
+                    calcMethod.contains("Fixed 26", ignoreCase = true) -> baseSalary / 26.0
+                    else -> baseSalary / daysInMonth.toDouble()
+                }
+                val hourlyRate = if (standardHrs > 0) dailyRate / standardHrs.toDouble() else 0.0
 
                 var earnedHours = 0.0
                 var overtimeMinutes = 0.0
                 var penaltyMinutes = 0.0
                 var totalShiftAllowance = 0.0
                 var presentDays = 0.0
-                var leaveDays = 0
+                var leaveDays = 0.0
                 var absentDays = 0
 
-                if (empSummaries.isNotEmpty()) {
-                    for (ds in empSummaries) {
-                        earnedHours += ds.earnedStandardHours
-                        overtimeMinutes += (ds.totalOvertimeMs / 60000.0)
-                        penaltyMinutes += (ds.totalPenaltyMs / 60000.0)
-                        totalShiftAllowance += ds.shiftAllowanceEarned
+                for (d in 1..daysInMonth) {
+                    val dayStr = if (d < 10) "0$d" else "$d"
+                    val currentDateStr = "$y-$monthStr-$dayStr"
+
+                    val dayCal = Calendar.getInstance().apply { set(y, m - 1, d) }
+                    val csharpDayOfWeek = when (dayCal.get(Calendar.DAY_OF_WEEK)) {
+                        Calendar.SUNDAY -> 0
+                        Calendar.MONDAY -> 1
+                        Calendar.TUESDAY -> 2
+                        Calendar.WEDNESDAY -> 3
+                        Calendar.THURSDAY -> 4
+                        Calendar.FRIDAY -> 5
+                        Calendar.SATURDAY -> 6
+                        else -> 0
+                    }
+
+                    val summaryForDay = empSummaries.firstOrNull { it.shiftDate == currentDateStr }
+                    if (summaryForDay != null) {
+                        val status = summaryForDay.status
+                        if (status.equals("Weekly Off", ignoreCase = true)) {
+                            continue
+                        }
+
+                        earnedHours += summaryForDay.earnedStandardHours
+                        overtimeMinutes += (summaryForDay.totalOvertimeMs / 60000.0)
+                        penaltyMinutes += (summaryForDay.totalPenaltyMs / 60000.0)
+
+                        if (featureSettings.enableShiftAllowance && (companySettings?.enableShiftAllowance == true)) {
+                            totalShiftAllowance += summaryForDay.shiftAllowanceEarned
+                        }
 
                         when {
-                            ds.status.equals("Present", ignoreCase = true) -> presentDays += 1.0
-                            ds.status.equals("Half Day", ignoreCase = true) -> presentDays += 0.5
-                            ds.status.contains("Leave", ignoreCase = true) -> leaveDays += 1
-                            ds.status.contains("Absent", ignoreCase = true) || ds.status.contains("Loss of Pay", ignoreCase = true) -> absentDays += 1
+                            status.equals("Present", ignoreCase = true) -> presentDays += 1.0
+                            status.equals("Half Day", ignoreCase = true) -> presentDays += 0.5
+                            status.contains("Absent", ignoreCase = true) || status.startsWith("Loss of Pay", ignoreCase = true) -> absentDays++
+                            status.equals("Weekly Off", ignoreCase = true) || status.equals("Weekly Off (Worked)", ignoreCase = true) || status.equals("Not Employed", ignoreCase = true) -> {
+                                // Skip non-paid
+                            }
+                            else -> {
+                                // Leave days
+                                if (status.contains("(Half", ignoreCase = true) || status.contains("Half Day", ignoreCase = true)) {
+                                    leaveDays += 0.5
+                                } else {
+                                    leaveDays += 1.0
+                                }
+                            }
+                        }
+                    } else if (d <= yesterdayDayOfMonth) {
+                        val compOff = emp.compOffDayOfWeek ?: 0 // Sunday default
+                        if (csharpDayOfWeek != compOff) {
+                            absentDays++
                         }
                     }
-                } else {
-                    // Fallback for full active month when daily summaries not yet closed
-                    presentDays = 26.0
-                    earnedHours = 26.0 * standardHrs
                 }
 
                 // Earned Pay
-                val earnedPay = if (emp.salaryCalculationMethod.contains("Pro-Rata", ignoreCase = true)) {
+                val earnedPay = if (calcMethod.startsWith("Pro-Rata", ignoreCase = true)) {
                     earnedHours * hourlyRate
                 } else {
                     (presentDays + leaveDays) * dailyRate
@@ -264,13 +399,14 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
                 // Overtime pay
                 val otHours = overtimeMinutes / 60.0
-                val overtimePay = when (emp.otRule.trim().lowercase()) {
-                    "1.5x" -> otHours * hourlyRate * 1.5
-                    "2.0x" -> otHours * hourlyRate * 2.0
-                    "flat" -> otHours * (if (emp.otFlatRate > 0) emp.otFlatRate else hourlyRate)
-                    "no overtime" -> 0.0
-                    else -> otHours * hourlyRate
-                }
+                val overtimePay = if (overtimeMinutes > 0 && !emp.otRule.equals("No Overtime", ignoreCase = true)) {
+                    when (emp.otRule.trim().lowercase()) {
+                        "1.5x" -> otHours * (hourlyRate * 1.5)
+                        "2.0x" -> otHours * (hourlyRate * 2.0)
+                        "flat" -> otHours * (if (emp.otFlatRate > 0) emp.otFlatRate else hourlyRate)
+                        else -> otHours * (hourlyRate * (if (emp.otRateMultiplier > 0) emp.otRateMultiplier else 1.0))
+                    }
+                } else 0.0
 
                 // Penalty deduction
                 val penaltyHours = penaltyMinutes / 60.0
@@ -278,30 +414,36 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
                 // Advance deduction
                 val empAdvances = unpaidAdvances.filter { it.employeeId == empIdInt }
-                val advanceDeduction = empAdvances.sumOf { it.amount }
+                val advanceDeduction = if (featureSettings.enableSalaryAdvance) empAdvances.sumOf { it.amount } else 0.0
 
                 // Bonus
                 val empBonuses = monthBonuses.filter { it.employeeId == empIdInt }
-                val bonus = empBonuses.sumOf { it.amount }
+                val bonus = if (featureSettings.enableBonusManagement) empBonuses.sumOf { it.amount } else 0.0
+
+                // Gross
+                val gross = earnedPay + overtimePay + bonus + totalShiftAllowance
 
                 // Statutory (PF, ESI, PT, TDS)
                 val basicSalary = if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else (baseSalary * 0.5)
-                val isPfEnabled = emp.enablePf
+                val isPfEnabled = emp.enablePf && featureSettings.enableStatutoryCompliance
                 val pfDeduction = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
                 val employerPf = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
 
-                val gross = earnedPay + overtimePay + bonus + totalShiftAllowance
-                val isEsiEnabled = emp.enableEsi && (gross <= 21000.0)
+                val isEsiEnabled = emp.enableEsi && featureSettings.enableStatutoryCompliance && (gross <= 21000.0)
                 val esiDeduction = if (isEsiEnabled) (gross * 0.0075) else 0.0
                 val employerEsi = if (isEsiEnabled) (gross * 0.0325) else 0.0
 
-                val ptDeduction = when {
-                    gross > 15000.0 -> 200.0
-                    gross > 10000.0 -> 150.0
-                    else -> 0.0
-                }
+                val ptDeduction = if (featureSettings.enableProfessionalTax) {
+                    when {
+                        gross > 15000.0 -> 200.0
+                        gross > 10000.0 -> 150.0
+                        else -> 0.0
+                    }
+                } else 0.0
 
-                val tdsDeduction = if (emp.tdsRatePercent > 0) (gross * (emp.tdsRatePercent / 100.0)) else 0.0
+                val tdsDeduction = if (featureSettings.enableTdsDeduction && emp.tdsRatePercent > 0) {
+                    (gross * (emp.tdsRatePercent / 100.0))
+                } else 0.0
 
                 val totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceDeduction + penaltyDeduction
                 val netPayable = (gross - totalDeductions).coerceAtLeast(0.0)
@@ -331,7 +473,7 @@ class AdminPayrollActivity : MotionBaseActivity() {
                         isPfEnabled = isPfEnabled,
                         isEsiEnabled = isEsiEnabled,
                         netPayable = netPayable,
-                        leaveDays = leaveDays,
+                        leaveDays = Math.round(leaveDays).toInt(),
                         absentDays = absentDays
                     )
                 )
@@ -389,26 +531,24 @@ class AdminPayrollActivity : MotionBaseActivity() {
             val card = inflater.inflate(R.layout.item_admin_payroll_row, llRows, false)
 
             card.findViewById<TextView>(R.id.tvEmployeeName).text = row.employeeName ?: "Staff #${row.employeeID}"
-            card.findViewById<TextView>(R.id.tvEmployeeId).text = "EMP #${row.employeeID} • Base: ${currency.format(row.baseSalary ?: (row.hourlyRate * 160))}"
+            card.findViewById<TextView>(R.id.tvEmployeeId).text = "EMP #${row.employeeID} • Base: ${currency.format(row.baseSalary ?: 0.0)} • Hourly: ${currency.format(row.hourlyRate)}"
             card.findViewById<TextView>(R.id.tvNetPay).text = currency.format(net)
             card.findViewById<TextView>(R.id.tvRowStatusBadge).text = "PREVIEW"
 
             card.findViewById<TextView>(R.id.tvEarnedPay).text = currency.format(row.earnedPay)
-            card.findViewById<TextView>(R.id.tvHoursWorked).text = "⏱️ ${"%.1f".format(Locale.US, row.earnedStandardHours)}h"
+            card.findViewById<TextView>(R.id.tvHoursWorked).text = "⏱️ ${formatMinutesToHhMm(row.earnedStandardHours * 60.0)}"
 
-            val otHours = row.overtimeMinutes / 60.0
             val tvOvertime = card.findViewById<TextView>(R.id.tvOvertimePay)
-            if (row.overtimePay > 0) {
-                tvOvertime.text = "+${currency.format(row.overtimePay)} (${"%.1f".format(Locale.US, otHours)}h)"
+            if (row.overtimePay > 0 || row.overtimeMinutes > 0) {
+                tvOvertime.text = "+${currency.format(row.overtimePay)} (${formatMinutesToHhMm(row.overtimeMinutes)})"
                 tvOvertime.isVisible = true
             } else {
                 tvOvertime.text = "+₹0 OT"
             }
 
-            val penHours = row.penaltyMinutes / 60.0
             val tvPen = card.findViewById<TextView>(R.id.tvPenaltyDed)
-            if (row.penaltyDeduction > 0) {
-                tvPen.text = "-${currency.format(row.penaltyDeduction)} (${"%.1f".format(Locale.US, penHours)}h)"
+            if (row.penaltyDeduction > 0 || row.penaltyMinutes > 0) {
+                tvPen.text = "-${currency.format(row.penaltyDeduction)} (${formatMinutesToHhMm(row.penaltyMinutes)})"
                 tvPen.isVisible = true
             } else {
                 tvPen.text = "-₹0 Ded"
@@ -556,7 +696,7 @@ class AdminPayrollActivity : MotionBaseActivity() {
             val card = inflater.inflate(R.layout.item_admin_payroll_row, llRows, false)
 
             card.findViewById<TextView>(R.id.tvEmployeeName).text = row.employeeName ?: "Staff #${row.employeeID}"
-            card.findViewById<TextView>(R.id.tvEmployeeId).text = "EMP #${row.employeeID} • Base: ${currency.format(row.baseSalary ?: 0.0)}"
+            card.findViewById<TextView>(R.id.tvEmployeeId).text = "EMP #${row.employeeID} • Base: ${currency.format(row.baseSalary ?: 0.0)} • Hourly: ${currency.format(row.hourlyRate)}"
             card.findViewById<TextView>(R.id.tvNetPay).text = currency.format(net)
 
             val badge = card.findViewById<TextView>(R.id.tvRowStatusBadge)
@@ -565,15 +705,13 @@ class AdminPayrollActivity : MotionBaseActivity() {
             badge.setTextColor(getColor(R.color.white))
 
             card.findViewById<TextView>(R.id.tvEarnedPay).text = currency.format(row.baseSalary ?: 0.0)
-            card.findViewById<TextView>(R.id.tvHoursWorked).text = "⏱️ ${"%.1f".format(Locale.US, row.totalHoursWorked)}h"
+            card.findViewById<TextView>(R.id.tvHoursWorked).text = "⏱️ ${formatMinutesToHhMm(row.totalHoursWorked * 60.0)}"
 
-            val otHours = row.totalOvertimeMinutes / 60.0
             val tvOvertime = card.findViewById<TextView>(R.id.tvOvertimePay)
-            tvOvertime.text = if (otHours > 0) "+${"%.1f".format(Locale.US, otHours)}h OT" else "+0h OT"
+            tvOvertime.text = if (row.totalOvertimeMinutes > 0) "+${formatMinutesToHhMm(row.totalOvertimeMinutes)} OT" else "+0h OT"
 
-            val penHours = row.totalPenaltyMinutes / 60.0
             val tvPen = card.findViewById<TextView>(R.id.tvPenaltyDed)
-            tvPen.text = if (penHours > 0) "-${"%.1f".format(Locale.US, penHours)}h Ded" else "-0h Ded"
+            tvPen.text = if (row.totalPenaltyMinutes > 0) "-${formatMinutesToHhMm(row.totalPenaltyMinutes)} Ded" else "-0h Ded"
 
             card.findViewById<TextView>(R.id.tvLeavesAbsent).text = "M: ${row.manualLeaveDays} • A: ${row.absentDays}"
             card.findViewById<TextView>(R.id.tvGrossPay).text = "Gross: ${currency.format(gross)}"

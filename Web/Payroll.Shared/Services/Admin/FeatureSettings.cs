@@ -124,6 +124,9 @@ namespace Payroll.Shared.Data
         [Column("admin_can_manage_employee_permissions")]
         public bool AdminCanManageEmployeePermissions { get; set; } = false; // Default to false
 
+        [Column("admin_can_manage_feature_toggles")]
+        public bool AdminCanManageFeatureToggles { get; set; } = false; // Default to false
+
         [Column("enable_professional_tax")]
         public bool EnableProfessionalTax { get; set; } = false;
 

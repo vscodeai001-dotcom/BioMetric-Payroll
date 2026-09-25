@@ -1432,6 +1432,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     menus.rowPunchCorrection.isVisible = isSuperAdmin || s.enablePunchCorrection
                     menus.rowPunchApprovals.isVisible = isSuperAdmin || (s.enablePunchCorrection && s.adminCanManagePunchApprovals)
                     menus.rowRegularizationApproval.isVisible = isSuperAdmin || s.enableRegularizationRequest
+                    menus.rowOfflineTracking.isVisible = isSuperAdmin || s.enableGeoFencing
+                    menus.rowLocationHistory.isVisible = isSuperAdmin || s.enableGeoFencing
 
                     // 3. Admin & Settings Section
                     menus.rowEmployeeRecords.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
@@ -1442,7 +1444,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     menus.rowRecycleBin.isVisible = isSuperAdmin && s.enableRecycleBin
                     menus.rowAuditLogs.isVisible = isSuperAdmin || s.enableAuditLog
                     menus.rowAttendanceEventMonitoring.isVisible = isSuperAdmin || s.enableAuditLog
-                    menus.rowFeatureToggles.isVisible = isSuperAdmin || s.adminCanManageEmployeePermissions
+                    menus.rowFeatureToggles.isVisible = isSuperAdmin || s.adminCanManageFeatureToggles || s.adminCanManageEmployeePermissions
 
                     // 4. Employee Tools (SA View)
                     if (isSuperAdmin) {
@@ -1639,7 +1641,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         menus.rowCompanySetup.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, CompanySetupActivity::class.java))
         }
         menus.rowHolidayManagement.setOnClickListener {
             HapticUtil.vibrateClick(it)
@@ -1647,7 +1649,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         }
         menus.rowCompanySettings.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, CompanySettingsActivity::class.java))
         }
         menus.rowRecycleBin.setOnClickListener {
             HapticUtil.vibrateClick(it)

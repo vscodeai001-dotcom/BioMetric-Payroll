@@ -40,12 +40,15 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.lifecycleScope
+import androidx.core.view.isVisible
 import com.biometric.app.R
 import com.biometric.app.api.EmployeeDashboardResponse
 import com.biometric.app.api.OsrmApiService
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.MainRepository
+import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.entity.AttendancePunch
+import com.biometric.app.data.entity.LocalFeatureSettings
 import com.biometric.app.data.repository.FirebaseEmployeeSelfServiceRepository
 import com.biometric.app.domain.attendance.EmployeeAttendanceStateMachine
 import com.biometric.app.domain.attendance.AttendancePolicyRepository
@@ -108,6 +111,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
+    @Inject lateinit var localSettingsDao: LocalSettingsDao
 
     private var officeMarker: Marker? = null
     private var userMarker: Marker? = null
@@ -245,6 +249,26 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             selfService.changesFlow().collectLatest {
                 if (_binding != null) loadDashboard()
+            }
+        }
+
+        lifecycleScope.launch {
+            localSettingsDao.getFeatureSettingsFlow().collectLatest { settings ->
+                val s = settings ?: LocalFeatureSettings()
+                _binding?.let { b ->
+                    b.btnAttendance.isVisible = s.employeeCanViewAttendance
+                    b.btnViewAttendanceLogs.isVisible = s.employeeCanViewAttendance
+                    b.btnLeaves.isVisible = s.enableLeaveManagement && s.employeeCanViewLeave
+                    b.btnPayslips.isVisible = s.enablePayroll && s.employeeCanViewPayslip
+                    b.btnViewPayslips.isVisible = s.enablePayroll && s.employeeCanViewPayslip
+                    b.btnAdvances.isVisible = s.enableSalaryAdvance && s.employeeCanViewAdvance
+                    b.btnBonuses.isVisible = s.enableBonusManagement && s.employeeCanViewBonus
+                    b.btnCorrection.isVisible = s.enableRegularizationReq || s.enablePunchCorrection
+                    b.btnResignation.isVisible = s.enableResignationModule && s.employeeCanViewResignation
+                    b.btnShifts.isVisible = s.enableShiftScheduling && s.employeeCanViewShifts
+                    b.btnTax.isVisible = s.enableTaxDeclarations && s.employeeCanViewTax
+                    b.btnFbp.isVisible = s.enableFlexibleBenefits
+                }
             }
         }
         lifecycleScope.launch {

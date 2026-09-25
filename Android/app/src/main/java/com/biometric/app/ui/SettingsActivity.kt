@@ -134,7 +134,8 @@ class SettingsActivity : MotionBaseActivity() {
                     adminCanManageEmployees = dto.adminCanManageEmployees,
                     adminCanEditSettings = dto.adminCanEditSettings,
                     adminCanManageEmployeePermissions = dto.adminCanManageEmployeePermissions,
-                    adminCanManagePunchApprovals = dto.adminCanManagePunchApprovals
+                    adminCanManagePunchApprovals = dto.adminCanManagePunchApprovals,
+                    adminCanManageFeatureToggles = dto.adminCanManageFeatureToggles
                 )
                 renderFeatureSwitches()
             }

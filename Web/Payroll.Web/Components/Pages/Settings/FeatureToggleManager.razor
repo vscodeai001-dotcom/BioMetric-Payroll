@@ -24,8 +24,8 @@
         <h3 class="mb-0 text-primary fw-bold">Feature & Permission Manager</h3>
         <p class="text-muted small mb-0">Master control panel for system modules and role capabilities.</p>
     </div>
-    @* Only SuperAdmin can save all settings *@
-    @if (userIsSuperAdmin)
+    @* SuperAdmin or authorized Admin can save settings *@
+    @if (userIsSuperAdmin || settings?.AdminCanManageFeatureToggles == true || settings?.AdminCanManageEmployeePermissions == true)
     {
         <button class="btn btn-primary shadow-sm" @onclick="SaveAllSettings" disabled="@(isSaving || isLoading)">
             @if (isSaving)
@@ -60,13 +60,16 @@ else
 {
     @* --- TABS NAVIGATION --- *@
     <ul class="nav nav-tabs nav-tabs-bordered mb-0 border-bottom-0">
-        @if (userIsSuperAdmin)
+        @if (userIsSuperAdmin || settings.AdminCanManageFeatureToggles)
         {
             <li class="nav-item">
                 <button class="nav-link @(activeTab == "modules" ? "active fw-bold" : "")" @onclick="@(() => activeTab = "modules")">
                     <i class="bi bi-grid-fill me-2"></i> Core Modules
                 </button>
             </li>
+        }
+        @if (userIsSuperAdmin)
+        {
             <li class="nav-item">
                 <button class="nav-link @(activeTab == "admin" ? "active fw-bold" : "")" @onclick="@(() => activeTab = "admin")">
                     <i class="bi bi-person-lock me-2"></i> Admin Permissions
@@ -74,7 +77,7 @@ else
             </li>
         }
         
-        @if (userIsSuperAdmin || settings.AdminCanManageEmployeePermissions)
+        @if (userIsSuperAdmin || settings.AdminCanManageEmployeePermissions || settings.AdminCanManageFeatureToggles)
         {
             <li class="nav-item">
                 <button class="nav-link @(activeTab == "employee" ? "active fw-bold" : "")" @onclick="@(() => activeTab = "employee")">
@@ -98,9 +101,9 @@ else
         <div class="card-body p-4 bg-light-subtle">
 
             @* ====================================================================================== *@
-            @* TAB 1: CORE MODULES (SuperAdmin Only) *@
+            @* TAB 1: CORE MODULES *@
             @* ====================================================================================== *@
-            @if (userIsSuperAdmin)
+            @if (userIsSuperAdmin || settings.AdminCanManageFeatureToggles)
             {
                 <div class="@(activeTab == "modules" ? "" : "d-none")">
                     
@@ -426,19 +429,23 @@ else
                                     </div>
                                     <div class="form-check form-switch mb-2">
                                         <input class="form-check-input" type="checkbox" role="switch" @bind="settings.AdminCanManageEmployeePermissions" id="a8" />
-                                        <label class="form-check-label" for="a8">Manage Employee Perms</LAbel>
+                                        <label class="form-check-label" for="a8">Manage Employee Perms</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" role="switch" @bind="settings.AdminCanManageFeatureToggles" id="a_ft" />
+                                        <label class="form-check-label" for="a_ft">Manage Feature Toggles</label>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            
+            }
 
             @* ====================================================================================== *@
             @* TAB 3: EMPLOYEE PERMISSIONS *@
             @* ====================================================================================== *@
-            @if (userIsSuperAdmin || settings.AdminCanManageEmployeePermissions)
+            @if (userIsSuperAdmin || settings.AdminCanManageEmployeePermissions || settings.AdminCanManageFeatureToggles)
             {
                 <div class="@(activeTab == "employee" ? "" : "d-none")">
                     <h5 class="text-info mb-3 border-bottom pb-2">Employee Portal Permissions</h5>
@@ -816,15 +823,22 @@ else
         var authState = await AuthState.GetAuthenticationStateAsync();
         var user = authState.User;
         userIsSuperAdmin = user.IsInRole("SuperAdmin");
-
-        if (!userIsSuperAdmin)
-        {
-            activeTab = "employee";
-        }
         
         activeTenant = await TenantContext.GetActiveTenantAsync();
         authCheckCompleted = true;
         await LoadAllSettings();
+
+        if (!userIsSuperAdmin)
+        {
+            if (settings?.AdminCanManageFeatureToggles == true)
+            {
+                activeTab = "modules";
+            }
+            else
+            {
+                activeTab = "employee";
+            }
+        }
 
         if (userIsSuperAdmin)
         {
@@ -977,6 +991,21 @@ else
             await using var dbContext = await DbFactory.CreateDbContextAsync();
             var existing = await dbContext.FeatureSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Id == targetFeatureId);
             if (existing != null) dbContext.Entry(existing).State = EntityState.Detached;
+
+            if (!userIsSuperAdmin && existing != null)
+            {
+                // Preserve SuperAdmin-controlled administrator rights
+                settings.AdminCanViewDashboard = existing.AdminCanViewDashboard;
+                settings.AdminCanManageEmployees = existing.AdminCanManageEmployees;
+                settings.AdminCanViewAttendance = existing.AdminCanViewAttendance;
+                settings.AdminCanRunPayroll = existing.AdminCanRunPayroll;
+                settings.AdminCanEditSettings = existing.AdminCanEditSettings;
+                settings.AdminCanManageShifts = existing.AdminCanManageShifts;
+                settings.AdminCanManagePunchApprovals = existing.AdminCanManagePunchApprovals;
+                settings.AdminCanViewReports = existing.AdminCanViewReports;
+                settings.AdminCanManageEmployeePermissions = existing.AdminCanManageEmployeePermissions;
+                settings.AdminCanManageFeatureToggles = existing.AdminCanManageFeatureToggles;
+            }
 
             dbContext.FeatureSettings.Update(settings);
             await dbContext.SaveChangesAsync();

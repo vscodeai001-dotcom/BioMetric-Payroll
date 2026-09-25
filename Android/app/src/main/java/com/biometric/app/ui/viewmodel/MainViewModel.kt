@@ -167,7 +167,8 @@ class MainViewModel @Inject constructor(
                     adminCanManageEmployees = it.adminCanManageEmployees,
                     adminCanEditSettings = it.adminCanEditSettings,
                     adminCanManageEmployeePermissions = it.adminCanManageEmployeePermissions,
-                    adminCanManagePunchApprovals = it.adminCanManagePunchApprovals
+                    adminCanManagePunchApprovals = it.adminCanManagePunchApprovals,
+                    adminCanManageFeatureToggles = it.adminCanManageFeatureToggles
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)

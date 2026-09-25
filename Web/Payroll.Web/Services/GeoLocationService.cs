@@ -575,10 +575,19 @@ public class GeoLocationService
                 var safeAccuracy = NormalizeAccuracy(accuracyMeters);
                 var safeDistance = NormalizeDistance(distanceMeters);
                 var now = DateTime.UtcNow;
-                var previousLocationState = session.LastIsWithinAllowedRadius;
+
+                var captureTimeIndia = TimeZoneInfo.ConvertTimeFromUtc(captureTime, IndiaTimeZone);
+                var sessionLastIndia = session.LastUpdateAtUtc != DateTime.MinValue
+                    ? TimeZoneInfo.ConvertTimeFromUtc(session.LastUpdateAtUtc, IndiaTimeZone)
+                    : (DateTime?)null;
+
+                // Day boundary check: if the previous GPS update was on an earlier calendar date (in India Time),
+                // treat previousLocationState as null so that the new day evaluates initial entrance fresh.
+                var isNewCalendarDay = sessionLastIndia == null || captureTimeIndia.Date > sessionLastIndia.Value.Date;
+                var effectivePreviousLocationState = isNewCalendarDay ? (bool?)null : session.LastIsWithinAllowedRadius;
 
                 var stableLocationState = ResolveStableGeofenceState(
-                    previousLocationState,
+                    effectivePreviousLocationState,
                     safeDistance,
                     allowedRadiusMeters + 1); // UX: 1m buffer for map stability
 
@@ -607,7 +616,7 @@ public class GeoLocationService
                             safeAccuracy,
                             safeDistance,
                             allowedRadiusMeters,
-                            previousLocationState,
+                            effectivePreviousLocationState,
                             stableLocationState.Value,
                             captureTime); // MIRROR: Use original capture time for offline sync reconciliation
 
@@ -897,7 +906,45 @@ public class GeoLocationService
                 .ThenBy(x => x.LogID)
                 .ToListAsync();
 
-            var attendanceCurrentlyOpen = todaysPunches.Count % 2 != 0;
+            var emp = await db.Employees.AsNoTracking().FirstOrDefaultAsync(e => e.EmployeeID == employeeId);
+            var isContinuous = string.Equals(emp?.ShiftMode, "CONTINUOUS", StringComparison.OrdinalIgnoreCase) ||
+                               (emp?.ShiftStartTime.HasValue == true && emp?.ShiftEndTime.HasValue == true && emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value);
+
+            bool attendanceCurrentlyOpen = false;
+
+            if (isContinuous)
+            {
+                // In continuous shift mode (or overnight shift), check the most recent punch within the last 24 hours
+                var windowStart = punchTime.AddHours(-24);
+                var recentPunches = await db.AttendanceLogs
+                    .AsNoTracking()
+                    .Where(x => x.EmployeeID == employeeId &&
+                                x.PunchTime >= windowStart &&
+                                x.PunchTime <= punchTime &&
+                                (x.LogType == "IN" || x.LogType == "OUT"))
+                    .OrderByDescending(x => x.PunchTime)
+                    .ThenByDescending(x => x.LogID)
+                    .Take(1)
+                    .ToListAsync();
+
+                if (recentPunches.Count > 0)
+                {
+                    attendanceCurrentlyOpen = string.Equals(recentPunches[0].LogType, "IN", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            else
+            {
+                // Standard Single Day Shift mode: check punches belonging to today's business day
+                var validPunches = todaysPunches
+                    .Where(p => string.Equals(p.LogType, "IN", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(p.LogType, "OUT", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (validPunches.Count > 0)
+                {
+                    attendanceCurrentlyOpen = string.Equals(validPunches.Last().LogType, "IN", StringComparison.OrdinalIgnoreCase);
+                }
+            }
             var punchType = currentLocationState ? "IN" : "OUT";
 
             // Initial OUT is only a state initialization, never an OUT punch.
@@ -1724,21 +1771,28 @@ public class GeoLocationService
             if (originalCaptureUtc > serverRecordedAtUtc.AddMinutes(5))
                 originalCaptureUtc = serverRecordedAtUtc;
 
-            // Firebase SSE sends the current history snapshot again after a
-            // reconnect. Android keeps the same capture timestamp/coordinates
-            // for a retried ClientEventId, so make the Web projection idempotent
-            // without changing the existing database schema.
-            var duplicate = await db.EmployeeLocationHistory
+            // Smart Route Playback De-duplication:
+            // 1. Prevent sub-second / burst duplicate entries (less than 5 seconds apart).
+            // 2. Suppress stationary GPS jitter (< 15 meters movement) unless 60 seconds have elapsed.
+            var lastPoint = await db.EmployeeLocationHistory
                 .AsNoTracking()
-                .AnyAsync(x =>
-                    x.EmployeeId == employeeId &&
-                    x.SessionId == sessionId &&
-                    x.CapturedAtUtc == originalCaptureUtc &&
-                    x.Latitude == latitude &&
-                    x.Longitude == longitude);
+                .Where(x => x.EmployeeId == employeeId && x.SessionId == sessionId)
+                .OrderByDescending(x => x.CapturedAtUtc)
+                .FirstOrDefaultAsync();
 
-            if (duplicate)
-                return;
+            if (lastPoint != null)
+            {
+                var timeDiffSeconds = Math.Abs((originalCaptureUtc - lastPoint.CapturedAtUtc).TotalSeconds);
+
+                // Burst duplicate suppression (same second or within 5s)
+                if (timeDiffSeconds < 5.0)
+                    return;
+
+                // Stationary deadband: suppress micro-jitter within 15 meters unless 60s passed
+                var distanceMoved = CalculateDistance(lastPoint.Latitude, lastPoint.Longitude, latitude, longitude);
+                if (distanceMoved < 15.0 && timeDiffSeconds < 60.0)
+                    return;
+            }
 
             var record = new EmployeeLocationHistory
             {

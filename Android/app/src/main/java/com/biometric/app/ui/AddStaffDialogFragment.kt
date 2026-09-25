@@ -129,6 +129,14 @@ class AddStaffDialogFragment : DialogFragment() {
         val otRules = arrayOf("No Overtime", "1.0x", "1.5x", "2.0x", "Flat")
         val otAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, otRules)
         binding.etOtRule.setAdapter(otAdapter)
+
+        val shiftModes = arrayOf("Single Day (Standard)", "Continuous (Overnight/Cross-Day)")
+        val shiftModeAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, shiftModes)
+        binding.etShiftMode.setAdapter(shiftModeAdapter)
+
+        val trackingModes = arrayOf("24/7 Tracking", "Shift Time Only")
+        val trackingModeAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, trackingModes)
+        binding.etTrackingMode.setAdapter(trackingModeAdapter)
     }
 
     private var autoFocusJob: Job? = null
@@ -184,6 +192,8 @@ class AddStaffDialogFragment : DialogFragment() {
                                 
                                 binding.etShiftStart.setText(it.shiftStart)
                                 binding.etShiftEnd.setText(it.shiftEnd)
+                                binding.etShiftMode.setText(if (it.shiftMode == "CONTINUOUS") "Continuous (Overnight/Cross-Day)" else "Single Day (Standard)", false)
+                                binding.etTrackingMode.setText(if (it.trackingMode == "SHIFT" || it.trackingMode == "SHIFT_TIME") "Shift Time Only" else "24/7 Tracking", false)
                                 binding.etBreakMinutes.setText(((it.breakHours * 60).toInt()).toString())
 
                                 val compOffText = when(it.compOffDayOfWeek) {
@@ -309,6 +319,9 @@ class AddStaffDialogFragment : DialogFragment() {
                 else -> null
             }
 
+            val shiftMode = if (binding.etShiftMode.text.toString().startsWith("Continuous", ignoreCase = true)) "CONTINUOUS" else "SINGLE_DAY"
+            val trackingMode = if (binding.etTrackingMode.text.toString().startsWith("Shift", ignoreCase = true)) "SHIFT" else "24/7"
+
             try {
                 if (employeeId == null) {
                     val success = viewModel.addEmployeeDetailed(
@@ -318,6 +331,8 @@ class AddStaffDialogFragment : DialogFragment() {
                         hra = binding.etHraComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         da = binding.etDaComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         start = start, end = end, breakHours = breakMins / 60.0,
+                        shiftMode = shiftMode,
+                        trackingMode = trackingMode,
                         otRule = otRule, otFlatRate = otFlatRate, compOff = compOffVal,
                         hireDate = hireDate, dob = dob,
                         loginId = loginId, password = password,
@@ -343,6 +358,8 @@ class AddStaffDialogFragment : DialogFragment() {
                         hra = binding.etHraComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         da = binding.etDaComponent.text.toString().toDoubleOrNull() ?: 0.0,
                         start = start, end = end, breakHours = breakMins / 60.0,
+                        shiftMode = shiftMode,
+                        trackingMode = trackingMode,
                         otRule = otRule, otFlatRate = otFlatRate, compOff = compOffVal,
                         hireDate = hireDate, dob = dob, terminateDate = terminateDate,
                         loginId = loginId, password = password,

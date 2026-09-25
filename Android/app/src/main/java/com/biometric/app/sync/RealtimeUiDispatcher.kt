@@ -33,6 +33,8 @@ class RealtimeUiDispatcher @Inject constructor() {
         "EmployeePunchActivity" to listOf("loadStatus"),
         "OfflineTrackingActivity" to listOf("refreshOnce"),
         "PunchCorrectionApprovalActivity" to listOf("load"),
+        "CompanySetupActivity" to listOf("loadInitialData"),
+        "CompanySettingsActivity" to listOf("loadInitialData"),
         "SettingsActivity" to listOf("loadSettings"),
         "ShopClosedDaysActivity" to listOf("refreshData"),
         "StaffActivity" to listOf("refreshRealtime"), // Updated for safe real-time sync

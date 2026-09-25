@@ -443,13 +443,16 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "feature_settings", "firebase_plan_mode", "TEXT DEFAULT 'Spark'", ct);
             await EnsureColumnExistsAsync(connection, "feature_settings", "is_offline_mode", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnExistsAsync(connection, "feature_settings", "deployment_mode", "TEXT DEFAULT 'Online'", ct);
+            await EnsureColumnExistsAsync(connection, "feature_settings", "admin_can_manage_feature_toggles", "INTEGER NOT NULL DEFAULT 0", ct);
 
             // 2. Ensure newly added columns on CompanyTenants
             await EnsureColumnExistsAsync(connection, "CompanyTenants", "is_offline_mode", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnExistsAsync(connection, "CompanyTenants", "deployment_mode", "TEXT DEFAULT 'Online'", ct);
 
-            // 3. Ensure tenant_id on employees
+            // 3. Ensure tenant_id, shift_mode, and tracking_mode on employees
             await EnsureColumnExistsAsync(connection, "employees", "tenant_id", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "employees", "shift_mode", "TEXT DEFAULT 'SINGLE_DAY'", ct);
+            await EnsureColumnExistsAsync(connection, "employees", "tracking_mode", "TEXT DEFAULT '24/7'", ct);
         }
         catch { }
     }

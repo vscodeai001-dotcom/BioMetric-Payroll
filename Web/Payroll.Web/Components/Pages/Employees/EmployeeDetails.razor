@@ -66,6 +66,7 @@ else
                         </div>
                         <div class="col-6">
                             <strong>Shift:</strong> @(employee.ShiftStartTime?.ToString("hh:mm tt") ?? "-") to @(employee.ShiftEndTime?.ToString("hh:mm tt") ?? "-")
+                            <span class="badge @(employee.ShiftMode == "CONTINUOUS" ? "bg-info" : "bg-secondary") ms-1">@(employee.ShiftMode == "CONTINUOUS" ? "Continuous" : "Single Day")</span>
                         </div>
                         
                         <div class="col-12"><hr class="my-1" /></div>

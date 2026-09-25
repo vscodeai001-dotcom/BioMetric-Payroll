@@ -65,6 +65,14 @@ namespace Payroll.Shared.Data
         [Column("shiftendtime")]
         public TimeOnly? ShiftEndTime { get; set; }
 
+        [Column("shift_mode")]
+        [StringLength(30)]
+        public string ShiftMode { get; set; } = "SINGLE_DAY"; // "SINGLE_DAY" or "CONTINUOUS"
+
+        [Column("tracking_mode")]
+        [StringLength(30)]
+        public string TrackingMode { get; set; } = "24/7"; // "24/7" or "SHIFT"
+
         [Column("HireDate")]
         public DateOnly? HireDate { get; set; }
 

@@ -17,6 +17,8 @@ data class Employee(
     var salaryCalculationMethod: String = "Pro-Rata Hourly",
     var shiftStart: String = "10:00",
     var shiftEnd: String = "22:00",
+    var shiftMode: String = "SINGLE_DAY",
+    var trackingMode: String = "24/7",
     var breakHours: Double = 0.0,
     var shift2Start: String? = null,
     var shift2End: String? = null,

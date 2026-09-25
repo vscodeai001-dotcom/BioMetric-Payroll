@@ -13,6 +13,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
+import com.biometric.app.api.AdminFeatureSettingsDto
+import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.AppDatabase
 import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.entity.LocalFeatureSettings
@@ -70,6 +72,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var appDatabase: AppDatabase
+    @Inject lateinit var apiService: MobileApiService
 
     private val gson = Gson()
     private var currentSettings = LocalFeatureSettings()
@@ -78,6 +81,9 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     private var activeTenantId = "biometricpayroll"
     private var activeCompanyCode = "PRIMARY"
     private var isUserSuperAdmin = false
+
+    private data class TabEntry(val title: String, val index: Int)
+    private val activeTabs = mutableListOf<TabEntry>()
 
     private val backupsList = mutableListOf<LocalBackupMetadata>()
     private lateinit var backupAdapter: BackupAdapter
@@ -90,13 +96,12 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
         applyWindowInsets(binding.clFeatureToggleRoot, binding.appBar)
 
         val role = sessionStore.userRole().trim().uppercase()
-        isUserSuperAdmin = role in setOf("SUPERADMIN", "SUPER_ADMIN", "ADMIN")
+        isUserSuperAdmin = role in setOf("SUPERADMIN", "SUPER_ADMIN")
 
         activeTenantId = sessionStore.firebaseOwnerUid() ?: "biometricpayroll"
         activeCompanyCode = if (activeTenantId.startsWith("tenant_")) activeTenantId.removePrefix("tenant_").uppercase() else "PRIMARY"
 
         setupToolbar()
-        setupTabs()
         setupListeners()
         setupBackupsRecyclerView()
 
@@ -110,32 +115,55 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             HapticUtil.vibrateClick(it)
             saveAllSettings()
         }
-    }
 
-    private fun setupTabs() {
-        val tabLayout = binding.tabLayout
-        tabLayout.removeAllTabs()
-
-        tabLayout.addTab(tabLayout.newTab().setText("⊞ Core Modules"))
-        tabLayout.addTab(tabLayout.newTab().setText("👤 Admin Permissions"))
-        tabLayout.addTab(tabLayout.newTab().setText("👥 Employee Permissions"))
-        tabLayout.addTab(tabLayout.newTab().setText("☢️ Danger Zone"))
-
-        tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+        binding.tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab?) {
-                HapticUtil.vibrateTick(tabLayout)
-                when (tab?.position) {
-                    0 -> showTab(0)
-                    1 -> showTab(1)
-                    2 -> showTab(2)
-                    3 -> showTab(3)
+                HapticUtil.vibrateTick(binding.tabLayout)
+                val pos = tab?.position ?: return
+                if (pos in activeTabs.indices) {
+                    showTab(activeTabs[pos].index)
                 }
             }
             override fun onTabUnselected(tab: TabLayout.Tab?) = Unit
             override fun onTabReselected(tab: TabLayout.Tab?) = Unit
         })
+    }
 
-        showTab(0)
+    private fun setupTabs(s: LocalFeatureSettings) {
+        val tabLayout = binding.tabLayout
+        tabLayout.removeAllTabs()
+        activeTabs.clear()
+
+        // 1:1 Web Parity with FeatureToggleManager.razor:
+        // - Core Modules: SuperAdmin OR Admin with AdminCanManageFeatureToggles
+        if (isUserSuperAdmin || s.adminCanManageFeatureToggles) {
+            activeTabs.add(TabEntry("⊞ Core Modules", 0))
+        }
+        // - Admin Permissions: SuperAdmin ONLY
+        if (isUserSuperAdmin) {
+            activeTabs.add(TabEntry("👤 Admin Permissions", 1))
+        }
+        // - Employee Permissions: SuperAdmin OR Admin with AdminCanManageEmployeePermissions OR AdminCanManageFeatureToggles
+        if (isUserSuperAdmin || s.adminCanManageEmployeePermissions || s.adminCanManageFeatureToggles) {
+            activeTabs.add(TabEntry("👥 Employee Permissions", 2))
+        }
+        // - Danger Zone: SuperAdmin ONLY
+        if (isUserSuperAdmin) {
+            activeTabs.add(TabEntry("☢️ Danger Zone", 3))
+        }
+
+        for (entry in activeTabs) {
+            tabLayout.addTab(tabLayout.newTab().setText(entry.title))
+        }
+
+        val canSave = isUserSuperAdmin || s.adminCanManageFeatureToggles || s.adminCanManageEmployeePermissions
+        binding.btnSaveAllSettings.isVisible = canSave
+
+        if (activeTabs.isNotEmpty()) {
+            showTab(activeTabs[0].index)
+        } else {
+            showTab(-1)
+        }
     }
 
     private fun showTab(position: Int) {
@@ -344,6 +372,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
         }
 
         // Tab 2: Admin Permissions
+        binding.swAdminManageFeatureToggles.isChecked = s.adminCanManageFeatureToggles
         binding.swAdminViewDashboard.isChecked = s.adminCanViewDashboard
         binding.swAdminViewAttendanceLogs.isChecked = s.adminCanViewAttendance
         binding.swAdminViewReports.isChecked = s.adminCanViewReports
@@ -381,69 +410,80 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     }
 
     private fun gatherSettingsFromUI(): LocalFeatureSettings {
-        val geo = binding.swEnableGeoFencing.isChecked
-        val plan = if (binding.rbPlanBlaze.isChecked) "Blaze" else "Spark"
+        val canEditModules = isUserSuperAdmin || currentSettings.adminCanManageFeatureToggles
+        val canEditEmployeePerms = isUserSuperAdmin || currentSettings.adminCanManageEmployeePermissions || currentSettings.adminCanManageFeatureToggles
+        val canEditAdminPerms = isUserSuperAdmin
+
+        val geo = if (canEditModules) binding.swEnableGeoFencing.isChecked else currentSettings.enableGeoFencing
+        val plan = if (isUserSuperAdmin) {
+            if (binding.rbPlanBlaze.isChecked) "Blaze" else "Spark"
+        } else {
+            currentSettings.firebasePlanMode
+        }
 
         return LocalFeatureSettings(
             id = 1,
-            enablePayroll = binding.swRunPayroll.isChecked,
-            enableSalaryAdvance = binding.swSalaryAdvance.isChecked,
-            enableBonusManagement = binding.swBonusManagement.isChecked,
-            employeeCanViewBonus = if (binding.swBonusManagement.isChecked) binding.swEmployeeViewBonuses.isChecked else false,
-            enableYearEndSummary = binding.swYearEndSummary.isChecked,
-            enableFlexibleBenefits = binding.swFbpCompStructuring.isChecked,
+            enablePayroll = if (canEditModules) binding.swRunPayroll.isChecked else currentSettings.enablePayroll,
+            enableSalaryAdvance = if (canEditModules) binding.swSalaryAdvance.isChecked else currentSettings.enableSalaryAdvance,
+            enableBonusManagement = if (canEditModules) binding.swBonusManagement.isChecked else currentSettings.enableBonusManagement,
+            employeeCanViewBonus = if (canEditModules) (if (binding.swBonusManagement.isChecked) binding.swEmployeeViewBonuses.isChecked else false) else currentSettings.employeeCanViewBonus,
+            enableYearEndSummary = if (canEditModules) binding.swYearEndSummary.isChecked else currentSettings.enableYearEndSummary,
+            enableFlexibleBenefits = if (canEditModules) binding.swFbpCompStructuring.isChecked else currentSettings.enableFlexibleBenefits,
 
-            enableStatutoryCompliance = binding.swPfEsiCompliance.isChecked,
-            enableProfessionalTax = binding.swProfessionalTax.isChecked,
-            enableTdsDeduction = binding.swEnableTdsDeduction.isChecked,
-            enableTaxDeclarations = binding.swTaxDeclarations.isChecked,
+            enableStatutoryCompliance = if (canEditModules) binding.swPfEsiCompliance.isChecked else currentSettings.enableStatutoryCompliance,
+            enableProfessionalTax = if (canEditModules) binding.swProfessionalTax.isChecked else currentSettings.enableProfessionalTax,
+            enableTdsDeduction = if (canEditModules) binding.swEnableTdsDeduction.isChecked else currentSettings.enableTdsDeduction,
+            enableTaxDeclarations = if (canEditModules) binding.swTaxDeclarations.isChecked else currentSettings.enableTaxDeclarations,
 
-            enableEmployeeManagement = binding.swEmployeeManagement.isChecked,
-            enableShiftScheduling = binding.swShiftScheduling.isChecked,
-            enableAutoShiftRotation = if (binding.swShiftScheduling.isChecked) binding.swAutoShiftRotation.isChecked else false,
-            enableShiftAllowance = binding.swNightShiftAllowance.isChecked,
-            enablePunchCorrection = binding.swPunchCorrection.isChecked,
+            enableEmployeeManagement = if (canEditModules) binding.swEmployeeManagement.isChecked else currentSettings.enableEmployeeManagement,
+            enableShiftScheduling = if (canEditModules) binding.swShiftScheduling.isChecked else currentSettings.enableShiftScheduling,
+            enableAutoShiftRotation = if (canEditModules) (if (binding.swShiftScheduling.isChecked) binding.swAutoShiftRotation.isChecked else false) else currentSettings.enableAutoShiftRotation,
+            enableShiftAllowance = if (canEditModules) binding.swNightShiftAllowance.isChecked else currentSettings.enableShiftAllowance,
+            enablePunchCorrection = if (canEditModules) binding.swPunchCorrection.isChecked else currentSettings.enablePunchCorrection,
             enableGeoFencing = geo,
-            enableDualAttendance = if (geo) binding.swDualAttendance.isChecked else false,
-            enableAutomaticGeofencePunching = if (geo) binding.swAutoGeofencePunching.isChecked else false,
+            enableDualAttendance = if (canEditModules) (if (geo) binding.swDualAttendance.isChecked else false) else currentSettings.enableDualAttendance,
+            enableAutomaticGeofencePunching = if (canEditModules) (if (geo) binding.swAutoGeofencePunching.isChecked else false) else currentSettings.enableAutomaticGeofencePunching,
 
-            enableCompanyReports = binding.swCompanyReports.isChecked,
-            enableCustomReporting = binding.swCustomReporting.isChecked,
-            enableRegularizationReq = binding.swRegularizationRequests.isChecked,
+            enableCompanyReports = if (canEditModules) binding.swCompanyReports.isChecked else currentSettings.enableCompanyReports,
+            enableCustomReporting = if (canEditModules) binding.swCustomReporting.isChecked else currentSettings.enableCustomReporting,
+            enableRegularizationReq = if (canEditModules) binding.swRegularizationRequests.isChecked else currentSettings.enableRegularizationReq,
 
-            enableLeaveManagement = binding.swEnableLeaveModule.isChecked,
-            enableLeaveAccrual = if (binding.swEnableLeaveModule.isChecked) binding.swLeaveAccrual.isChecked else false,
-            enableSandwichRule = if (binding.swEnableLeaveModule.isChecked) binding.swSandwichRule.isChecked else false,
-            enableResignationModule = binding.swExitFnfSettlement.isChecked,
+            enableLeaveManagement = if (canEditModules) binding.swEnableLeaveModule.isChecked else currentSettings.enableLeaveManagement,
+            enableLeaveAccrual = if (canEditModules) (if (binding.swEnableLeaveModule.isChecked) binding.swLeaveAccrual.isChecked else false) else currentSettings.enableLeaveAccrual,
+            enableSandwichRule = if (canEditModules) (if (binding.swEnableLeaveModule.isChecked) binding.swSandwichRule.isChecked else false) else currentSettings.enableSandwichRule,
+            enableResignationModule = if (canEditModules) binding.swExitFnfSettlement.isChecked else currentSettings.enableResignationModule,
 
-            enableEmailNotifications = binding.swEmailNotifications.isChecked,
-            enableInAppNotifications = binding.swInAppNotificationBell.isChecked,
-            showThemeToggle = binding.swDarkLightToggle.isChecked,
-            enableAuditLog = binding.swEnableAuditTrails.isChecked,
-            enableRecycleBin = binding.swEnableRecycleBin.isChecked,
+            enableEmailNotifications = if (canEditModules) binding.swEmailNotifications.isChecked else currentSettings.enableEmailNotifications,
+            enableInAppNotifications = if (canEditModules) binding.swInAppNotificationBell.isChecked else currentSettings.enableInAppNotifications,
+            showThemeToggle = if (canEditModules) binding.swDarkLightToggle.isChecked else currentSettings.showThemeToggle,
+            enableAuditLog = if (canEditModules) binding.swEnableAuditTrails.isChecked else currentSettings.enableAuditLog,
+            enableRecycleBin = if (canEditModules) binding.swEnableRecycleBin.isChecked else currentSettings.enableRecycleBin,
             firebasePlanMode = plan,
 
-            adminCanViewDashboard = binding.swAdminViewDashboard.isChecked,
-            adminCanViewAttendance = binding.swAdminViewAttendanceLogs.isChecked,
-            adminCanViewReports = binding.swAdminViewReports.isChecked,
-            adminCanManageEmployees = binding.swAdminManageEmployees.isChecked,
-            adminCanManageShifts = binding.swAdminManageShifts.isChecked,
-            adminCanManagePunchApprovals = binding.swAdminPunchApprovalRequests.isChecked,
-            adminCanRunPayroll = binding.swAdminRunPayroll.isChecked,
-            adminCanEditSettings = binding.swAdminEditGlobalSettings.isChecked,
-            adminCanManageEmployeePermissions = binding.swAdminManageEmployeePerms.isChecked,
+            // Admin Permissions - strictly preserved unless SuperAdmin!
+            adminCanManageFeatureToggles = if (canEditAdminPerms) binding.swAdminManageFeatureToggles.isChecked else currentSettings.adminCanManageFeatureToggles,
+            adminCanViewDashboard = if (canEditAdminPerms) binding.swAdminViewDashboard.isChecked else currentSettings.adminCanViewDashboard,
+            adminCanViewAttendance = if (canEditAdminPerms) binding.swAdminViewAttendanceLogs.isChecked else currentSettings.adminCanViewAttendance,
+            adminCanViewReports = if (canEditAdminPerms) binding.swAdminViewReports.isChecked else currentSettings.adminCanViewReports,
+            adminCanManageEmployees = if (canEditAdminPerms) binding.swAdminManageEmployees.isChecked else currentSettings.adminCanManageEmployees,
+            adminCanManageShifts = if (canEditAdminPerms) binding.swAdminManageShifts.isChecked else currentSettings.adminCanManageShifts,
+            adminCanManagePunchApprovals = if (canEditAdminPerms) binding.swAdminPunchApprovalRequests.isChecked else currentSettings.adminCanManagePunchApprovals,
+            adminCanRunPayroll = if (canEditAdminPerms) binding.swAdminRunPayroll.isChecked else currentSettings.adminCanRunPayroll,
+            adminCanEditSettings = if (canEditAdminPerms) binding.swAdminEditGlobalSettings.isChecked else currentSettings.adminCanEditSettings,
+            adminCanManageEmployeePermissions = if (canEditAdminPerms) binding.swAdminManageEmployeePerms.isChecked else currentSettings.adminCanManageEmployeePermissions,
 
-            employeeCanViewDashboard = binding.swEmpShowHome.isChecked,
-            employeeToolsVisible = binding.swEmpShowTools.isChecked,
-            employeeCanViewAttendance = binding.swEmpViewAttendance.isChecked,
-            employeeCanViewShifts = if (binding.swShiftScheduling.isChecked) binding.swEmpViewShiftSchedule.isChecked else false,
-            employeeCanViewPayslip = if (binding.swRunPayroll.isChecked) binding.swEmpViewPayslips.isChecked else false,
-            employeeCanViewAdvance = if (binding.swSalaryAdvance.isChecked) binding.swEmpViewSalaryAdvances.isChecked else false,
-            employeeCanViewTax = if (binding.swTaxDeclarations.isChecked) binding.swEmpSubmitTax.isChecked else false,
-            employeeCanViewLeave = if (binding.swEnableLeaveModule.isChecked) binding.swEmpViewLeave.isChecked else false,
-            employeeCanViewLeaveHistory = if (binding.swEnableLeaveModule.isChecked) binding.swEmpViewLeave.isChecked else false,
-            employeeCanViewResignation = if (binding.swExitFnfSettlement.isChecked) binding.swEmpSubmitResignation.isChecked else false,
-            employeeCanViewReports = if (binding.swCustomReporting.isChecked) binding.swEmpViewReports.isChecked else false
+            // Employee Permissions
+            employeeCanViewDashboard = if (canEditEmployeePerms) binding.swEmpShowHome.isChecked else currentSettings.employeeCanViewDashboard,
+            employeeToolsVisible = if (canEditEmployeePerms) binding.swEmpShowTools.isChecked else currentSettings.employeeToolsVisible,
+            employeeCanViewAttendance = if (canEditEmployeePerms) binding.swEmpViewAttendance.isChecked else currentSettings.employeeCanViewAttendance,
+            employeeCanViewShifts = if (canEditEmployeePerms) (if (binding.swShiftScheduling.isChecked) binding.swEmpViewShiftSchedule.isChecked else false) else currentSettings.employeeCanViewShifts,
+            employeeCanViewPayslip = if (canEditEmployeePerms) (if (binding.swRunPayroll.isChecked) binding.swEmpViewPayslips.isChecked else false) else currentSettings.employeeCanViewPayslip,
+            employeeCanViewAdvance = if (canEditEmployeePerms) (if (binding.swSalaryAdvance.isChecked) binding.swEmpViewSalaryAdvances.isChecked else false) else currentSettings.employeeCanViewAdvance,
+            employeeCanViewTax = if (canEditEmployeePerms) (if (binding.swTaxDeclarations.isChecked) binding.swEmpSubmitTax.isChecked else false) else currentSettings.employeeCanViewTax,
+            employeeCanViewLeave = if (canEditEmployeePerms) (if (binding.swEnableLeaveModule.isChecked) binding.swEmpViewLeave.isChecked else false) else currentSettings.employeeCanViewLeave,
+            employeeCanViewLeaveHistory = if (canEditEmployeePerms) (if (binding.swEnableLeaveModule.isChecked) binding.swEmpViewLeave.isChecked else false) else currentSettings.employeeCanViewLeaveHistory,
+            employeeCanViewResignation = if (canEditEmployeePerms) (if (binding.swExitFnfSettlement.isChecked) binding.swEmpSubmitResignation.isChecked else false) else currentSettings.employeeCanViewResignation,
+            employeeCanViewReports = if (canEditEmployeePerms) (if (binding.swCustomReporting.isChecked) binding.swEmpViewReports.isChecked else false) else currentSettings.employeeCanViewReports
         )
     }
 
@@ -471,6 +511,67 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
 
                         if (activeTenantId == "biometricpayroll") {
                             FirebaseDatabase.getInstance().getReference("feature_settings/1").setValue(map).await()
+                        }
+                    }
+                }
+
+                // 3. Synchronize with Backend API (MobileApiService)
+                val token = sessionStore.token()
+                if (!token.isNullOrBlank()) {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            val authHeader = if (token.startsWith("Bearer ", ignoreCase = true)) token else "Bearer $token"
+                            val dto = AdminFeatureSettingsDto(
+                                enablePayroll = updated.enablePayroll,
+                                enableSalaryAdvance = updated.enableSalaryAdvance,
+                                enableBonusManagement = updated.enableBonusManagement,
+                                enableSalaryStructuring = updated.enableFlexibleBenefits,
+                                employeeCanViewAdvance = updated.employeeCanViewAdvance,
+                                employeeCanViewBonus = updated.employeeCanViewBonus,
+                                enableTdsDeduction = updated.enableTdsDeduction,
+                                enableShiftScheduling = updated.enableShiftScheduling,
+                                enableLeaveManagement = updated.enableLeaveManagement,
+                                enablePunchCorrection = updated.enablePunchCorrection,
+                                enableEmployeeManagement = updated.enableEmployeeManagement,
+                                enableCompanyReports = updated.enableCompanyReports,
+                                enableStatutoryCompliance = updated.enableStatutoryCompliance,
+                                adminCanViewDashboard = updated.adminCanViewDashboard,
+                                adminCanManageEmployees = updated.adminCanManageEmployees,
+                                adminCanViewAttendance = updated.adminCanViewAttendance,
+                                adminCanRunPayroll = updated.adminCanRunPayroll,
+                                adminCanEditSettings = updated.adminCanEditSettings,
+                                adminCanManageShifts = updated.adminCanManageShifts,
+                                adminCanManagePunchApprovals = updated.adminCanManagePunchApprovals,
+                                adminCanViewReports = updated.adminCanViewReports,
+                                employeeCanViewDashboard = updated.employeeCanViewDashboard,
+                                employeeCanViewPayslip = updated.employeeCanViewPayslip,
+                                employeeCanViewAttendance = updated.employeeCanViewAttendance,
+                                employeeCanViewLeave = updated.employeeCanViewLeave,
+                                employeeCanViewLeaveHistory = updated.employeeCanViewLeaveHistory,
+                                employeeToolsVisible = updated.employeeToolsVisible,
+                                showThemeToggle = updated.showThemeToggle,
+                                adminCanManageEmployeePermissions = updated.adminCanManageEmployeePermissions,
+                                adminCanManageFeatureToggles = updated.adminCanManageFeatureToggles,
+                                enableProfessionalTax = updated.enableProfessionalTax,
+                                enableEmailNotifications = updated.enableEmailNotifications,
+                                enableLeaveAccrual = updated.enableLeaveAccrual,
+                                enableSandwichRule = updated.enableSandwichRule,
+                                enableShiftAllowance = updated.enableShiftAllowance,
+                                enableAuditLog = updated.enableAuditLog,
+                                employeeCanViewShifts = updated.employeeCanViewShifts,
+                                enableYearEndSummary = updated.enableYearEndSummary,
+                                enableRecycleBin = updated.enableRecycleBin,
+                                enableTaxDeclarations = updated.enableTaxDeclarations,
+                                enableGeoFencing = updated.enableGeoFencing,
+                                enableDualAttendance = updated.enableDualAttendance,
+                                enableAutomaticGeofencePunching = updated.enableAutomaticGeofencePunching,
+                                enableResignationModule = updated.enableResignationModule,
+                                employeeCanViewResignation = updated.employeeCanViewResignation,
+                                employeeCanViewTax = updated.employeeCanViewTax,
+                                enableCustomReporting = updated.enableCustomReporting,
+                                employeeCanViewReports = updated.employeeCanViewReports
+                            )
+                            apiService.saveAdminFeatureSettings(authHeader, dto)
                         }
                     }
                 }
@@ -531,6 +632,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             "adminCanRunPayroll" to s.adminCanRunPayroll,
             "adminCanEditSettings" to s.adminCanEditSettings,
             "adminCanManageEmployeePermissions" to s.adminCanManageEmployeePermissions,
+            "adminCanManageFeatureToggles" to s.adminCanManageFeatureToggles,
             "employeeCanViewDashboard" to s.employeeCanViewDashboard,
             "employeeToolsVisible" to s.employeeToolsVisible,
             "employeeCanViewAttendance" to s.employeeCanViewAttendance,

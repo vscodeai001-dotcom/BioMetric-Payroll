@@ -24,6 +24,7 @@ import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
+import com.google.gson.Gson
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.flow.collectLatest
@@ -305,12 +306,14 @@ class FirebaseRoomHydrator @Inject constructor(
         biometricId = s("biometricId").orEmpty(),
         role = s("role") ?: "Staff",
         salaryType = s("salaryType") ?: "MONTHLY_FIXED",
-        salaryRate = d("salaryRate"),
+        salaryRate = d("salaryRate").takeIf { it > 0 } ?: d("monthlySalary").takeIf { it > 0 } ?: d("salary"),
         paidLeaveBalance = d("paidLeaveBalance"),
         sickLeaveBalance = d("sickLeaveBalance"),
-        salaryCalculationMethod = s("salaryCalculationMethod") ?: "Pro-Rata Hourly",
+        salaryCalculationMethod = s("salaryCalculationMethod") ?: "Days in Month",
         shiftStart = s("shiftStart") ?: "10:00",
         shiftEnd = s("shiftEnd") ?: "22:00",
+        shiftMode = s("shiftMode") ?: "SINGLE_DAY",
+        trackingMode = s("trackingMode") ?: "24/7",
         breakHours = d("breakHours"),
         shift2Start = s("shift2Start"),
         shift2End = s("shift2End"),
@@ -330,6 +333,7 @@ class FirebaseRoomHydrator @Inject constructor(
         hireDate = l("hireDate"),
         dob = l("dob").takeIf { it > 0 },
         terminateDate = l("terminateDate").takeIf { it > 0 },
+        standardHours = i("standardHours")?.takeIf { it > 0 } ?: 8,
         basicSalaryComponent = d("basicSalaryComponent"),
         hraComponent = d("hraComponent"),
         daComponent = d("daComponent"),
@@ -390,6 +394,7 @@ class FirebaseRoomHydrator @Inject constructor(
         newValue = d("newValue"),
         shiftStart = s("shiftStart").orEmpty(),
         shiftEnd = s("shiftEnd").orEmpty(),
+        shiftMode = s("shiftMode") ?: "SINGLE_DAY",
         breakHours = d("breakHours"),
         shift2Start = s("shift2Start"),
         shift2End = s("shift2End"),
@@ -541,6 +546,7 @@ class FirebaseRoomHydrator @Inject constructor(
         adminCanEditSettings = b("adminCanEditSettings", true),
         adminCanManageEmployeePermissions = b("adminCanManageEmployeePermissions", true),
         adminCanManagePunchApprovals = b("adminCanManagePunchApprovals", true),
+        adminCanManageFeatureToggles = b("adminCanManageFeatureToggles", false) || b("admin_can_manage_feature_toggles", false),
         firebasePlanMode = s("firebasePlanMode") ?: s("firebase_plan_mode") ?: "Spark",
         syncState = 1
     )
@@ -774,12 +780,35 @@ class FirebaseRoomHydrator @Inject constructor(
         }
 
     private fun Shop.toLocal() = LocalShop(shopId, name, location, openingDate, isActive, 1)
-    private fun Employee.toLocal() = LocalEmployee(employeeId, shopId, name, role, isActive, 1)
+    private fun Employee.toLocal() = LocalEmployee(
+        employeeId = employeeId,
+        shopId = shopId,
+        name = name,
+        role = role,
+        isActive = isActive,
+        salaryType = salaryType,
+        salaryRate = salaryRate,
+        basicSalaryComponent = basicSalaryComponent,
+        hraComponent = hraComponent,
+        daComponent = daComponent,
+        standardHours = standardHours,
+        otRule = otRule,
+        otFlatRate = otFlatRate,
+        otRateMultiplier = otRateMultiplier,
+        salaryCalculationMethod = salaryCalculationMethod,
+        compOffDayOfWeek = compOffDayOfWeek,
+        shiftMode = shiftMode,
+        trackingMode = trackingMode,
+        enablePf = enablePf,
+        enableEsi = enableEsi,
+        tdsRatePercent = tdsRatePercent,
+        syncState = 1
+    )
     private fun Attendance.toLocal() = LocalAttendance(attendanceId, employeeId, checkInTime, checkOutTime, 1)
     private fun AdvancePayment.toLocal() = LocalAdvancePayment(advanceId, employeeId, shopId, amount, date, isRecovered, recoveryPaymentId, 1)
     private fun EmployeeHistory.toLocal() = LocalEmployeeHistory(
         historyId, employeeId, version, type, salaryType, oldValue, newValue, shiftStart, shiftEnd,
-        breakHours, shift2Start, shift2End, weekendShiftStart, weekendShiftEnd, weekendBreakHours,
+        shiftMode, breakHours, shift2Start, shift2End, weekendShiftStart, weekendShiftEnd, weekendBreakHours,
         weekendShift2Start, weekendShift2End, isBonusEligible, isPaidLeaveEligible, paidLeaveOnWeekdays,
         paidLeaveOnWeekends, rulesOverrideJson, changeDate, effectiveDate, endDate, changeReason, salaryRate, 1
     )
@@ -815,34 +844,53 @@ class FirebaseRoomHydrator @Inject constructor(
         syncState = 1
     )
 
-    private fun DataSnapshot.toLocalAuditLog(): LocalAuditLog = LocalAuditLog(
-        logId = stringValue("logId") ?: key.orEmpty(),
-        shopId = stringValue("shopId").orEmpty(),
-        action = stringValue("action").orEmpty(),
-        module = stringValue("module").orEmpty(),
-        oldValue = stringValue("oldValue"),
-        newValue = stringValue("newValue"),
-        userDisplayName = stringValue("userDisplayName").orEmpty(),
-        userId = stringValue("userId").orEmpty(),
-        timestamp = longValue("timestamp"),
-        syncState = 1
-    )
+    private fun DataSnapshot.jsonOrStringValue(name: String): String? {
+        val value = childValue(name) ?: return null
+        return when (value) {
+            is Map<*, *> -> runCatching { Gson().toJson(value) }.getOrNull()
+            is String -> value
+            else -> value.toString()
+        }
+    }
 
-    private fun DataSnapshot.toLocalDailySummary(): LocalDailySummary = LocalDailySummary(
-        summaryId = intValue("summaryId") ?: key.orEmpty().toIntOrNull() ?: 0,
-        employeeId = intValue("employeeId") ?: 0,
-        shiftDate = stringValue("shiftDate").orEmpty(),
-        status = stringValue("status").orEmpty(),
-        earnedStandardHours = doubleValue("earnedStandardHours"),
-        totalOvertimeMs = longValue("totalOvertimeMs"),
-        totalPenaltyMs = longValue("totalPenaltyMs"),
-        totalLatenessMs = longValue("totalLatenessMs"),
-        totalBreakPenaltyMs = longValue("totalBreakPenaltyMs"),
-        scheduledShiftDurationMs = longValue("scheduledShiftDurationMs"),
-        shiftAllowanceEarned = doubleValue("shiftAllowanceEarned"),
-        isManualOverride = booleanValue("isManualOverride"),
-        syncState = 1
-    )
+    private fun DataSnapshot.toLocalAuditLog(): LocalAuditLog {
+        val rawTs = longValue("timestamp").let { if (it in 1..9999999999L) it * 1000L else it }
+        return LocalAuditLog(
+            logId = stringValue("logId") ?: key.orEmpty(),
+            shopId = stringValue("shopId").orEmpty(),
+            action = stringValue("action").orEmpty(),
+            module = stringValue("module").orEmpty(),
+            oldValue = jsonOrStringValue("oldValue"),
+            newValue = jsonOrStringValue("newValue"),
+            userDisplayName = stringValue("userDisplayName").orEmpty(),
+            userId = stringValue("userId").orEmpty(),
+            timestamp = if (rawTs > 0) rawTs else System.currentTimeMillis(),
+            syncState = 1
+        )
+    }
+
+    private fun DataSnapshot.toLocalDailySummary(): LocalDailySummary {
+        val sDate = stringValue("shiftDate") ?: stringValue("date").orEmpty()
+        val eId = intValue("employeeId") ?: intValue("staffId") ?: 0
+        val rawId = intValue("summaryId")?.takeIf { it > 0 } ?: key.orEmpty().toIntOrNull()?.takeIf { it > 0 }
+        val finalId = rawId ?: (eId.toString() + "_" + sDate).hashCode().let { if (it == 0) 1 else if (it < 0) Math.abs(it) else it }
+
+        return LocalDailySummary(
+            summaryId = finalId,
+            employeeId = eId,
+            shiftDate = sDate,
+            status = stringValue("status").orEmpty(),
+            earnedStandardHours = doubleValue("earnedStandardHours"),
+            totalOvertimeMs = longValue("totalOvertimeMs"),
+            totalPenaltyMs = longValue("totalPenaltyMs"),
+            totalLatenessMs = longValue("totalLatenessMs"),
+            totalBreakPenaltyMs = longValue("totalBreakPenaltyMs"),
+            scheduledShiftDurationMs = longValue("scheduledShiftDurationMs"),
+            shiftAllowanceEarned = doubleValue("shiftAllowanceEarned"),
+            isManualOverride = booleanValue("isManualOverride"),
+            syncState = 1
+        )
+    }
 
     private fun DataSnapshot.toLocalShiftSchedule(): LocalShiftSchedule = LocalShiftSchedule(
         scheduleId = intValue("scheduleId") ?: key.orEmpty().toIntOrNull() ?: 0,

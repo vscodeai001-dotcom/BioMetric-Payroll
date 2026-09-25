@@ -982,6 +982,7 @@ public sealed class FirebaseEmployeeManagementService
             ShiftRotationPattern = StringValue("shiftRotationPattern"),
             LastRotatedDate = DateValue("lastRotatedDate"),
             CurrentShiftIndex = IntValue("currentShiftIndex"),
+            ShiftMode = StringValue("shiftMode") ?? "SINGLE_DAY",
             TenantId = StringValue("tenantId") ?? StringValue("ownerUid")
         };
 
@@ -1027,6 +1028,7 @@ public sealed class FirebaseEmployeeManagementService
             ["sickLeaveBalance"] = employee.SickLeaveBalance,
             ["shiftStart"] = TimeString(employee.ShiftStartTime),
             ["shiftEnd"] = TimeString(employee.ShiftEndTime),
+            ["shiftMode"] = employee.ShiftMode ?? "SINGLE_DAY",
             ["breakHours"] = employee.StandardBreakMinutes / 60d,
             ["compOffDayOfWeek"] = employee.CompOffDayOfWeek.HasValue ? (int)employee.CompOffDayOfWeek.Value : null,
             ["otRule"] = employee.OT_Rule,

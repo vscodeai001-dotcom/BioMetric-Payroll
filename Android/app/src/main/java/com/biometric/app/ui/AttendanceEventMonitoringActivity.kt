@@ -14,13 +14,21 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.biometric.app.R
+import com.biometric.app.data.dao.LocalAuditLogDao
 import com.biometric.app.data.entity.AuditLog
+import com.biometric.app.data.entity.LocalAuditLog
 import com.biometric.app.databinding.ActivityAttendanceEventMonitoringBinding
 import com.biometric.app.databinding.ItemAttendanceEventRowBinding
 import com.biometric.app.sync.FirebaseSyncManager
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
+import com.google.gson.Gson
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -35,6 +43,7 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
     private lateinit var binding: ActivityAttendanceEventMonitoringBinding
 
     @Inject lateinit var sync: FirebaseSyncManager
+    @Inject lateinit var localAuditLogDao: LocalAuditLogDao
 
     private lateinit var adapter: AttendanceEventAdapter
 
@@ -43,10 +52,9 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
     private var selectedEventType: String = ""
     private var quickFilter: String = "ALL" // "ALL", "SUCCESS", "WARNINGS", "FAILED", "FORCED"
 
-    private var allAuditLogs = listOf<AuditLog>()
+    private var allAuditLogs = mutableListOf<AuditLog>()
 
     private val displayDateFormat = SimpleDateFormat("dd-MMM-yyyy", Locale.getDefault())
-    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     private val fullTimestampFormat = SimpleDateFormat("dd-MMM-yyyy HH:mm:ss", Locale.getDefault()).apply {
         timeZone = TimeZone.getTimeZone("Asia/Kolkata")
     }
@@ -159,13 +167,13 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
 
     private fun setupListeners() {
         binding.swipeRefresh.setOnRefreshListener {
-            filterAndRenderEvents()
+            loadInitialData()
             binding.swipeRefresh.isRefreshing = false
         }
 
         binding.btnRefreshEvents.setOnClickListener {
             binding.progressBar.isVisible = true
-            filterAndRenderEvents()
+            loadInitialData()
             binding.progressBar.isVisible = false
         }
 
@@ -174,20 +182,72 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
         }
     }
 
-    private fun observeEventsRealtime() {
-        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(500)
-        if (query != null) {
-            lifecycleScope.launch {
-                sync.getQueryFlow<AuditLog>(query).collectLatest { logs ->
-                    allAuditLogs = logs.filter { it.action.equals("AUTH_SESSION", ignoreCase = true) }
-                    filterAndRenderEvents()
-                }
+    fun loadInitialData() {
+        lifecycleScope.launch {
+            val localLogs = withContext(Dispatchers.IO) {
+                localAuditLogDao.getByAction("AUTH_SESSION")
             }
+            if (localLogs.isNotEmpty()) {
+                mergeLogs(localLogs.map { it.toDomain() })
+            }
+            syncWithFirebase()
         }
     }
 
+    private fun observeEventsRealtime() {
+        // 1. Observe Room local SQLite flow (SSOT)
+        lifecycleScope.launch {
+            localAuditLogDao.getByActionFlow("AUTH_SESSION").collectLatest { localList ->
+                mergeLogs(localList.map { it.toDomain() })
+            }
+        }
+
+        // 2. Real-time Firebase listener
+        syncWithFirebase()
+    }
+
+    private fun syncWithFirebase() {
+        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(1000) ?: return
+        query.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                lifecycleScope.launch(Dispatchers.Default) {
+                    val fbLogs = mutableListOf<AuditLog>()
+                    val roomEntities = mutableListOf<LocalAuditLog>()
+
+                    for (child in snapshot.children) {
+                        val log = child.toAuditLogSafe()
+                        if (log.action.equals("AUTH_SESSION", ignoreCase = true)) {
+                            fbLogs.add(log)
+                            roomEntities.add(log.toLocal())
+                        }
+                    }
+
+                    // Save to Room for offline persistence
+                    if (roomEntities.isNotEmpty()) {
+                        withContext(Dispatchers.IO) {
+                            localAuditLogDao.upsertAll(roomEntities)
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        mergeLogs(fbLogs)
+                    }
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    private fun mergeLogs(incoming: List<AuditLog>) {
+        val map = allAuditLogs.associateBy { it.logId }.toMutableMap()
+        incoming.forEach { map[it.logId] = it }
+        allAuditLogs = map.values.sortedByDescending { it.timestamp }.toMutableList()
+        filterAndRenderEvents()
+    }
+
     private fun filterAndRenderEvents() {
-        // Date range boundaries
+        // Date range boundaries in India Timezone
         val startOfDay = Calendar.getInstance().apply {
             time = startDate.time
             set(Calendar.HOUR_OF_DAY, 0)
@@ -266,20 +326,119 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
         binding.rvEvents.isVisible = sortedList.isNotEmpty()
     }
 
-    private fun extractEventType(details: String?): String {
-        if (details.isNullOrBlank()) return "UNKNOWN"
+    private fun unwrapDiagnosticDetails(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
         return runCatching {
-            JSONObject(details).optString("EventType", "UNKNOWN")
+            val json = JSONObject(raw)
+            if (json.has("details")) {
+                val inner = json.optString("details")
+                if (inner.startsWith("{")) inner else raw
+            } else {
+                raw
+            }
+        }.getOrDefault(raw)
+    }
+
+    private fun extractEventType(raw: String?): String {
+        if (raw.isNullOrBlank()) return "UNKNOWN"
+        return runCatching {
+            val unwrapped = unwrapDiagnosticDetails(raw)
+            val json = JSONObject(unwrapped)
+            val eventType = json.optString("EventType", json.optString("eventType", ""))
+            if (eventType.isNotBlank()) eventType else "UNKNOWN"
         }.getOrDefault("UNKNOWN")
     }
 
     private fun formatDiagnosticDetails(details: String?): String {
         if (details.isNullOrBlank()) return "No diagnostic payload available"
         return runCatching {
-            val json = JSONObject(details)
+            val unwrapped = unwrapDiagnosticDetails(details)
+            val json = JSONObject(unwrapped)
             json.toString(2)
         }.getOrElse { details }
     }
+
+    private fun DataSnapshot.toAuditLogSafe(): AuditLog {
+        val id = child("logId").value?.toString() ?: key.orEmpty()
+        val shopId = child("shopId").value?.toString().orEmpty()
+        val action = child("action").value?.toString().orEmpty()
+        val module = child("module").value?.toString().orEmpty()
+
+        val oldValueRaw = child("oldValue").value
+        val oldValue = when (oldValueRaw) {
+            is Map<*, *> -> runCatching { Gson().toJson(oldValueRaw) }.getOrNull()
+            is String -> oldValueRaw
+            else -> oldValueRaw?.toString()
+        }
+
+        val newValueRaw = child("newValue").value
+        val newValue = when (newValueRaw) {
+            is Map<*, *> -> runCatching { Gson().toJson(newValueRaw) }.getOrNull()
+            is String -> newValueRaw
+            else -> newValueRaw?.toString()
+        }
+
+        val userDisplayName = child("userDisplayName").value?.toString().orEmpty()
+        val userId = child("userId").value?.toString().orEmpty()
+        val actorRole = child("actorRole").value?.toString().orEmpty()
+        val ownerUid = child("ownerUid").value?.toString().orEmpty()
+        val targetId = child("targetId").value?.toString()
+        val rawTs = when (val ts = child("timestamp").value) {
+            is Number -> ts.toLong()
+            is String -> ts.toLongOrNull() ?: System.currentTimeMillis()
+            else -> System.currentTimeMillis()
+        }
+        val timestamp = if (rawTs in 1..9999999999L) rawTs * 1000L else rawTs
+
+        return AuditLog(
+            logId = id,
+            shopId = shopId,
+            action = action,
+            module = module,
+            oldValue = oldValue,
+            newValue = newValue,
+            userDisplayName = userDisplayName,
+            userId = userId,
+            actorRole = actorRole,
+            ownerUid = ownerUid,
+            targetId = targetId,
+            timestamp = timestamp
+        )
+    }
+
+    private fun LocalAuditLog.toDomain(): AuditLog {
+        val normalizedTs = if (timestamp in 1..9999999999L) timestamp * 1000L else timestamp
+        return AuditLog(
+            logId = logId,
+            shopId = shopId,
+            action = action,
+            module = module,
+            oldValue = oldValue,
+            newValue = newValue,
+            userDisplayName = userDisplayName,
+            userId = userId,
+            actorRole = actorRole,
+            ownerUid = ownerUid,
+            targetId = targetId,
+            timestamp = normalizedTs
+        )
+    }
+
+    private fun AuditLog.toLocal(): LocalAuditLog = LocalAuditLog(
+        logId = logId,
+        shopId = shopId,
+        action = action,
+        module = module,
+        oldValue = oldValue,
+        newValue = newValue,
+        userDisplayName = userDisplayName,
+        userId = userId,
+        actorRole = actorRole,
+        ownerUid = ownerUid,
+        targetId = targetId,
+        timestamp = timestamp,
+        syncState = 1
+    )
 
     // ============================================================
     // RECYCLERVIEW ADAPTER
@@ -342,7 +501,7 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
                     }
                 }
 
-                // User Identity
+                // User Identity: Email and ID matching Web
                 val userEmail = if (item.userDisplayName.isNotBlank()) {
                     item.userDisplayName
                 } else if (item.userId.isNotBlank()) {
@@ -353,14 +512,17 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
                 itemBinding.tvUserEmail.text = userEmail
 
                 val entityIdText = if (!item.targetId.isNullOrBlank()) {
-                    "Entity: ${item.targetId} • Role: ${item.actorRole.ifBlank { "User" }}"
+                    item.targetId
+                } else if (item.userId.isNotBlank()) {
+                    item.userId
                 } else {
-                    "Role: ${item.actorRole.ifBlank { "System" }}"
+                    "Session"
                 }
                 itemBinding.tvEntityId.text = entityIdText
 
                 // Formatted diagnostic JSON
-                itemBinding.tvDiagnosticText.text = formatDiagnosticDetails(item.newValue)
+                val diagnosticJson = unwrapDiagnosticDetails(item.newValue)
+                itemBinding.tvDiagnosticText.text = formatDiagnosticDetails(diagnosticJson)
             }
         }
     }

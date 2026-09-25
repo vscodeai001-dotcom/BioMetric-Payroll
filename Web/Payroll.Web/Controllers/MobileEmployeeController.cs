@@ -741,6 +741,7 @@ public sealed class MobileEmployeeController : ControllerBase
             hireDate = employee.HireDate?.ToString("yyyy-MM-dd"),
             shiftStartTime = employee.ShiftStartTime?.ToString("HH:mm"),
             shiftEndTime = employee.ShiftEndTime?.ToString("HH:mm"),
+            shiftMode = employee.ShiftMode ?? "SINGLE_DAY",
             uan = employee.UAN,
             esiNumber = employee.ESINumber,
             bankName = employee.BankName,

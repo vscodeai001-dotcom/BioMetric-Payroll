@@ -1,4 +1,4 @@
-﻿@using global::Payroll.Shared.Data
+@using global::Payroll.Shared.Data
 @using Microsoft.AspNetCore.Components.Forms
 @using System.Diagnostics.CodeAnalysis
 
@@ -100,6 +100,20 @@
     <div class="col-md-2">
         <label class="form-label small fw-bold text-info mb-0">Shift End</label>
         <input type="time" class="form-control form-control-sm" @bind="ShiftEndTime" />
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold text-primary mb-0">Shift Mode</label>
+        <select class="form-select form-select-sm" @bind="Employee.ShiftMode">
+            <option value="SINGLE_DAY">Single Day (Standard)</option>
+            <option value="CONTINUOUS">Continuous (Overnight/Cross-Day)</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold text-primary mb-0">Tracking Type 🛰️</label>
+        <select class="form-select form-select-sm" @bind="Employee.TrackingMode">
+            <option value="24/7">24/7 Tracking</option>
+            <option value="SHIFT">Shift Time Only</option>
+        </select>
     </div>
     <div class="col-md-2">
         <label class="form-label small fw-bold text-info mb-0">Break (Min) <span class="text-danger">*</span></label>

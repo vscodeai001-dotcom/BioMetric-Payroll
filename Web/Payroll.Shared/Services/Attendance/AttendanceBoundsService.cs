@@ -25,10 +25,14 @@ namespace Payroll.Shared.Services
             // Do not truncate an explicitly scheduled overnight shift with
             // WorkDayCutoffHour. The cutoff is a business-day setting, not
             // the scheduled end of an overnight shift.
-            bool overnight = shiftEnd <= shiftStart;
+            bool isContinuous = string.Equals(emp.ShiftMode, "CONTINUOUS", StringComparison.OrdinalIgnoreCase);
+            bool overnight = shiftEnd <= shiftStart || isContinuous;
             if (overnight)
             {
-                shiftEnd = shiftEnd.AddDays(1);
+                if (shiftEnd <= shiftStart)
+                {
+                    shiftEnd = shiftEnd.AddDays(1);
+                }
             }
             else
             {
@@ -46,12 +50,15 @@ namespace Payroll.Shared.Services
         }
 
         /// <summary>
-        /// Returns true when the effective shift crosses midnight.
+        /// Returns true when the effective shift crosses midnight or is continuous.
         /// </summary>
         public bool IsOvernightShift(
             Employee emp,
             ShiftSchedule? schedule)
         {
+            if (string.Equals(emp.ShiftMode, "CONTINUOUS", StringComparison.OrdinalIgnoreCase))
+                return true;
+
             TimeOnly? start = schedule?.StartTime ?? emp.ShiftStartTime;
             TimeOnly? end = schedule?.EndTime ?? emp.ShiftEndTime;
 

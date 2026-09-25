@@ -304,9 +304,12 @@ else
                                 <a href="salary-advances" class="btn btn-outline-warning action-pill-btn">
                                     <span>💳</span> <i class="bi bi-cash-coin"></i> Salary Advances
                                 </a>
-                                <a href="admin/feature-toggles" class="btn btn-outline-secondary action-pill-btn">
-                                    <span>⚙️</span> <i class="bi bi-sliders2"></i> System Settings
-                                </a>
+                                @if (userIsSuperAdmin || settings?.AdminCanManageFeatureToggles == true || settings?.AdminCanManageEmployeePermissions == true)
+                                {
+                                    <a href="admin/feature-toggles" class="btn btn-outline-secondary action-pill-btn">
+                                        <span>⚙️</span> <i class="bi bi-sliders2"></i> System Settings
+                                    </a>
+                                }
                             </div>
                         </div>
                     </div>
@@ -367,6 +370,9 @@ else
 }
 
 @code {
+    [CascadingParameter(Name = "Settings")]
+    private FeatureSettings? settings { get; set; }
+
     private bool isLoaded = false;
     private bool geoFeatureAvailable;
     private bool userIsSuperAdmin = false;

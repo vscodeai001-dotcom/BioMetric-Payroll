@@ -57,6 +57,7 @@ data class LocalFeatureSettings(
     var adminCanEditSettings: Boolean = true,
     var adminCanManageEmployeePermissions: Boolean = true,
     var adminCanManagePunchApprovals: Boolean = true,
+    var adminCanManageFeatureToggles: Boolean = false,
     var firebasePlanMode: String = "Spark",
     val syncState: Int = 1
 )

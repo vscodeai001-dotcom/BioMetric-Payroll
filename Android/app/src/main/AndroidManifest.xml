@@ -297,6 +297,18 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.CompanySetupActivity"
+            android:exported="false"
+            android:label="Company &amp; System Setup"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
+            android:name=".ui.CompanySettingsActivity"
+            android:exported="false"
+            android:label="Company &amp; Organization Settings"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".ui.ManageCategoriesActivity"
             android:exported="false"
             android:label="Manage Categories"

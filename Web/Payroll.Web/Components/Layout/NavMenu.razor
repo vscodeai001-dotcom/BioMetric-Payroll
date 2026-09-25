@@ -183,12 +183,15 @@
                                         </NavLink>
                                     </div>
                                 }
-                                @* --- Regularization Approval Link --- *@
+                                 @* --- Regularization Approval Link --- *@
                                 <div class="nav-item px-3">
                                     <NavLink class="nav-link" href="attendance/regularization-approval">
                                         <span class="me-2">⏳</span> Regularization Approval
                                     </NavLink>
                                 </div>
+                            }
+                            @if (userIsSuperAdmin || settings.EnableGeoFencing)
+                            {
                                 <div class="nav-item px-3">
                                     <NavLink class="nav-link" href="admin/offline-tracking-details">
                                         <span class="me-2">📡</span> Offline Tracking
@@ -243,31 +246,30 @@
                             </div>
                         }
 
-                        @* --- SUPER ADMIN ONLY LINK --- *@
-                        <AuthorizeView Roles="SuperAdmin">
-                            @if (settings.EnableRecycleBin)
-                            {
-                                <div class="nav-item px-3">
-                                    <NavLink class="nav-link text-danger" href="admin/recycle-bin">
-                                        <span class="me-2">🗑️</span> Recycle Bin
-                                    </NavLink>
-                                </div>
-                            }
-                            @if (userIsSuperAdmin || settings.EnableAuditLog)
-                            {
-                                <div class="nav-item px-3">
-                                    <NavLink class="nav-link" href="admin/audit-logs">
-                                        <span class="me-2">📜</span> Audit Logs
-                                    </NavLink>
-                                    <NavLink class="nav-link" href="admin/attendance-event-monitoring">
-                                        <span class="me-2">🛰️</span> Attendance Event Monitoring
-                                    </NavLink>
-                                </div>
-                            }
-                        </AuthorizeView>
+                        @* --- RECYCLE BIN (SuperAdmin only) --- *@
+                        @if (userIsSuperAdmin && settings.EnableRecycleBin)
+                        {
+                            <div class="nav-item px-3">
+                                <NavLink class="nav-link text-danger" href="admin/recycle-bin">
+                                    <span class="me-2">🗑️</span> Recycle Bin
+                                </NavLink>
+                            </div>
+                        }
+                        @* --- AUDIT LOGS & EVENT MONITORING --- *@
+                        @if (userIsSuperAdmin || settings.EnableAuditLog)
+                        {
+                            <div class="nav-item px-3">
+                                <NavLink class="nav-link" href="admin/audit-logs">
+                                    <span class="me-2">📜</span> Audit Logs
+                                </NavLink>
+                                <NavLink class="nav-link" href="admin/attendance-event-monitoring">
+                                    <span class="me-2">🛰️</span> Attendance Event Monitoring
+                                </NavLink>
+                            </div>
+                        }
 
                         @* --- SUPERADMIN OR PERMITTED ADMIN LINK --- *@
-                        @if (userIsSuperAdmin || settings.AdminCanManageEmployeePermissions)
+                        @if (userIsSuperAdmin || settings.AdminCanManageFeatureToggles || settings.AdminCanManageEmployeePermissions)
                         {
                             <div class="nav-item px-3">
                                 <NavLink class="nav-link" href="admin/feature-toggles">

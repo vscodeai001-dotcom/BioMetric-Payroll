@@ -14,6 +14,7 @@ data class LocalEmployeeHistory(
     val newValue: Double,
     val shiftStart: String,
     val shiftEnd: String,
+    val shiftMode: String = "SINGLE_DAY",
     val breakHours: Double,
     val shift2Start: String?,
     val shift2End: String?,

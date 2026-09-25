@@ -4204,7 +4204,7 @@ foreach (var point in ordered)
             try
             {
                 await FirebaseRealtime.StreamGlobalChangesAsync(
-                    $"owners/{ownerUid.Trim()}/tracking",
+                    $"owners/{ownerUid.Trim()}/tracking/live",
                     async (path, data, ct) =>
                     {
                         if (disposed || ct.IsCancellationRequested)
@@ -4272,9 +4272,17 @@ foreach (var point in ordered)
             {
                 return true;
             }
+            if (ex is System.IO.IOException ioEx &&
+                (ioEx.Message.Contains("unexpected EOF", StringComparison.OrdinalIgnoreCase) ||
+                 ioEx.Message.Contains("0 bytes", StringComparison.OrdinalIgnoreCase) ||
+                 ioEx.Message.Contains("aborted", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
             if (ex.Message.Contains("10054") ||
                 ex.Message.Contains("forcibly closed by the remote host", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase))
+                ex.Message.Contains("ConnectionReset", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("unexpected EOF", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -4316,11 +4324,12 @@ foreach (var point in ordered)
         var relative = path.Trim('/');
         _lastFirebaseTrackingEventUtc = DateTime.UtcNow;
 
-        // Expected stream paths under owners/{ownerUid}/tracking:
-        // live/{employeeId}
-        // sessions/{employeeId}/{sessionId}
-        // live (initial/root replacement)
-        if (relative.Equals("live", StringComparison.OrdinalIgnoreCase))
+        // Expected stream paths under owners/{ownerUid}/tracking/live:
+        // / or "" (initial snapshot)
+        // {employeeId} or live/{employeeId}
+        if (string.IsNullOrEmpty(relative) ||
+            relative == "/" ||
+            relative.Equals("live", StringComparison.OrdinalIgnoreCase))
         {
             if (data is not JsonElement root ||
                 root.ValueKind == JsonValueKind.Null)
@@ -4498,17 +4507,23 @@ foreach (var point in ordered)
             return;
         }
 
-        if (relative.StartsWith(
-                "live/",
-                StringComparison.OrdinalIgnoreCase))
+        var isLivePrefix = relative.StartsWith("live/", StringComparison.OrdinalIgnoreCase);
+        var firstPart = relative.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        var isNumericChild = int.TryParse(firstPart, out var parsedChildId) && parsedChildId > 0;
+
+        if (isLivePrefix || isNumericChild)
         {
             var parts = relative.Split(
                 '/',
                 StringSplitOptions.RemoveEmptyEntries);
 
-            if (parts.Length < 2 ||
-                !int.TryParse(parts[1], out var employeeId) ||
-                employeeId <= 0)
+            var employeeId = 0;
+            if (isLivePrefix && parts.Length >= 2)
+                int.TryParse(parts[1], out employeeId);
+            else if (isNumericChild && parts.Length >= 1)
+                employeeId = parsedChildId;
+
+            if (employeeId <= 0)
                 return;
 
             /*

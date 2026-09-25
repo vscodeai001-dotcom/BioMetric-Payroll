@@ -66,6 +66,8 @@ class TrackingService : Service() {
     private var isManualStopping = false
     private var staffId: String = "unknown"
     private var lastLocation: Location? = null
+    private var lastHistoryLocation: Location? = null
+    private var lastHistoryRecordedTimeMs: Long = 0L
     private var currentInterval = 30_000L
     private var serverSessionStarted = false
     private var heartbeatJob: Job? = null
@@ -324,6 +326,11 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
                 refreshTrackingWindow()
             }
         }
+        serviceScope.launch {
+            trackingWindowResolver.observeEmployeeChanges().collectLatest {
+                refreshTrackingWindow()
+            }
+        }
     }
 
     private suspend fun refreshTrackingWindow() {
@@ -539,7 +546,23 @@ else if (locationUpdatesStarted) {
             putFloat("last_bearing", location.bearing)
         }
         
-        processLocationCapture(location)
+        // Evaluate if this fix qualifies for a route history breadcrumb:
+        val now = System.currentTimeMillis()
+        val prevHistory = lastHistoryLocation
+        val timeSinceLastHistory = now - lastHistoryRecordedTimeMs
+        val distSinceLastHistory = if (prevHistory != null) location.distanceTo(prevHistory) else Float.MAX_VALUE
+
+        // Industry standard GPS logging throttles (preserves Spark plan & eliminates route playback duplicates):
+        // 1. Initial point of session -> always record
+        // 2. Normal displacement: >= 60s elapsed AND moved >= 10m
+        // 3. Significant displacement: >= 30s elapsed AND moved >= 25m
+        // 4. Stationary heartbeat: >= 300s (5 minutes) elapsed
+        val isHistoryDue = prevHistory == null ||
+            (timeSinceLastHistory >= 60_000L && distSinceLastHistory >= 10f) ||
+            (timeSinceLastHistory >= 30_000L && distSinceLastHistory >= 25f) ||
+            (timeSinceLastHistory >= 300_000L)
+
+        processLocationCapture(location, isHistoryDue)
     }
 
     private fun nextGpsSequence(sessionId: String): Long {
@@ -556,7 +579,7 @@ else if (locationUpdatesStarted) {
         }
     }
 
-    private fun processLocationCapture(location: Location) {
+    private fun processLocationCapture(location: Location, recordHistory: Boolean) {
         val battery = (getSystemService(BATTERY_SERVICE) as BatteryManager)
             .getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val sessionId = sessionStore.gpsSessionId()
@@ -584,7 +607,7 @@ else if (locationUpdatesStarted) {
 
             val delivered = try {
                 withTimeoutOrNull(DIRECT_GPS_DELIVERY_TIMEOUT_MS) {
-                    deliverLocationDirectToSsot(capture)
+                    deliverLocationDirectToSsot(capture, recordHistory = recordHistory)
                 } ?: false
             } catch (e: Exception) {
                 Log.w(
@@ -596,12 +619,21 @@ else if (locationUpdatesStarted) {
             }
 
             if (delivered) {
+                if (recordHistory) {
+                    lastHistoryLocation = location
+                    lastHistoryRecordedTimeMs = System.currentTimeMillis()
+                }
                 // Firebase/SSOT acknowledged the stable ClientEventId.
                 // Do not route successful online GPS records through Room.
                 return@launch
             }
 
-            queueLocationForRetry(capture)
+            // Only queue for offline retry if this fix was designated as a route history breadcrumb
+            if (recordHistory) {
+                lastHistoryLocation = location
+                lastHistoryRecordedTimeMs = System.currentTimeMillis()
+                queueLocationForRetry(capture)
+            }
         }
     }
 
@@ -612,7 +644,7 @@ else if (locationUpdatesStarted) {
      * GPS -> Firebase/SSOT -> dashboards.
      * Room is entered only after this method fails to receive an acknowledgement.
      */
-    private suspend fun deliverLocationDirectToSsot(location: LocalLocation): Boolean {
+    private suspend fun deliverLocationDirectToSsot(location: LocalLocation, recordHistory: Boolean = true): Boolean {
         val effectiveSessionId = ensureFirebaseGpsSessionStarted(location.sessionId)
             ?: return false
 
@@ -628,7 +660,8 @@ else if (locationUpdatesStarted) {
             bearing = location.bearing.toDouble(),
             batteryLevel = location.batteryLevel,
             timestamp = location.timestamp,
-            isOffline = false
+            isOffline = false,
+            recordHistory = recordHistory
         )
 
         if (uploaded) {
@@ -640,7 +673,7 @@ else if (locationUpdatesStarted) {
             offlineMonitor.record(
                 OfflineTrackingMonitor.UPLOAD_SUCCESS,
                 OfflineTrackingMonitor.INFO,
-                "GPS fix ${location.sequence} published directly to Firebase/SSOT",
+                "GPS fix ${location.sequence} published directly to Firebase/SSOT (history=$recordHistory)",
                 sessionId = effectiveSessionId,
                 latitude = location.latitude,
                 longitude = location.longitude,
@@ -893,6 +926,9 @@ else if (locationUpdatesStarted) {
         locationHandlerThread = null
         offlineMonitor.record(OfflineTrackingMonitor.TRACKING_STOPPED, OfflineTrackingMonitor.INFO, "Tracking service destroyed")
         offlineMonitor.stop()
+        lastLocation = null
+        lastHistoryLocation = null
+        lastHistoryRecordedTimeMs = 0L
         serviceScope.cancel()
         super.onDestroy()
     }

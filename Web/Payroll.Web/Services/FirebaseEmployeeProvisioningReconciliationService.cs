@@ -249,6 +249,7 @@ public sealed class FirebaseEmployeeProvisioningReconciliationService : Backgrou
             ["sickLeaveBalance"] = employee.SickLeaveBalance,
             ["shiftStart"] = Time(employee.ShiftStartTime),
             ["shiftEnd"] = Time(employee.ShiftEndTime),
+            ["shiftMode"] = employee.ShiftMode ?? "SINGLE_DAY",
             ["breakHours"] = employee.StandardBreakMinutes / 60.0,
             ["hireDate"] = Unix(employee.HireDate),
             ["terminateDate"] = Unix(employee.TerminationDate),

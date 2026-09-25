@@ -2,6 +2,7 @@ package com.biometric.app.domain.location
 
 import android.content.Context
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalEmployeeDao
 import com.biometric.app.data.dao.LocalShiftScheduleDao
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
@@ -9,6 +10,7 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,14 +20,15 @@ import javax.inject.Singleton
  * tracking mode and assigned shift schedule.
  *
  * Default remains 24/7 so existing deployments are not silently changed.
- * SHIFT mode becomes active only when explicitly configured through the local
- * tracking_mode preference by the existing settings flow.
+ * SHIFT mode becomes active when configured on the Employee profile or
+ * through the local tracking_mode preference by the existing settings flow.
  */
 @Singleton
 class TrackingWindowResolver @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val sessionStore: MobileSessionStore,
-    private val shiftScheduleDao: LocalShiftScheduleDao
+    private val shiftScheduleDao: LocalShiftScheduleDao,
+    private val employeeDao: LocalEmployeeDao
 ) {
     data class Window(
         val allowed: Boolean,
@@ -37,17 +40,31 @@ class TrackingWindowResolver @Inject constructor(
 
     fun observeShiftChanges(): Flow<List<com.biometric.app.data.entity.LocalShiftSchedule>> {
         val employeeId = sessionStore.employeeId()
-        if (employeeId <= 0) return kotlinx.coroutines.flow.flowOf(emptyList())
+        if (employeeId <= 0) return flowOf(emptyList())
         val today = LocalDate.now(ZoneId.systemDefault())
         return shiftScheduleDao.observeForEmployeeWithPatterns(employeeId, today.minusDays(1).toString(), today.toString())
     }
 
+    fun observeEmployeeChanges(): Flow<List<com.biometric.app.data.entity.LocalEmployee>> {
+        return employeeDao.getAllFlow()
+    }
+
     suspend fun resolve(now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())): Window {
-        val mode = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_TRACKING_MODE, MODE_24_7)
+        val employeeId = sessionStore.employeeId()
+        val emp = if (employeeId > 0) employeeDao.getById(employeeId.toString()) else null
+        val profileMode = emp?.trackingMode?.trim()?.uppercase()
+
+        val prefMode = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_TRACKING_MODE, null)
             ?.trim()
             ?.uppercase()
-            ?: MODE_24_7
+
+        val mode = when {
+            profileMode == "SHIFT" || profileMode == "SHIFT_TIME" || profileMode == "SHIFT_ONLY" -> MODE_SHIFT
+            profileMode == "24/7" -> MODE_24_7
+            prefMode != null -> prefMode
+            else -> MODE_24_7
+        }
 
         return when (mode) {
             MODE_SHIFT -> resolveShift(now)

@@ -364,11 +364,12 @@ namespace Payroll.Web.Services
                     s.EmployeeID == employeeId &&
                     s.ShiftDate == previousDate);
 
-            var overnight = previousSchedule != null
-                ? previousSchedule.EndTime <= previousSchedule.StartTime
-                : emp.ShiftStartTime.HasValue &&
-                  emp.ShiftEndTime.HasValue &&
-                  emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value;
+            var overnight = string.Equals(emp.ShiftMode, "CONTINUOUS", StringComparison.OrdinalIgnoreCase) ||
+                (previousSchedule != null
+                    ? previousSchedule.EndTime <= previousSchedule.StartTime
+                    : emp.ShiftStartTime.HasValue &&
+                      emp.ShiftEndTime.HasValue &&
+                      emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value);
 
             if (overnight)
             {

@@ -382,11 +382,12 @@ public sealed class MobileAdminPunchController : ControllerBase
                     x => x.EmployeeID == employeeId &&
                          x.ShiftDate == DateOnly.FromDateTime(previousDate));
 
-            var overnight = previousSchedule != null
-                ? previousSchedule.EndTime <= previousSchedule.StartTime
-                : emp.ShiftStartTime.HasValue &&
-                  emp.ShiftEndTime.HasValue &&
-                  emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value;
+            var overnight = string.Equals(emp.ShiftMode, "CONTINUOUS", StringComparison.OrdinalIgnoreCase) ||
+                (previousSchedule != null
+                    ? previousSchedule.EndTime <= previousSchedule.StartTime
+                    : emp.ShiftStartTime.HasValue &&
+                      emp.ShiftEndTime.HasValue &&
+                      emp.ShiftEndTime.Value <= emp.ShiftStartTime.Value);
 
             if (overnight)
             {

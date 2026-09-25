@@ -74,7 +74,10 @@ class EmployeeToolsActivity : MotionBaseActivity() {
         if (features.enableFlexibleBenefits) tools += Tool("FBP Declaration", "Flexible benefits", "✦") { startActivity(Intent(this, FbpDeclarationActivity::class.java)) }
         tools += Tool("Profile", "My details", "●") { startActivity(Intent(this, MyReportsActivity::class.java).putExtra("FRAGMENT_TYPE", "profile")) }
         if (features.enableCustomReporting && features.employeeCanViewReports) tools += Tool("My Reports", "Personal reports", "▥") { startActivity(Intent(this, MyReportsActivity::class.java)) }
-        tools += Tool("Offline GPS", "Map, queue & event log", "🛰") { startActivity(Intent(this, OfflineTrackingActivity::class.java)) }
+        if (features.enableGeoFencing) {
+            tools += Tool("Offline GPS", "Map, queue & event log", "🛰") { startActivity(Intent(this, OfflineTrackingActivity::class.java)) }
+            tools += Tool("Location History", "Stays & GPS timeline", "📍") { startActivity(Intent(this, LocationStaysActivity::class.java)) }
+        }
 
         tools.forEach { tool ->
             val card = MaterialCardView(this).apply {

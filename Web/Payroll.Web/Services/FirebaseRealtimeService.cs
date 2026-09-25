@@ -1248,6 +1248,7 @@ public sealed class FirebaseRealtimeService
         bool isWithinAllowedRadius = false,
         DateTime? sessionStartedUtc = null,
         double distanceMeters = 0.0,
+        bool recordHistory = false,
         CancellationToken cancellationToken = default)
     {
         if (employeeId <= 0 || sessionId == Guid.Empty || string.IsNullOrWhiteSpace(clientEventId))
@@ -1274,33 +1275,25 @@ public sealed class FirebaseRealtimeService
 
         var updates = new Dictionary<string, object?>
         {
-            [$"tracking/live/{employeeId}"] = payload,
-            [$"tracking/history/{employeeId}/{clientEventId}"] = payload
+            [$"tracking/live/{employeeId}"] = payload
         };
+
+        if (recordHistory)
+        {
+            updates[$"tracking/history/{employeeId}/{clientEventId}"] = payload;
+        }
 
         var ownerUid = ResolveOwnerUid($"employee-{employeeId}", "Employee");
         if (!string.IsNullOrWhiteSpace(ownerUid))
         {
             updates[$"owners/{ownerUid}/tracking/live/{employeeId}"] = payload;
-            updates[$"owners/{ownerUid}/tracking/history/{employeeId}/{clientEventId}"] = payload;
-        }
-
-        var success = await UpdateAsync(updates, cancellationToken);
-
-        // Spark Mode Optimization (Option B2): Purge tracking history entries older than 24 hours
-        if (success && !string.IsNullOrWhiteSpace(ownerUid))
-        {
-            _ = Task.Run(async () =>
+            if (recordHistory)
             {
-                try
-                {
-                    await PurgeOldTrackingHistoryAsync(ownerUid, employeeId, TimeSpan.FromHours(24));
-                }
-                catch { }
-            });
+                updates[$"owners/{ownerUid}/tracking/history/{employeeId}/{clientEventId}"] = payload;
+            }
         }
 
-        return success;
+        return await UpdateAsync(updates, cancellationToken);
     }
 
     public async Task PurgeOldTrackingHistoryAsync(string ownerUid, int employeeId, TimeSpan maxAge)
@@ -1515,6 +1508,8 @@ public sealed class FirebaseRealtimeService
                 Put("rotationGroup", Value("RotationGroup"));
                 Put("shiftRotationPattern", Value("ShiftRotationPattern"));
                 Put("aspNetUserId", Value("AspNetUserId"));
+                Put("shiftMode", Value("ShiftMode") ?? "SINGLE_DAY");
+                Put("trackingMode", Value("TrackingMode") ?? "24/7");
                 Put("isActive", Value("IsDeleted") is bool deleted ? !deleted : true);
                 break;
 

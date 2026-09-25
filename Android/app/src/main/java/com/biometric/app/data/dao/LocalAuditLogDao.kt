@@ -15,6 +15,12 @@ interface LocalAuditLogDao {
     @Query("SELECT * FROM local_audit_logs ORDER BY timestamp DESC")
     fun getAllFlow(): Flow<List<LocalAuditLog>>
 
+    @Query("SELECT * FROM local_audit_logs WHERE action = :action ORDER BY timestamp DESC")
+    fun getByActionFlow(action: String): Flow<List<LocalAuditLog>>
+
+    @Query("SELECT * FROM local_audit_logs WHERE action = :action ORDER BY timestamp DESC")
+    suspend fun getByAction(action: String): List<LocalAuditLog>
+
     @Query("SELECT * FROM local_audit_logs WHERE syncState = 0")
     fun getUnsynced(): List<LocalAuditLog>
 
