@@ -115,6 +115,13 @@ class AdminBonusActivity : MotionBaseActivity() {
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
         binding.spEmployeeFilter.adapter = adapter
 
+        if (selectedEmployeeId > 0) {
+            val idx = allEmployees.indexOfFirst { (it.employeeId.toIntOrNull() ?: 0) == selectedEmployeeId }
+            if (idx >= 0) {
+                binding.spEmployeeFilter.setSelection(idx + 1, false)
+            }
+        }
+
         binding.spEmployeeFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val newId = if (position == 0) {
@@ -167,12 +174,13 @@ class AdminBonusActivity : MotionBaseActivity() {
         if (!hasData) return
 
         val namesMap = allEmployees.associateBy { it.employeeId.toIntOrNull() ?: -1 }
+        val namesMapStr = allEmployees.associateBy { it.employeeId }
         val inflater = LayoutInflater.from(this)
 
         filtered.forEach { bonus ->
             val card = inflater.inflate(R.layout.item_admin_bonus_row, container, false)
 
-            val emp = namesMap[bonus.employeeId]
+            val emp = namesMap[bonus.employeeId] ?: namesMapStr[bonus.employeeId.toString()]
             val empName = emp?.name ?: "Employee #${bonus.employeeId}"
             val empRole = emp?.role ?: "Staff"
 
@@ -282,7 +290,7 @@ class AdminBonusActivity : MotionBaseActivity() {
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
                     try {
-                        firebaseFinance.deleteBonus(bonus.bonusId)
+                        firebaseFinance.deleteBonus(bonus.bonusId, bonus.firebaseKey)
                         Toast.makeText(this@AdminBonusActivity, "Bonus record deleted 🗑️", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(this@AdminBonusActivity, "Failed to delete: ${e.message}", Toast.LENGTH_LONG).show()

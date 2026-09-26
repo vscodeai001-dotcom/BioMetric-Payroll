@@ -135,7 +135,14 @@ class FirebaseRoomHydrator @Inject constructor(
             observe("bonus_records",
                 query = firebaseSync.getOwnerRef()?.child("bonus_records")?.limitToLast(100),
                 onUpsert = { bonusRecordDao.upsert(it.toLocalBonusRecord()) },
-                onDelete = { bonusRecordDao.deleteById(it.intValue("bonusId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+                onDelete = {
+                    val key = it.key.orEmpty()
+                    val id = it.intValue("bonusId")
+                        ?: it.intValue("BonusID")
+                        ?: key.toIntOrNull()
+                        ?: (if (key.isNotBlank()) Math.abs(key.hashCode()).let { h -> if (h == 0) 1 else h } else 0)
+                    bonusRecordDao.deleteByIdOrKey(id, key)
+                })
             observe("tax_declarations",
                 query = firebaseSync.getOwnerRef()?.child("tax_declarations")?.limitToLast(100),
                 onUpsert = { taxDeclarationDao.upsert(it.toLocalTaxDeclaration()) },
@@ -774,9 +781,9 @@ class FirebaseRoomHydrator @Inject constructor(
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
         Log.i("FirebaseRoomHydrator", "Rebinding realtime Room hydration: $reason")
         reconnectJob?.cancel()
-        listeners.forEach { (query, listener) -> query.removeEventListener(listener) }
+        listeners.forEach { (query, listener) -> runCatching { query.removeEventListener(listener) } }
         listeners.clear()
-        valueListeners.forEach { (query, listener) -> query.removeEventListener(listener) }
+        valueListeners.forEach { (query, listener) -> runCatching { query.removeEventListener(listener) } }
         valueListeners.clear()
         hydrationJob?.cancel()
         hydrationJob = null
@@ -815,12 +822,12 @@ class FirebaseRoomHydrator @Inject constructor(
         hydrationJob = null
 
         listeners.forEach { (query, listener) ->
-            query.removeEventListener(listener)
+            runCatching { query.removeEventListener(listener) }
         }
         listeners.clear()
 
         valueListeners.forEach { (query, listener) ->
-            query.removeEventListener(listener)
+            runCatching { query.removeEventListener(listener) }
         }
         valueListeners.clear()
 
@@ -850,11 +857,22 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun DataSnapshot.longValue(name: String): Long =
         when (val v = childValue(name)) {
-            is Number -> v.toLong()
+            is Number -> {
+                val n = v.toLong()
+                if (n in 1..9999999999L) n * 1000L else n
+            }
             else -> {
-                val s = v?.toString().orEmpty()
-                s.toLongOrNull() ?: runCatching {
+                val s = v?.toString().orEmpty().trim()
+                s.toLongOrNull()?.let { n ->
+                    if (n in 1..9999999999L) n * 1000L else n
+                } ?: runCatching {
                     java.time.Instant.parse(s).toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.LocalDateTime.parse(s).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.LocalDate.parse(s).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
                 }.getOrDefault(0L)
             }
         }
@@ -1024,15 +1042,33 @@ class FirebaseRoomHydrator @Inject constructor(
         syncState = 1
     )
 
-    private fun DataSnapshot.toLocalBonusRecord(): LocalBonusRecord = LocalBonusRecord(
-        bonusId = intValue("bonusId") ?: key.orEmpty().toIntOrNull() ?: 0,
-        employeeId = intValue("employeeId") ?: 0,
-        bonusDate = longValue("bonusDate"),
-        amount = doubleValue("amount"),
-        description = stringValue("description"),
-        payrollIdPaid = intValue("payrollIdPaid"),
-        syncState = 1
-    )
+    private fun DataSnapshot.toLocalBonusRecord(): LocalBonusRecord {
+        val keyStr = key.orEmpty()
+        val rawBonusId = intValue("bonusId")?.takeIf { it > 0 }
+            ?: intValue("BonusID")?.takeIf { it > 0 }
+            ?: keyStr.toIntOrNull()?.takeIf { it > 0 }
+            ?: (if (keyStr.isNotBlank()) Math.abs(keyStr.hashCode()).let { if (it == 0) 1 else it } else 1)
+
+        val empId = intValue("employeeId")
+            ?: intValue("EmployeeID")
+            ?: intValue("staffId")
+            ?: 0
+
+        val dateMs = longValue("bonusDate").takeIf { it > 0 }
+            ?: longValue("BonusDate").takeIf { it > 0 }
+            ?: System.currentTimeMillis()
+
+        return LocalBonusRecord(
+            bonusId = rawBonusId,
+            employeeId = empId,
+            bonusDate = dateMs,
+            amount = doubleValue("amount").takeIf { it != 0.0 } ?: doubleValue("Amount"),
+            description = stringValue("description") ?: stringValue("Description"),
+            payrollIdPaid = intValue("payrollIdPaid") ?: intValue("PayrollID_Paid"),
+            syncState = 1,
+            firebaseKey = keyStr
+        )
+    }
 
     private fun DataSnapshot.toLocalTaxDeclaration(): LocalTaxDeclaration = LocalTaxDeclaration(
         declarationId = intValue("declarationId") ?: key.orEmpty().toIntOrNull() ?: 0,

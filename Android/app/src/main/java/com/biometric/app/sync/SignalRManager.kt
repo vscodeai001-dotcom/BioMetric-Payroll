@@ -864,19 +864,22 @@ class SignalRManager @Inject constructor(
                         ref.child(employeeId.toString())
                     } else ref
                 }
-            locationListener?.let { liveRef.removeEventListener(it) }
+            locationListener?.let { runCatching { liveRef.removeEventListener(it) } }
             // Release the Firebase SSOT live sync when Admin stops/logs out.
             // While the Admin session is active this path remains keepSynced(true).
-            liveRef.keepSynced(false)
-            employeeListener?.let { employeesRefForStop(ownerUid).removeEventListener(it) }
+            runCatching { liveRef.keepSynced(false) }
+            employeeListener?.let { runCatching { employeesRefForStop(ownerUid).removeEventListener(it) } }
 
-            clientEventsRootListener?.let {
-                firebaseSync.getGlobalRef().child("client_events").removeEventListener(it)
-            }
+            // Detach child employee queries FIRST before detaching parent root listener
+            // to prevent Firebase SDK internal SyncTree "View does not exist but we have a tag" warning.
             clientEventEmployeeListeners.values.forEach { (query, listener) ->
-                query.removeEventListener(listener)
+                runCatching { query.removeEventListener(listener) }
             }
             clientEventEmployeeListeners.clear()
+
+            clientEventsRootListener?.let {
+                runCatching { firebaseSync.getGlobalRef().child("client_events").removeEventListener(it) }
+            }
         }
 
         locationListener = null

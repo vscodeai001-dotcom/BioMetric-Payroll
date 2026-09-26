@@ -81,10 +81,17 @@ class LauncherActivity : AppCompatActivity() {
                 validation.role == UserRole.Admin.name || validation.role == UserRole.SuperAdmin.name
             ) MainActivity::class.java else EmployeeHomeActivity::class.java
 
-            sharedViewModel.warmUpDashboard()
-
-            startActivity(Intent(this@LauncherActivity, destination))
+            val launchIntent = Intent(this@LauncherActivity, destination).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            }
+            startActivity(launchIntent)
             finish()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                overridePendingTransition(0, 0)
+            }
         }
     }
 

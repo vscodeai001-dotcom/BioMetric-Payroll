@@ -204,7 +204,8 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         require(employeeId > 0) { "Valid employee is required." }
         require(amount > 0.0) { "Positive amount is required." }
         val id = nextBonusId()
-        ownerRef().child("bonus_records").child(id.toString()).setValue(
+        val key = id.toString()
+        ownerRef().child("bonus_records").child(key).setValue(
             mapOf(
                 "bonusId" to id,
                 "employeeId" to employeeId,
@@ -212,16 +213,29 @@ class FirebaseAdminFinanceRepository @Inject constructor(
                 "amount" to amount,
                 "description" to description,
                 "bonusDate" to parseDate(date),
-                "payrollIdPaid" to 0
+                "payrollIdPaid" to 0,
+                "_entity" to "BonusRecord",
+                "_key" to key
             )
         ).await()
-        firebaseSync.notifyRealtimeChanged("BonusRecord", "ADDED", id.toString())
+        firebaseSync.notifyRealtimeChanged("BonusRecord", "ADDED", key)
     }
 
-    suspend fun deleteBonus(bonusId: Int) {
-        require(bonusId > 0) { "Valid bonusId is required." }
-        ownerRef().child("bonus_records").child(bonusId.toString()).removeValue().await()
-        firebaseSync.notifyRealtimeChanged("BonusRecord", "DELETED", bonusId.toString())
+    suspend fun deleteBonus(bonusId: Int, firebaseKey: String? = null) {
+        val targetKey = if (!firebaseKey.isNullOrBlank()) {
+            firebaseKey
+        } else if (bonusId > 0) {
+            bonusId.toString()
+        } else {
+            return
+        }
+        ownerRef().child("bonus_records").child(targetKey).removeValue().await()
+        if (targetKey != bonusId.toString() && bonusId > 0) {
+            runCatching {
+                ownerRef().child("bonus_records").child(bonusId.toString()).removeValue().await()
+            }
+        }
+        firebaseSync.notifyRealtimeChanged("BonusRecord", "DELETED", targetKey)
     }
 
     private suspend fun nextBonusId(): Int {

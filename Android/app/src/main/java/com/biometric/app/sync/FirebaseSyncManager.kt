@@ -326,6 +326,40 @@ class FirebaseSyncManager @Inject constructor(
                 )
                 @Suppress("UNCHECKED_CAST")
                 a as T
+            } else if (T::class.java == com.biometric.app.data.entity.LocalBonusRecord::class.java) {
+                val key = snapshot.key.orEmpty()
+                val rawBonusId = snapshot.child("bonusId").value?.toString()?.toIntOrNull()
+                    ?: snapshot.child("BonusID").value?.toString()?.toIntOrNull()
+                    ?: key.toIntOrNull()
+                    ?: (if (key.isNotBlank()) Math.abs(key.hashCode()).let { if (it == 0) 1 else it } else 1)
+
+                val empId = snapshot.child("employeeId").value?.toString()?.toIntOrNull()
+                    ?: snapshot.child("EmployeeID").value?.toString()?.toIntOrNull()
+                    ?: snapshot.child("staffId").value?.toString()?.toIntOrNull()
+                    ?: 0
+
+                val rawDate = snapshot.child("bonusDate").value ?: snapshot.child("BonusDate").value
+                val dateMs = rawDate.parseTimestampOrLong(System.currentTimeMillis())
+
+                val amt = (snapshot.child("amount").value ?: snapshot.child("Amount").value).numberOrDouble()
+
+                val desc = snapshot.child("description").value?.toString()
+                    ?: snapshot.child("Description").value?.toString()
+
+                val payrollId = (snapshot.child("payrollIdPaid").value ?: snapshot.child("PayrollID_Paid").value)?.toString()?.toIntOrNull()
+
+                val b = com.biometric.app.data.entity.LocalBonusRecord(
+                    bonusId = rawBonusId,
+                    employeeId = empId,
+                    bonusDate = dateMs,
+                    amount = amt,
+                    description = desc,
+                    payrollIdPaid = payrollId,
+                    syncState = 1,
+                    firebaseKey = key
+                )
+                @Suppress("UNCHECKED_CAST")
+                b as T
             } else if (T::class.java == AuditLog::class.java) {
                 @Suppress("UNCHECKED_CAST")
                 decodeAuditLog(snapshot) as? T
@@ -368,6 +402,30 @@ class FirebaseSyncManager @Inject constructor(
         when (this) {
             is Number -> toLong()
             else -> this?.toString()?.trim()?.toLongOrNull()
+        }
+
+    @PublishedApi
+    internal fun Any?.parseTimestampOrLong(default: Long = System.currentTimeMillis()): Long =
+        when (this) {
+            is Number -> {
+                val n = toLong()
+                if (n in 1..9999999999L) n * 1000L else n
+            }
+            null -> default
+            else -> {
+                val s = toString().trim()
+                s.toLongOrNull()?.let { n ->
+                    if (n in 1..9999999999L) n * 1000L else n
+                } ?: runCatching {
+                    java.time.Instant.parse(s).toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.OffsetDateTime.parse(s).toInstant().toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.LocalDateTime.parse(s).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrNull() ?: runCatching {
+                    java.time.LocalDate.parse(s).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }.getOrDefault(default)
+            }
         }
 
     @PublishedApi

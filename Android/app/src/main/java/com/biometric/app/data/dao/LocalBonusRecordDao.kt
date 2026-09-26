@@ -17,4 +17,7 @@ interface LocalBonusRecordDao {
 
     @Query("DELETE FROM local_bonus_records WHERE bonusId = :id")
     fun deleteById(id: Int)
+
+    @Query("DELETE FROM local_bonus_records WHERE bonusId = :id OR (firebaseKey IS NOT NULL AND firebaseKey = :key)")
+    fun deleteByIdOrKey(id: Int, key: String?)
 }

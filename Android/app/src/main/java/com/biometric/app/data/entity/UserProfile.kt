@@ -1,12 +1,15 @@
 package com.biometric.app.data.entity
 
 import androidx.annotation.Keep
+import com.google.firebase.database.Exclude
+import com.google.firebase.database.IgnoreExtraProperties
 
 enum class UserRole {
     SuperAdmin, Admin, Employee
 }
 
 @Keep
+@IgnoreExtraProperties
 data class UserProfile(
     var uid: String = "",
     var name: String = "",
@@ -27,12 +30,20 @@ data class UserProfile(
     var brandingName: String? = null,
     var brandingLogoUrl: String? = null,
     var theme: String = "light",
-    var dataLastModified: Long = System.currentTimeMillis()
+    var dataLastModified: Long = System.currentTimeMillis(),
+    var ownerUid: String? = null,
+    var enabled: Boolean = true
 ) {
+    @Exclude
     fun isSuperAdmin() = role.equals(UserRole.SuperAdmin.name, ignoreCase = true)
+
+    @Exclude
     fun isAdmin() = role.equals(UserRole.Admin.name, ignoreCase = true)
+
+    @Exclude
     fun isStaff() = role.equals(UserRole.Employee.name, ignoreCase = true) || role.equals("STAFF", ignoreCase = true)
     
+    @Exclude
     fun isOwner() = isSuperAdmin()
 
     companion object {

@@ -69,6 +69,9 @@
     "client_events": {
       ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'Admin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')",
       "$employeeId": {
+        ".indexOn": [
+          "timestamp"
+        ],
         ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'Admin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN' || auth.token.employee_id == $employeeId || (auth.token.employee_id + '') == $employeeId || root.child('user_profiles').child(auth.uid).child('employeeId').val() == $employeeId || (root.child('user_profiles').child(auth.uid).child('employeeId').val() + '') == $employeeId)",
         ".write": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.employee_id == $employeeId || (auth.token.employee_id + '') == $employeeId || root.child('user_profiles').child(auth.uid).child('employeeId').val() == $employeeId || (root.child('user_profiles').child(auth.uid).child('employeeId').val() + '') == $employeeId)",
         "$eventId": {
@@ -261,10 +264,13 @@
           }
         },
         "recycle_bin": {
-          ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'SuperAdmin' || auth.token.role == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')",
+          ".indexOn": [
+            "timestamp"
+          ],
+          ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.owner_uid == $uid || auth.uid == $uid || $uid == 'biometricpayroll' || root.child('user_profiles').child(auth.uid).child('ownerUid').val() == $uid || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'Admin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'ADMIN' || auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
           "$id": {
-            ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'SuperAdmin' || auth.token.role == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')",
-            ".write": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'SuperAdmin' || auth.token.role == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')"
+            ".read": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.owner_uid == $uid || auth.uid == $uid || $uid == 'biometricpayroll' || root.child('user_profiles').child(auth.uid).child('ownerUid').val() == $uid || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'Admin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'ADMIN' || auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
+            ".write": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.owner_uid == $uid || auth.uid == $uid || $uid == 'biometricpayroll' || root.child('user_profiles').child(auth.uid).child('ownerUid').val() == $uid || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'Admin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'ADMIN' || auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')"
           }
         },
         "tracking": {

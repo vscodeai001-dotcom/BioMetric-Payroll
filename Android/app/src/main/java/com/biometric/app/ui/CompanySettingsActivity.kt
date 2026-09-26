@@ -250,14 +250,24 @@ class CompanySettingsActivity : MotionBaseActivity() {
                     override fun onCancelled(error: DatabaseError) {}
                 })
 
-                // Load Admin Details from Owner root node
-                owner.addListenerForSingleValueEvent(object : ValueEventListener {
+                // Load Admin Details from Owner specific child keys (Never query root owner node to prevent OOM)
+                owner.child("adminEmail").addListenerForSingleValueEvent(object : ValueEventListener {
                     override fun onDataChange(snapshot: DataSnapshot) {
-                        val email = snapshot.child("adminEmail").getValue(String::class.java)
-                        val name = snapshot.child("adminName").getValue(String::class.java)
-                        val phone = snapshot.child("adminPhone").getValue(String::class.java)
+                        val email = snapshot.getValue(String::class.java)
                         if (!email.isNullOrBlank()) binding.etAdminEmail.setText(email)
+                    }
+                    override fun onCancelled(error: DatabaseError) {}
+                })
+                owner.child("adminName").addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val name = snapshot.getValue(String::class.java)
                         if (!name.isNullOrBlank()) binding.etAdminName.setText(name)
+                    }
+                    override fun onCancelled(error: DatabaseError) {}
+                })
+                owner.child("adminPhone").addListenerForSingleValueEvent(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        val phone = snapshot.getValue(String::class.java)
                         if (!phone.isNullOrBlank()) binding.etAdminPhone.setText(phone)
                     }
                     override fun onCancelled(error: DatabaseError) {}
