@@ -43,6 +43,7 @@ import com.biometric.app.ui.selfservice.*
 import com.biometric.app.sync.SignalRManager
 import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.sync.FirebaseRoomHydrator
+import com.biometric.app.sync.FirebaseAuthTokenManager
 import com.biometric.app.util.BatteryOptimizationHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
@@ -125,6 +126,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var adminRealtimeCoordinator: AdminRealtimeCoordinator
     @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
+    @Inject lateinit var firebaseAuthTokenManager: FirebaseAuthTokenManager
     @Inject lateinit var osrmApi: OsrmApiService
 
     private val markers = mutableMapOf<Int, Marker>()
@@ -1360,12 +1362,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             delay(300)
             _binding?.let {
                 runCatching {
-                    val user = FirebaseAuth.getInstance().currentUser
-                    val tokenResult = user?.getIdToken(true)?.await()
-                    tokenResult?.token?.let { freshToken ->
+                    val freshToken = firebaseAuthTokenManager.getValidToken(forceRefresh = false)
+                    freshToken?.let { token ->
                         applicationContext.getSharedPreferences("mobile_session", Context.MODE_PRIVATE)
                             .edit(commit = true) {
-                                putString("token", freshToken)
+                                putString("token", token)
                             }
                     }
                 }
@@ -1555,7 +1556,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     // Application Menus Role & Permission Gating (Web 1:1 Mirror)
                     val menus = b.appMenus
                     menus.cardSuperAdminPortal.isVisible = isSuperAdmin
-                    menus.cardSectionEmployeeTools.isVisible = isSuperAdmin
+                    menus.cardSectionEmployeeTools.isVisible = false // Completely hidden per user request
 
                     // 1. Payroll Section
                     val payrollEnabled = isSuperAdmin || s.enablePayroll || s.enableSalaryAdvance || s.enableBonusManagement || s.enableResignationModule
@@ -1591,20 +1592,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     menus.rowAttendanceEventMonitoring.isVisible = isSuperAdmin || s.enableAuditLog
                     menus.rowFeatureToggles.isVisible = isSuperAdmin || s.adminCanManageFeatureToggles || s.adminCanManageEmployeePermissions
 
-                    // 4. Employee Tools (SA View)
-                    if (isSuperAdmin) {
-                        menus.rowMyPayslips.isVisible = s.enablePayroll && s.employeeCanViewPayslip
-                        menus.rowMyAttendance.isVisible = s.employeeCanViewAttendance
-                        menus.rowRequestLeave.isVisible = s.enableLeaveManagement && s.employeeCanViewLeave
-                        menus.rowLeaveHistory.isVisible = s.enableLeaveManagement && s.employeeCanViewLeaveHistory
-                        menus.rowMyShiftSchedule.isVisible = s.enableShiftScheduling && s.employeeCanViewShifts
-                        menus.rowMySalaryAdvances.isVisible = s.enableSalaryAdvance && s.employeeCanViewAdvance
-                        menus.rowMyTaxDeclaration.isVisible = s.enableTaxDeclarations && s.employeeCanViewTax
-                        menus.rowMyBonuses.isVisible = s.enableBonusManagement && s.employeeCanViewBonus
-                        menus.rowMyResignation.isVisible = s.enableResignationModule && s.employeeCanViewResignation
-                        menus.rowMyRegularization.isVisible = s.enableRegularizationRequest
-                        menus.rowMyReports.isVisible = s.enableCustomReporting && s.employeeCanViewReports
-                    }
+                    // 4. Employee Tools (SA View) - Completely hidden
+                    menus.cardSectionEmployeeTools.isVisible = false
 
                     // The profile/role can arrive after the toolbar is first created.
                     // Rebuild the toolbar so Admin Modules becomes visible immediately.

@@ -77,6 +77,25 @@ class MobileSessionStore @Inject constructor(
     fun saveDashboardCache(json: String) { prefs.edit { putString("dashboard_stats_cache", json) } }
     fun getDashboardCache(): String? = prefs.getString("dashboard_stats_cache", null)
 
+    fun saveAuthCredentials(email: String, pass: String) {
+        if (email.isNotBlank() && pass.isNotBlank()) {
+            val encoded = android.util.Base64.encodeToString(pass.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            prefs.edit {
+                putString(KEY_SAVED_AUTH_EMAIL, email)
+                putString(KEY_SAVED_AUTH_PASS, encoded)
+            }
+        }
+    }
+
+    fun getSavedAuthCredentials(): Pair<String?, String?> {
+        val email = prefs.getString(KEY_SAVED_AUTH_EMAIL, null)
+        val encoded = prefs.getString(KEY_SAVED_AUTH_PASS, null)
+        val pass = if (!encoded.isNullOrBlank()) {
+            runCatching { String(android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP), Charsets.UTF_8) }.getOrNull()
+        } else null
+        return Pair(email, pass)
+    }
+
     fun clearLogin() {
         clearGpsSession()
         prefs.edit { clear() }
@@ -91,5 +110,7 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_ACTIVE = "active"
         private const val KEY_GPS_SESSION = "gps_session_id"
         private const val KEY_RELIABILITY_DONE = "reliability_setup_done"
+        private const val KEY_SAVED_AUTH_EMAIL = "saved_auth_email"
+        private const val KEY_SAVED_AUTH_PASS = "saved_auth_pass"
     }
 }

@@ -24,7 +24,8 @@ import javax.inject.Singleton
 @Singleton
 class SignalRManager @Inject constructor(
     private val sessionStore: MobileSessionStore,
-    private val firebaseSync: FirebaseSyncManager
+    private val firebaseSync: FirebaseSyncManager,
+    private val firebaseAuthTokenManager: FirebaseAuthTokenManager
 ) {
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var applicationJob: Job? = null
@@ -406,17 +407,7 @@ class SignalRManager @Inject constructor(
                 val now = System.currentTimeMillis()
                 if (now - lastTokenRefresh >= AUTH_TOKEN_REFRESH_INTERVAL_MS) {
                     runCatching {
-                        val user = FirebaseAuth.getInstance().currentUser
-                        val tokenResult = user?.getIdToken(true)?.await()
-                        tokenResult?.token?.let { freshToken ->
-                            sessionStore.saveLogin(
-                                token = freshToken,
-                                employeeId = sessionStore.employeeId(),
-                                name = sessionStore.employeeName(),
-                                email = user.email.orEmpty(),
-                                firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                            )
-                        }
+                        firebaseAuthTokenManager.getValidToken(forceRefresh = true)
                         lastTokenRefresh = now
                     }
                 }
@@ -456,21 +447,11 @@ class SignalRManager @Inject constructor(
         realtimeRecoveryJob = managerScope.launch {
             try {
                 Log.w("SignalRManager", "Initiating Firebase Auth recovery ($reason)...")
-                val user = FirebaseAuth.getInstance().currentUser
-                if (user != null) {
-                    val tokenResult = runCatching { user.getIdToken(true).await() }.getOrNull()
-                    val freshToken = tokenResult?.token
-                    if (!freshToken.isNullOrBlank()) {
-                        sessionStore.saveLogin(
-                            token = freshToken,
-                            employeeId = sessionStore.employeeId(),
-                            name = sessionStore.employeeName(),
-                            email = user.email.orEmpty(),
-                            firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                        )
-                        Log.i("SignalRManager", "Firebase Auth ID token refreshed. Re-establishing listeners...")
-                    }
-                    runCatching { FirebaseDatabase.getInstance().goOnline() }
+                val freshToken = firebaseAuthTokenManager.getValidToken(forceRefresh = true)
+                if (!freshToken.isNullOrBlank()) {
+                    Log.i("SignalRManager", "Firebase Auth ID token refreshed. Re-establishing listeners...")
+                }
+                runCatching { FirebaseDatabase.getInstance().goOnline() }
                     delay(300L)
                     stop(clearState = false)
                     delay(200L)
@@ -522,17 +503,9 @@ class SignalRManager @Inject constructor(
 
         managerScope.launch {
             runCatching {
-                val user = FirebaseAuth.getInstance().currentUser
-                val tokenResult = user?.getIdToken(true)?.await()
-                tokenResult?.token?.let { freshToken ->
-                    sessionStore.saveLogin(
-                        token = freshToken,
-                        employeeId = sessionStore.employeeId(),
-                        name = sessionStore.employeeName(),
-                        email = user.email.orEmpty(),
-                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                    )
-                    Log.i("SignalRManager", "ID token refreshed for rebind ($reason)")
+                val freshToken = firebaseAuthTokenManager.getValidToken(forceRefresh = false)
+                if (!freshToken.isNullOrBlank()) {
+                    Log.i("SignalRManager", "Token validated/restored for rebind ($reason)")
                 }
             }
             runCatching {

@@ -444,6 +444,7 @@ class LoginActivity : MotionBaseActivity() {
                             email = firebaseUser.email ?: email,
                             firebaseOwnerUid = firebaseOwnerUid
                         )
+                        mobileSessionStore.saveAuthCredentials(firebaseUser.email ?: email, pass)
 
                         applicationContext.getSharedPreferences("user_prefs", MODE_PRIVATE).edit(commit = true) {
                             putBoolean("is_logged_in", true)
@@ -567,6 +568,7 @@ class LoginActivity : MotionBaseActivity() {
                 email = firebaseUser.email ?: email,
                 firebaseOwnerUid = ownerUid
             )
+            mobileSessionStore.saveAuthCredentials(firebaseUser.email ?: email, pass)
 
             // Save application user state.
             applicationContext

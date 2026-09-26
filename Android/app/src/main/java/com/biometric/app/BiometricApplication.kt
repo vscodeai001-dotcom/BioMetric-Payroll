@@ -43,6 +43,7 @@ class BiometricApplication : Application(), Configuration.Provider {
     @Inject lateinit var themePreferenceSync: com.biometric.app.sync.ThemePreferenceSync
     @Inject lateinit var firebaseReconnectCoordinator: com.biometric.app.sync.FirebaseReconnectCoordinator
     @Inject lateinit var signalRManager: com.biometric.app.sync.SignalRManager
+    @Inject lateinit var firebaseAuthTokenManager: com.biometric.app.sync.FirebaseAuthTokenManager
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -120,24 +121,14 @@ class BiometricApplication : Application(), Configuration.Provider {
             override fun onActivityStarted(activity: Activity) {
                 if (foregroundActivityCount == 0 && !isActivityChangingConfigs) {
                     val idleTime = System.currentTimeMillis() - lastBackgroundTimestamp
-                    if (sessionStore.isLoggedIn() && FirebaseAuth.getInstance().currentUser != null) {
+                    if (sessionStore.isLoggedIn()) {
                         Log.i("BiometricApplication", "App returned to foreground (idle: ${idleTime}ms) - healing realtime listeners")
                         realtimeScope.launch {
-                            // Proactively refresh Firebase Auth token so expired tokens do not cause listener silence
+                            // Safely validate or restore Firebase Auth token through centralized mutex manager
                             runCatching {
-                                val user = FirebaseAuth.getInstance().currentUser
-                                val tokenResult = user?.getIdToken(true)?.await()
-                                tokenResult?.token?.let { freshToken ->
-                                    sessionStore.saveLogin(
-                                        token = freshToken,
-                                        employeeId = sessionStore.employeeId(),
-                                        name = sessionStore.employeeName(),
-                                        email = user.email.orEmpty(),
-                                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                                    )
-                                }
+                                firebaseAuthTokenManager.getValidToken(forceRefresh = false)
                             }.onFailure {
-                                Log.w("BiometricApplication", "Failed to force-refresh Firebase token on foreground resume", it)
+                                Log.w("BiometricApplication", "Token validation on foreground resume failed", it)
                             }
                             delay(200L)
                             val role = sessionStore.userRole().trim().uppercase()

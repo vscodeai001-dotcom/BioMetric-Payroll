@@ -65,7 +65,8 @@ class FirebaseRoomHydrator @Inject constructor(
     private val taxDeclarationDao: LocalTaxDeclarationDao,
     private val fbpComponentDao: LocalFbpComponentDao,
     private val fbpDeclarationDao: LocalFbpDeclarationDao,
-    private val settingsDao: LocalSettingsDao
+    private val settingsDao: LocalSettingsDao,
+    private val firebaseAuthTokenManager: FirebaseAuthTokenManager
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
@@ -782,17 +783,7 @@ class FirebaseRoomHydrator @Inject constructor(
         activeOwnerUid = null
         reconnectJob = scope.launch {
             runCatching {
-                val user = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-                val tokenResult = user?.getIdToken(true)?.await()
-                tokenResult?.token?.let { freshToken ->
-                    sessionStore.saveLogin(
-                        token = freshToken,
-                        employeeId = sessionStore.employeeId(),
-                        name = sessionStore.employeeName(),
-                        email = user.email.orEmpty(),
-                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
-                    )
-                }
+                firebaseAuthTokenManager.getValidToken(forceRefresh = false)
             }
             delay(250L)
             if (sessionStore.isLoggedIn() && firebaseSync.isAuthenticated() && firebaseSync.getOwnerUid() == ownerUid) {
