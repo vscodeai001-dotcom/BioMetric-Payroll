@@ -1,5 +1,6 @@
 package com.biometric.app.data.repository
 
+import android.util.Log
 import com.biometric.app.api.AttendanceDayDto
 import com.biometric.app.api.EmployeeDashboardResponse
 import com.biometric.app.api.FbpDto
@@ -658,6 +659,24 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun createAdvance(amount: Double, reason: String) {
         requireFeatureAllowed("advance")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
+        val empIdStr = sessionStore.employeeId().toString()
+
+        // Rapid duplicate debounce check (within 10 seconds for same employee & amount)
+        runCatching {
+            val snapshot = ownerRef().child("advance_payments").get().await()
+            val now = System.currentTimeMillis()
+            val isDuplicate = snapshot.children.any { s ->
+                val eId = s.child("employeeId").value?.toString() ?: s.child("staffId").value?.toString()
+                val amt = s.child("amount").value?.toString()?.toDoubleOrNull() ?: 0.0
+                val dt = s.child("date").value?.toString()?.toLongOrNull() ?: 0L
+                (eId == empIdStr || eId == emp.employeeId) && Math.abs(amt - amount) < 0.01 && Math.abs(dt - now) < 10000L
+            }
+            if (isDuplicate) {
+                Log.w("SelfService", "Prevented duplicate employee advance request")
+                return
+            }
+        }
+
         val id = UUID.randomUUID().toString()
         ownerRef().child("advance_payments").child(id).setValue(
             mapOf(

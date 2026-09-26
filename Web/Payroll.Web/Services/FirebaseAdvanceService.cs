@@ -172,7 +172,44 @@ public sealed class FirebaseAdvanceService
             }
         }
 
-        return result.OrderByDescending(x => x.AdvanceDate).ThenBy(x => x.EmployeeID).ToList();
+        // Deduplicate logical duplicates (same employee, same amount, same date/minute, same recovery status)
+        var grouped = result.GroupBy(x => $"{x.EmployeeID}|{x.Amount}|{x.AdvanceDate:yyyy-MM-dd HH:mm}|{x.PayrollID_Paid.HasValue}");
+        var distinctAdvances = new List<SalaryAdvance>();
+        var duplicateKeysToDelete = new List<string>();
+
+        foreach (var group in grouped)
+        {
+            var primary = group.First();
+            distinctAdvances.Add(primary);
+
+            foreach (var duplicate in group.Skip(1))
+            {
+                if (!string.IsNullOrWhiteSpace(duplicate.FirebaseKey) && duplicate.FirebaseKey != primary.FirebaseKey)
+                {
+                    duplicateKeysToDelete.Add(duplicate.FirebaseKey);
+                }
+            }
+        }
+
+        if (duplicateKeysToDelete.Count > 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                foreach (var dupKey in duplicateKeysToDelete)
+                {
+                    try
+                    {
+                        await _firebase.DeleteOwnerRecordAsync(OwnerUid, Table, dupKey, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        // best-effort cleanup
+                    }
+                }
+            });
+        }
+
+        return distinctAdvances.OrderByDescending(x => x.AdvanceDate).ThenBy(x => x.EmployeeID).ToList();
     }
 
     private static SalaryAdvance? ParseAdvance(JsonElement row, string key, int employeeId, DateTime? from, DateTime? to, bool unpaidOnly)

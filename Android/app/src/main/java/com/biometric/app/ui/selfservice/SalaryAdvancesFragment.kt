@@ -62,7 +62,10 @@ class SalaryAdvancesFragment : Fragment() {
     private fun loadAdvances() {
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val advances = selfService.advances()
+                val rawAdvances = selfService.advances()
+                val advances = rawAdvances
+                    .distinctBy { it.id }
+                    .distinctBy { "${it.employeeId}|${it.amount}|${it.date}|${it.paid}" }
                 _binding?.let { b ->
                     adapter.submitList(advances)
                     val total = advances.sumOf { it.amount }

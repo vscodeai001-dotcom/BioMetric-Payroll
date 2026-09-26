@@ -257,9 +257,29 @@ class ShiftManagerActivity : MotionBaseActivity() {
     private fun showAddShiftDialog() {
         val d = DialogAddShiftBinding.inflate(layoutInflater)
 
-        if (allEmployees.isNotEmpty()) {
-            d.etName.setText(allEmployees.first().employeeId)
+        // Setup Employee Dropdown with Employee Names
+        val employeeDisplayList = allEmployees.map { "${it.name} (#${it.employeeId})" }
+        val empAdapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_dropdown_item_1line,
+            employeeDisplayList
+        )
+        d.actvEmployee.setAdapter(empAdapter)
+
+        // Pre-select employee: either currently filtered employee or first in list
+        val defaultEmployee = if (filterEmployeeId != null) {
+            allEmployees.find { it.employeeId.toIntOrNull() == filterEmployeeId } ?: allEmployees.firstOrNull()
+        } else {
+            allEmployees.firstOrNull()
         }
+        if (defaultEmployee != null) {
+            d.actvEmployee.setText("${defaultEmployee.name} (#${defaultEmployee.employeeId})", false)
+        }
+
+        d.actvEmployee.setOnClickListener {
+            d.actvEmployee.showDropDown()
+        }
+
         d.etDate.setText(isoDateFormat.format(Date()))
 
         d.etDate.isFocusable = false
@@ -285,7 +305,15 @@ class ShiftManagerActivity : MotionBaseActivity() {
             .setMessage("Assign shift timing. Recurring patterns repeat across upcoming dates.")
             .setView(d.root)
             .setPositiveButton("Save Shift ✅") { _, _ ->
-                val employeeId = d.etName.text.toString().toIntOrNull() ?: 0
+                val empText = d.actvEmployee.text.toString().trim()
+                val selectedEmployee = allEmployees.find { "${it.name} (#${it.employeeId})" == empText }
+                    ?: allEmployees.find { it.name.equals(empText, ignoreCase = true) }
+                    ?: allEmployees.find { it.employeeId == empText }
+                val employeeId = selectedEmployee?.employeeId?.toIntOrNull()
+                    ?: empText.substringAfter("(#").substringBefore(")").toIntOrNull()
+                    ?: empText.toIntOrNull()
+                    ?: 0
+
                 val date = d.etDate.text.toString().trim()
                 val start = d.etStart.text.toString().trim()
                 val end = d.etEnd.text.toString().trim()
@@ -293,7 +321,7 @@ class ShiftManagerActivity : MotionBaseActivity() {
                 val duration = d.etDuration.text.toString().toIntOrNull() ?: 7
 
                 if (employeeId <= 0 || date.isBlank() || start.isBlank() || end.isBlank()) {
-                    toast("Employee ID, date, and times are required ⚠️")
+                    toast("Please select an employee, date, and valid times ⚠️")
                     return@setPositiveButton
                 }
 

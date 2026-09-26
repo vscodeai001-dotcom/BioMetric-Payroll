@@ -52,13 +52,14 @@ import javax.inject.Inject
 import kotlin.math.*
 
 @AndroidEntryPoint
-class LocationStaysActivity : AppCompatActivity() {
+class LocationStaysActivity : MotionBaseActivity() {
 
     @Inject lateinit var repo: MainRepository
     @Inject lateinit var signal: SignalRManager
 
     private lateinit var mapView: MapView
     private lateinit var spnEmployee: Spinner
+    private lateinit var spnMinDuration: Spinner
     private lateinit var btnDateFrom: MaterialButton
     private lateinit var btnDateTo: MaterialButton
     private lateinit var btnTimeFrom: MaterialButton
@@ -79,6 +80,9 @@ class LocationStaysActivity : AppCompatActivity() {
 
     private var activeEmployees: List<Employee> = emptyList()
     private var allShops: List<Shop> = emptyList()
+    private var allDetectedStays: List<LocationStayItem> = emptyList()
+    private var currentFilteredPoints: List<SignalRManager.LiveLocation> = emptyList()
+    private var minDurationMinutes: Int = 10
 
     private val calFrom = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0)
@@ -99,11 +103,13 @@ class LocationStaysActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_location_stays)
+        applyWindowInsets(findViewById(R.id.clLocationStaysRoot), findViewById(R.id.appBar))
 
         initViews()
         setupMap()
         setupAdapters()
         setupPickers()
+        setupDurationSpinner()
         observeData()
     }
 
@@ -111,6 +117,7 @@ class LocationStaysActivity : AppCompatActivity() {
         findViewById<MaterialToolbar>(R.id.toolbar).setNavigationOnClickListener { finish() }
 
         spnEmployee = findViewById(R.id.spnEmployee)
+        spnMinDuration = findViewById(R.id.spnMinDuration)
         btnDateFrom = findViewById(R.id.btnDateFrom)
         btnDateTo = findViewById(R.id.btnDateTo)
         btnTimeFrom = findViewById(R.id.btnTimeFrom)
@@ -268,6 +275,50 @@ class LocationStaysActivity : AppCompatActivity() {
         spnEmployee.adapter = adapter
     }
 
+    private fun setupDurationSpinner() {
+        val options = listOf(
+            "All Stays (≥ 10 mins)",
+            "≥ 20 mins",
+            "≥ 30 mins",
+            "≥ 1 hour",
+            "≥ 2 hours"
+        )
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        spnMinDuration.adapter = adapter
+        spnMinDuration.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                minDurationMinutes = when (position) {
+                    1 -> 20
+                    2 -> 30
+                    3 -> 60
+                    4 -> 120
+                    else -> 10
+                }
+                applyStayFilters()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun applyStayFilters() {
+        val minMs = minDurationMinutes * 60 * 1000L
+        val filteredStays = allDetectedStays.filter { it.durationMs >= minMs }
+        val totalStayMs = filteredStays.sumOf { it.durationMs }
+        val distinctEmployeesCount = filteredStays.map { it.employeeId }.distinct().size
+
+        tvMetricEmployees.text = distinctEmployeesCount.toString()
+        tvMetricStays.text = filteredStays.size.toString()
+        tvMetricTotalStay.text = formatDuration(totalStayMs)
+        tvMetricPoints.text = currentFilteredPoints.size.toString()
+        tvMapPointsBadge.text = "${currentFilteredPoints.size} points"
+        tvStaysCountBadge.text = "${filteredStays.size} stays (≥${minDurationMinutes}m)"
+
+        stayAdapter.submit(filteredStays)
+        tvNoStays.visibility = if (filteredStays.isEmpty()) View.VISIBLE else View.GONE
+
+        renderMap(currentFilteredPoints, filteredStays)
+    }
+
     private fun loadAndAnalyze() {
         val fromEpoch = calFrom.timeInMillis
         val toEpoch = calTo.timeInMillis
@@ -311,31 +362,21 @@ class LocationStaysActivity : AppCompatActivity() {
             val detectedStays = detectStays(filteredPoints, empNameMap)
             enrichShopMatches(detectedStays, allShops)
 
-            val totalStayMs = detectedStays.sumOf { it.durationMs }
-            val distinctEmployeesCount = detectedStays.map { it.employeeId }.distinct().size
-
             withContext(Dispatchers.Main) {
                 progressBar.visibility = View.GONE
                 btnSearchRadar.isEnabled = true
 
-                tvMetricEmployees.text = distinctEmployeesCount.toString()
-                tvMetricStays.text = detectedStays.size.toString()
-                tvMetricTotalStay.text = formatDuration(totalStayMs)
-                tvMetricPoints.text = filteredPoints.size.toString()
-                tvMapPointsBadge.text = "${filteredPoints.size} points"
-                tvStaysCountBadge.text = "${detectedStays.size} stays"
+                currentFilteredPoints = filteredPoints
+                allDetectedStays = detectedStays
 
-                stayAdapter.submit(detectedStays)
-                tvNoStays.visibility = if (detectedStays.isEmpty()) View.VISIBLE else View.GONE
-
-                renderMap(filteredPoints, detectedStays)
+                applyStayFilters()
             }
         }
     }
 
     /**
-     * SSOT stay detection identical to Web LocationTrackingHistory.razor.DetectStays:
-     * Points clustered within 10-15m for > 10 minutes.
+     * Stay detection engine:
+     * Points clustered within 50m radius for ≥ 10 minutes.
      */
     private fun detectStays(
         points: List<SignalRManager.LiveLocation>,
@@ -364,7 +405,7 @@ class LocationStaysActivity : AppCompatActivity() {
                 val endEpoch = parseTrackingTimestamp(run.last().timestamp)
                 val durationMs = endEpoch - startEpoch
 
-                // Web SSOT: Minimum 10 minutes (600,000 ms)
+                // Minimum stay requirement: 10 minutes (600,000 ms)
                 if (durationMs >= 10 * 60 * 1000L) {
                     val eid = run.first().employeeId
                     val empName = empNameMap[eid] ?: "Employee #$eid"
@@ -397,9 +438,10 @@ class LocationStaysActivity : AppCompatActivity() {
                             longitude = avgLon,
                             accuracyMeters = avgAcc,
                             pointCount = run.size,
-                            matchedLocation = "Unknown / Other Location",
+                            matchedLocation = "External Location / Field Halt",
+                            placeCategory = "Field Halt",
                             distanceFromMatchedLocationMeters = 0.0,
-                            radiusMeters = run.first().allowedRadiusMeters,
+                            radiusMeters = 50,
                             arrivalSpeedKmh = arrSpeedKmh,
                             departureSpeedKmh = depSpeedKmh
                         )
@@ -419,8 +461,8 @@ class LocationStaysActivity : AppCompatActivity() {
                 }
 
                 val dist = calculateDistance(curAnchor.latitude, curAnchor.longitude, point.latitude, point.longitude)
-                // Threshold: 10-15 meters cluster distance
-                if (dist <= 15.0) {
+                // 50-meter cluster radius as required for stays
+                if (dist <= 50.0) {
                     run.add(point)
                 } else {
                     finishRun()
@@ -444,8 +486,6 @@ class LocationStaysActivity : AppCompatActivity() {
     }
 
     private fun enrichShopMatches(stays: List<LocationStayItem>, shops: List<Shop>) {
-        if (shops.isEmpty()) return
-
         for (stay in stays) {
             val match = shops
                 .filter { it.latitude != 0.0 && it.longitude != 0.0 }
@@ -453,14 +493,20 @@ class LocationStaysActivity : AppCompatActivity() {
                     val dist = calculateDistance(stay.latitude, stay.longitude, shop.latitude, shop.longitude)
                     shop to dist
                 }
-                .filter { (_, dist) -> dist <= 120.0 } // 120m geofence radius match
+                .filter { (_, dist) -> dist <= 120.0 } // 120m proximity geofence match
                 .minByOrNull { (_, dist) -> dist }
 
             if (match != null) {
                 val (shop, dist) = match
-                stay.matchedLocation = shop.name.ifBlank { "Branch Shop" }
+                stay.matchedLocation = shop.name.ifBlank { "Branch Office / Shop" }
+                stay.placeCategory = "Worksite"
                 stay.distanceFromMatchedLocationMeters = dist
-                stay.radiusMeters = 100
+                stay.radiusMeters = 50
+            } else {
+                stay.matchedLocation = "External Client Site / Field Halt"
+                stay.placeCategory = "Field Halt"
+                stay.distanceFromMatchedLocationMeters = 0.0
+                stay.radiusMeters = 50
             }
         }
     }
@@ -650,6 +696,7 @@ data class LocationStayItem(
     val accuracyMeters: Double,
     val pointCount: Int,
     var matchedLocation: String,
+    var placeCategory: String = "Field Halt",
     var distanceFromMatchedLocationMeters: Double,
     var radiusMeters: Int,
     val arrivalSpeedKmh: Double,
@@ -685,6 +732,8 @@ private class LocationStayAdapter(
         private val tvTime = view.findViewById<TextView>(R.id.tvStayTime)
         private val tvDuration = view.findViewById<TextView>(R.id.tvStayDuration)
         private val tvLocation = view.findViewById<TextView>(R.id.tvStayLocation)
+        private val tvCategory = view.findViewById<TextView>(R.id.tvStayCategory)
+        private val tvAdminSummary = view.findViewById<TextView>(R.id.tvStayAdminSummary)
         private val tvAccuracy = view.findViewById<TextView>(R.id.tvStayAccuracy)
         private val tvPoints = view.findViewById<TextView>(R.id.tvStayPoints)
         private val tvSpeeds = view.findViewById<TextView>(R.id.tvStaySpeeds)
@@ -703,9 +752,14 @@ private class LocationStayAdapter(
             val mins = item.durationMs / 60000
             val hrs = mins / 60
             val remMins = mins % 60
-            tvDuration.text = if (hrs > 0) "${hrs}h ${remMins}m" else "${mins}m"
+            val durText = if (hrs > 0) "${hrs}h ${remMins}m" else "${mins}m"
+            tvDuration.text = durText
 
             tvLocation.text = item.matchedLocation
+            tvCategory.text = item.placeCategory
+            tvCategory.setTextColor(if (item.placeCategory == "Worksite") Color.parseColor("#1565C0") else Color.parseColor("#E65100"))
+            tvAdminSummary.text = "Stayed $durText at this location (within 50m radius, ≥10m dwell)"
+
             tvAccuracy.text = "±${String.format(Locale.US, "%.1f", item.accuracyMeters)} m"
             tvPoints.text = "${item.pointCount} GPS fixes analyzed"
 

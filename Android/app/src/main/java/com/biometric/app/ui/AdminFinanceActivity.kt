@@ -93,12 +93,43 @@ class AdminFinanceActivity : MotionBaseActivity() {
             combine(advanceFlow, employeeFlow) { advances, employees ->
                 advances to employees
             }.collectLatest { (advances, employees) ->
-                allAdvances = advances.sortedByDescending { it.date }
+                val deduplicatedAdvances = advances
+                    .distinctBy { it.advanceId }
+                    .distinctBy { adv ->
+                        val minuteBucket = adv.date / 60000L
+                        "${adv.employeeId}|${adv.amount}|$minuteBucket|${adv.isRecovered}|${adv.recoveryPaymentId.orEmpty()}"
+                    }
+
+                // If ghost duplicates exist in Firebase, clean them up in the background
+                if (advances.size > deduplicatedAdvances.size) {
+                    cleanupGhostDuplicatesInFirebase(advances, deduplicatedAdvances)
+                }
+
+                allAdvances = deduplicatedAdvances.sortedByDescending { it.date }
                 allEmployees = employees.sortedBy { it.name }
 
                 setupEmployeeSpinner()
                 updateKpiDashboard()
                 renderAdvances()
+            }
+        }
+    }
+
+    private fun cleanupGhostDuplicatesInFirebase(
+        rawAdvances: List<AdvancePayment>,
+        keptAdvances: List<AdvancePayment>
+    ) {
+        lifecycleScope.launch {
+            try {
+                val keptIds = keptAdvances.map { it.advanceId }.toSet()
+                val duplicateIds = rawAdvances.map { it.advanceId }.filter { it !in keptIds }
+                duplicateIds.forEach { id ->
+                    if (id.isNotBlank()) {
+                        firebaseFinance.deleteAdvance(id)
+                    }
+                }
+            } catch (e: Exception) {
+                // best effort cleanup
             }
         }
     }
@@ -206,16 +237,16 @@ class AdminFinanceActivity : MotionBaseActivity() {
             .setTitle("Void Salary Advance 💳")
             .setMessage("Are you sure you want to void the advance of ${currency.format(adv.amount)} for $staffName?\n\nThis removes the advance from pending deduction in upcoming payroll.")
             .setPositiveButton("Void Advance 🗑️") { _, _ ->
-                voidAdvance(adv.advanceId)
+                voidAdvance(adv)
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    private fun voidAdvance(advanceId: String) {
+    private fun voidAdvance(adv: AdvancePayment) {
         lifecycleScope.launch {
             try {
-                firebaseFinance.deleteAdvance(advanceId)
+                firebaseFinance.deleteAdvanceAndDuplicates(adv)
                 Toast.makeText(this@AdminFinanceActivity, "Advance voided successfully! 🗑️", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(this@AdminFinanceActivity, "Failed to void advance: ${e.message}", Toast.LENGTH_SHORT).show()

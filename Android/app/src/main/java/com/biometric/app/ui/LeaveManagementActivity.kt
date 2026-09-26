@@ -4,6 +4,7 @@ import android.app.DatePickerDialog
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -25,6 +26,7 @@ import com.biometric.app.data.entity.LeaveRequest
 import com.biometric.app.databinding.ActivityLeaveManagementBinding
 import com.biometric.app.databinding.DialogAdminGrantLeaveBinding
 import com.biometric.app.databinding.ItemAdminLeaveCardBinding
+import com.biometric.app.sync.FirebaseSyncManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 import dagger.hilt.android.AndroidEntryPoint
@@ -34,6 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -44,6 +47,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
     @Inject lateinit var repository: MainRepository
     @Inject lateinit var mobileApi: MobileApiService
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private lateinit var adapter: LeaveAdapter
 
@@ -52,6 +56,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
     private var currentTab = "Pending"
     private var filterEmployeeId: Int? = null
+    private var isAllDates = true
 
     private var filterStartDate = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
     private var filterEndDate = Calendar.getInstance().apply {
@@ -74,6 +79,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
         setupTabs()
         setupRecyclerView()
         setupListeners()
+        updateAllDatesButtonUi()
 
         observeData()
         fetchLeavesFromServer()
@@ -90,6 +96,8 @@ class LeaveManagementActivity : MotionBaseActivity() {
         binding.cardFilterStartDate.setOnClickListener {
             showDatePicker(filterStartDate) { picked ->
                 filterStartDate = picked
+                isAllDates = false
+                updateAllDatesButtonUi()
                 binding.tvFilterStartDate.text = displayDateFormat.format(filterStartDate.time)
                 filterAndRender()
                 fetchLeavesFromServer()
@@ -99,6 +107,8 @@ class LeaveManagementActivity : MotionBaseActivity() {
         binding.cardFilterEndDate.setOnClickListener {
             showDatePicker(filterEndDate) { picked ->
                 filterEndDate = picked
+                isAllDates = false
+                updateAllDatesButtonUi()
                 binding.tvFilterEndDate.text = displayDateFormat.format(filterEndDate.time)
                 filterAndRender()
                 fetchLeavesFromServer()
@@ -117,6 +127,18 @@ class LeaveManagementActivity : MotionBaseActivity() {
             base.get(Calendar.MONTH),
             base.get(Calendar.DAY_OF_MONTH)
         ).show()
+    }
+
+    private fun updateAllDatesButtonUi() {
+        if (isAllDates) {
+            binding.btnAllDatesToggle.text = "📅 All Dates: ON"
+            binding.btnAllDatesToggle.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#2E7D32"))
+            binding.btnAllDatesToggle.setTextColor(Color.WHITE)
+        } else {
+            binding.btnAllDatesToggle.text = "📅 All Dates: OFF"
+            binding.btnAllDatesToggle.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#EEEEEE"))
+            binding.btnAllDatesToggle.setTextColor(Color.DKGRAY)
+        }
     }
 
     private fun setupTabs() {
@@ -146,6 +168,13 @@ class LeaveManagementActivity : MotionBaseActivity() {
         }
 
         binding.btnSearchLeaves.setOnClickListener {
+            fetchLeavesFromServer()
+        }
+
+        binding.btnAllDatesToggle.setOnClickListener {
+            isAllDates = !isAllDates
+            updateAllDatesButtonUi()
+            filterAndRender()
             fetchLeavesFromServer()
         }
 
@@ -195,9 +224,10 @@ class LeaveManagementActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             binding.swipeRefresh.isRefreshing = true
             try {
-                val fromStr = isoDateFormat.format(filterStartDate.time)
-                val toStr = isoDateFormat.format(filterEndDate.time)
                 val empId = filterEmployeeId ?: 0
+                // When isAllDates is true, query without date bounds to ensure all leaves sync into SSOT Room
+                val fromStr = if (!isAllDates) isoDateFormat.format(filterStartDate.time) else null
+                val toStr = if (!isAllDates) isoDateFormat.format(filterEndDate.time) else null
 
                 val response = mobileApi.adminLeaves(
                     authorization = apiAuth,
@@ -212,12 +242,15 @@ class LeaveManagementActivity : MotionBaseActivity() {
                         val dateMs = dto.leaveDate?.let { dateStr ->
                             runCatching {
                                 isoDateFormat.parse(dateStr)?.time
+                                    ?: SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(dateStr)?.time
+                                    ?: SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(dateStr)?.time
                             }.getOrNull()
                         } ?: 0L
 
                         LeaveRequest(
                             id = dto.id.toString(),
                             staffId = dto.employeeId.toString(),
+                            employeeId = dto.employeeId.toString(),
                             staffName = dto.employeeName.ifBlank { "Employee" },
                             leaveType = dto.leaveType.ifBlank { "Paid Leave" },
                             startDate = dateMs,
@@ -233,6 +266,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 }
             } catch (e: Exception) {
                 // Network unavailable: local Room cache remains active
+                Log.d("LeaveManagement", "Server API unavailable, using local Room/Firebase SSOT: ${e.message}")
             } finally {
                 binding.swipeRefresh.isRefreshing = false
                 filterAndRender()
@@ -260,17 +294,27 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
         // Employee & Date filter
         val inScope = allRequests.filter { req ->
-            val reqEmpId = req.staffId.toIntOrNull()
+            val reqEmpId = req.staffId.toIntOrNull() ?: req.employeeId.toIntOrNull()
             val matchesEmployee = filterEmployeeId == null || filterEmployeeId == 0 || reqEmpId == filterEmployeeId
             val effectiveEnd = if (req.endDate > 0) req.endDate else req.startDate
-            val matchesDate = if (req.startDate > 0) {
-                req.startDate <= endMs && effectiveEnd >= startMs
-            } else true
+            val matchesDate = if (isAllDates) {
+                true
+            } else {
+                if (req.startDate > 0) {
+                    req.startDate <= endMs && effectiveEnd >= startMs
+                } else true
+            }
             matchesEmployee && matchesDate
         }
 
-        // Compute KPI counters
-        val pendingCount = inScope.count { it.status.equals("Pending", ignoreCase = true) }
+        // Pending count: all pending requests matching employee filter (pending action items requiring attention)
+        val pendingInScope = allRequests.filter { req ->
+            val reqEmpId = req.staffId.toIntOrNull() ?: req.employeeId.toIntOrNull()
+            val matchesEmployee = filterEmployeeId == null || filterEmployeeId == 0 || reqEmpId == filterEmployeeId
+            matchesEmployee && req.status.equals("Pending", ignoreCase = true) && !req.leaveType.equals("Loss of Pay (Auto)", ignoreCase = true)
+        }
+
+        val pendingCount = pendingInScope.size
         val approvedCount = inScope.count { it.status.equals("Approved", ignoreCase = true) }
         val rejectedCount = inScope.count { it.status.equals("Rejected", ignoreCase = true) }
         val totalCount = inScope.size
@@ -285,8 +329,11 @@ class LeaveManagementActivity : MotionBaseActivity() {
             "Approved" -> inScope.filter { it.status.equals("Approved", ignoreCase = true) }
             "Rejected" -> inScope.filter { it.status.equals("Rejected", ignoreCase = true) }
             "All" -> inScope
-            else -> inScope.filter { it.status.equals("Pending", ignoreCase = true) }
-        }.sortedByDescending { it.startDate }
+            else -> {
+                // Pending tab: always display pending requests needing admin review
+                pendingInScope
+            }
+        }.sortedByDescending { if (it.startDate > 0) it.startDate else it.createdAt }
 
         adapter.submitList(tabFiltered)
         binding.llEmptyState.isVisible = tabFiltered.isEmpty()
@@ -306,25 +353,29 @@ class LeaveManagementActivity : MotionBaseActivity() {
             .setPositiveButton("Confirm") { _, _ ->
                 val remarks = input.text.toString().trim()
                 lifecycleScope.launch {
+                    val newStatus = if (approved) "Approved" else "Rejected"
                     try {
                         val reqId = request.id.toIntOrNull() ?: 0
-                        val r = mobileApi.setAdminLeaveStatus(
-                            apiAuth,
-                            reqId,
-                            AdminLeaveStatusRequest(approved, remarks.ifBlank { null })
-                        )
-                        if (!r.isSuccessful) {
-                            throw IllegalStateException("Server returned HTTP ${r.code()}")
+                        if (reqId > 0) {
+                            mobileApi.setAdminLeaveStatus(
+                                apiAuth,
+                                reqId,
+                                AdminLeaveStatusRequest(approved, remarks.ifBlank { null })
+                            )
                         }
-                        // Update local repository memory if needed
-                        request.status = if (approved) "Approved" else "Rejected"
-                        request.adminNotes = remarks
-                        filterAndRender()
-                        fetchLeavesFromServer()
-                        toast("Leave request ${if (approved) "Approved ✅" else "Rejected ❌"}")
-                    } catch (e: Exception) {
-                        toast("Unable to update leave: ${e.message} ⚠️")
-                    }
+                    } catch (_: Exception) {}
+
+                    // Offline-first / Firebase Room update
+                    repository.updateLeaveStatus(request.id, newStatus, remarks)
+                    request.status = newStatus
+                    request.adminNotes = remarks
+                    try {
+                        firebaseSync.pushLeaveRequest(request)
+                    } catch (_: Exception) {}
+
+                    filterAndRender()
+                    fetchLeavesFromServer()
+                    toast("Leave request ${if (approved) "Approved ✅" else "Rejected ❌"}")
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -339,17 +390,16 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 lifecycleScope.launch {
                     try {
                         val reqId = request.id.toIntOrNull() ?: 0
-                        val r = mobileApi.deleteAdminLeave(apiAuth, reqId)
-                        if (!r.isSuccessful) {
-                            throw IllegalStateException("Server returned HTTP ${r.code()}")
+                        if (reqId > 0) {
+                            mobileApi.deleteAdminLeave(apiAuth, reqId)
                         }
-                        allRequests.removeAll { it.id == request.id }
-                        filterAndRender()
-                        fetchLeavesFromServer()
-                        toast("Leave record deleted / revoked 🗑️")
-                    } catch (e: Exception) {
-                        toast("Unable to delete record: ${e.message} ⚠️")
-                    }
+                    } catch (_: Exception) {}
+
+                    allRequests.removeAll { it.id == request.id }
+                    repository.deleteLeaveRequest(request.id)
+                    filterAndRender()
+                    fetchLeavesFromServer()
+                    toast("Leave record deleted / revoked 🗑️")
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -423,15 +473,37 @@ class LeaveManagementActivity : MotionBaseActivity() {
                             isHalfDay = isHalf,
                             notes = notes?.ifBlank { null }
                         )
-                        val r = mobileApi.createAdminLeave(apiAuth, req)
-                        if (!r.isSuccessful) {
-                            throw IllegalStateException("Server returned HTTP ${r.code()}")
-                        }
-                        toast("Approved leave granted for ${selectedEmp.name} ✅")
-                        fetchLeavesFromServer()
-                    } catch (e: Exception) {
-                        toast("Unable to grant leave: ${e.message} ⚠️")
+                        mobileApi.createAdminLeave(apiAuth, req)
+                    } catch (_: Exception) {}
+
+                    // Offline-first / Firebase SSOT fallback
+                    val dateCal = Calendar.getInstance().apply {
+                        time = runCatching { isoDateFormat.parse(leaveDateStr) }.getOrNull() ?: Date()
                     }
+                    val dateMs = dateCal.timeInMillis
+                    val leaveId = UUID.randomUUID().toString()
+                    val newLeave = LeaveRequest(
+                        id = leaveId,
+                        staffId = selectedEmp.employeeId,
+                        employeeId = selectedEmp.employeeId,
+                        staffName = selectedEmp.name,
+                        leaveType = leaveTypeStr,
+                        startDate = dateMs,
+                        endDate = dateMs,
+                        reason = notes.orEmpty(),
+                        status = "Approved",
+                        adminNotes = "Granted by Admin",
+                        isHalfDay = isHalf,
+                        createdAt = dateMs
+                    )
+                    repository.upsertLeaveRequests(listOf(newLeave))
+                    try {
+                        firebaseSync.pushLeaveRequest(newLeave)
+                    } catch (_: Exception) {}
+
+                    toast("Approved leave granted for ${selectedEmp.name} ✅")
+                    filterAndRender()
+                    fetchLeavesFromServer()
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -480,8 +552,13 @@ class LeaveManagementActivity : MotionBaseActivity() {
             RecyclerView.ViewHolder(itemBinding.root) {
 
             fun bind(item: LeaveRequest) {
-                itemBinding.tvStaffName.text = item.staffName.ifBlank { "Staff #${item.staffId}" }
-                itemBinding.tvStaffIdSubtitle.text = "Staff ID: ${item.staffId}"
+                val emp = allEmployees.find { it.employeeId == item.staffId || it.employeeId == item.employeeId }
+                val resolvedName = emp?.name?.takeIf { it.isNotBlank() }
+                    ?: item.staffName.takeIf { it.isNotBlank() && it != "Employee" }
+                    ?: "Staff #${item.staffId}"
+
+                itemBinding.tvStaffName.text = resolvedName
+                itemBinding.tvStaffIdSubtitle.text = "Staff ID: ${item.staffId.ifBlank { item.employeeId }}"
 
                 // Status Badge Color
                 val status = item.status.uppercase(Locale.US)
@@ -541,7 +618,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                     itemBinding.tvAdminNotesText.isVisible = false
                 }
 
-                // Click Listeners
+                // Actions
                 itemBinding.btnApproveLeave.setOnClickListener { onApprove(item) }
                 itemBinding.btnRejectLeave.setOnClickListener { onReject(item) }
                 itemBinding.btnRevokeOrDelete.setOnClickListener { onDelete(item) }

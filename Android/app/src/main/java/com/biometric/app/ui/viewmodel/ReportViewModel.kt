@@ -32,7 +32,11 @@ class ReportViewModel @Inject constructor(
             try {
                 if (reportType == "ATTENDANCE_MONTHLY_SUMMARY") {
                     _cumulativeSummary.value = reportRepository.calculateCompanyCumulativeSummary(startDate, endDate, employeeId)
-                    _reportData.value = reportRepository.generateConsolidatedAttendance(startDate, endDate, employeeId)
+                    _reportData.value = if (employeeId != null && employeeId > 0) {
+                        reportRepository.generateEmployeeDailyAttendance(startDate, endDate, employeeId)
+                    } else {
+                        reportRepository.generateConsolidatedAttendance(startDate, endDate, null)
+                    }
                 } else {
                     _reportData.value = when (reportType) {
                         "PAYROLL_VARIANCE" -> reportRepository.generatePayrollVariance(year, month)

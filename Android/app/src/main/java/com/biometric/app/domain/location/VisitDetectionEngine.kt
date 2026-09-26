@@ -11,7 +11,7 @@ class VisitDetectionEngine @Inject constructor() {
 
     companion object {
         private const val VISIT_RADIUS_METERS = 50.0
-        private const val MIN_VISIT_DURATION_MILLIS = 5 * 60 * 1000L // 5 minutes
+        private const val MIN_VISIT_DURATION_MILLIS = 10 * 60 * 1000L // 10 minutes minimum stay
     }
 
     /**

@@ -24,10 +24,10 @@
             </div>
             <div>
                 <h2 class="page-header-title">
-                    Location Tracking History & GPS Radar
+                    Location Tracking History &amp; GPS Radar
                 </h2>
                 <p class="page-header-subtitle">
-                    <span>📍 Historical GPS movement analysis: Dwell locations, stay duration (&gt;10 min) & travel trajectory</span>
+                    <span>📍 Historical GPS movement analysis: Dwell locations (50m radius), stay duration (≥10 min) &amp; travel trajectory</span>
                 </p>
             </div>
         </div>
@@ -61,19 +61,29 @@
                     <label class="form-label">Date To</label>
                     <input type="date" class="form-control" @bind="toDate" />
                 </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label">From Time</label>
+                <div class="col-6 col-md-1">
+                    <label class="form-label">From</label>
                     <input type="time" class="form-control" @bind="fromTime" />
                 </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label">To Time</label>
+                <div class="col-6 col-md-1">
+                    <label class="form-label">To</label>
                     <input type="time" class="form-control" @bind="toTime" />
+                </div>
+                <div class="col-12 col-md-2">
+                    <label class="form-label">Min Stay (50m Radius)</label>
+                    <select class="form-select" value="@minDurationFilterMinutes" @onchange="OnDurationFilterChanged">
+                        <option value="10">≥ 10 mins (All)</option>
+                        <option value="20">≥ 20 mins</option>
+                        <option value="30">≥ 30 mins</option>
+                        <option value="60">≥ 1 hour</option>
+                        <option value="120">≥ 2 hours</option>
+                    </select>
                 </div>
                 <div class="col-12 col-md-1 d-grid">
                     <button class="btn btn-primary" @onclick="LoadAsync" disabled="@loading"><i class="bi bi-search"></i><span class="d-md-none ms-2">Search</span></button>
                 </div>
             </div>
-            <div class="small text-muted mt-2"><i class="bi bi-shield-check me-1"></i>No GPS records are changed. Stay records are derived from the existing <code>EmployeeLocationHistory</code> data.</div>
+            <div class="small text-muted mt-2"><i class="bi bi-shield-check me-1"></i>No GPS records are changed. Stay records are derived from the existing <code>EmployeeLocationHistory</code> data clustered within a 50m radius for ≥10 minutes.</div>
         </div>
     </div>
 
@@ -95,7 +105,7 @@
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <div>
                         <strong><i class="bi bi-clock-history me-2"></i>Detected Stayed Locations</strong>
-                        <div class="small text-muted">More than 10 minutes within approximately 10 metres.</div>
+                        <div class="small text-muted">Stayed ≥ 10 minutes within 50-metre radius cluster</div>
                     </div>
                     <span class="badge bg-primary-subtle text-primary">@stays.Count</span>
                 </div>
@@ -106,7 +116,7 @@
                     }
                     else if (stays.Count == 0)
                     {
-                        <div class="p-4 text-center text-muted"><i class="bi bi-geo-alt display-6 d-block mb-2"></i>No qualifying >10-minute stays found for the selected filters.</div>
+                        <div class="p-4 text-center text-muted"><i class="bi bi-geo-alt display-6 d-block mb-2"></i>No qualifying ≥@(minDurationFilterMinutes)-minute stays found for the selected filters.</div>
                     }
                     else
                     {
@@ -116,7 +126,12 @@
                                 <div class="stay-row-top">
                                     <span class="stay-index">@stay.Sequence</span>
                                     <div class="stay-main">
-                                        <strong>@stay.EmployeeName</strong>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <strong>@stay.EmployeeName</strong>
+                                            <span class="badge @(stay.PlaceCategory == "Worksite" ? "bg-primary-subtle text-primary border border-primary-subtle" : "bg-warning-subtle text-warning-emphasis border border-warning-subtle")">
+                                                @(stay.PlaceCategory == "Worksite" ? "🏢 Worksite" : "📍 Field Halt")
+                                            </span>
+                                        </div>
                                         <span class="small text-muted">@FormatIst(stay.StartUtc) · @FormatDuration(stay.Duration)</span>
                                     </div>
                                     <span class="stay-duration">@FormatDuration(stay.Duration)</span>
@@ -124,6 +139,9 @@
                                 <div class="stay-location-line">
                                     <i class="bi bi-geo-alt"></i>
                                     <span data-stay-address="@stay.Id">Address unavailable</span>
+                                </div>
+                                <div class="small text-muted px-2 py-1 mb-1 rounded bg-light-subtle">
+                                    <i class="bi bi-info-circle me-1 text-primary"></i>Stayed <strong>@FormatDuration(stay.Duration)</strong> at @stay.MatchedLocation (50m radius, ≥10m dwell)
                                 </div>
                                 <div class="stay-meta">
                                     <span><i class="bi bi-clock"></i>@FormatIst(stay.StartUtc, "HH:mm") - @FormatIst(stay.EndUtc, "HH:mm")</span>
@@ -458,12 +476,14 @@
     private bool loading;
     private string? error;
     private int employeeFilter;
+    private int minDurationFilterMinutes = 10;
     private DateTime fromDate = DateTime.Today;
     private DateTime toDate = DateTime.Today;
     private TimeOnly fromTime = new(0, 0);
     private TimeOnly toTime = new(23, 59);
     private List<EmployeeOption> employees = new();
     private List<PointRow> points = new();
+    private List<StayRow> allDetectedStays = new();
     private List<StayRow> stays = new();
     private Summary summary = new();
     private bool mapInitialized;
@@ -474,6 +494,39 @@
     {
         if (loading || !points.Any()) return;
         await InitializeMapAsync();
+    }
+
+    private async Task OnDurationFilterChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var mins))
+        {
+            minDurationFilterMinutes = mins;
+            ApplyStayFilters();
+            mapInitialized = false;
+            await InitializeMapAsync();
+        }
+    }
+
+    private void ApplyStayFilters()
+    {
+        var minDuration = TimeSpan.FromMinutes(minDurationFilterMinutes);
+        stays = allDetectedStays.Where(x => x.Duration >= minDuration).ToList();
+
+        var sequenceByEmployee = new Dictionary<int, int>();
+        foreach (var stay in stays.OrderBy(x => x.StartUtc))
+        {
+            sequenceByEmployee.TryGetValue(stay.EmployeeId, out var sequence);
+            stay.Sequence = ++sequence;
+            sequenceByEmployee[stay.EmployeeId] = sequence;
+        }
+
+        summary = new Summary
+        {
+            Employees = stays.Select(x => x.EmployeeId).Distinct().Count(),
+            Stays = stays.Count,
+            Points = points.Count,
+            TotalStay = new TimeSpan(stays.Sum(x => x.Duration.Ticks))
+        };
     }
 
     private async Task LoadAsync()
@@ -527,29 +580,15 @@
                 RecordedAtUtc = x.RecordedAtUtc
             }).ToList();
 
-            stays = DetectStays(points);
-            await EnrichShopMatchesAsync(stays);
-
-            var sequenceByEmployee = new Dictionary<int, int>();
-            foreach (var stay in stays.OrderBy(x => x.StartUtc))
-            {
-                sequenceByEmployee.TryGetValue(stay.EmployeeId, out var sequence);
-                stay.Sequence = ++sequence;
-                sequenceByEmployee[stay.EmployeeId] = sequence;
-            }
-
-            summary = new Summary
-            {
-                Employees = stays.Select(x => x.EmployeeId).Distinct().Count(),
-                Stays = stays.Count,
-                Points = points.Count,
-                TotalStay = new TimeSpan(stays.Sum(x => x.Duration.Ticks))
-            };
+            allDetectedStays = DetectStays(points);
+            await EnrichShopMatchesAsync(allDetectedStays);
+            ApplyStayFilters();
         }
         catch (Exception ex)
         {
             error = "Unable to analyze location history: " + ex.Message;
             points.Clear();
+            allDetectedStays.Clear();
             stays.Clear();
             summary = new Summary();
         }
@@ -615,7 +654,7 @@
                 }
 
                 var duration = run[^1].CapturedAtUtc - run[0].CapturedAtUtc;
-                if (duration > TimeSpan.FromMinutes(10))
+                if (duration >= TimeSpan.FromMinutes(10))
                 {
                     var averageAccuracy = run.Where(x => x.AccuracyMeters > 0).Select(x => x.AccuracyMeters).DefaultIfEmpty().Average();
                     var previous = ordered.IndexOf(run[0]) > 0 ? ordered[ordered.IndexOf(run[0]) - 1] : null;
@@ -637,7 +676,8 @@
                         DistanceFromMatchedLocationMeters = 0,
                         RadiusMeters = run[0].AllowedRadiusMeters,
                         ArrivalSpeedKmh = CalculateSpeedKmh(previous, run[0]),
-                        DepartureSpeedKmh = CalculateSpeedKmh(run[^1], next)
+                        DepartureSpeedKmh = CalculateSpeedKmh(run[^1], next),
+                        PlaceCategory = "Field Halt"
                     });
                 }
 
@@ -655,7 +695,7 @@
                 }
 
                 var distance = CalculateDistance(anchor.Latitude, anchor.Longitude, point.Latitude, point.Longitude);
-                if (distance <= 10d)
+                if (distance <= 50d)
                 {
                     run.Add(point);
                 }
@@ -676,7 +716,10 @@
     private async Task EnrichShopMatchesAsync(List<StayRow> stayRows)
     {
         foreach (var stay in stayRows)
-            stay.MatchedLocation = "Unknown / Other Location";
+        {
+            stay.MatchedLocation = "Field Halt / Client Visit";
+            stay.PlaceCategory = "Field Halt";
+        }
 
         try
         {
@@ -709,7 +752,7 @@
             {
                 var match = shops
                     .Select(shop => new { shop, distance = CalculateDistance(stay.Latitude, stay.Longitude, shop.Latitude, shop.Longitude) })
-                    .Where(x => x.distance <= x.shop.RadiusMeters)
+                    .Where(x => x.distance <= Math.Max(x.shop.RadiusMeters, 120d))
                     .OrderBy(x => x.distance)
                     .FirstOrDefault();
 
@@ -718,6 +761,7 @@
                     stay.MatchedLocation = match.shop.Name;
                     stay.DistanceFromMatchedLocationMeters = match.distance;
                     stay.RadiusMeters = (int)Math.Round(match.shop.RadiusMeters);
+                    stay.PlaceCategory = "Worksite";
                 }
             }
         }
@@ -829,6 +873,7 @@
         public double ArrivalSpeedKmh { get; set; }
         public double DepartureSpeedKmh { get; set; }
         public string MatchedLocation { get; set; } = "Unknown / Other Location";
+        public string PlaceCategory { get; set; } = "Field Halt";
         public double DistanceFromMatchedLocationMeters { get; set; }
         public int RadiusMeters { get; set; }
     }

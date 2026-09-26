@@ -141,6 +141,23 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         require(amount > 0.0) { "Positive amount is required." }
         val employee = ownerRef().child("employees").child(employeeId.toString()).get().await()
         val shopId = employee.string("shopId") ?: ""
+        val parsedTime = parseDate(date)
+
+        // Rapid duplicate debounce check (within 10 seconds for same employee & amount)
+        runCatching {
+            val snapshot = ownerRef().child("advance_payments").get().await()
+            val isDuplicate = snapshot.children.any { s ->
+                val eId = s.int("employeeId")
+                val amt = s.double("amount")
+                val dt = s.long("date")
+                eId == employeeId && Math.abs(amt - amount) < 0.01 && Math.abs(dt - parsedTime) < 10000L
+            }
+            if (isDuplicate) {
+                android.util.Log.w("FirebaseAdminFinance", "Debounced duplicate advance for employee $employeeId")
+                return
+            }
+        }
+
         val id = UUID.randomUUID().toString()
         ownerRef().child("advance_payments").child(id).setValue(
             mapOf(
@@ -148,7 +165,7 @@ class FirebaseAdminFinanceRepository @Inject constructor(
                 "employeeId" to employeeId,
                 "shopId" to shopId,
                 "amount" to amount,
-                "date" to parseDate(date),
+                "date" to parsedTime,
                 "isRecovered" to false,
                 "recoveryPaymentId" to null,
                 "advanceType" to type
@@ -163,6 +180,26 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "DELETED", advanceId)
     }
 
+    suspend fun deleteAdvanceAndDuplicates(adv: com.biometric.app.data.entity.AdvancePayment) {
+        if (adv.advanceId.isNotBlank()) {
+            ownerRef().child("advance_payments").child(adv.advanceId).removeValue().await()
+        }
+        runCatching {
+            val root = ownerRef().child("advance_payments")
+            val snap = root.get().await()
+            val targetMinute = adv.date / 60000L
+            for (child in snap.children) {
+                val eId = child.child("employeeId").value?.toString() ?: child.child("staffId").value?.toString()
+                val amt = child.child("amount").value?.toString()?.toDoubleOrNull() ?: 0.0
+                val dt = child.child("date").value?.toString()?.toLongOrNull() ?: 0L
+                if (eId == adv.employeeId && Math.abs(amt - adv.amount) < 0.01 && (dt / 60000L == targetMinute)) {
+                    child.ref.removeValue().await()
+                }
+            }
+        }
+        firebaseSync.notifyRealtimeChanged("AdvancePayment", "DELETED", adv.advanceId)
+    }
+
     suspend fun createBonus(employeeId: Int, amount: Double, description: String?, date: String?) {
         require(employeeId > 0) { "Valid employee is required." }
         require(amount > 0.0) { "Positive amount is required." }
@@ -171,10 +208,11 @@ class FirebaseAdminFinanceRepository @Inject constructor(
             mapOf(
                 "bonusId" to id,
                 "employeeId" to employeeId,
+                "staffId" to employeeId.toString(),
                 "amount" to amount,
                 "description" to description,
                 "bonusDate" to parseDate(date),
-                "payrollIdPaid" to null
+                "payrollIdPaid" to 0
             )
         ).await()
         firebaseSync.notifyRealtimeChanged("BonusRecord", "ADDED", id.toString())

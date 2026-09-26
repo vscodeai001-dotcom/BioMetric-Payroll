@@ -156,13 +156,15 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             tabLayout.addTab(tabLayout.newTab().setText(entry.title))
         }
 
+        tabLayout.isVisible = activeTabs.size > 1
+
         val canSave = isUserSuperAdmin || s.adminCanManageFeatureToggles || s.adminCanManageEmployeePermissions
         binding.btnSaveAllSettings.isVisible = canSave
 
         if (activeTabs.isNotEmpty()) {
             showTab(activeTabs[0].index)
         } else {
-            showTab(-1)
+            showTab(0)
         }
     }
 
@@ -306,6 +308,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 localSettingsDao.getFeatureSettings() ?: LocalFeatureSettings()
             }
             currentSettings = local
+            setupTabs(local)
             populateUI(local)
         }
     }

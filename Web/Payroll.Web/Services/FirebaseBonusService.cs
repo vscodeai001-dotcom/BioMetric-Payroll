@@ -288,6 +288,11 @@ public sealed class FirebaseBonusService
             Int(row, "payrollIdPaid")
             ?? Int(row, "PayrollID_Paid");
 
+        if (payrollIdPaid.HasValue && payrollIdPaid.Value <= 0)
+        {
+            payrollIdPaid = null;
+        }
+
         return new BonusRecord
         {
             BonusID = bonusId.Value,

@@ -75,12 +75,14 @@ class ReportCenterActivity : MotionBaseActivity() {
             showDatePicker {
                 startDate = it
                 binding.etStartDate.setText(sdf.format(it.time))
+                triggerGenerate()
             }
         }
         binding.etEndDate.setOnClickListener {
             showDatePicker {
                 endDate = it
                 binding.etEndDate.setText(sdf.format(it.time))
+                triggerGenerate()
             }
         }
 
@@ -90,6 +92,7 @@ class ReportCenterActivity : MotionBaseActivity() {
                 binding.spEmployee.setAdapter(ArrayAdapter(this@ReportCenterActivity, android.R.layout.simple_dropdown_item_1line, names))
                 binding.spEmployee.setOnItemClickListener { _, _, position, _ ->
                     selectedEmployeeId = if (position == 0) null else employees.getOrNull(position - 1)?.employeeId?.toIntOrNull()
+                    triggerGenerate()
                 }
             }
         }
@@ -98,14 +101,7 @@ class ReportCenterActivity : MotionBaseActivity() {
 
         binding.btnGenerate.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            viewModel.generateReport(
-                selectedReportType,
-                sdf.format(startDate.time),
-                sdf.format(endDate.time),
-                endDate.get(Calendar.YEAR),
-                endDate.get(Calendar.MONTH) + 1,
-                selectedEmployeeId
-            )
+            triggerGenerate()
         }
 
         binding.rvResults.layoutManager = LinearLayoutManager(this)
@@ -113,6 +109,19 @@ class ReportCenterActivity : MotionBaseActivity() {
             HapticUtil.vibrateClick(it)
             exportReportCsv()
         }
+
+        triggerGenerate()
+    }
+
+    private fun triggerGenerate() {
+        viewModel.generateReport(
+            selectedReportType,
+            sdf.format(startDate.time),
+            sdf.format(endDate.time),
+            endDate.get(Calendar.YEAR),
+            endDate.get(Calendar.MONTH) + 1,
+            selectedEmployeeId
+        )
     }
 
     private fun setupReportTypeTiles() {
@@ -133,6 +142,7 @@ class ReportCenterActivity : MotionBaseActivity() {
                 selectedReportType = type
                 binding.tilEmployee.visibility = if (type == "ATTENDANCE_MONTHLY_SUMMARY") View.VISIBLE else View.GONE
                 updateTileSelection()
+                triggerGenerate()
             }
             view.tag = type
             binding.llReportTypes.addView(view)
@@ -166,15 +176,20 @@ class ReportCenterActivity : MotionBaseActivity() {
                 }
                 launch {
                     viewModel.reportData.collectLatest { data ->
-                        binding.tvEmptyState.isVisible = data == null
-                        if (data != null) {
-                            binding.rvResults.adapter = ReportAdapter(data)
-                            binding.btnExportCsv.isVisible = data.isNotEmpty()
-                            if (data.isEmpty()) {
-                                binding.tvEmptyState.isVisible = true
-                            }
-                        } else {
+                        if (data == null) {
+                            binding.tvEmptyState.isVisible = true
+                            binding.tvEmptyStateText.text = "Select date range and click Generate Report"
+                            binding.rvResults.adapter = null
                             binding.btnExportCsv.isVisible = false
+                        } else if (data.isEmpty()) {
+                            binding.tvEmptyState.isVisible = true
+                            binding.tvEmptyStateText.text = "No records found for the selected period"
+                            binding.rvResults.adapter = null
+                            binding.btnExportCsv.isVisible = false
+                        } else {
+                            binding.tvEmptyState.isVisible = false
+                            binding.rvResults.adapter = ReportAdapter(data)
+                            binding.btnExportCsv.isVisible = true
                         }
                     }
                 }

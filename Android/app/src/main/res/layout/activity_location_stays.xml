@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/clLocationStaysRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
@@ -10,13 +11,22 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <com.google.android.material.appbar.MaterialToolbar
-            android:id="@+id/toolbar"
-            style="@style/Widget.App.Toolbar"
+        <com.google.android.material.appbar.AppBarLayout
+            android:id="@+id/appBar"
             android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            app:navigationIcon="@drawable/ic_back"
-            app:title="Location History &amp; GPS Radar" />
+            android:layout_height="wrap_content"
+            android:background="?attr/colorSurface"
+            android:fitsSystemWindows="false"
+            app:elevation="2dp">
+
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                style="@style/Widget.App.Toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:navigationIcon="@drawable/ic_back"
+                app:title="Location History &amp; GPS Radar" />
+        </com.google.android.material.appbar.AppBarLayout>
 
         <androidx.core.widget.NestedScrollView
             android:layout_width="match_parent"
@@ -34,7 +44,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="📍 Historical GPS movement analysis: Dwell locations, stay duration (>10 min) &amp; travel trajectory"
+                    android:text="📍 Historical GPS movement analysis: Dwell locations (50m radius), stay duration (≥10 min) &amp; travel trajectory"
                     android:textSize="12sp"
                     android:textColor="?attr/colorOnSurfaceVariant" />
 
@@ -67,6 +77,28 @@
                             android:layout_width="match_parent"
                             android:layout_height="44dp"
                             android:layout_marginTop="4dp" />
+
+                        <!-- Stay Duration Filter (10m, 20m, 30m, 1h, 2h+) -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="MINIMUM STAY DURATION (50m RADIUS)"
+                                android:textStyle="bold"
+                                android:textSize="10sp"
+                                android:textColor="?attr/colorPrimary" />
+
+                            <Spinner
+                                android:id="@+id/spnMinDuration"
+                                android:layout_width="match_parent"
+                                android:layout_height="44dp"
+                                android:layout_marginTop="2dp" />
+                        </LinearLayout>
 
                         <!-- Dates Row -->
                         <LinearLayout
@@ -410,14 +442,14 @@
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Detected Stayed Locations"
+                            android:text="Detected Stayed Locations (≥ 10m)"
                             android:textStyle="bold"
                             android:textSize="16sp"
                             android:textColor="?attr/colorOnSurface" />
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="More than 10 minutes within approximately 10 metres"
+                            android:text="Employee stayed within 50-metre radius for 10 minutes or longer"
                             android:textSize="11sp"
                             android:textColor="?attr/colorOnSurfaceVariant" />
                     </LinearLayout>

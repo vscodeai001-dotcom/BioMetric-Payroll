@@ -170,9 +170,9 @@
                                 <th>Reconnected (IST)</th>
                                 <th>Duration</th>
                                 <th>Disconnect Reason</th>
-                                <th>Points Captured</th>
-                                <th>Distance</th>
-                                <th>Geofence (In / Out)</th>
+                                <th>Offline Punches in Gap</th>
+                                <th>Breadcrumbs</th>
+                                <th>Geofence</th>
                                 <th>Reconciliation Status</th>
                                 <th class="text-end">Action</th>
                             </tr>
@@ -187,8 +187,26 @@
                                 <td class="nowrap"><i class="bi bi-wifi text-success me-1"></i>@FormatIst(period.OfflineEndedUtc)</td>
                                 <td><span class="badge bg-dark-subtle text-dark">@FormatDuration(period.Duration)</span></td>
                                 <td><span class="badge bg-secondary-subtle text-secondary"><i class="bi bi-airplane me-1"></i>@period.DisconnectReason</span></td>
-                                <td><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span></td>
-                                <td>@FormatDistance(period.TotalDistanceMeters)</td>
+                                <td>
+                                    @if (period.Punches.Any())
+                                    {
+                                        <div class="d-flex flex-column gap-1">
+                                        @foreach (var p in period.Punches)
+                                        {
+                                            var isOut = p.Type.Equals("OUT", StringComparison.OrdinalIgnoreCase);
+                                            <span class="badge @(isOut ? "bg-danger-subtle text-danger border border-danger-subtle" : "bg-success-subtle text-success border border-success-subtle") text-start">
+                                                @(isOut ? "🔴 OUT" : "🟢 IN") @FormatIst(p.PunchTimeUtc, "HH:mm")
+                                                <small class="d-block fw-normal text-muted">(Recorded Offline)</small>
+                                            </span>
+                                        }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small"><i class="bi bi-dash-circle me-1"></i>None</span>
+                                    }
+                                </td>
+                                <td><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span> · @FormatDistance(period.TotalDistanceMeters)</td>
                                 <td>
                                     <span class="badge bg-success-subtle text-success">@period.WithinRadiusCount IN</span>
                                     @if (period.PointCount - period.WithinRadiusCount > 0)
@@ -199,11 +217,19 @@
                                 <td>
                                     @if (period.IsFullySynced)
                                     {
-                                        <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled (@(period.SyncedAtUtc.HasValue ? FormatIst(period.SyncedAtUtc) : "Live"))</span>
+                                        <div>
+                                            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled to Live</span>
+                                            <div class="small text-primary mt-1">
+                                                Pushed to cloud: @(period.Punches.Any() ? $"{period.Punches.Count} punches & " : "")@period.PointCount points merged
+                                            </div>
+                                        </div>
                                     }
                                     else
                                     {
-                                        <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Sync Pending</span>
+                                        <div>
+                                            <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Sync Pending</span>
+                                            <div class="small text-warning-emphasis mt-1">Buffered on device</div>
+                                        </div>
                                     }
                                 </td>
                                 <td class="text-end">
@@ -634,7 +660,11 @@
                 maxCaptureUtc = liveMax;
             }
 
-            offlinePeriods = BuildOfflinePeriods(points, auditEvents);
+            var periodPunches = await db.AttendanceLogs.AsNoTracking()
+                .Where(p => p.PunchTime >= fromUtc && p.PunchTime < toUtc)
+                .ToListAsync();
+
+            offlinePeriods = BuildOfflinePeriods(points, auditEvents, periodPunches);
 
             summary = new Summary
             {
@@ -653,7 +683,7 @@
         finally { loading = false; }
     }
 
-    private static List<OfflinePeriodRow> BuildOfflinePeriods(List<PointRow> allPoints, List<AuditRow> audits)
+    private static List<OfflinePeriodRow> BuildOfflinePeriods(List<PointRow> allPoints, List<AuditRow> audits, List<AttendanceLog> punches)
     {
         var offlinePoints = allPoints
             .Where(p => p.CaptureSource == "OfflineSync")
@@ -676,7 +706,7 @@
                 {
                     if (currentPoints.Any())
                     {
-                        result.Add(CreatePeriod(currentPoints, audits));
+                        result.Add(CreatePeriod(currentPoints, audits, punches));
                         currentPoints = new List<PointRow>();
                     }
                 }
@@ -686,14 +716,14 @@
 
             if (currentPoints.Any())
             {
-                result.Add(CreatePeriod(currentPoints, audits));
+                result.Add(CreatePeriod(currentPoints, audits, punches));
             }
         }
 
         return result.OrderByDescending(x => x.OfflineStartedUtc).ToList();
     }
 
-    private static OfflinePeriodRow CreatePeriod(List<PointRow> cluster, List<AuditRow> audits)
+    private static OfflinePeriodRow CreatePeriod(List<PointRow> cluster, List<AuditRow> audits, List<AttendanceLog> punches)
     {
         var first = cluster.First();
         var last = cluster.Last();
@@ -714,6 +744,19 @@
                 reason = "Mobile Data / Wi-Fi Off";
         }
 
+        var punchesInGap = punches
+            .Where(p => p.EmployeeID == empId &&
+                        p.PunchTime >= first.CapturedAtUtc.AddMinutes(-2) &&
+                        p.PunchTime <= last.CapturedAtUtc.AddMinutes(2))
+            .OrderBy(p => p.PunchTime)
+            .Select(p => new ReconciledPunch
+            {
+                Type = p.LogType ?? "PUNCH",
+                PunchTimeUtc = p.PunchTime,
+                IsApproved = p.IsApproved
+            })
+            .ToList();
+
         double totalDist = 0;
         for (int i = 1; i < cluster.Count; i++)
         {
@@ -733,7 +776,8 @@
             DisconnectReason = reason,
             IsFullySynced = cluster.All(c => c.SyncedAtUtc.HasValue),
             SyncedAtUtc = cluster.Select(c => c.SyncedAtUtc).Max(),
-            Points = cluster
+            Points = cluster,
+            Punches = punchesInGap
         };
     }
 
@@ -783,11 +827,11 @@
     private static string FormatDistance(double meters) =>
         meters >= 1000 ? $"{meters / 1000d:F2} km" : $"{meters:F0} m";
 
-    private static string FormatIst(DateTime? utc) =>
+    private static string FormatIst(DateTime? utc, string format = "dd-MMM-yyyy HH:mm:ss") =>
         utc.HasValue ? TimeZoneInfo.ConvertTimeFromUtc(
             DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc),
             TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"))
-            .ToString("dd-MMM-yyyy HH:mm:ss") : "-";
+            .ToString(format) : "-";
 
     private static DateTime IndiaToUtc(DateTime india) =>
         TimeZoneInfo.ConvertTimeToUtc(
@@ -837,6 +881,13 @@
         public bool IsFullySynced { get; set; }
         public DateTime? SyncedAtUtc { get; set; }
         public List<PointRow> Points { get; set; } = new();
+        public List<ReconciledPunch> Punches { get; set; } = new();
+    }
+    private sealed class ReconciledPunch
+    {
+        public string Type { get; set; } = "IN";
+        public DateTime PunchTimeUtc { get; set; }
+        public bool IsApproved { get; set; } = true;
     }
     private sealed class SessionRow
     {

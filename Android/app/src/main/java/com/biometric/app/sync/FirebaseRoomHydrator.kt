@@ -197,10 +197,8 @@ class FirebaseRoomHydrator @Inject constructor(
                 scheduleRebind("$table cancelled: ${error.message}")
             }
         }
-        // Only small master tables (shops, employees, shop_closed_days) need
-        // explicit reconciliation for deleted keys. High-volume transactional tables
-        // (punches, attendance, logs) rely purely on ChildEventListener to save bandwidth.
-        if (table in setOf("shops", "employees", "shop_closed_days")) {
+        // Small master & transactional request tables need explicit initial hydration & reconciliation
+        if (table in setOf("shops", "employees", "shop_closed_days", "leave_requests", "regularizations", "resignation_requests", "advance_payments", "shift_schedules")) {
             ref.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     scope.launch {
@@ -489,7 +487,11 @@ class FirebaseRoomHydrator @Inject constructor(
             ?: ""
         val start = l("startDate").takeIf { it > 0 }
             ?: s("leaveDate")?.let { str ->
-                runCatching { java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time }.getOrNull()
+                runCatching {
+                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(str)?.time
+                        ?: java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(str)?.time
+                        ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time
+                }.getOrNull()
             } ?: 0L
         val end = l("endDate").takeIf { it > 0 } ?: start
         val isAppr = b("isApproved")

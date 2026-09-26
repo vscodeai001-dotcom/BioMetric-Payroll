@@ -194,7 +194,7 @@
           "$id": {
             ".read": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (((auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')) || (auth.token.employee_id == data.child('employeeId').val() || (auth.token.employee_id + '') == (data.child('employeeId').val() + '') || auth.token.employee_id == data.child('staffId').val() || (auth.token.employee_id + '') == (data.child('staffId').val() + '')))",
             ".write": "auth != null && (auth.token.owner_uid == $uid || auth.uid == $uid) && (auth.token.role == 'Admin' || auth.token.role == 'SuperAdmin' || auth.token.role == 'ADMIN' || auth.token.role == 'SUPER_ADMIN')",
-            ".validate": "newData.hasChildren(['bonusId','amount','bonusDate','payrollIdPaid']) && (newData.hasChild('employeeId') || newData.hasChild('staffId')) && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('bonusDate').isNumber()"
+            ".validate": "newData.hasChildren(['bonusId','amount','bonusDate']) && (newData.hasChild('employeeId') || newData.hasChild('staffId')) && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('bonusDate').isNumber()"
           }
         },
         "payroll_history": {

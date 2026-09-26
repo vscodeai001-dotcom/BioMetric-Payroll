@@ -1,5 +1,6 @@
 package com.biometric.app.ui
 
+import android.app.DatePickerDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.Menu
@@ -8,6 +9,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.viewModels
@@ -28,7 +31,6 @@ import com.biometric.app.data.EmployeeStats
 import com.biometric.app.data.entity.AdvancePayment
 import com.biometric.app.data.entity.SalaryRules
 import com.biometric.app.databinding.ActivityStaffDetailBinding
-import com.biometric.app.ui.adapter.HorizontalFilterAdapter
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.ui.viewmodel.StaffViewModel
 import com.biometric.app.util.DateRangeUtil
@@ -64,13 +66,23 @@ class StaffDetailActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var repository: MainRepository
 
-    private lateinit var filterAdapter: HorizontalFilterAdapter
     private lateinit var attendanceLogAdapter: AttendanceLogAdapter
     private var employeeId: String = ""
     private var allShopEmployees: List<Employee> = emptyList()
-    private var eligibleStaffInPeriod: List<Employee> = emptyList()
-    private var selectedDate = Calendar.getInstance()
-    private var currentFilter = "Up To Date"
+    private val calFrom = Calendar.getInstance().apply {
+        set(Calendar.DAY_OF_MONTH, 1)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    private val calTo = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 23)
+        set(Calendar.MINUTE, 59)
+        set(Calendar.SECOND, 59)
+        set(Calendar.MILLISECOND, 999)
+    }
+    private val filterRefreshTrigger = kotlinx.coroutines.flow.MutableStateFlow(0L)
     private var shopId: String = ""
     private var filteredAttendance: List<Attendance> = emptyList()
     private var allLogItems: List<ActivityLogItem> = emptyList()
@@ -81,7 +93,7 @@ class StaffDetailActivity : MotionBaseActivity() {
         _binding = ActivityStaffDetailBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
-        applyWindowInsets(binding.clStaffDetailRoot, findViewById(R.id.appBar))
+        applyWindowInsets(binding.clStaffDetailRoot, binding.appBar)
 
         binding.nsvData.visibility = View.INVISIBLE
 
@@ -97,8 +109,8 @@ class StaffDetailActivity : MotionBaseActivity() {
         observeAttendanceLog()
 
         setupMotionFeedback(
-            binding.layoutFilterIcons.btnPrevDate,
-            binding.layoutFilterIcons.btnNextDate,
+            binding.btnDateFrom,
+            binding.btnDateTo,
             binding.cardLate,
             binding.cardEarly,
             binding.cardGap,
@@ -174,22 +186,80 @@ class StaffDetailActivity : MotionBaseActivity() {
     private fun setupUI() {
         binding.rvStaffHistory.layoutManager = LinearLayoutManager(this)
 
-        filterAdapter = HorizontalFilterAdapter(showCustom = false) { selected ->
-            currentFilter = selected
-            currentLogFilter = null
-            refreshData()
+        updateDateButtons()
+
+        binding.btnDateFrom.setOnClickListener {
+            DatePickerDialog(
+                this,
+                { _, year, month, dayOfMonth ->
+                    calFrom.set(Calendar.YEAR, year)
+                    calFrom.set(Calendar.MONTH, month)
+                    calFrom.set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                    calFrom.set(Calendar.HOUR_OF_DAY, 0)
+                    calFrom.set(Calendar.MINUTE, 0)
+                    calFrom.set(Calendar.SECOND, 0)
+                    calFrom.set(Calendar.MILLISECOND, 0)
+
+                    if (calFrom.timeInMillis > calTo.timeInMillis) {
+                        calTo.timeInMillis = calFrom.timeInMillis
+                        calTo.set(Calendar.HOUR_OF_DAY, 23)
+                        calTo.set(Calendar.MINUTE, 59)
+                        calTo.set(Calendar.SECOND, 59)
+                        calTo.set(Calendar.MILLISECOND, 999)
+                    }
+                    updateDateButtons()
+                    refreshData()
+                },
+                calFrom.get(Calendar.YEAR),
+                calFrom.get(Calendar.MONTH),
+                calFrom.get(Calendar.DAY_OF_MONTH)
+            ).show()
         }
-        binding.layoutFilterIcons.rvFilterIcons.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 7)
-        binding.layoutFilterIcons.rvFilterIcons.adapter = filterAdapter
 
-        binding.layoutFilterIcons.btnPrevDate.setOnClickListener { adjustDate(-1) }
-        binding.layoutFilterIcons.btnNextDate.setOnClickListener { adjustDate(1) }
+        binding.btnDateTo.setOnClickListener {
+            DatePickerDialog(
+                this,
+                { _, year, month, dayOfMonth ->
+                    calTo.set(Calendar.YEAR, year)
+                    calTo.set(Calendar.MONTH, month)
+                    calTo.set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                    calTo.set(Calendar.HOUR_OF_DAY, 23)
+                    calTo.set(Calendar.MINUTE, 59)
+                    calTo.set(Calendar.SECOND, 59)
+                    calTo.set(Calendar.MILLISECOND, 999)
 
-        binding.layoutFilterIcons.tvDateLabel.setOnClickListener {
-            PickerHelper.showSmartPicker(this, currentFilter, selectedDate) { newDate ->
-                selectedDate.timeInMillis = newDate.timeInMillis
-                refreshData()
+                    if (calTo.timeInMillis < calFrom.timeInMillis) {
+                        calFrom.timeInMillis = calTo.timeInMillis
+                        calFrom.set(Calendar.HOUR_OF_DAY, 0)
+                        calFrom.set(Calendar.MINUTE, 0)
+                        calFrom.set(Calendar.SECOND, 0)
+                        calFrom.set(Calendar.MILLISECOND, 0)
+                    }
+                    updateDateButtons()
+                    refreshData()
+                },
+                calTo.get(Calendar.YEAR),
+                calTo.get(Calendar.MONTH),
+                calTo.get(Calendar.DAY_OF_MONTH)
+            ).show()
+        }
+
+        binding.spEmployee.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (position in allShopEmployees.indices) {
+                    val selected = allShopEmployees[position]
+                    if (selected.employeeId != employeeId) {
+                        employeeId = selected.employeeId
+                        updateProfileHeader(selected)
+                        binding.actvStaffName.setText(selected.name, false)
+                        refreshSelectedEmployeeHistory()
+                        refreshData()
+                        HapticUtil.vibrateClick(binding.spEmployee)
+                    }
+                }
             }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
         binding.cardLate.setOnClickListener { toggleLogFilter("LATE") }
@@ -206,39 +276,36 @@ class StaffDetailActivity : MotionBaseActivity() {
         binding.btnNextStaff.setOnClickListener { navigateStaff(1) }
     }
 
+    private fun updateDateButtons() {
+        val df = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
+        binding.btnDateFrom.text = df.format(calFrom.time)
+        binding.btnDateTo.text = df.format(calTo.time)
+    }
+
     private fun navigateStaff(direction: Int) {
-        if (eligibleStaffInPeriod.isEmpty()) return
-        val currentIndex = eligibleStaffInPeriod.indexOfFirst { it.employeeId == employeeId }
+        if (allShopEmployees.isEmpty()) return
+        val currentIndex = allShopEmployees.indexOfFirst { it.employeeId == employeeId }
         var nextIndex = currentIndex + direction
 
-        if (nextIndex < 0) nextIndex = eligibleStaffInPeriod.size - 1
-        if (nextIndex >= eligibleStaffInPeriod.size) nextIndex = 0
+        if (nextIndex < 0) nextIndex = allShopEmployees.size - 1
+        if (nextIndex >= allShopEmployees.size) nextIndex = 0
 
-        val nextEmp = eligibleStaffInPeriod[nextIndex]
+        val nextEmp = allShopEmployees[nextIndex]
         employeeId = nextEmp.employeeId
 
-        // Update the selected profile immediately.
+        binding.spEmployee.setSelection(nextIndex)
         updateProfileHeader(nextEmp)
         binding.actvStaffName.setText(nextEmp.name, false)
 
-        // IMPORTANT: employee history is keyed by employeeId.
-        // Refresh it immediately when the selected staff changes so the
-        // previous employee's history can never remain on screen.
         refreshSelectedEmployeeHistory()
-
-        // Refresh all other staff data containers.
         refreshData()
 
         HapticUtil.vibrateClick(if (direction > 0) binding.btnNextStaff else binding.btnPrevStaff)
     }
 
     private fun refreshData() {
-        refreshStaffListForCurrentFilter()
-
-        binding.layoutFilterIcons.tvDateLabel.text = DateRangeUtil.getFormattedRangeLabel(currentFilter, selectedDate.timeInMillis)
-        filterAdapter.setSelected(currentFilter, selectedDate.timeInMillis)
-
-        val range = DateRangeUtil.getRangeForPeriod(currentFilter, selectedDate.timeInMillis)
+        val startTs = getMidnight(calFrom.timeInMillis)
+        val endTs = getEndOfDay(calTo.timeInMillis)
 
         lifecycleScope.launch {
             if (filteredAttendance.isEmpty()) {
@@ -247,10 +314,13 @@ class StaffDetailActivity : MotionBaseActivity() {
             }
 
             if (employeeId.isEmpty()) {
-                if (eligibleStaffInPeriod.isNotEmpty()) {
-                    val nextEmp = eligibleStaffInPeriod.find { it.isActive } ?: eligibleStaffInPeriod.first()
+                if (allShopEmployees.isNotEmpty()) {
+                    val nextEmp = allShopEmployees.find { it.isActive } ?: allShopEmployees.first()
                     employeeId = nextEmp.employeeId
                     updateProfileHeader(nextEmp)
+                    binding.actvStaffName.setText(nextEmp.name, false)
+                    val idx = allShopEmployees.indexOfFirst { it.employeeId == employeeId }
+                    if (idx >= 0) binding.spEmployee.setSelection(idx)
                     refreshSelectedEmployeeHistory()
                 } else {
                     PremiumLoader.hide(binding.brewingLoader)
@@ -272,57 +342,60 @@ class StaffDetailActivity : MotionBaseActivity() {
 
             val hireTs = getMidnight(employee.hireDate)
             val termTs = employee.terminateDate?.let { getMidnight(it) } ?: Long.MAX_VALUE
-            val isEmployedInPeriod = (hireTs <= range.second) && (termTs >= range.first)
+            val isEmployedInPeriod = (hireTs <= endTs) && (termTs >= startTs)
 
             if (isEmployedInPeriod) {
                 binding.tvNotEmployedMessage.visibility = View.GONE
-                updateMetricsForRange(range.first, range.second)
+                updateMetricsForRange(startTs, endTs)
             } else {
-                employeeId = ""
                 updateHistoryList(emptyList())
-                refreshData()
+                PremiumLoader.hide(binding.brewingLoader)
+                binding.nsvData.visibility = View.GONE
+                binding.tvNotEmployedMessage.visibility = View.VISIBLE
+                binding.tvNotEmployedMessage.text = "⚠️ Staff not employed during selected date range"
             }
+            filterRefreshTrigger.value = System.currentTimeMillis()
         }
     }
 
-    private fun refreshStaffListForCurrentFilter() {
-        val range = DateRangeUtil.getRangeForPeriod(currentFilter, selectedDate.timeInMillis)
-        if (shopId.isEmpty()) shopId = sharedViewModel.selectedShop.value?.shopId ?: ""
+    private fun updateStaffSpinner() {
+        if (allShopEmployees.isEmpty()) {
+            binding.spEmployee.adapter = null
+            return
+        }
 
-        eligibleStaffInPeriod = allShopEmployees.asSequence().filter { emp ->
-            val hireTs = getMidnight(emp.hireDate)
-            val termTs = emp.terminateDate?.let { getMidnight(it) } ?: Long.MAX_VALUE
-            val isEmployedInPeriod = (hireTs <= range.second) && (termTs >= range.first)
-            isEmployedInPeriod && emp.employeeId.isNotEmpty() && (emp.shopId == shopId)
-        }.sortedBy { it.name }.toList()
-        updateStaffDropdown()
+        val options = allShopEmployees.map { "${it.name} (#${it.employeeId})" }
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        binding.spEmployee.adapter = adapter
+
+        val currentIndex = allShopEmployees.indexOfFirst { it.employeeId == employeeId }
+        if (currentIndex >= 0) {
+            binding.spEmployee.setSelection(currentIndex)
+        }
     }
 
     private fun updateStaffDropdown() {
-        if (eligibleStaffInPeriod.isEmpty()) {
+        if (allShopEmployees.isEmpty()) {
             binding.actvStaffName.setAdapter(null)
             binding.actvStaffName.setText("", false)
             return
         }
 
         binding.actvStaffName.textSize = 14f
-        val names = eligibleStaffInPeriod.map { it.name }
-        val adapter = android.widget.ArrayAdapter(this, R.layout.item_simple_dropdown, names)
+        val names = allShopEmployees.map { it.name }
+        val adapter = ArrayAdapter(this, R.layout.item_simple_dropdown, names)
         binding.actvStaffName.setAdapter(adapter)
 
-        val currentEmp = eligibleStaffInPeriod.find { it.employeeId == employeeId }
+        val currentEmp = allShopEmployees.find { it.employeeId == employeeId }
         currentEmp?.let { binding.actvStaffName.setText(it.name, false) }
 
         binding.actvStaffName.setOnItemClickListener { _, _, position, _ ->
-            val selected = eligibleStaffInPeriod[position]
+            val selected = allShopEmployees[position]
             employeeId = selected.employeeId
             updateProfileHeader(selected)
-
-            // The history list belongs to the selected employee, not the
-            // previously displayed employee. Refresh it before loading the
-            // rest of the staff metrics.
+            val idx = allShopEmployees.indexOfFirst { it.employeeId == employeeId }
+            if (idx >= 0) binding.spEmployee.setSelection(idx)
             refreshSelectedEmployeeHistory()
-
             refreshData()
             HapticUtil.vibrateClick(binding.actvStaffName)
         }
@@ -331,6 +404,11 @@ class StaffDetailActivity : MotionBaseActivity() {
     private fun getMidnight(ts: Long): Long = Calendar.getInstance().apply {
         timeInMillis = ts
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    private fun getEndOfDay(ts: Long): Long = Calendar.getInstance().apply {
+        timeInMillis = ts
+        set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
     }.timeInMillis
 
     private fun toggleLogFilter(type: String) {
@@ -347,11 +425,6 @@ class StaffDetailActivity : MotionBaseActivity() {
         attendanceLogAdapter = AttendanceLogAdapter()
         binding.rvAttendanceLog.layoutManager = LinearLayoutManager(this)
         binding.rvAttendanceLog.adapter = attendanceLogAdapter
-    }
-
-    private fun adjustDate(amount: Int) {
-        DateRangeUtil.adjustDate(currentFilter, selectedDate, amount)
-        refreshData()
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -393,7 +466,7 @@ class StaffDetailActivity : MotionBaseActivity() {
                             allShopEmployees = rawList.filter { emp ->
                                 val isDeleted = !emp.isActive && emp.terminateDate == null
                                 !isDeleted && (emp.shopId == it.shopId)
-                            }
+                            }.sortedBy { it.name }
 
                             // AUTO-SELECT first employee if none selected
                             if (employeeId.isEmpty() && allShopEmployees.isNotEmpty()) {
@@ -402,6 +475,8 @@ class StaffDetailActivity : MotionBaseActivity() {
                                 updateProfileHeader(firstEmp)
                                 refreshSelectedEmployeeHistory()
                             }
+                            updateStaffSpinner()
+                            updateStaffDropdown()
                             refreshData()
                         }
                     }
@@ -578,7 +653,7 @@ class StaffDetailActivity : MotionBaseActivity() {
             val nLeaveAmt = allMonthStats.fold(java.math.BigDecimal.ZERO) { acc, stats -> acc.add(stats.netLeaveAmount) }
             binding.tvLeaveCount.text = getString(R.string.leave_breakdown_format, nLeaveHrs, nLeaveAmt.toDouble(), tPLCount, unpaidLeaves)
 
-            val showRules = currentFilter in listOf("Monthly", "Quarterly", "Half Yearly", "Annually", "Up To Date")
+            val showRules = true
             binding.cardBonus.visibility = if (showRules && tBonus > java.math.BigDecimal.ZERO) View.VISIBLE else View.GONE
             binding.tvBonusRecv.text = String.format(locale, "₹%,.2f", tBonus.toDouble())
             
@@ -662,21 +737,11 @@ class StaffDetailActivity : MotionBaseActivity() {
 
     private fun updateActivityLog(allMonthStats: List<EmployeeStats>, advances: List<AdvancePayment>, startTs: Long, endTs: Long) {
         val logItems = mutableListOf<ActivityLogItem>()
-        val isFullMonthFilter = currentFilter in listOf("Monthly", "Quarterly", "Half Yearly", "Annually")
-        val isFullUpToDate = if (currentFilter == "Up To Date") {
-            val cal = Calendar.getInstance()
-            val today = cal[Calendar.DAY_OF_MONTH]
-            val lastDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-            today == lastDay
-        } else false
 
         allMonthStats.forEach { stats ->
             stats.activityLog.forEach { item ->
                 // Filter items by range
                 if (item.timestamp < startTs || item.timestamp > endTs) return@forEach
-                
-                // Special rules for BONUS and PAID_LEAVE visibility
-                if ((item.type == "BONUS" || item.type == "PAID_LEAVE") && !(isFullMonthFilter || isFullUpToDate)) return@forEach
                 
                 logItems.add(ActivityLogItem(item.type, item.title, item.desc, item.timestamp))
             }
@@ -692,16 +757,7 @@ class StaffDetailActivity : MotionBaseActivity() {
 
     private fun updateLogRecyclerView() {
         val filtered = if (currentLogFilter == null) {
-            val isFullMonthFilter = currentFilter in listOf("Monthly", "Quarterly", "Half Yearly", "Annually")
-            val isFullUpToDate = if (currentFilter == "Up To Date") {
-                val cal = Calendar.getInstance()
-                val today = cal[Calendar.DAY_OF_MONTH]
-                val lastDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-                today == lastDay
-            } else false
-            allLogItems.filter { item ->
-                if ((item.type == "BONUS") || (item.type == "PAID_LEAVE")) isFullMonthFilter || isFullUpToDate else true
-            }
+            allLogItems
         } else allLogItems.filter { it.type == currentLogFilter }
         val sdf = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()); binding.rvActivityLog.adapter = object : RecyclerView.Adapter<RecyclerView.ViewHolder>() { override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder { val view = LayoutInflater.from(parent.context).inflate(R.layout.item_history_row, parent, false); return object : RecyclerView.ViewHolder(view) {} }; override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) { val item = filtered[position]; val tvIcon = holder.itemView.findViewById<TextView>(R.id.tvHistoryIcon); val tvTitle = holder.itemView.findViewById<TextView>(R.id.tvHistoryTitle); val tvDate = holder.itemView.findViewById<TextView>(R.id.tvHistoryDate); val tvReason = holder.itemView.findViewById<TextView>(R.id.tvHistoryReason); val btnDelete = holder.itemView.findViewById<View>(R.id.btnDeleteHistory); btnDelete.visibility = View.GONE; tvReason.visibility = View.VISIBLE; tvIcon.text = when(item.type) { "LATE" -> "⏰"; "EARLY" -> "🏃"; "GAP" -> "🚫"; "LEAVE" -> "🌴"; "BONUS" -> "🌟"; "PAID_LEAVE" -> "💎"; "ALLOWANCE" -> "🎁"; "ADVANCE" -> "💳"; "OT" -> "⚡"; else -> "📝" }; tvTitle.text = item.title; tvReason.text = item.desc; tvDate.text = sdf.format(Date(item.timestamp)) }; override fun getItemCount() = filtered.size }
     }
@@ -875,18 +931,23 @@ class StaffDetailActivity : MotionBaseActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 combine(
                     repository.allAttendancePunchesFlow,
-                    repository.allDailySummariesFlow
-                ) { punches, summaries ->
+                    repository.allDailySummariesFlow,
+                    filterRefreshTrigger
+                ) { punches, summaries, _ ->
                     punches to summaries
                 }.collectLatest { (allPunches, allSummaries) ->
-                    val range = DateRangeUtil.getRangeForPeriod(currentFilter, selectedDate.timeInMillis)
+                    val startTs = getMidnight(calFrom.timeInMillis)
+                    val endTs = getEndOfDay(calTo.timeInMillis)
                     val empId = employeeId
                     
-                    if (empId.isBlank()) return@collectLatest
+                    if (empId.isBlank()) {
+                        attendanceLogAdapter.submitList(emptyList())
+                        return@collectLatest
+                    }
                     
                     val filteredSummaries = allSummaries.filter { 
                         it.employeeId == empId.toIntOrNull() &&
-                        DateRangeUtil.parseIsoDate(it.shiftDate) in range.first..range.second
+                        DateRangeUtil.parseIsoDate(it.shiftDate) in startTs..endTs
                     }.sortedByDescending { it.shiftDate }
                     
                     val logRows = filteredSummaries.map { summary ->

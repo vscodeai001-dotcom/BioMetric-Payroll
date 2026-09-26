@@ -78,7 +78,7 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Matched Location / Shop -->
+        <!-- Matched Location / Shop & Place Analysis -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -100,8 +100,24 @@
                 android:layout_weight="1"
                 android:text="Office / Branch 1"
                 android:textColor="?attr/colorOnSurface"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvStayCategory"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:background="@drawable/bg_rounded_card_outline"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorPrimary"
+                android:text="Worksite" />
+
+            <Space android:layout_width="6dp" android:layout_height="1dp" />
 
             <TextView
                 android:id="@+id/tvStayAccuracy"
@@ -111,6 +127,16 @@
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:textSize="11sp" />
         </LinearLayout>
+
+        <!-- Admin friendly stay explanation -->
+        <TextView
+            android:id="@+id/tvStayAdminSummary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:text="Stayed 1h 15m at this location (within 50m radius, ≥10m dwell)"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="11sp" />
 
         <!-- Metadata: Points analyzed, speed in/out -->
         <LinearLayout

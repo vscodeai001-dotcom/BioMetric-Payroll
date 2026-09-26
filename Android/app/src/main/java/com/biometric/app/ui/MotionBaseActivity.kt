@@ -78,31 +78,47 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
         scrollContainer: View? = null
     ) {
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { v, insets ->
-            val systemBars = insets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            val statusBarTop = insets.getInsets(
+                WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+            ).top
+
+            val navBars = insets.getInsets(
+                WindowInsetsCompat.Type.navigationBars()
             )
             
             // 1. Top Safe Area (Status bar & camera cutout)
             val topBar: View? = appBarLayout 
+                ?: findAppBarLayout(v)
                 ?: v.findViewById<AppBarLayout?>(R.id.appBar)
                 ?: v.findViewById<Toolbar?>(R.id.toolbar)
+                ?: v.findViewById<com.google.android.material.appbar.MaterialToolbar?>(R.id.toolbar)
 
             if (topBar != null) {
-                val baseTopPadding = (topBar.getTag(R.id.top_inset_base_padding) as? Int)
-                    ?: topBar.paddingTop.also { topBar.setTag(R.id.top_inset_base_padding, it) }
-                topBar.updatePadding(top = baseTopPadding + systemBars.top)
+                // Ensure AppBarLayout never applies internal duplicate insets
+                if (topBar is AppBarLayout) {
+                    topBar.fitsSystemWindows = false
+                }
+                
+                // If topBar is a Toolbar without an AppBarLayout parent, ensure its height accommodates the status bar
+                if (topBar !is AppBarLayout && topBar.parent !is AppBarLayout) {
+                    val baseHeight = (topBar.getTag(R.id.top_inset_base_height) as? Int)
+                        ?: topBar.layoutParams?.height?.takeIf { it > 0 }?.also { topBar.setTag(R.id.top_inset_base_height, it) }
+                    if (baseHeight != null && baseHeight > 0) {
+                        topBar.layoutParams?.height = baseHeight + statusBarTop
+                    }
+                }
+
+                topBar.updatePadding(top = statusBarTop)
                 v.updatePadding(top = 0)
             } else {
-                val baseTopPadding = (v.getTag(R.id.top_inset_base_padding) as? Int)
-                    ?: v.paddingTop.also { v.setTag(R.id.top_inset_base_padding, it) }
-                v.updatePadding(top = baseTopPadding + systemBars.top)
+                v.updatePadding(top = statusBarTop)
             }
 
             // 2. Bottom Safe Area (Taskbar / Navigation buttons / Gestures)
             val bottomTarget = scrollContainer ?: v
             val baseBottomPadding = (bottomTarget.getTag(R.id.bottom_inset_base_padding) as? Int)
                 ?: bottomTarget.paddingBottom.also { bottomTarget.setTag(R.id.bottom_inset_base_padding, it) }
-            bottomTarget.updatePadding(bottom = baseBottomPadding + systemBars.bottom)
+            bottomTarget.updatePadding(bottom = baseBottomPadding + navBars.bottom)
             if (scrollContainer != null && scrollContainer != v) {
                 v.updatePadding(bottom = 0)
             }
@@ -110,6 +126,17 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
             insets
         }
         ViewCompat.requestApplyInsets(rootView)
+    }
+
+    private fun findAppBarLayout(view: View): AppBarLayout? {
+        if (view is AppBarLayout) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val found = findAppBarLayout(view.getChildAt(i))
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     private fun findScrollableView(view: View): View? {

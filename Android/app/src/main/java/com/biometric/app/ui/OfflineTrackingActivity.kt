@@ -21,8 +21,10 @@ import com.biometric.app.data.LocalLocation
 import com.biometric.app.data.LocationDao
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalAttendancePunchDao
 import com.biometric.app.data.dao.OfflineTrackingEventDao
 import com.biometric.app.data.entity.Employee
+import com.biometric.app.data.entity.LocalAttendancePunch
 import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.OfflineTrackingMonitor
@@ -53,11 +55,11 @@ import javax.inject.Inject
 import kotlin.math.*
 
 @AndroidEntryPoint
-class OfflineTrackingActivity : AppCompatActivity() {
+class OfflineTrackingActivity : MotionBaseActivity() {
     @Inject lateinit var repo: MainRepository
     @Inject lateinit var locationDao: LocationDao
     @Inject lateinit var eventDao: OfflineTrackingEventDao
-    @Inject lateinit var sessionStore: MobileSessionStore
+    @Inject lateinit var punchDao: LocalAttendancePunchDao
     @Inject lateinit var monitor: OfflineTrackingMonitor
     @Inject lateinit var signalR: SignalRManager
 
@@ -117,6 +119,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_offline_tracking)
+        applyWindowInsets(findViewById(R.id.clOfflineTrackingRoot), findViewById(R.id.appBar))
         monitor.start()
 
         initViews()
@@ -425,12 +428,13 @@ class OfflineTrackingActivity : AppCompatActivity() {
                 emptyList()
             }
 
+            val allLocalPunches = try { punchDao.getAll() } catch (_: Exception) { emptyList<LocalAttendancePunch>() }
             val empNameMap = activeEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
             val allPeriods = mutableListOf<OfflinePeriodItem>()
             val allPointsForMap = mutableListOf<LocalLocation>()
 
             // 1. Check local periods first
-            val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device")
+            val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device", allLocalPunches)
             allPeriods.addAll(localPeriods)
             allPointsForMap.addAll(localRecent)
 
@@ -464,7 +468,7 @@ class OfflineTrackingActivity : AppCompatActivity() {
                     }
 
                     val empName = empNameMap[eid] ?: "Employee #$eid"
-                    val empPeriods = buildOfflinePeriods(localConverted, emptyList(), eid, empName)
+                    val empPeriods = buildOfflinePeriods(localConverted, emptyList(), eid, empName, allLocalPunches)
                     allPeriods.addAll(empPeriods)
                     allPointsForMap.addAll(localConverted)
                 }
@@ -523,7 +527,8 @@ class OfflineTrackingActivity : AppCompatActivity() {
         locations: List<LocalLocation>,
         events: List<OfflineTrackingEvent>,
         employeeId: Int,
-        employeeName: String
+        employeeName: String,
+        localPunches: List<LocalAttendancePunch> = emptyList()
     ): List<OfflinePeriodItem> {
         val sorted = locations.sortedBy { it.timestamp }
         if (sorted.isEmpty()) return emptyList()
@@ -581,6 +586,21 @@ class OfflineTrackingActivity : AppCompatActivity() {
                 else -> "Network Disconnected / Signal Loss"
             }
 
+            // Reconcile attendance punches taken during this offline period
+            val punchesInGap = localPunches.filter { p ->
+                val pStaffId = p.staffId.toIntOrNull() ?: 0
+                (pStaffId == employeeId || employeeId == 0 || p.staffId == employeeId.toString()) &&
+                        p.timestamp >= (first.timestamp - 120_000L) &&
+                        p.timestamp <= (last.timestamp + 120_000L)
+            }.map { p ->
+                OfflinePunchInfo(
+                    type = p.type,
+                    timestamp = p.timestamp,
+                    isSynced = p.syncState == 1,
+                    isOutside = false
+                )
+            }
+
             result.add(
                 OfflinePeriodItem(
                     id = "${employeeId}_${first.sessionId}_${first.timestamp}",
@@ -594,7 +614,8 @@ class OfflineTrackingActivity : AppCompatActivity() {
                     distanceMeters = dist,
                     inRadiusCount = c.count { it.accuracy > 0 },
                     isSynced = c.all { it.syncState == LocalLocation.SYNCED || it.syncState == LocalLocation.FIREBASE_SYNCED },
-                    points = c
+                    points = c,
+                    punches = punchesInGap
                 )
             )
         }
@@ -762,6 +783,13 @@ data class EmployeeStatusRow(
     val isWithinRadius: Boolean
 )
 
+data class OfflinePunchInfo(
+    val type: String,
+    val timestamp: Long,
+    val isSynced: Boolean = true,
+    val isOutside: Boolean = false
+)
+
 data class OfflinePeriodItem(
     val id: String,
     val employeeId: Int = 0,
@@ -774,7 +802,8 @@ data class OfflinePeriodItem(
     val distanceMeters: Double,
     val inRadiusCount: Int,
     val isSynced: Boolean,
-    val points: List<LocalLocation>
+    val points: List<LocalLocation>,
+    val punches: List<OfflinePunchInfo> = emptyList()
 )
 
 private class OfflineEmployeeStatusAdapter(
@@ -892,9 +921,12 @@ private class OfflinePeriodAdapter(
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
         private val tvTitle = view.findViewById<TextView>(R.id.tvPeriodTitle)
+        private val tvWindow = view.findViewById<TextView>(R.id.tvPeriodWindow)
         private val tvDuration = view.findViewById<TextView>(R.id.tvPeriodDuration)
         private val tvReason = view.findViewById<TextView>(R.id.tvPeriodReason)
         private val tvSyncStatus = view.findViewById<TextView>(R.id.tvPeriodSyncStatus)
+        private val tvPunches = view.findViewById<TextView>(R.id.tvPeriodPunches)
+        private val tvLiveImpact = view.findViewById<TextView>(R.id.tvPeriodLiveImpact)
         private val tvStats = view.findViewById<TextView>(R.id.tvPeriodStats)
         private val btnInspect = view.findViewById<MaterialButton>(R.id.btnViewPeriodRoute)
 
@@ -902,9 +934,10 @@ private class OfflinePeriodAdapter(
             val tz = TimeZone.getTimeZone("Asia/Kolkata")
             val fmt = SimpleDateFormat("dd-MMM HH:mm:ss", Locale.US).apply { timeZone = tz }
             val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US).apply { timeZone = tz }
+            val punchFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
 
-            val empPrefix = if (item.employeeName.isNotBlank()) "${item.employeeName} • " else ""
-            tvTitle.text = "$empPrefix${fmt.format(Date(item.startTime))} → ${timeFmt.format(Date(item.endTime))} IST"
+            tvTitle.text = if (item.employeeName.isNotBlank()) item.employeeName else "Employee #${item.employeeId}"
+            tvWindow.text = "Disconnected: ${fmt.format(Date(item.startTime))} → Reconnected: ${timeFmt.format(Date(item.endTime))} IST"
 
             val mins = item.durationMs / 60000
             val secs = (item.durationMs % 60000) / 1000
@@ -924,13 +957,37 @@ private class OfflinePeriodAdapter(
                 tvSyncStatus.setTextColor(Color.parseColor("#F57C00"))
             }
 
+            // Punches taken during the offline period:
+            if (item.punches.isNotEmpty()) {
+                val punchText = item.punches.joinToString("  •  ") { p ->
+                    val icon = if (p.type.equals("OUT", ignoreCase = true)) "🔴" else "🟢"
+                    val syncLabel = if (p.isSynced) "Synced to Live" else "Pending Local"
+                    "$icon ${p.type.uppercase()} Punch at ${punchFmt.format(Date(p.timestamp))} ($syncLabel)"
+                }
+                tvPunches.text = punchText
+                tvPunches.setTextColor(Color.parseColor("#2E7D32"))
+            } else {
+                tvPunches.text = "No attendance punches taken during this gap"
+                tvPunches.setTextColor(Color.parseColor("#757575"))
+            }
+
+            // How gap was reconciled to live data:
+            if (item.isSynced) {
+                val punchNote = if (item.punches.isNotEmpty()) "${item.punches.size} punch(es) reconciled & " else ""
+                tvLiveImpact.text = "Live Data Impact: ${punchNote}${item.pointsCount} offline breadcrumbs uploaded to cloud upon reconnection"
+                tvLiveImpact.setTextColor(Color.parseColor("#1565C0"))
+            } else {
+                tvLiveImpact.text = "Live Data Impact: Pending sync - ${item.pointsCount} breadcrumbs and punches stored in local queue"
+                tvLiveImpact.setTextColor(Color.parseColor("#E65100"))
+            }
+
             val distText = if (item.distanceMeters >= 1000) {
                 String.format(Locale.US, "%.2f km", item.distanceMeters / 1000.0)
             } else {
                 String.format(Locale.US, "%.0f m", item.distanceMeters)
             }
 
-            tvStats.text = "${item.pointsCount} points captured • Distance: $distText • Local storage verified"
+            tvStats.text = "${item.pointsCount} points captured • Distance: $distText • Within geofence: ${item.inRadiusCount} / Outside: ${item.pointsCount - item.inRadiusCount}"
 
             btnInspect.setOnClickListener {
                 onInspect(item)

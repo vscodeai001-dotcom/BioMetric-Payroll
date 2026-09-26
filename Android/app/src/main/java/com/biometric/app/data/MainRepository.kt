@@ -670,6 +670,12 @@ class MainRepository(
         }
     }
 
+    suspend fun deleteLeaveRequest(requestId: String) = withContext(Dispatchers.IO) {
+        localLeaveRequestDao.deleteById(requestId)
+        firebaseSync.getOwnerRef()?.child("leave_requests")?.child(requestId)?.removeValue()
+        notifyDataChanged()
+    }
+
     // ---------------- RESIGNATION ----------------
     suspend fun updateResignationStatus(requestId: String, status: String, remarks: String?) = withContext(Dispatchers.IO) {
         val existing = localResignationRequestDao.getAllFlow().first().find { it.requestId == requestId }

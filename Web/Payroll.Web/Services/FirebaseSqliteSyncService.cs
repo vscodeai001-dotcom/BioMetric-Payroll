@@ -1,3 +1,4 @@
+using Payroll.Shared;
 using Payroll.Shared.Firebase;
 using Payroll.Shared.Data;
 using System.Globalization;
@@ -174,6 +175,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         ("Employee", "employees"),
         ("Shop", "shops"),
         ("ShiftSchedule", "shift_schedules"),
+        ("BonusRecord", "bonus_records"),
     };
 
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
@@ -1826,6 +1828,92 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return changedSession;
         }
 
+        // Specialized handler for SalaryAdvance:
+        // In SQLite, advanceid is an auto-increment integer, while Firebase records can use UUIDs or string keys.
+        // Lookups must match either by integer AdvanceID or by logical uniqueness (EmployeeID, Amount, AdvanceDate)
+        // to prevent duplicate insertions on every sync reconnect or polling cycle.
+        if (entityType.ClrType == typeof(SalaryAdvance))
+        {
+            var empId = GetInt(json, "employeeId", "EmployeeId", "staffId");
+            if (empId <= 0) return false;
+
+            var amount = (decimal)GetDouble(json, "amount", "Amount");
+            if (amount <= 0m) return false;
+
+            var dateElement = FindJsonValue(json, "date") ?? FindJsonValue(json, "advanceDate") ?? FindJsonValue(json, "AdvanceDate");
+            var advDate = (DateTime?)(ConvertValue(dateElement, typeof(DateTime))) ?? DateTime.UtcNow;
+            var advType = GetString(json, "advanceType", "AdvanceType", "type") ?? "General";
+            var payrollIdVal = GetInt(json, "payrollIdPaid", "PayrollID_Paid", "recoveryPaymentId");
+            int? payrollIdPaid = payrollIdVal > 0 ? payrollIdVal : null;
+            var isRecovered = GetBool(json, "isRecovered", "IsRecovered") || payrollIdPaid.HasValue;
+
+            SalaryAdvance? existingAdvance = null;
+
+            // 1. Try matching by integer AdvanceID if key or json contains an integer id
+            var idElement = FindJsonValue(json, "advanceId") ?? FindJsonValue(json, "AdvanceID");
+            var idStr = idElement?.GetString() ?? idElement?.ToString() ?? (firebaseKey.Contains('/') ? firebaseKey.Split('/')[^1] : firebaseKey);
+            if (int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var advId) && advId > 0)
+            {
+                existingAdvance = await db.SalaryAdvances.FirstOrDefaultAsync(s => s.AdvanceID == advId, ct)
+                    ?? db.ChangeTracker.Entries<SalaryAdvance>()
+                        .Select(e => e.Entity)
+                        .FirstOrDefault(s => s.AdvanceID == advId);
+            }
+
+            // 2. If not found by ID (e.g. key is a UUID from mobile or web), match by logical content:
+            // same employee, same amount, and same advance date (within same day/seconds)
+            if (existingAdvance == null)
+            {
+                var candidates = await db.SalaryAdvances
+                    .Where(s => s.EmployeeID == empId && s.Amount == amount)
+                    .ToListAsync(ct);
+
+                existingAdvance = candidates.FirstOrDefault(s =>
+                    s.AdvanceDate.HasValue &&
+                    Math.Abs((s.AdvanceDate.Value - advDate).TotalSeconds) < 60)
+                    ?? candidates.FirstOrDefault(s =>
+                        s.AdvanceDate.HasValue &&
+                        s.AdvanceDate.Value.Date == advDate.Date);
+            }
+
+            var isNew = existingAdvance == null;
+            var targetAdvance = existingAdvance ?? new SalaryAdvance
+            {
+                EmployeeID = empId,
+                AdvanceDate = advDate,
+                Amount = amount,
+                AdvanceType = advType
+            };
+
+            var changedAdvance = false;
+
+            if (targetAdvance.EmployeeID != empId) { targetAdvance.EmployeeID = empId; changedAdvance = true; }
+            if (targetAdvance.Amount != amount) { targetAdvance.Amount = amount; changedAdvance = true; }
+            if (targetAdvance.AdvanceType != advType) { targetAdvance.AdvanceType = advType; changedAdvance = true; }
+            if (targetAdvance.AdvanceDate != advDate && isNew) { targetAdvance.AdvanceDate = advDate; changedAdvance = true; }
+            if (isRecovered && targetAdvance.PayrollID_Paid == null && payrollIdPaid.HasValue)
+            {
+                targetAdvance.PayrollID_Paid = payrollIdPaid;
+                changedAdvance = true;
+            }
+
+            if (isNew)
+            {
+                if (int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedId) && parsedId > 0)
+                {
+                    targetAdvance.AdvanceID = parsedId;
+                }
+                db.SalaryAdvances.Add(targetAdvance);
+                return true;
+            }
+            else if (changedAdvance && db.Entry(targetAdvance).State == EntityState.Unchanged)
+            {
+                db.Entry(targetAdvance).State = EntityState.Modified;
+            }
+
+            return changedAdvance;
+        }
+
         var keyParts = firebaseKey.Split('|');
         var keyValues = new object?[keys.Count];
 
@@ -1913,6 +2001,15 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 if (converted is bool isActuallyActive)
                 {
                     converted = !isActuallyActive;
+                }
+            }
+
+            // Special mapping for BonusRecord payrollIdPaid <= 0 (Firebase) to null (SQL)
+            if (entityType.ClrType.Name == "BonusRecord" && property.Name == "PayrollID_Paid")
+            {
+                if (converted is int pid && pid <= 0)
+                {
+                    converted = null;
                 }
             }
 

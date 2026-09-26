@@ -95,10 +95,9 @@
                                 <th>Offline Started</th>
                                 <th>Reconnected</th>
                                 <th>Duration</th>
-                                <th>Points Captured</th>
-                                <th>Distance Traveled</th>
-                                <th>Geofence</th>
-                                <th>Sync Status</th>
+                                <th>Offline Attendance Punches</th>
+                                <th>GPS Breadcrumbs</th>
+                                <th>Live Data Reconciliation</th>
                                 <th class="text-end">Inspect</th>
                             </tr>
                         </thead>
@@ -107,27 +106,72 @@
                         {
                             var isSelected = period.Id == selectedOfflinePeriodId;
                             <tr class="@(isSelected ? "table-warning fw-semibold" : "")">
-                                <td><strong>@period.EmployeeName</strong><div class="small text-muted">ID @period.EmployeeId</div></td>
-                                <td><i class="bi bi-wifi-off text-danger me-1"></i>@ToLocal(period.StartUtc).ToString("dd MMM HH:mm:ss")</td>
-                                <td><i class="bi bi-wifi text-success me-1"></i>@ToLocal(period.EndUtc).ToString("dd MMM HH:mm:ss")</td>
-                                <td><span class="badge bg-dark-subtle text-dark">@FormatAge(period.Duration)</span></td>
-                                <td><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span></td>
-                                <td>@FormatDistance(period.DistanceMeters)</td>
                                 <td>
-                                    <span class="badge bg-success-subtle text-success">@period.InRadiusCount In</span>
-                                    @if (period.PointCount - period.InRadiusCount > 0)
+                                    <strong>@period.EmployeeName</strong>
+                                    <div class="small text-muted">ID @period.EmployeeId</div>
+                                </td>
+                                <td>
+                                    <div><i class="bi bi-wifi-off text-danger me-1"></i>@ToLocal(period.StartUtc).ToString("dd MMM HH:mm:ss")</div>
+                                    <span class="badge bg-secondary-subtle text-secondary small">@period.DisconnectReason</span>
+                                </td>
+                                <td>
+                                    <div><i class="bi bi-wifi text-success me-1"></i>@ToLocal(period.EndUtc).ToString("dd MMM HH:mm:ss")</div>
+                                    <small class="text-success"><i class="bi bi-check2 me-1"></i>Connection restored</small>
+                                </td>
+                                <td>
+                                    <span class="badge bg-dark-subtle text-dark">@FormatAge(period.Duration)</span>
+                                </td>
+                                <td>
+                                    @if (period.Punches.Any())
                                     {
-                                        <span class="badge bg-danger-subtle text-danger ms-1">@(period.PointCount - period.InRadiusCount) Out</span>
+                                        <div class="d-flex flex-column gap-1">
+                                        @foreach (var p in period.Punches)
+                                        {
+                                            var isOut = p.Type.Equals("OUT", StringComparison.OrdinalIgnoreCase);
+                                            <span class="badge @(isOut ? "bg-danger-subtle text-danger border border-danger-subtle" : "bg-success-subtle text-success border border-success-subtle") text-start">
+                                                @(isOut ? "🔴 OUT Punch" : "🟢 IN Punch"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt")
+                                                <small class="d-block fw-normal text-muted">(Recorded Offline on Device)</small>
+                                            </span>
+                                        }
+                                        </div>
                                     }
+                                    else
+                                    {
+                                        <span class="small text-muted"><i class="bi bi-dash-circle me-1"></i>No punches taken</span>
+                                    }
+                                </td>
+                                <td>
+                                    <div><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span> · @FormatDistance(period.DistanceMeters)</div>
+                                    <div class="small mt-1">
+                                        <span class="badge bg-success-subtle text-success">@period.InRadiusCount In</span>
+                                        @if (period.PointCount - period.InRadiusCount > 0)
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger ms-1">@(period.PointCount - period.InRadiusCount) Out</span>
+                                        }
+                                    </div>
                                 </td>
                                 <td>
                                     @if (period.IsSynced)
                                     {
-                                        <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled</span>
+                                        <div>
+                                            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled to Live</span>
+                                            <div class="small text-primary mt-1">
+                                                <i class="bi bi-cloud-arrow-up me-1"></i>Pushed from local to live upon reconnection
+                                                @if (period.Punches.Any())
+                                                {
+                                                    <span>(@period.Punches.Count punches & @period.PointCount points merged)</span>
+                                                }
+                                            </div>
+                                        </div>
                                     }
                                     else
                                     {
-                                        <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending</span>
+                                        <div>
+                                            <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending Sync</span>
+                                            <div class="small text-warning-emphasis mt-1">
+                                                <i class="bi bi-phone me-1"></i>Buffered in mobile local storage
+                                            </div>
+                                        </div>
                                     }
                                 </td>
                                 <td class="text-end">
@@ -264,9 +308,13 @@
             foreach (var row in offlineSyncRows)
                 row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
 
+            var todayPunches = await db.AttendanceLogs.AsNoTracking()
+                .Where(point => point.PunchTime >= DateTime.UtcNow.Date.AddDays(-1))
+                .ToListAsync();
+
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();
-            BuildOfflinePeriods();
+            BuildOfflinePeriods(todayPunches);
 
             var trackedEmployees = employeeList;
 
@@ -435,7 +483,7 @@
     private static string FormatDistance(double m) => m >= 1000 ? $"{m / 1000:F2} km" : $"{m:F0} m";
     private static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"));
 
-    private void BuildOfflinePeriods()
+    private void BuildOfflinePeriods(List<AttendanceLog> todayPunches)
     {
         offlinePeriods.Clear();
         if (offlineSyncRows.Count == 0) return;
@@ -451,7 +499,7 @@
                 {
                     if (cluster.Any())
                     {
-                        offlinePeriods.Add(CreateOfflinePeriod(cluster));
+                        offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches));
                         cluster = new List<OfflineSyncRow>();
                     }
                 }
@@ -461,14 +509,14 @@
 
             if (cluster.Any())
             {
-                offlinePeriods.Add(CreateOfflinePeriod(cluster));
+                offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches));
             }
         }
 
         offlinePeriods = offlinePeriods.OrderByDescending(x => x.StartUtc).ToList();
     }
 
-    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster)
+    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster, List<AttendanceLog> todayPunches)
     {
         var first = cluster.First();
         var last = cluster.Last();
@@ -477,6 +525,21 @@
         {
             dist += CalculateDistanceMeters(cluster[i - 1].Latitude, cluster[i - 1].Longitude, cluster[i].Latitude, cluster[i].Longitude);
         }
+
+        var punchesInGap = todayPunches
+            .Where(p => p.EmployeeID == first.EmployeeId &&
+                        p.PunchTime >= first.CapturedAtUtc.AddMinutes(-2) &&
+                        p.PunchTime <= last.CapturedAtUtc.AddMinutes(2))
+            .OrderBy(p => p.PunchTime)
+            .Select(p => new ReconciledPunch
+            {
+                Type = p.LogType ?? "PUNCH",
+                PunchTimeUtc = p.PunchTime,
+                IsApproved = p.IsApproved
+            })
+            .ToList();
+
+        var isSynced = cluster.All(x => x.SyncedAtUtc.HasValue);
 
         return new OfflinePeriodDisplay
         {
@@ -488,8 +551,10 @@
             DistanceMeters = dist,
             InRadiusCount = cluster.Count(x => x.IsWithinAllowedRadius),
             SyncedAtUtc = cluster.Select(x => x.SyncedAtUtc).Max(),
-            IsSynced = cluster.All(x => x.SyncedAtUtc.HasValue),
-            Points = cluster
+            IsSynced = isSynced,
+            Points = cluster,
+            Punches = punchesInGap,
+            DisconnectReason = "Network Disconnected / Signal Loss"
         };
     }
 
@@ -499,6 +564,13 @@
         cts?.Dispose();
         timer?.Dispose();
         await Task.CompletedTask;
+    }
+
+    private sealed class ReconciledPunch
+    {
+        public string Type { get; set; } = "IN";
+        public DateTime PunchTimeUtc { get; set; }
+        public bool IsApproved { get; set; } = true;
     }
 
     private sealed class OfflineSyncRow
@@ -537,11 +609,13 @@
         public DateTime StartUtc { get; set; }
         public DateTime EndUtc { get; set; }
         public TimeSpan Duration => EndUtc >= StartUtc ? EndUtc - StartUtc : TimeSpan.Zero;
+        public string DisconnectReason { get; set; } = "Network Signal Loss";
         public int PointCount { get; set; }
         public double DistanceMeters { get; set; }
         public int InRadiusCount { get; set; }
         public DateTime? SyncedAtUtc { get; set; }
         public bool IsSynced { get; set; }
         public List<OfflineSyncRow> Points { get; set; } = new();
+        public List<ReconciledPunch> Punches { get; set; } = new();
     }
 }
