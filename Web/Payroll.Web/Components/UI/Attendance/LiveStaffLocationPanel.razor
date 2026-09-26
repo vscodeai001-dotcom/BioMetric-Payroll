@@ -5227,54 +5227,69 @@ foreach (var point in ordered)
                     FirebaseEmployees.OwnerUid,
                     employeeId);
 
-            if (!employeeNode.HasValue)
-                return;
-
-            if (employeeNode.HasValue &&
-                employeeNode.Value.ValueKind == JsonValueKind.Object &&
-                TryParseLiveEmployeeLocation(
-                    employeeId,
-                    employeeNode.Value,
-                    out var location))
+            if (!employeeNode.HasValue || employeeNode.Value.ValueKind == JsonValueKind.Null)
             {
-                var index =
-                    locations.FindIndex(
-                        x => x.EmployeeId == employeeId);
-
-                var membershipChanged = false;
-
-                if (index >= 0)
+                var removed = locations.RemoveAll(x => x.EmployeeId == employeeId) > 0;
+                if (removed)
                 {
-                    membershipChanged =
-                        locations[index].SessionId != location.SessionId;
-                    locations[index] = location;
-                }
-                else
-                {
-                    locations.Add(location);
-                    membershipChanged = true;
-                }
-
-                lastRefresh = DateTime.Now;
-                mapNeedsUpdate = true;
-
-                if (membershipChanged)
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
                     await InvokeAsync(StateHasChanged);
-
+                }
                 return;
             }
 
-            // Only the confirmed authoritative absence/terminal state removes
-            // the employee after a child-null event.
-            var removed =
-                locations.RemoveAll(
-                    x => x.EmployeeId == employeeId) > 0;
-
-            if (removed)
+            if (employeeNode.Value.ValueKind == JsonValueKind.Object)
             {
-                lastRefresh = DateTime.Now;
-                mapNeedsUpdate = true;
-                await InvokeAsync(StateHasChanged);
+                var state = GetJsonStringValue(employeeNode.Value, "State", "state");
+                if (state.Equals("ENDED", StringComparison.OrdinalIgnoreCase) ||
+                    state.Equals("OFFLINE", StringComparison.OrdinalIgnoreCase))
+                {
+                    var removed = locations.RemoveAll(x => x.EmployeeId == employeeId) > 0;
+                    if (removed)
+                    {
+                        lastRefresh = DateTime.Now;
+                        mapNeedsUpdate = true;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    return;
+                }
+
+                if (TryParseLiveEmployeeLocation(
+                    employeeId,
+                    employeeNode.Value,
+                    out var location))
+                {
+                    var index =
+                        locations.FindIndex(
+                            x => x.EmployeeId == employeeId);
+
+                    var membershipChanged = false;
+
+                    if (index >= 0)
+                    {
+                        membershipChanged =
+                            locations[index].SessionId != location.SessionId;
+                        locations[index] = location;
+                    }
+                    else
+                    {
+                        locations.Add(location);
+                        membershipChanged = true;
+                    }
+
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
+
+                    if (membershipChanged)
+                        await InvokeAsync(StateHasChanged);
+
+                    return;
+                }
+
+                // If node is an active object but a partial field caused parse to fail,
+                // do NOT remove the employee. Preserve the last known-good live state.
+                return;
             }
         }
         catch (Exception ex)
@@ -5630,7 +5645,31 @@ foreach (var point in ordered)
     private async Task SelectEmployee(int employeeId)
     {
         if (employeeId <= 0)
+        {
+            if (selectedEmployeeId > 0)
+            {
+                await StopPlayback();
+
+                selectedEmployeeId = 0;
+
+                selectedHistory.Clear();
+                selectedPunchAudits.Clear();
+
+                selectedPunchAudit = null;
+
+                gpsSessionLookup.Clear();
+
+                selectedPlaybackSessionId = null;
+
+                playbackIndex = 0;
+                playbackStatus = "Ready";
+
+                mapNeedsUpdate = true;
+
+                await InvokeAsync(StateHasChanged);
+            }
             return;
+        }
 
         /*
          * ============================================================

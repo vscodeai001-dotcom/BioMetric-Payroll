@@ -4024,7 +4024,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                     )
                 );
 
-            if (state.followSelected && Number(state.lastSelectedId) === employeeId) {
+            if (state.followSelected && Number(state.lastSelectedId) === employeeId && Number(state.lastSelectedId) > 0) {
                 try {
                     state.map.panTo(displayTarget, { animate: true, duration: 0.7 });
                 } catch { }
@@ -4208,17 +4208,10 @@ window.updateAdminLiveStaffMap =
                 });
             }
 
-            // Default view shows every live employee. Once an employee is
-            // selected, the live map becomes employee-scoped and renders
-            // only that employee. Playback/detail routes therefore cannot
-            // leave unrelated live markers visible. This is presentation
-            // filtering only; Firebase, GPS sessions and attendance state
-            // remain unchanged.
-            const visibleStaff = Number(selectedId) > 0
-                ? liveStaff.filter(function (x) {
-                    return Number(x.employeeId) === Number(selectedId);
-                })
-                : liveStaff;
+            // All live employees remain on the map so the radar maintains full staff awareness.
+            // When an employee is selected, they are highlighted and focused with the company office,
+            // while remaining employees stay visible without blinking or disappearing.
+            const visibleStaff = liveStaff;
 
             const displayPoints = [];
 
@@ -4337,8 +4330,10 @@ window.updateAdminLiveStaffMap =
                     historyStartMarker: null,
                     historyEndMarker: null,
                     hasInitialFit: false,
+                    initialFitStaffCount: 0,
                     lastStaffSignature: '',
                     lastSelectedId: 0,
+                    followSelected: false,
                     isPlayback: !!isPlayback,
                     lastLocationAt: {},
                     routeStates: {},
@@ -4356,6 +4351,15 @@ window.updateAdminLiveStaffMap =
                 window.adminLiveMaps[mapId] =
                     state;
 
+                map.on('click', function (e) {
+                    if (e.originalEvent?._stoppedByMarker) return;
+                    if (state.markerDotNetRef && Number(state.lastSelectedId) > 0) {
+                        try {
+                            state.markerDotNetRef.invokeMethodAsync('SelectEmployeeFromMap', 0);
+                        } catch (err) { }
+                    }
+                });
+
                 window.ensureAdminLiveMapLayout(mapId);
                 if (!state.liveSummaryTimer) {
                     state.liveSummaryTimer = setInterval(function () {
@@ -4366,7 +4370,8 @@ window.updateAdminLiveStaffMap =
                 try {
                     if (!state._controlsToggleBound) {
                         const mapContainer = map.getContainer();
-                        mapContainer.addEventListener('click', function () {
+                        mapContainer.addEventListener('click', function (e) {
+                            if (e.target && (e.target.closest('.payroll-user-marker') || e.target.closest('.payroll-map-floating-nav') || e.target.closest('.payroll-premium-map-ui'))) return;
                             const wrapper = mapContainer.parentElement;
                             if (!wrapper) return;
                             wrapper.classList.toggle('controls-open');
@@ -4630,7 +4635,8 @@ window.updateAdminLiveStaffMap =
                             );
 
                         if (dotNetRef) {
-                            state.markers[employeeId].on('click', function () {
+                            state.markers[employeeId].on('click', function (e) {
+                                if (e?.originalEvent) e.originalEvent._stoppedByMarker = true;
                                 try {
                                     dotNetRef.invokeMethodAsync('SelectEmployeeFromMap', employeeId);
                                 } catch (e) { }
@@ -4667,7 +4673,8 @@ window.updateAdminLiveStaffMap =
                             try {
                                 state.markers[employeeId].off('click');
                             } catch (e) { }
-                            state.markers[employeeId].on('click', function () {
+                            state.markers[employeeId].on('click', function (e) {
+                                if (e?.originalEvent) e.originalEvent._stoppedByMarker = true;
                                 try {
                                     dotNetRef.invokeMethodAsync('SelectEmployeeFromMap', employeeId);
                                 } catch (e) { }
@@ -4743,7 +4750,7 @@ window.updateAdminLiveStaffMap =
                          * The explicit Follow control remains the only automatic
                          * camera-follow path.
                          */
-                        if (isSelected && state.followSelected && !isPlayback) {
+                        if (isSelected && state.followSelected && !isPlayback && Number(selectedId) > 0) {
                             try {
                                 state.map.panTo(displayPosition, {
                                     animate: true,
@@ -5071,10 +5078,14 @@ window.updateAdminLiveStaffMap =
             // 3. Manual "Fit All" / "Recenter" toolbar actions are handled by
             //    handlePremiumAdminMapAction and operate independently.
             // --------------------------------------------------------
-            const selectionChanged = state.lastSelectedId !== Number(selectedId);
+            const selId = Number(selectedId);
+            const selectionChanged = state.lastSelectedId !== selId;
 
-            if (!state.hasInitialFit) {
-                // First-ever render: fit all employees + office regardless of selection.
+            // Initial fit: fits all employees + office when the map first renders OR
+            // when live staff first arrive (if initial fit happened before staff loaded).
+            const needsInitialFit = !state.hasInitialFit || (state.initialFitStaffCount === 0 && liveStaff.length > 0 && selId === 0);
+
+            if (needsInitialFit) {
                 const initPoints = [office];
                 liveStaff.forEach(function (x) {
                     const lat = Number(x.latitude);
@@ -5096,13 +5107,13 @@ window.updateAdminLiveStaffMap =
                     state.map.setView(office, 15);
                 }
                 state.hasInitialFit = true;
+                state.initialFitStaffCount = liveStaff.length;
             } else if (selectionChanged) {
                 // Selection changed: fit the newly selected employee + office,
                 // or fit all when deselecting back to "All staff".
                 const selPoints = [office];
-                const selId = Number(selectedId);
                 if (selId > 0) {
-                    // Scope camera to the selected employee only.
+                    // Scope camera to the selected employee + office.
                     const selStaff = liveStaff.find(function (x) {
                         return Number(x.employeeId) === selId;
                     });
@@ -5113,27 +5124,41 @@ window.updateAdminLiveStaffMap =
                             selPoints.push([lat, lng]);
                         }
                     }
+                    if (selPoints.length > 1) {
+                        const bounds = L.latLngBounds(selPoints);
+                        if (bounds.isValid()) {
+                            state.map.fitBounds(bounds, {
+                                padding: [60, 60],
+                                maxZoom: 17,
+                                animate: true
+                            });
+                        }
+                    } else if (selPoints.length === 1) {
+                        state.map.setView(selPoints[0], 15, { animate: true });
+                    }
                 } else {
                     // Deselected back to all-staff: show all employees + office.
+                    const allPoints = [office];
                     liveStaff.forEach(function (x) {
                         const lat = Number(x.latitude);
                         const lng = Number(x.longitude);
                         if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                            selPoints.push([lat, lng]);
+                            allPoints.push([lat, lng]);
                         }
                     });
-                }
-                if (selPoints.length > 1) {
-                    const bounds = L.latLngBounds(selPoints);
-                    if (bounds.isValid()) {
-                        state.map.fitBounds(bounds, {
-                            padding: [60, 60],
-                            maxZoom: 17,
-                            animate: true
-                        });
+                    if (allPoints.length > 1) {
+                        const bounds = L.latLngBounds(allPoints);
+                        if (bounds.isValid()) {
+                            state.map.fitBounds(bounds, {
+                                padding: [60, 60],
+                                maxZoom: 17,
+                                animate: true
+                            });
+                        }
+                    } else {
+                        state.map.setView(office, 15);
                     }
-                } else {
-                    state.map.setView(office, 15);
+                    state.followSelected = false;
                 }
             }
             // NOTE: membershipChanged (employee going online/offline) intentionally
@@ -5412,9 +5437,6 @@ window.applyPremiumAdminMapFilter = function (mapId) {
         const isSelected = selectedId === id;
         const name = String(x.name || ('Employee ' + id)).toLowerCase();
 
-        // REQUIREMENT: If an employee is selected, hide all others.
-        // REQUIREMENT: If playback is active, hide all live markers.
-        const matchesSelection = selectedId === 0 || isSelected;
         const matchesPlayback = !isPlayback;
 
         const matchesSearch = !search || name.includes(search) || String(id).includes(search);
@@ -5424,12 +5446,12 @@ window.applyPremiumAdminMapFilter = function (mapId) {
             (filter === 'within' && within) ||
             (filter === 'outside' && !within);
 
-        const visible = matchesSearch && matchesFilter && matchesSelection && matchesPlayback;
+        const visible = matchesSearch && matchesFilter && matchesPlayback;
 
         const marker = state.markers?.[id];
         if (marker) {
-            marker.setOpacity(visible ? 1 : 0);
-            if (visible) marker.setZIndexOffset(isSelected ? 2500 : 0);
+            marker.setOpacity(visible ? (selectedId > 0 && !isSelected ? 0.8 : 1) : 0);
+            if (visible) marker.setZIndexOffset(isSelected ? 3000 : 0);
             try {
                 if (!visible && marker.isTooltipOpen()) marker.closeTooltip();
             } catch { }
@@ -5714,6 +5736,9 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
     });
 
     if (action === 'fit') {
+        if (state.markerDotNetRef && Number(state.selectedId) > 0) {
+            try { state.markerDotNetRef.invokeMethodAsync('SelectEmployeeFromMap', 0); } catch (e) { }
+        }
         const bounds = L.latLngBounds(points);
         if (bounds.isValid()) state.map.fitBounds(bounds, { padding: [70, 70], maxZoom: 17, animate: true, duration: .8 });
     } else if (action === 'zoom-in' || action === 'zoomin') {
@@ -5722,9 +5747,17 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         state.map.zoomOut();
     } else if (action === 'recenter') {
         if (state.selectedId > 0 && state.markers?.[state.selectedId]) {
-            state.map.setView(state.markers[state.selectedId].getLatLng(), Math.max(16, state.map.getZoom()), { animate: true });
-        } else if (state.office) {
-            state.map.setView(state.office, Math.max(15, state.map.getZoom()), { animate: true });
+            const selPoints = [state.office, state.markers[state.selectedId].getLatLng()].filter(Boolean);
+            if (selPoints.length > 1) {
+                const b = L.latLngBounds(selPoints);
+                if (b.isValid()) state.map.fitBounds(b, { padding: [60, 60], maxZoom: 17, animate: true });
+            } else {
+                state.map.setView(state.markers[state.selectedId].getLatLng(), Math.max(16, state.map.getZoom()), { animate: true });
+            }
+        } else {
+            const bounds = L.latLngBounds(points);
+            if (bounds.isValid()) state.map.fitBounds(bounds, { padding: [70, 70], maxZoom: 17, animate: true });
+            else if (state.office) state.map.setView(state.office, 15, { animate: true });
         }
     } else if (action === 'office') {
         state.map.setView(state.office, Math.max(15, state.map.getZoom()), { animate: true });
