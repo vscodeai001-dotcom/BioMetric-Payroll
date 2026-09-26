@@ -14,6 +14,7 @@ import androidx.paging.PagingData
 import com.biometric.app.backup.BackupWorker
 import com.biometric.app.data.dao.*
 import com.biometric.app.util.DateRangeUtil
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.tasks.await
@@ -45,7 +46,8 @@ class MainRepository(
     private val localDailySummaryDao: LocalDailySummaryDao,
     private val localShiftScheduleDao: LocalShiftScheduleDao,
     private val localPayrollHistoryDao: LocalPayrollHistoryDao,
-    private val localSettingsDao: LocalSettingsDao
+    private val localSettingsDao: LocalSettingsDao,
+    val localAuditLogDao: LocalAuditLogDao
 ) {
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -865,17 +867,57 @@ class MainRepository(
     ): Double = getProjectedSalaryFlow(shopId, start, end, includeBonus).firstOrNull() ?: 0.0
 
     // ---------------- AUDIT TRAIL ----------------
+    private fun matchesAuditShop(logShopId: String?, targetShopId: String?): Boolean {
+        if (targetShopId.isNullOrEmpty() || targetShopId.equals("GLOBAL", ignoreCase = true)) return true
+        if (logShopId.isNullOrEmpty() || logShopId.equals("GLOBAL", ignoreCase = true)) return true
+        return logShopId.equals(targetShopId, ignoreCase = true)
+    }
+
     fun getAuditLogsSummary(shopId: String?, start: Long, end: Long): Flow<List<AuditLog>> {
-        return firebaseSync.getDataFlow<AuditLog>("audit_logs").map { logs ->
-            logs.filter { (shopId.isNullOrEmpty() || it.shopId == shopId) && it.timestamp in start..end }
-        }.flowOn(Dispatchers.Default)
+        val localFlow = localAuditLogDao.getAllFlow().map { list ->
+            list.filter { matchesAuditShop(it.shopId, shopId) && it.timestamp in start..end }
+                .map { it.toDomain() }
+        }
+
+        val query = firebaseSync.getOwnerRef()?.child("audit_logs")
+            ?.orderByChild("timestamp")
+            ?.startAt(start.toDouble())
+            ?.endAt(end.toDouble())
+
+        return if (query == null) {
+            localFlow
+        } else {
+            callbackFlow {
+                val initialJob = launch {
+                    localFlow.collect { localList ->
+                        trySend(localList)
+                    }
+                }
+
+                val listener = object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        initialJob.cancel()
+                        val list = snapshot.children.mapNotNull { child ->
+                            firebaseSync.decodeAuditLog(child) ?: runCatching { child.getValue(AuditLog::class.java) }.getOrNull()
+                        }.filter { matchesAuditShop(it.shopId, shopId) && it.timestamp in start..end }
+                        trySend(list)
+                    }
+
+                    override fun onCancelled(error: DatabaseError) {
+                        // Keep using local flow on cancel
+                    }
+                }
+                query.addValueEventListener(listener)
+                awaitClose { query.removeEventListener(listener) }
+            }.flowOn(Dispatchers.Default)
+        }
     }
 
     fun getAuditLogsPaged(shopId: String?, start: Long, end: Long, search: String = ""): Flow<PagingData<AuditLog>> {
         return Pager(
             config = PagingConfig(pageSize = 50, enablePlaceholders = false, initialLoadSize = 100)
         ) {
-            AuditPagingSource(firebaseSync, shopId, start, end, search)
+            AuditPagingSource(firebaseSync, localAuditLogDao, shopId, start, end, search)
         }.flow
     }
 

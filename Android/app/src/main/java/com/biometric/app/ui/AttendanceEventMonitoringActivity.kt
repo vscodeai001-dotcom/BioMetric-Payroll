@@ -59,6 +59,9 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
         timeZone = TimeZone.getTimeZone("Asia/Kolkata")
     }
 
+    private var auditQuery: com.google.firebase.database.Query? = null
+    private var auditEventListener: ValueEventListener? = null
+
     private val eventTypeOptions = listOf(
         "All Security Events",
         "LOGIN_ATTEMPT",
@@ -207,8 +210,10 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
     }
 
     private fun syncWithFirebase() {
-        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(150) ?: return
-        query.addValueEventListener(object : ValueEventListener {
+        auditEventListener?.let { auditQuery?.removeEventListener(it) }
+        val query = sync.getOwnerRef()?.child("audit_logs")?.limitToLast(100) ?: return
+        auditQuery = query
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lifecycleScope.launch(Dispatchers.Default) {
                     val fbLogs = mutableListOf<AuditLog>()
@@ -236,7 +241,16 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
             }
 
             override fun onCancelled(error: DatabaseError) {}
-        })
+        }
+        auditEventListener = listener
+        query.addValueEventListener(listener)
+    }
+
+    override fun onDestroy() {
+        auditEventListener?.let { auditQuery?.removeEventListener(it) }
+        auditEventListener = null
+        auditQuery = null
+        super.onDestroy()
     }
 
     private fun mergeLogs(incoming: List<AuditLog>) {

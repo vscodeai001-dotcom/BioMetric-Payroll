@@ -2436,7 +2436,7 @@ public sealed class FirebaseRealtimeService
         try
         {
             var client = _httpClientFactory.CreateClient("FirebaseRealtime");
-            var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/.json");
+            var uri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/.json?print=silent");
             using var request = new HttpRequestMessage(HttpMethod.Patch, uri);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await context.GetAccessTokenAsync());
             request.Content = new StringContent(

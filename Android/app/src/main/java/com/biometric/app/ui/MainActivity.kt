@@ -1316,7 +1316,6 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     override fun onResume() {
         super.onResume()
         lastRenderedLiveSignature = null
-        firebaseRoomHydrator.forceRebind("MainActivity onResume")
         binding.tvLiveDate.text = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(Date())
         _binding?.adminMapView?.onResume()
         _binding?.adminMapView?.post { _binding?.adminMapView?.invalidate() }

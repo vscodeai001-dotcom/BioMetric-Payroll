@@ -17,7 +17,6 @@ import com.biometric.app.R
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.databinding.ActivityAdminAttendanceBinding
 import com.biometric.app.databinding.ItemAdminAttendanceBinding
-import com.biometric.app.sync.AdminRealtimeCoordinator
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
@@ -34,7 +33,6 @@ class AdminAttendanceActivity : MotionBaseActivity() {
     private lateinit var binding: ActivityAdminAttendanceBinding
 
     @Inject lateinit var sharedViewModel: SharedViewModel
-    @Inject lateinit var realtimeCoordinator: AdminRealtimeCoordinator
 
     private lateinit var adapter: AttendanceAdapter
     private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
@@ -60,19 +58,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         setupListeners()
         observeData()
 
-        realtimeCoordinator.start {
-            if (!isFinishing && !isDestroyed) {
-                sharedViewModel.warmUpDashboard()
-                render()
-            }
-        }
-        sharedViewModel.warmUpDashboard()
         render()
-    }
-
-    override fun onDestroy() {
-        realtimeCoordinator.stop()
-        super.onDestroy()
     }
 
     private fun setupToolbar() {
@@ -144,12 +130,10 @@ class AdminAttendanceActivity : MotionBaseActivity() {
     private fun setupListeners() {
         binding.btnGenerate.setOnClickListener {
             binding.progress.isVisible = true
-            sharedViewModel.warmUpDashboard()
             render()
         }
 
         binding.swipeRefresh.setOnRefreshListener {
-            sharedViewModel.warmUpDashboard()
             render()
             binding.swipeRefresh.isRefreshing = false
         }

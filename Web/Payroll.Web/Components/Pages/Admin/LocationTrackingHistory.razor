@@ -41,10 +41,10 @@
     </div>
 
     <div class="card border-0 shadow-sm mb-3 filter-card">
-        <div class="card-body">
-            <div class="row g-3 align-items-end">
-                <div class="col-12 col-md-3">
-                    <label class="form-label">Employee</label>
+        <div class="card-body p-3">
+            <div class="filter-grid">
+                <div class="filter-item">
+                    <label class="form-label"><i class="bi bi-person me-1 text-primary"></i>Employee</label>
                     <select class="form-select" @bind="employeeFilter">
                         <option value="0">All employees</option>
                         @foreach (var employee in employees)
@@ -53,24 +53,24 @@
                         }
                     </select>
                 </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label">Date From</label>
+                <div class="filter-item">
+                    <label class="form-label"><i class="bi bi-calendar-event me-1 text-primary"></i>Date From</label>
                     <input type="date" class="form-control" @bind="fromDate" />
                 </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label">Date To</label>
+                <div class="filter-item">
+                    <label class="form-label"><i class="bi bi-calendar2-check me-1 text-primary"></i>Date To</label>
                     <input type="date" class="form-control" @bind="toDate" />
                 </div>
-                <div class="col-6 col-md-1">
-                    <label class="form-label">From</label>
+                <div class="filter-item filter-item-time">
+                    <label class="form-label"><i class="bi bi-clock me-1 text-primary"></i>From</label>
                     <input type="time" class="form-control" @bind="fromTime" />
                 </div>
-                <div class="col-6 col-md-1">
-                    <label class="form-label">To</label>
+                <div class="filter-item filter-item-time">
+                    <label class="form-label"><i class="bi bi-clock-history me-1 text-primary"></i>To</label>
                     <input type="time" class="form-control" @bind="toTime" />
                 </div>
-                <div class="col-12 col-md-2">
-                    <label class="form-label">Min Stay (50m Radius)</label>
+                <div class="filter-item filter-item-stay">
+                    <label class="form-label"><i class="bi bi-geo-alt me-1 text-primary"></i>Min Stay (50m Radius)</label>
                     <select class="form-select" value="@minDurationFilterMinutes" @onchange="OnDurationFilterChanged">
                         <option value="10">≥ 10 mins (All)</option>
                         <option value="20">≥ 20 mins</option>
@@ -79,11 +79,17 @@
                         <option value="120">≥ 2 hours</option>
                     </select>
                 </div>
-                <div class="col-12 col-md-1 d-grid">
-                    <button class="btn btn-primary" @onclick="LoadAsync" disabled="@loading"><i class="bi bi-search"></i><span class="d-md-none ms-2">Search</span></button>
+                <div class="filter-item filter-item-btn">
+                    <button class="btn btn-primary w-100 d-flex align-items-center justify-content-center gap-2 shadow-sm" @onclick="LoadAsync" disabled="@loading">
+                        <i class="bi bi-search"></i>
+                        <span>Search</span>
+                    </button>
                 </div>
             </div>
-            <div class="small text-muted mt-2"><i class="bi bi-shield-check me-1"></i>No GPS records are changed. Stay records are derived from the existing <code>EmployeeLocationHistory</code> data clustered within a 50m radius for ≥10 minutes.</div>
+            <div class="small text-muted mt-2 d-flex align-items-center gap-1">
+                <i class="bi bi-shield-check text-success"></i>
+                <span>No GPS records are changed. Stay records are derived from the existing <code>EmployeeLocationHistory</code> data clustered within a 50m radius for ≥10 minutes.</span>
+            </div>
         </div>
     </div>
 
@@ -208,8 +214,62 @@
 <style>
     .location-stays-page { min-width: 0; }
     .location-stays-page .card { border-radius: 15px; overflow: hidden; }
-    .filter-card { background: linear-gradient(180deg, rgba(127,127,127,.05), transparent); }
-    .filter-card .form-label { font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; }
+    .filter-card { background: linear-gradient(180deg, rgba(127,127,127,.05), transparent); border-radius: 12px; }
+    .filter-grid {
+        display: grid;
+        grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 0.9fr) minmax(130px, 0.9fr) minmax(160px, 1.2fr) minmax(105px, auto);
+        gap: 12px;
+        align-items: flex-end;
+    }
+    .filter-item { min-width: 0; }
+    .filter-item .form-label {
+        font-size: .75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: 5px;
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+    }
+    .filter-item .form-control,
+    .filter-item .form-select {
+        height: 38px;
+        font-size: .85rem;
+        border-radius: 8px;
+        padding: 6px 10px;
+    }
+    .filter-item input[type="time"] {
+        min-width: 125px;
+        font-variant-numeric: tabular-nums;
+    }
+    .filter-item input[type="date"] {
+        min-width: 135px;
+    }
+    .filter-item .btn {
+        height: 38px;
+        font-weight: 600;
+        font-size: .85rem;
+        border-radius: 8px;
+    }
+    @@media (max-width: 1280px) {
+        .filter-grid {
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+        .filter-item-btn {
+            grid-column: 1 / -1;
+        }
+    }
+    @@media (max-width: 576px) {
+        .filter-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        .filter-item:first-child,
+        .filter-item-stay,
+        .filter-item-btn {
+            grid-column: 1 / -1;
+        }
+    }
     .metric-card { min-height: 112px; padding: 16px 18px; border-radius: 15px; background: var(--bs-body-bg); box-shadow: 0 6px 22px rgba(0,0,0,.07); position: relative; overflow: hidden; border: 1px solid rgba(127,127,127,.12); }
     .metric-card span { display:block; color:#64748b; font-size:.76rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; }
     .metric-card strong { display:block; margin-top:8px; font-size:1.55rem; }
@@ -487,6 +547,7 @@
     private List<StayRow> stays = new();
     private Summary summary = new();
     private bool mapInitialized;
+    private List<ShopLocation>? cachedShops;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -538,11 +599,11 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            employees = (await FirebaseEmployees.GetEmployeesAsync())
+            employees = await db.Employees.AsNoTracking()
                 .Where(x => !x.IsDeleted)
                 .OrderBy(x => x.Name)
                 .Select(x => new EmployeeOption { EmployeeID = x.EmployeeID, Name = x.Name, Role = x.Role ?? "Staff" })
-                .ToList();
+                .ToListAsync();
 
             var fromLocal = fromDate.Date.Add(fromTime.ToTimeSpan());
             var toLocal = toDate.Date.Add(toTime.ToTimeSpan());
@@ -723,34 +784,45 @@
 
         try
         {
-            var auth = await AuthState.GetAuthenticationStateAsync();
-            var user = auth.User;
-            var actorUid = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                ?? user.FindFirst("sub")?.Value
-                ?? user.Identity?.Name
-                ?? "admin";
-            var role = user.IsInRole("SuperAdmin") ? "SuperAdmin" : "Admin";
-            var ownerUid = FirebaseRealtime.ResolveOwnerUid(actorUid, role);
-            var shopsJson = await FirebaseRealtime.GetOwnerTableAsync(ownerUid, "shops");
-            if (!shopsJson.HasValue || shopsJson.Value.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return;
-
-            var shops = new List<ShopLocation>();
-            foreach (var property in shopsJson.Value.EnumerateObject())
+            if (cachedShops == null)
             {
-                var value = property.Value;
-                if (value.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                var lat = ReadDouble(value, "latitude", "lat");
-                var lng = ReadDouble(value, "longitude", "lng", "lon");
-                var radius = ReadDouble(value, "radiusMeters", "allowedRadiusMeters", "radius");
-                var name = ReadString(value, "name", "brandingName") ?? property.Name;
-                if (!lat.HasValue || !lng.HasValue || !radius.HasValue || radius <= 0) continue;
-                shops.Add(new ShopLocation { Id = property.Name, Name = name, Latitude = lat.Value, Longitude = lng.Value, RadiusMeters = radius.Value });
+                var auth = await AuthState.GetAuthenticationStateAsync();
+                var user = auth.User;
+                var actorUid = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                    ?? user.FindFirst("sub")?.Value
+                    ?? user.Identity?.Name
+                    ?? "admin";
+                var role = user.IsInRole("SuperAdmin") ? "SuperAdmin" : "Admin";
+                var ownerUid = FirebaseRealtime.ResolveOwnerUid(actorUid, role);
+                var shopsJson = await FirebaseRealtime.GetOwnerTableAsync(ownerUid, "shops");
+                if (shopsJson.HasValue && shopsJson.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var shops = new List<ShopLocation>();
+                    foreach (var property in shopsJson.Value.EnumerateObject())
+                    {
+                        var value = property.Value;
+                        if (value.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                        var lat = ReadDouble(value, "latitude", "lat");
+                        var lng = ReadDouble(value, "longitude", "lng", "lon");
+                        var radius = ReadDouble(value, "radiusMeters", "allowedRadiusMeters", "radius");
+                        var name = ReadString(value, "name", "brandingName") ?? property.Name;
+                        if (!lat.HasValue || !lng.HasValue || !radius.HasValue || radius <= 0) continue;
+                        shops.Add(new ShopLocation { Id = property.Name, Name = name, Latitude = lat.Value, Longitude = lng.Value, RadiusMeters = radius.Value });
+                    }
+                    cachedShops = shops;
+                }
+                else
+                {
+                    cachedShops = new List<ShopLocation>();
+                }
             }
+
+            var activeShops = cachedShops;
+            if (activeShops.Count == 0) return;
 
             foreach (var stay in stayRows)
             {
-                var match = shops
+                var match = activeShops
                     .Select(shop => new { shop, distance = CalculateDistance(stay.Latitude, stay.Longitude, shop.Latitude, shop.Longitude) })
                     .Where(x => x.distance <= Math.Max(x.shop.RadiusMeters, 120d))
                     .OrderBy(x => x.distance)

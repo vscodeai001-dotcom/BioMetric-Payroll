@@ -2,12 +2,15 @@ package com.biometric.app.data
 
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
+import com.biometric.app.data.dao.LocalAuditLogDao
 import com.biometric.app.data.entity.AuditLog
+import com.biometric.app.data.entity.LocalAuditLog
 import com.biometric.app.sync.FirebaseSyncManager
 import kotlinx.coroutines.tasks.await
 
 class AuditPagingSource(
     private val firebaseSync: FirebaseSyncManager,
+    private val localAuditLogDao: LocalAuditLogDao,
     private val shopId: String?,
     private val start: Long,
     private val end: Long,
@@ -37,34 +40,38 @@ class AuditPagingSource(
             
             while (currentEndAt >= start && attempts < scanLimit) {
                 attempts++
-            val query = firebaseSync.getOwnerRef()?.child("audit_logs")
-                ?.orderByChild("timestamp")
-                ?.endAt(currentEndAt.toDouble())
-                ?.limitToLast(batchSize)
+                val query = firebaseSync.getOwnerRef()?.child("audit_logs")
+                    ?.orderByChild("timestamp")
+                    ?.endAt(currentEndAt.toDouble())
+                    ?.limitToLast(batchSize)
 
-            if (query == null) break
+                if (query == null) break
 
-            val snapshot = try {
-                query.get().await()
-            } catch (e: Exception) {
-                if (e.message?.contains("Index not defined") == true) {
-                    // FALLBACK: Assign the result of the manual fetch to snapshot
-                    firebaseSync.getOwnerRef()?.child("audit_logs")?.get()?.await()
-                } else {
-                    throw e
+                val snapshot = try {
+                    query.get().await()
+                } catch (e: Exception) {
+                    if (e.message?.contains("Index not defined") == true) {
+                        try {
+                            firebaseSync.getOwnerRef()?.child("audit_logs")?.get()?.await()
+                        } catch (_: Exception) {
+                            null
+                        }
+                    } else {
+                        null
+                    }
                 }
-            }
 
-            if (snapshot == null) break
-            
-            val rawLogs = snapshot.children.mapNotNull { it.getValue(AuditLog::class.java) }
-                .sortedByDescending { it.timestamp }
+                if (snapshot == null) break
+                
+                val rawLogs = snapshot.children.mapNotNull { child ->
+                    firebaseSync.decodeAuditLog(child) ?: runCatching { child.getValue(AuditLog::class.java) }.getOrNull()
+                }.sortedByDescending { it.timestamp }
                 
                 if (rawLogs.isEmpty()) break
 
                 // Filter for results matching this shop and within time range
                 val filtered = rawLogs.filter { log ->
-                    (shopId.isNullOrEmpty() || log.shopId == shopId) &&
+                    matchesShop(log.shopId) &&
                     matchesSearch(log) &&
                     log.timestamp >= start && 
                     log.timestamp <= startKey 
@@ -93,15 +100,44 @@ class AuditPagingSource(
                 }
             }
 
+            // Fallback: If Firebase returned no logs or was unavailable, check Room local database
+            if (allFetchedLogs.isEmpty()) {
+                val localLogs = localAuditLogDao.getByRange(start, startKey)
+                val filteredLocal = localLogs.map { it.toDomain() }.filter { log ->
+                    matchesShop(log.shopId) &&
+                    matchesSearch(log)
+                }
+                allFetchedLogs.addAll(filteredLocal.take(params.loadSize))
+            }
+
             LoadResult.Page(
                 data = allFetchedLogs,
                 prevKey = null,
-                nextKey = if (currentEndAt >= start) currentEndAt else null
+                nextKey = if (currentEndAt >= start && allFetchedLogs.size >= params.loadSize) currentEndAt else null
             )
         } catch (e: Exception) {
             android.util.Log.e("AuditPaging", "Error loading audit logs: ${e.message}", e)
-            LoadResult.Error(e)
+            try {
+                val localLogs = localAuditLogDao.getByRange(start, end)
+                val filteredLocal = localLogs.map { it.toDomain() }.filter { log ->
+                    matchesShop(log.shopId) &&
+                    matchesSearch(log)
+                }
+                LoadResult.Page(
+                    data = filteredLocal.take(params.loadSize),
+                    prevKey = null,
+                    nextKey = null
+                )
+            } catch (fallbackEx: Exception) {
+                LoadResult.Error(e)
+            }
         }
+    }
+
+    private fun matchesShop(logShopId: String?): Boolean {
+        if (shopId.isNullOrEmpty() || shopId.equals("GLOBAL", ignoreCase = true)) return true
+        if (logShopId.isNullOrEmpty() || logShopId.equals("GLOBAL", ignoreCase = true)) return true
+        return logShopId.equals(shopId, ignoreCase = true)
     }
 
     private fun matchesSearch(log: AuditLog): Boolean {
@@ -113,4 +149,19 @@ class AuditPagingSource(
         ).joinToString(" ")
         return haystack.contains(q, ignoreCase = true)
     }
+
+    private fun LocalAuditLog.toDomain() = AuditLog(
+        logId = logId,
+        shopId = shopId,
+        action = action,
+        module = module,
+        oldValue = oldValue,
+        newValue = newValue,
+        userDisplayName = userDisplayName,
+        userId = userId,
+        actorRole = actorRole,
+        ownerUid = ownerUid,
+        targetId = targetId,
+        timestamp = timestamp
+    )
 }

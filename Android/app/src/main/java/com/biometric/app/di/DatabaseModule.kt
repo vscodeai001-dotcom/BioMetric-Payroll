@@ -136,7 +136,8 @@ object DatabaseModule {
         localDailySummaryDao: LocalDailySummaryDao,
         localShiftScheduleDao: LocalShiftScheduleDao,
         localPayrollHistoryDao: LocalPayrollHistoryDao,
-        localSettingsDao: LocalSettingsDao
+        localSettingsDao: LocalSettingsDao,
+        localAuditLogDao: LocalAuditLogDao
     ): MainRepository {
         return MainRepository(
             context, firebaseSync, firebaseRoomHydrator, dataSafety,
@@ -144,7 +145,7 @@ object DatabaseModule {
             advanceDao, historyDao, closedDayDao, regularizationDao,
             localAttendancePunchDao, localLeaveRequestDao, localResignationRequestDao,
             localDailySummaryDao, localShiftScheduleDao, localPayrollHistoryDao,
-            localSettingsDao
+            localSettingsDao, localAuditLogDao
         )
     }
 }

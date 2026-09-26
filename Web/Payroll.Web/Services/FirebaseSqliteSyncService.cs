@@ -1022,6 +1022,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             "AttendancePunch",          // attendance_punches — append-only, large
             "GeoPunchAudit",            // geo_punch_audits   — append-only, large
             "EmployeeLocationHistory",  // tracking/history   — append-only, large
+            "AttendanceLog",            // attendance         — append-only, large
+            "EmployeeGpsSession",       // tracking/sessions  — append-only, large
+            "PayrollHistory",           // payroll_history    — historical, large
+            "SalarySnapshot",           // salary_snapshots   — historical, large
         };
 
         foreach (var table in Tables)

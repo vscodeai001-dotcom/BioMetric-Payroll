@@ -32,7 +32,7 @@
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:visibility="visible"
-        android:alpha="0"
+        android:alpha="1"
         app:layout_behavior="@string/appbar_scrolling_view_behavior">
 
         <!-- Fixed Header (Controls & Summary) -->
@@ -179,6 +179,6 @@
         layout="@layout/layout_brewing_loader"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="visible" />
+        android:visibility="gone" />
 
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

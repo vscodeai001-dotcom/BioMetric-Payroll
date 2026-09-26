@@ -1,5 +1,6 @@
 package com.biometric.app.data.repository
 
+import com.biometric.app.data.dao.LocalPayrollHistoryDao
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.sync.FirebaseSyncManager
 import com.google.firebase.database.DatabaseReference
@@ -16,7 +17,8 @@ import javax.inject.Singleton
 @Singleton
 class FirebaseAdminAttendanceRepository @Inject constructor(
     private val firebaseSync: FirebaseSyncManager,
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val payrollHistoryDao: LocalPayrollHistoryDao
 ) {
     private fun ownerRef(): DatabaseReference =
         firebaseSync.getOwnerRef() ?: throw IllegalStateException("Firebase admin session is not initialized")
@@ -26,7 +28,20 @@ class FirebaseAdminAttendanceRepository @Inject constructor(
         val cal = java.util.Calendar.getInstance().apply { timeInMillis = epochMillis }
         val year = cal.get(java.util.Calendar.YEAR)
         val month = cal.get(java.util.Calendar.MONTH) + 1
-        val snapshot = ownerRef().child("payroll_history").get().await()
+
+        // SPARK PLAN OPTIMIZATION: Check local Room cache first (0 network calls, 0 latency)
+        val localCount = runCatching { payrollHistoryDao.countLocked(employeeId, year, month) }.getOrDefault(0)
+        if (localCount > 0) return true
+
+        // Bounded remote fallback: Query ONLY this specific employee's records instead of downloading entire table
+        val snapshot = runCatching {
+            ownerRef().child("payroll_history")
+                .orderByChild("employeeId")
+                .equalTo(employeeId.toDouble())
+                .get()
+                .await()
+        }.getOrNull() ?: return false
+
         return snapshot.children.any { row ->
             row.intAny("employeeId", "EmployeeID") == employeeId &&
                 row.intAny("payYear", "PayYear") == year &&

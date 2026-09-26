@@ -93,20 +93,20 @@ window.attendanceRefresh = (function () {
             liveRef.on('child_changed', onFirebaseLiveLocation);
             liveRef.on('child_removed', onFirebaseLiveLocationRemoved);
             if (ownerUid) {
-                const ownerEventsRef = firebaseDatabase.ref('owner_events/' + ownerUid);
+                const ownerEventsRef = firebaseDatabase.ref('owner_events/' + ownerUid).limitToLast(50);
                 ownerEventsRef.on('child_added', onFirebaseApplicationEvent);
 
                 // Mobile-originated changes use a per-employee channel so an
                 // employee cannot write to the shared admin event stream.
                 // Admin/SuperAdmin Firebase rules allow the web dashboard to
                 // receive these events without changing the existing UI.
-                const clientEventsRef = firebaseDatabase.ref('client_events');
+                const clientEventsRef = firebaseDatabase.ref('client_events').limitToLast(50);
                 clientEventsRef.on('child_added', onFirebaseClientEventEmployee);
 
             } else {
                 // Backward compatibility for installations that have not yet
                 // configured a shared Firebase owner UID.
-                const eventsRef = firebaseDatabase.ref('application_events');
+                const eventsRef = firebaseDatabase.ref('application_events').limitToLast(50);
                 eventsRef.on('child_added', onFirebaseApplicationEvent);
             }
 

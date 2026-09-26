@@ -17,4 +17,7 @@ interface LocalPayrollHistoryDao {
 
     @Query("DELETE FROM payroll_history WHERE payrollId = :id")
     fun deleteById(id: Int)
+
+    @Query("SELECT COUNT(*) FROM payroll_history WHERE employeeId = :employeeId AND payYear = :year AND payMonth = :month")
+    suspend fun countLocked(employeeId: Int, year: Int, month: Int): Int
 }

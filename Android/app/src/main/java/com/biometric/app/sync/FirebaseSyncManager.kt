@@ -402,7 +402,7 @@ class FirebaseSyncManager @Inject constructor(
         // store during the phased migration.
         val ref = database.child("owner_events").child(ownerUid)
             .orderByChild("timestamp")
-            .limitToLast(200)
+            .limitToLast(25)
         val deliveredEventIds = Collections.synchronizedSet(mutableSetOf<String>())
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {

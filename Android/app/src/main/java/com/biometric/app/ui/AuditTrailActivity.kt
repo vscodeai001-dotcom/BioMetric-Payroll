@@ -75,6 +75,7 @@ class AuditTrailActivity : MotionBaseActivity() {
         setupToolbar(initialShopName)
         setupUI()
         observeViewModel()
+        refreshData()
 
         setupMotionFeedback(binding.layoutFilterIcons.btnPrevDate, binding.layoutFilterIcons.btnNextDate)
     }
@@ -211,8 +212,19 @@ class AuditTrailActivity : MotionBaseActivity() {
         refreshData()
     }
 
+    private var loaderTimeoutJob: kotlinx.coroutines.Job? = null
+
     private fun refreshData() {
         updateFilterText()
+        loaderTimeoutJob?.cancel()
+        loaderTimeoutJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(3000)
+            if (binding.brewingLoader.root.visibility == View.VISIBLE) {
+                PremiumLoader.hide(binding.brewingLoader)
+                binding.contentLayout.visibility = View.VISIBLE
+                binding.contentLayout.alpha = 1f
+            }
+        }
         viewModel.loadLogs(shopId, currentFilter, selectedDate.timeInMillis, auditSearch)
     }
 
@@ -226,9 +238,9 @@ class AuditTrailActivity : MotionBaseActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     sharedViewModel.selectedShop.collectLatest { shop ->
-                        shop?.let {
-                            shopId = it.shopId
-                            updateToolbarTitle(it.name)
+                        if (shop != null && shop.shopId != shopId) {
+                            shopId = shop.shopId
+                            updateToolbarTitle(shop.name)
                             refreshData()
                         }
                     }
@@ -239,12 +251,13 @@ class AuditTrailActivity : MotionBaseActivity() {
                         auditAdapter.loadStateFlow
                     ) { state: AuditTrailState, loadStates: CombinedLoadStates ->
                         val refreshLoading = loadStates.refresh is androidx.paging.LoadState.Loading
+                        val isError = loadStates.refresh is androidx.paging.LoadState.Error
 
-                        // ATOMIC LOADING: Hide only when EVERYTHING is ready
+                        // ATOMIC LOADING: Hide only when EVERYTHING is ready or if error occurs
                         val isSummaryLoading = state.isLoading
                         val isLogsLoading = refreshLoading && auditAdapter.itemCount == 0
 
-                        isSummaryLoading || isLogsLoading
+                        if (isError) false else (isSummaryLoading || isLogsLoading)
                     }
                     .distinctUntilChanged()
                     .collectLatest { showBrewing ->
@@ -283,7 +296,7 @@ class AuditTrailActivity : MotionBaseActivity() {
 
                         // Empty State Logic
                         val isInitialLoading = refreshState is androidx.paging.LoadState.Loading
-                        val isEmpty = !isError && !isInitialLoading && auditAdapter.itemCount == 0
+                        val isEmpty = !isInitialLoading && auditAdapter.itemCount == 0
 
                         if (isEmpty) {
                             binding.llEmptyState.visibility = View.VISIBLE

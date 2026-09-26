@@ -16,18 +16,82 @@ window.payrollEscapeHtml = function (value) {
 // Keep it deliberately conservative so HeadOutlet/PageTitle remains the
 // authoritative title when a page provides one. The fallback prevents a
 // missing JS function from generating a Blazor JSInterop exception.
-window.payrollDocumentTitle = function (location) {
+window.payrollDocumentTitle = function (locationUrl) {
     try {
-        var current = document.title || '';
-        if (current.trim()) {
-            return current;
+        if (!locationUrl) return document.title;
+        var pathname = '';
+        try {
+            var url = new URL(locationUrl, window.location.origin);
+            pathname = url.pathname.toLowerCase().replace(/^\/|\/$/g, '');
+        } catch (_) {
+            pathname = String(locationUrl || '').toLowerCase().replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/^\/|\/$/g, '');
         }
 
-        document.title = 'Payroll.Web';
+        var routeTitles = {
+            '': 'Admin Dashboard',
+            'home': 'Admin Dashboard',
+            'admin': 'Admin Dashboard',
+            'bonus-management': 'Bonus Management',
+            'attendancelogs': 'Attendance Master Logs',
+            'company-attendance-report': 'Company Attendance Report',
+            'manual-punch-correction': 'Manual Punch Correction',
+            'punch-approvals': 'Punch Correction Approval',
+            'attendance-event-monitoring': 'Attendance Event Monitoring',
+            'runpayroll': 'Run Payroll',
+            'payslip': 'Payslip',
+            'salary-advances': 'Salary Advances',
+            'leave-management': 'Leave Management',
+            'scheduling': 'Shift Scheduler',
+            'settings/company': 'Company Settings',
+            'settings/features': 'Feature & Permission Manager',
+            'settings/holidays': 'Holiday Management',
+            'superadmin/tenants': 'SuperAdmin Command Center',
+            'user-management': 'User Management',
+            'audit-logs': 'Audit Logs',
+            'recycle-bin': 'Recycle Bin',
+            'location-history': 'Location Tracking History',
+            'location-stays': 'Location Stays',
+            'offline-tracking': 'Offline GPS Tracking',
+            'report-center': 'Report Center',
+            'exit-management': 'Exit Management',
+            'fbp-components': 'FBP Component Management',
+            'fbp-approvals': 'FBP Declaration Approval',
+            'tax-declarations': 'Manage Tax Declarations',
+            'regularization-approvals': 'Regularization Approval',
+            'year-end-summary': 'Year-End Summary',
+            'employee-home': 'Employee Home',
+            'my-profile': 'Employee Profile',
+            'employee/profile': 'Employee Profile',
+            'identity/account/manage': 'Employee Profile',
+            'identity/account/manage/index': 'Employee Profile',
+            'my-payslips': 'My Payslips',
+            'my-attendance': 'My Attendance',
+            'my-leave-request': 'Request Leave',
+            'my-leave-history': 'My Leave History',
+            'my-shifts': 'My Shift Schedule',
+            'my-salary-advances': 'My Salary Advances',
+            'my-tax-declaration': 'My Tax Declaration',
+            'my-bonuses': 'My Bonuses',
+            'my-resignation': 'My Resignation',
+            'my-regularization': 'Punch Regularization',
+            'my-reports': 'My Personal Reports',
+            'my-fbp-declaration': 'My FBP Declaration',
+            'employees': 'Employee Management'
+        };
+
+        if (routeTitles[pathname]) {
+            document.title = routeTitles[pathname] + ' - BioMetric + Payroll';
+        } else if (pathname.startsWith('employees/details')) {
+            document.title = 'Employee Details - BioMetric + Payroll';
+        } else if (pathname.startsWith('employees/insights')) {
+            document.title = 'Employee Insights - BioMetric + Payroll';
+        } else if (pathname.startsWith('offline-tracking/')) {
+            document.title = 'Offline Tracking Details - BioMetric + Payroll';
+        }
         return document.title;
     } catch (e) {
         console.warn('Unable to set document title', e);
-        return '';
+        return document.title || 'Payroll.Web';
     }
 };
 
@@ -1924,6 +1988,40 @@ window.payrollFetchRoadRoute = async function (from, to, options = {}) {
     }
 };
 
+window.payrollUpdateRouteEmployeeEndpoint = function (polyline, employeePosition) {
+    if (!polyline) return;
+    try {
+        const current = polyline.getLatLngs();
+        if (!Array.isArray(current) || current.length < 2) return;
+        const targetLat = Number(Array.isArray(employeePosition) ? employeePosition[0] : employeePosition?.lat);
+        const targetLng = Number(Array.isArray(employeePosition) ? employeePosition[1] : employeePosition?.lng);
+        if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+        const getCoord = function (pt) {
+            if (!pt) return [0, 0];
+            const lat = Number(pt.lat !== undefined ? pt.lat : (Array.isArray(pt) ? pt[0] : 0));
+            const lng = Number(pt.lng !== undefined ? pt.lng : (Array.isArray(pt) ? pt[1] : 0));
+            return [lat, lng];
+        };
+
+        const pStart = getCoord(current[0]);
+        const pEnd = getCoord(current[current.length - 1]);
+        const dStart = window.payrollHaversineMeters(pStart, [targetLat, targetLng]);
+        const dEnd = window.payrollHaversineMeters(pEnd, [targetLat, targetLng]);
+
+        // Road route starts at employee (current[0]) and terminates at office (current[last]).
+        // Always snap the employee side of the route to the marker motion.
+        // Under no circumstances overwrite the office endpoint with the employee coordinate,
+        // which creates a harsh diagonal crossing chord across the city blocks.
+        if (dStart <= dEnd) {
+            current[0] = L.latLng(targetLat, targetLng);
+        } else if (dEnd < 1000) {
+            current[current.length - 1] = L.latLng(targetLat, targetLng);
+        }
+        polyline.setLatLngs(current);
+    } catch { }
+};
+
 window.payrollFetchMultiPointRoadRoute = async function (rawPoints, options = {}) {
     if (!Array.isArray(rawPoints) || rawPoints.length < 2) return null;
     const valid = rawPoints
@@ -2005,11 +2103,123 @@ window.payrollGenerateSmoothSpline = function (points, pointsPerSegment = 5) {
     return result;
 };
 
+window.payrollReverseGeocodeLocation = async function (lat, lon) {
+    const nLat = Number(lat);
+    const nLon = Number(lon);
+    if (!Number.isFinite(nLat) || !Number.isFinite(nLon)) return null;
+    window.__payrollReverseGeocodeCache = window.__payrollReverseGeocodeCache || {};
+    const key = nLat.toFixed(4) + ',' + nLon.toFixed(4);
+    if (window.__payrollReverseGeocodeCache[key]) {
+        return window.__payrollReverseGeocodeCache[key];
+    }
+    const renderAddress = function (data) {
+        const a = data?.address || {};
+        const admin = data?.localityInfo?.administrative || [];
+        const parts = [
+            a.suburb || a.quarter || a.neighbourhood || a.village || admin.find?.(x => /taluk|district|subdivision/i.test(x?.description || ''))?.name || data?.locality,
+            a.city || a.town || a.county || a.state_district,
+            a.state || data?.principalSubdivision
+        ].filter(Boolean);
+        const unique = [...new Set(parts.map(String).map(s => s.trim()))].filter(Boolean);
+        return unique.length ? unique.join(', ') : (data?.display_name || '');
+    };
+
+    try {
+        const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(nLat) + '&lon=' + encodeURIComponent(nLon) + '&zoom=18&addressdetails=1';
+        const res = await fetch(reverseUrl, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+        if (res.ok) {
+            const data = await res.json();
+            const addr = renderAddress(data);
+            if (addr) {
+                window.__payrollReverseGeocodeCache[key] = addr;
+                return addr;
+            }
+        }
+    } catch (_) { }
+
+    try {
+        const fallbackUrl = 'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + encodeURIComponent(nLat) + '&longitude=' + encodeURIComponent(nLon) + '&localityLanguage=en';
+        const res = await fetch(fallbackUrl, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+        if (res.ok) {
+            const data = await res.json();
+            const addr = renderAddress(data);
+            if (addr) {
+                window.__payrollReverseGeocodeCache[key] = addr;
+                return addr;
+            }
+        }
+    } catch (_) { }
+
+    const fallbackCoord = nLat.toFixed(5) + ', ' + nLon.toFixed(5);
+    window.__payrollReverseGeocodeCache[key] = fallbackCoord;
+    return fallbackCoord;
+};
+
 window.payrollGetNextRoadName = function (route) {
-    const step = (route?.steps || []).find(s => String(s.name || '').trim());
+    const step = (route?.steps || []).find(s => String(s?.name || s?.ref || '').trim());
     if (!step) return 'Road route';
     const name = String(step.name || '').trim();
-    return ref && ref !== name ? `${name} (${ref})` : name;
+    const ref = String(step.ref || '').trim();
+    if (name && ref && ref !== name) return `${name} (${ref})`;
+    return name || ref || 'Road route';
+};
+
+window.payrollUpdateEmployeeAddress = function (mapData, coords) {
+    if (!mapData || !coords || !Number.isFinite(Number(coords[0])) || !Number.isFinite(Number(coords[1]))) return;
+    const lat = Number(coords[0]);
+    const lon = Number(coords[1]);
+    const moved = mapData.lastGeocodedPosition
+        ? window.payrollHaversineMeters(mapData.lastGeocodedPosition, [lat, lon])
+        : Infinity;
+
+    if (mapData.isGeocoding) return;
+    if (mapData.currentAddress && moved < 40) return;
+
+    mapData.isGeocoding = true;
+    mapData.lastGeocodedPosition = [lat, lon];
+    window.payrollReverseGeocodeLocation(lat, lon).then(function (addr) {
+        mapData.isGeocoding = false;
+        if (addr) {
+            mapData.currentAddress = addr;
+            window.payrollRefreshEmployeeJourneyOverlay(mapData);
+        }
+    }).catch(function () {
+        mapData.isGeocoding = false;
+    });
+};
+
+window.payrollRefreshEmployeeJourneyOverlay = function (mapData, routeOverride) {
+    if (!mapData || !mapData.journeyOverlay) return;
+    const user = mapData.userPosition || mapData.lastRawPosition;
+    const office = mapData.office;
+    if (!user || !office) return;
+
+    const route = routeOverride !== undefined ? routeOverride : mapData.routeState?.route;
+    const airDist = window.payrollHaversineMeters(user, office);
+    const distanceMeters = (route && Number(route.distanceMeters) > 0) ? Number(route.distanceMeters) : airDist;
+    const isArrived = distanceMeters <= 35;
+    const allowedRadius = Math.max(35, Number(mapData.radius) || 100);
+    const isWithin = distanceMeters <= allowedRadius;
+
+    const durationSeconds = (route && Number(route.durationSeconds) > 0)
+        ? Number(route.durationSeconds)
+        : (isArrived ? 0 : Math.round(distanceMeters / 7));
+
+    const road = route ? window.payrollGetNextRoadName(route) : 'Road route';
+
+    window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
+        name: mapData.employeeName || 'You',
+        distanceMeters: distanceMeters,
+        durationSeconds: durationSeconds,
+        speedMps: mapData.speedMps,
+        accuracyMeters: mapData.lastAccuracyMeters,
+        journeyStartedAt: mapData.journeyStartedAt,
+        road: road,
+        currentAddress: mapData.currentAddress || '',
+        userCoords: user,
+        withinRange: isWithin,
+        arrived: isArrived
+    });
 };
 
 window.payrollCreateJourneyOverlay = function (mapElement, className) {
@@ -2019,38 +2229,42 @@ window.payrollCreateJourneyOverlay = function (mapElement, className) {
         style.id = 'payroll-journey-map-global-style';
         style.textContent = `
 .payroll-admin-journey-tooltip{background:transparent!important;border:0!important;box-shadow:none!important;padding:0!important;color:inherit!important}.payroll-admin-journey-tooltip:before{display:none!important}.payroll-admin-journey-label{min-width:178px;max-width:235px;padding:7px 8px;border-radius:13px;background:rgba(255,255,255,.96);border:1px solid rgba(22,136,255,.20);box-shadow:0 9px 24px rgba(15,31,55,.24),0 2px 8px rgba(15,31,55,.12);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:#172238;font-size:9px;line-height:1.15}.payroll-admin-journey-head{display:flex;align-items:center;justify-content:space-between;gap:7px}.payroll-admin-journey-name{font-size:11px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.payroll-admin-journey-state{font-size:7px;font-weight:900;white-space:nowrap}.payroll-admin-journey-destination{margin-top:3px;color:#718096;font-size:7px;font-weight:800}.payroll-admin-journey-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:5px}.payroll-admin-journey-grid span{display:block;padding:4px 4px;border-radius:7px;background:#f1f5fa;border:1px solid rgba(19,43,77,.07);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.payroll-admin-journey-grid b{font-weight:900}.payroll-admin-journey-tooltip .leaflet-tooltip-content{margin:0!important}[data-theme="dark"] .payroll-admin-journey-label,[data-bs-theme="dark"] .payroll-admin-journey-label{background:rgba(14,22,35,.96);border-color:rgba(79,166,255,.25);box-shadow:0 12px 28px rgba(0,0,0,.48);color:#edf5ff}.payroll-admin-journey-grid span,[data-theme="dark"] .payroll-admin-journey-grid span,[data-bs-theme="dark"] .payroll-admin-journey-grid span{color:#25354a}.payroll-admin-journey-grid span{color:#25354a}[data-theme="dark"] .payroll-admin-journey-grid span,[data-bs-theme="dark"] .payroll-admin-journey-grid span{background:rgba(29,43,61,.78);border-color:rgba(143,177,214,.12);color:#dbeaff}.payroll-admin-journey-destination{color:#718096}[data-theme="dark"] .payroll-admin-journey-destination,[data-bs-theme="dark"] .payroll-admin-journey-destination{color:#8fa4bb}@media(max-width:900px){.payroll-admin-journey-label{min-width:150px;max-width:190px;padding:6px 7px}.payroll-admin-journey-name{font-size:10px}.payroll-admin-journey-grid{gap:2px}.payroll-admin-journey-grid span{padding:3px;font-size:8px}}.admin-employee-label,.payroll-employee-name-label{background:rgba(10,18,30,.92)!important;color:#fff!important;border:1px solid rgba(255,255,255,.18)!important;border-radius:10px!important;box-shadow:0 5px 14px rgba(0,0,0,.25)!important;font-size:11px!important;font-weight:800!important;padding:4px 8px!important}.admin-distance-label{background:rgba(13,110,253,.94)!important;color:#fff!important;border:0!important;border-radius:99px!important;font-weight:800!important;}
-.payroll-journey-overlay{position:absolute!important;left:10px!important;right:10px!important;top:10px!important;bottom:auto!important;z-index:1000!important;width:auto!important;margin:0!important;padding:5px 8px!important;border-radius:12px!important;overflow:hidden;pointer-events:auto;color:#162033;background:rgba(255,255,255,.93);border:1px solid rgba(19,43,77,.14);box-shadow:0 8px 22px rgba(15,31,55,.14);backdrop-filter:blur(16px) saturate(145%);-webkit-backdrop-filter:blur(16px) saturate(145%);font-size:10px;line-height:1.15}
-.payroll-journey-card{display:flex;align-items:center;gap:8px;width:100%;overflow:hidden;background:transparent!important;padding:0!important}
-.payroll-journey-top{display:flex;align-items:center;gap:6px;flex:0 0 auto}
-.payroll-journey-avatar{width:26px;height:26px;display:grid;place-items:center;flex:0 0 26px;border-radius:8px;background:linear-gradient(145deg,#1688ff,#5b5df0);color:#fff;font-size:13px;box-shadow:0 4px 10px rgba(22,136,255,.24)}
-.payroll-journey-title{min-width:0;flex:0 0 auto;max-width:110px}
-.payroll-journey-name{font-size:11px;font-weight:900;letter-spacing:.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.payroll-journey-destination{margin-top:1px;color:#718096;font-size:7px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.payroll-journey-status{display:inline-flex;align-items:center;gap:3px;padding:3px 5px;border-radius:999px;font-size:7px;font-weight:900;letter-spacing:.2px;white-space:nowrap;background:#e9f9ef;color:#168447;border:1px solid rgba(22,132,71,.12);flex:0 0 auto}
-.payroll-journey-status.live{background:#eaf4ff;color:#1268cf;border-color:rgba(18,104,207,.12)}
-.payroll-journey-status .dot{width:4px;height:4px;border-radius:50%;background:currentColor}
+.payroll-journey-overlay{position:absolute!important;left:10px!important;right:10px!important;top:10px!important;bottom:auto!important;z-index:1000!important;width:auto!important;margin:0!important;padding:8px 12px!important;border-radius:12px!important;overflow:hidden;pointer-events:auto;color:#1e293b;background:rgba(255,255,255,.95);border:1px solid rgba(226,232,240,.9);box-shadow:0 8px 24px rgba(15,23,42,.12),0 2px 6px rgba(15,23,42,.06);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);font-size:11px;line-height:1.25}
+.payroll-journey-card{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;overflow:hidden;background:transparent!important;padding:0!important}
+.payroll-journey-info-group{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0}
+.payroll-journey-avatar{width:32px;height:32px;display:grid;place-items:center;flex:0 0 32px;border-radius:9px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;font-size:15px;box-shadow:0 3px 8px rgba(37,99,235,.3)}
+.payroll-journey-arrived .payroll-journey-avatar{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 3px 8px rgba(16,185,129,.35)}
+.payroll-journey-details{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1 1 auto}
+.payroll-journey-head{display:flex;align-items:center;gap:7px;min-width:0}
+.payroll-journey-name{font-size:12.5px;font-weight:800;letter-spacing:-.1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#0f172a}
+.payroll-journey-status{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;font-size:8px;font-weight:800;letter-spacing:.3px;white-space:nowrap;flex:0 0 auto}
+.payroll-journey-status.live{background:#e0f2fe;color:#0369a1;border:1px solid rgba(3,105,161,.22)}
+.payroll-journey-status.outside{background:#fee2e2;color:#b91c1c;border:1px solid rgba(185,28,28,.22)}
+.payroll-journey-status.arrived{background:#dcfce7;color:#15803d;border:1px solid rgba(21,128,61,.22)}
+.payroll-journey-status .dot{width:5.5px;height:5.5px;border-radius:50%;background:currentColor}
 .payroll-journey-status.live .dot{animation:payrollJourneyPulse 1.5s ease-in-out infinite}@keyframes payrollJourneyPulse{0%,100%{opacity:.55;transform:scale(.85)}50%{opacity:1;transform:scale(1.1)}}
-.payroll-journey-progress{display:none}
-.payroll-journey-metrics{display:flex;flex-wrap:nowrap;overflow-x:auto;gap:5px;flex:1;min-width:0;padding:1px 0;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.payroll-journey-sub{display:flex;align-items:center;gap:6px;min-width:0}
+.payroll-journey-sub-item{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px;padding:2px 7px;border-radius:6px;font-size:9px;font-weight:600;line-height:1.2}
+.payroll-journey-sub-item .chip-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.payroll-journey-sub-item.location{color:#065f46;background:rgba(16,185,129,.09);border:1px solid rgba(16,185,129,.2);font-weight:700}
+.payroll-journey-sub-item.road{color:#1e40af;background:rgba(37,99,235,.08);border:1px solid rgba(37,99,235,.18)}
+.payroll-journey-metrics{display:flex;align-items:center;gap:5px;flex:0 0 auto;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .payroll-journey-metrics::-webkit-scrollbar{display:none}
-.payroll-journey-metric{flex:0 0 auto;min-width:72px;padding:3px 6px;border-radius:8px;background:rgba(244,247,251,.94);border:1px solid rgba(19,43,77,.08);text-align:center}
-.payroll-journey-icon{font-size:8px;line-height:1;margin-bottom:1px}
-.payroll-journey-label{font-size:5.5px;text-transform:uppercase;letter-spacing:.3px;font-weight:800;color:#8491a5;line-height:1}
-.payroll-journey-value{margin-top:1px;font-size:8px;line-height:1;font-weight:900;color:#172238;white-space:nowrap}
-.payroll-journey-road{display:flex;align-items:center;gap:4px;flex:0 0 auto;max-width:130px;padding:3px 6px;border-radius:8px;background:rgba(22,136,255,.07);border:1px solid rgba(22,136,255,.10);color:#2f5f8e}
-.payroll-journey-road-icon{font-size:10px}
-.payroll-journey-road-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800;font-size:7px}
-.payroll-journey-road-caption{display:inline;color:#8292a7;font-size:5.5px;text-transform:uppercase;letter-spacing:.2px;font-weight:800;margin-right:2px}
-.payroll-journey-footer{display:none}
-.payroll-journey-arrived .payroll-journey-avatar{background:linear-gradient(145deg,#19a765,#0f8f7a);box-shadow:0 4px 10px rgba(25,167,101,.25)}
-[data-theme="dark"] .payroll-journey-overlay,[data-bs-theme="dark"] .payroll-journey-overlay{color:#e9f1fb;background:rgba(14,22,35,.92);border-color:rgba(143,177,214,.18);box-shadow:0 12px 30px rgba(0,0,0,.48)}
+.payroll-journey-metric{flex:0 0 auto;min-width:64px;padding:3px 6px;border-radius:8px;background:rgba(248,250,252,.96);border:1px solid rgba(226,232,240,.9);text-align:center}
+.payroll-journey-icon{font-size:8.5px;line-height:1;margin-bottom:1.5px}
+.payroll-journey-label{font-size:6.5px;text-transform:uppercase;letter-spacing:.3px;font-weight:800;color:#64748b;line-height:1}
+.payroll-journey-value{margin-top:1.5px;font-size:9px;line-height:1;font-weight:900;color:#0f172a;white-space:nowrap}
+[data-theme="dark"] .payroll-journey-overlay,[data-bs-theme="dark"] .payroll-journey-overlay{color:#f1f5f9;background:rgba(15,23,42,.94);border-color:rgba(51,65,85,.8);box-shadow:0 10px 28px rgba(0,0,0,.45)}
 [data-theme="dark"] .payroll-journey-card,[data-bs-theme="dark"] .payroll-journey-card{background:transparent!important}
-[data-theme="dark"] .payroll-journey-destination,[data-bs-theme="dark"] .payroll-journey-destination,[data-theme="dark"] .payroll-journey-label,[data-bs-theme="dark"] .payroll-journey-label{color:#8fa4bb}
-[data-theme="dark"] .payroll-journey-metric,[data-bs-theme="dark"] .payroll-journey-metric{background:rgba(28,41,59,.78);border-color:rgba(143,177,214,.12)}
-[data-theme="dark"] .payroll-journey-value,[data-bs-theme="dark"] .payroll-journey-value{color:#edf5ff}
-[data-theme="dark"] .payroll-journey-road,[data-bs-theme="dark"] .payroll-journey-road{background:rgba(44,145,255,.11);border-color:rgba(44,145,255,.18);color:#a8d3ff}
-[data-theme="dark"] .payroll-journey-status.live,[data-bs-theme="dark"] .payroll-journey-status.live{background:rgba(39,139,255,.15);color:#7dc0ff;border-color:rgba(39,139,255,.22)}
-[data-theme="dark"] .payroll-journey-status,[data-bs-theme="dark"] .payroll-journey-status{background:rgba(35,176,108,.14);color:#6ee2a7;border-color:rgba(35,176,108,.20)}
+[data-theme="dark"] .payroll-journey-name,[data-bs-theme="dark"] .payroll-journey-name,[data-theme="dark"] .payroll-journey-value,[data-bs-theme="dark"] .payroll-journey-value{color:#f8fafc}
+[data-theme="dark"] .payroll-journey-label,[data-bs-theme="dark"] .payroll-journey-label{color:#94a3b8}
+[data-theme="dark"] .payroll-journey-metric,[data-bs-theme="dark"] .payroll-journey-metric{background:rgba(30,41,59,.85);border-color:rgba(51,65,85,.8)}
+[data-theme="dark"] .payroll-journey-sub-item.location,[data-bs-theme="dark"] .payroll-journey-sub-item.location{color:#6ee7b7;background:rgba(16,185,129,.16);border-color:rgba(16,185,129,.28)}
+[data-theme="dark"] .payroll-journey-sub-item.road,[data-bs-theme="dark"] .payroll-journey-sub-item.road{color:#93c5fd;background:rgba(37,99,235,.16);border-color:rgba(37,99,235,.28)}
+[data-theme="dark"] .payroll-journey-status.live,[data-bs-theme="dark"] .payroll-journey-status.live{background:rgba(3,105,161,.28);color:#7dd3fc;border-color:rgba(3,105,161,.4)}
+[data-theme="dark"] .payroll-journey-status.outside,[data-bs-theme="dark"] .payroll-journey-status.outside{background:rgba(220,38,38,.28);color:#fca5a5;border-color:rgba(220,38,38,.4)}
+[data-theme="dark"] .payroll-journey-status.arrived,[data-bs-theme="dark"] .payroll-journey-status.arrived{background:rgba(22,163,74,.28);color:#86efac;border-color:rgba(22,163,74,.4)}
+@media(max-width:860px){.payroll-journey-card{flex-direction:column;align-items:stretch;gap:7px}.payroll-journey-metrics{width:100%;justify-content:flex-start}.payroll-journey-sub-item{max-width:170px}}
 `;
         document.head.appendChild(style);
     }
@@ -2073,33 +2287,45 @@ window.payrollRenderJourneyOverlay = function (overlay, data) {
                 });
             };
     const name = escapeHtml(data.name || 'Employee');
-    const road = escapeHtml(data.road || 'Calculating road route...');
+    const road = escapeHtml(data.road || 'Road route');
+    const location = escapeHtml(data.currentAddress || (data.userCoords ? `${Number(data.userCoords[0]).toFixed(4)}, ${Number(data.userCoords[1]).toFixed(4)}` : 'Resolving location...'));
     const distance = window.payrollFormatRouteDistance(data.distanceMeters);
-    const eta = data.durationSeconds > 0 ? window.payrollFormatRouteDuration(data.durationSeconds) : 'Calculating...';
+    const eta = data.durationSeconds > 0
+        ? window.payrollFormatRouteDuration(data.durationSeconds)
+        : (data.arrived ? 'Arrived' : (Number(data.distanceMeters) > 35 ? window.payrollFormatRouteDuration(Math.round(Number(data.distanceMeters) / 7)) : '1 min'));
     const speed = window.payrollFormatSpeed(data.speedMps);
     const accuracy = Number(data.accuracyMeters) > 0 ? `±${Math.round(Number(data.accuracyMeters))} m` : 'Unknown';
     const elapsed = data.journeyStartedAt ? window.payrollFormatRouteDuration((Date.now() - data.journeyStartedAt) / 1000) : '0s';
-    const status = data.arrived ? 'ARRIVED' : 'LIVE';
-    const statusClass = data.arrived ? '' : ' live';
-    const cardClass = data.arrived ? ' payroll-journey-arrived' : '';
+    const arrived = !!data.arrived;
+    const withinRange = data.withinRange !== false;
+    const statusText = arrived ? 'ARRIVED' : (withinRange ? 'IN RANGE' : 'OUTSIDE RANGE');
+    const statusClass = arrived ? ' arrived' : (withinRange ? ' live' : ' outside');
+    const cardClass = arrived ? ' payroll-journey-arrived' : '';
+    const avatarIcon = arrived ? '🏁' : '🛵';
+
     overlay.innerHTML =
         `<div class="payroll-journey-card${cardClass}">` +
-        `<div class="payroll-journey-top">` +
-        `<div class="payroll-journey-avatar">${data.arrived ? '🏁' : '🛵'}</div>` +
-        `<div class="payroll-journey-title"><div class="payroll-journey-name">${name}</div><div class="payroll-journey-destination">📍 Destination • To Office</div></div>` +
-        `<div class="payroll-journey-status${statusClass}"><span class="dot"></span>${status}</div>` +
+        `<div class="payroll-journey-info-group">` +
+        `<div class="payroll-journey-avatar">${avatarIcon}</div>` +
+        `<div class="payroll-journey-details">` +
+        `<div class="payroll-journey-head">` +
+        `<span class="payroll-journey-name">${name}</span>` +
+        `<span class="payroll-journey-status${statusClass}"><span class="dot"></span>${statusText}</span>` +
         `</div>` +
-        `<div class="payroll-journey-progress"><span></span></div>` +
+        `<div class="payroll-journey-sub">` +
+        `<span class="payroll-journey-sub-item location" title="Current Location: ${location}"><span class="chip-text">📍 ${location}</span></span>` +
+        `<span class="payroll-journey-sub-item road" title="Road: ${road}"><span class="chip-text">🛣️ ${road}</span></span>` +
+        `</div>` +
+        `</div>` +
+        `</div>` +
         `<div class="payroll-journey-metrics">` +
         `<div class="payroll-journey-metric"><div class="payroll-journey-icon">📏</div><div class="payroll-journey-label">Remaining</div><div class="payroll-journey-value">${distance}</div></div>` +
         `<div class="payroll-journey-metric"><div class="payroll-journey-icon">⏱️</div><div class="payroll-journey-label">ETA</div><div class="payroll-journey-value">${eta}</div></div>` +
         `<div class="payroll-journey-metric"><div class="payroll-journey-icon">🚦</div><div class="payroll-journey-label">Speed</div><div class="payroll-journey-value">${escapeHtml(speed)}</div></div>` +
         `<div class="payroll-journey-metric"><div class="payroll-journey-icon">🎯</div><div class="payroll-journey-label">Accuracy</div><div class="payroll-journey-value">${accuracy}</div></div>` +
         `<div class="payroll-journey-metric"><div class="payroll-journey-icon">🕐</div><div class="payroll-journey-label">Journey</div><div class="payroll-journey-value">${elapsed}</div></div>` +
-        `<div class="payroll-journey-metric"><div class="payroll-journey-icon">🛣️</div><div class="payroll-journey-label">Route</div><div class="payroll-journey-value">Road</div></div>` +
+        `<div class="payroll-journey-metric"><div class="payroll-journey-icon">🏢</div><div class="payroll-journey-label">Dest</div><div class="payroll-journey-value">Office</div></div>` +
         `</div>` +
-        `<div class="payroll-journey-road"><span class="payroll-journey-road-icon">🛣️</span><div class="payroll-journey-road-text"><span class="payroll-journey-road-caption">Current road</span>${road}</div></div>` +
-        `<div class="payroll-journey-footer"><span class="payroll-journey-live-dot">● GPS LIVE</span><span>🏢 Office destination</span></div>` +
         `</div>`;
 };
 
@@ -2488,6 +2714,13 @@ window.updateGeoMap = async function (
         }
         mapData.lastRawPosition = user.slice();
         mapData.lastRawPositionAt = rawNow;
+        mapData.userPosition = user.slice();
+
+        // Update reverse geocoding for current address & locality
+        window.payrollUpdateEmployeeAddress(mapData, user);
+
+        // Immediate overlay render
+        window.payrollRefreshEmployeeJourneyOverlay(mapData);
 
         // Presentation road routing: update UI when route loads, but don't block map readiness.
         window.payrollRequestJourneyRoute(mapData, user, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function (employeeRoute) {
@@ -2511,23 +2744,8 @@ window.updateGeoMap = async function (
                     mapData.routeLine.setStyle({ opacity: 0 });
                 }
             }
-            const employeeRemaining = employeeRoute?.distanceMeters || window.payrollHaversineMeters(user, office);
-            window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
-                name: mapData.employeeName, distanceMeters: employeeRemaining,
-                durationSeconds: employeeRoute?.durationSeconds || 0, speedMps: mapData.speedMps,
-                accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
-                road: window.payrollGetNextRoadName(employeeRoute), arrived: employeeRemaining <= Math.max(25, allowedRadius)
-            });
+            window.payrollRefreshEmployeeJourneyOverlay(mapData, employeeRoute);
         }).catch(function () { });
-
-        // Initial overlay render (Air distance fallback while routing loads)
-        const airRemaining = window.payrollHaversineMeters(user, office);
-        window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
-            name: mapData.employeeName, distanceMeters: airRemaining,
-            durationSeconds: 0, speedMps: mapData.speedMps,
-            accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
-            road: 'Calculating road route...', arrived: airRemaining <= Math.max(25, allowedRadius)
-        });
 
         const employeeAnimationKey =
             'employee:' + mapId;
@@ -2777,6 +2995,10 @@ window.updateEmployeeLiveGeoMap =
         }
         mapData.lastRawPosition = target.slice();
         mapData.lastRawPositionAt = now;
+        mapData.userPosition = target.slice();
+
+        // Update reverse geocoding for current address & locality if moved
+        window.payrollUpdateEmployeeAddress(mapData, target);
 
         window.payrollRequestJourneyRoute(mapData, target, office, { minMoveMeters: 20, minIntervalMs: 18000 }).then(function (route) {
             if (route?.geometry?.length > 1) {
@@ -2797,12 +3019,7 @@ window.updateEmployeeLiveGeoMap =
             } else {
                 mapData.routeLine?.setStyle({ opacity: 0 });
             }
-            const remaining = route?.distanceMeters || window.payrollHaversineMeters(target, office);
-            window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
-                name: mapData.employeeName || 'You', distanceMeters: remaining, durationSeconds: route?.durationSeconds || 0,
-                speedMps: mapData.speedMps, accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
-                road: window.payrollGetNextRoadName(route), arrived: remaining <= Math.max(25, Number(mapData.radius) || 100)
-            });
+            window.payrollRefreshEmployeeJourneyOverlay(mapData, route);
         }).catch(function () { });
 
         window.payrollSmoothMoveMarker(
@@ -2813,13 +3030,8 @@ window.updateEmployeeLiveGeoMap =
             function (position) {
                 try {
                     mapData.routeLine.setLatLngs([]);
-                    const route = mapData.routeState?.route;
-                    const remaining = route?.distanceMeters || window.payrollHaversineMeters(position, office);
-                    window.payrollRenderJourneyOverlay(mapData.journeyOverlay, {
-                        name: mapData.employeeName || 'You', distanceMeters: remaining, durationSeconds: route?.durationSeconds || 0,
-                        speedMps: mapData.speedMps, accuracyMeters: mapData.lastAccuracyMeters, journeyStartedAt: mapData.journeyStartedAt,
-                        road: window.payrollGetNextRoadName(route), arrived: remaining <= Math.max(25, Number(mapData.radius) || 100)
-                    });
+                    mapData.userPosition = position;
+                    window.payrollRefreshEmployeeJourneyOverlay(mapData);
                 } catch { }
             }
         );
@@ -3119,13 +3331,39 @@ window.ensurePayrollPremiumMapStyles = function () {
       .payroll-map-status-stale i { background:#f59e0b; }
       .payroll-map-status-out i { background:#ef4444; }
 
+      .admin-map-wrapper:fullscreen,
+      .admin-map-wrapper:-webkit-full-screen {
+        width: 100vw !important;
+        height: 100vh !important;
+        border-radius: 0 !important;
+        background: #08111f !important;
+        position: relative !important;
+      }
+
+      .admin-map-wrapper:fullscreen .admin-live-map,
+      .admin-map-wrapper:-webkit-full-screen .admin-live-map {
+        width: 100vw !important;
+        height: 100vh !important;
+      }
+
+      .admin-map-wrapper.payroll-map-fullscreen,
       .payroll-map-fullscreen {
-        position:fixed !important;
-        inset:0 !important;
-        width:100vw !important;
-        height:100vh !important;
-        z-index:99999 !important;
-        border-radius:0 !important;
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 99999 !important;
+        border-radius: 0 !important;
+        background: #08111f !important;
+      }
+
+      .admin-map-wrapper.payroll-map-fullscreen .admin-live-map {
+        width: 100vw !important;
+        height: 100vh !important;
+      }
+
+      body.payroll-fullscreen-active {
+        overflow: hidden !important;
       }
 
       .payroll-premium-employee-map-ui {
@@ -3812,33 +4050,9 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                                     .setLatLng(animatedPosition);
                             }
 
-                            // Smoother road route line connection
-                            if (state.roadRouteLines?.[employeeId]) {
-                                const current = state.roadRouteLines[employeeId].getLatLngs();
-                                if (current?.length >= 2) {
-                                    const dFirst = window.payrollHaversineMeters([current[0].lat, current[0].lng], animatedPosition);
-                                    const dLast = window.payrollHaversineMeters([current[current.length - 1].lat, current[current.length - 1].lng], animatedPosition);
-                                    if (dFirst < dLast) {
-                                        current[0] = animatedPosition;
-                                    } else {
-                                        current[current.length - 1] = animatedPosition;
-                                    }
-                                    state.roadRouteLines[employeeId].setLatLngs(current);
-                                }
-                            }
-                            if (state.roadRouteCasings?.[employeeId]) {
-                                const current = state.roadRouteCasings[employeeId].getLatLngs();
-                                if (current?.length >= 2) {
-                                    const dFirst = window.payrollHaversineMeters([current[0].lat, current[0].lng], animatedPosition);
-                                    const dLast = window.payrollHaversineMeters([current[current.length - 1].lat, current[current.length - 1].lng], animatedPosition);
-                                    if (dFirst < dLast) {
-                                        current[0] = animatedPosition;
-                                    } else {
-                                        current[current.length - 1] = animatedPosition;
-                                    }
-                                    state.roadRouteCasings[employeeId].setLatLngs(current);
-                                }
-                            }
+                            // Smoother road route line connection without crossing to office
+                            window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteLines?.[employeeId], animatedPosition);
+                            window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteCasings?.[employeeId], animatedPosition);
                         }
                         catch { }
                     }
@@ -3879,32 +4093,9 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             }
 
             // Keep the existing live route endpoint synchronized with the
-            // actual GPS coordinate, without changing its routing logic.
-            if (state.roadRouteLines?.[employeeId]) {
-                const current =
-                    state.roadRouteLines[employeeId]
-                        .getLatLngs();
-
-                if (current?.length >= 2) {
-                    current[current.length - 1] =
-                        target;
-                    state.roadRouteLines[employeeId]
-                        .setLatLngs(current);
-                }
-            }
-
-            if (state.roadRouteCasings?.[employeeId]) {
-                const current =
-                    state.roadRouteCasings[employeeId]
-                        .getLatLngs();
-
-                if (current?.length >= 2) {
-                    current[current.length - 1] =
-                        target;
-                    state.roadRouteCasings[employeeId]
-                        .setLatLngs(current);
-                }
-            }
+            // actual GPS coordinate, without overwriting the office destination.
+            window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteLines?.[employeeId], target);
+            window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteCasings?.[employeeId], target);
             window.refreshAdminLiveMapSummary(mapId);
         }
         catch (error) {
@@ -4528,21 +4719,9 @@ window.updateAdminLiveStaffMap =
                                         state.journeyLabels[employeeId].setLatLng(animatedPosition);
                                     }
 
-                                    // Update road route endpoint to match visual marker motion
-                                    if (state.roadRouteLines?.[employeeId]) {
-                                        const current = state.roadRouteLines[employeeId].getLatLngs();
-                                        if (current?.length >= 2) {
-                                            current[current.length - 1] = animatedPosition;
-                                            state.roadRouteLines[employeeId].setLatLngs(current);
-                                        }
-                                    }
-                                    if (state.roadRouteCasings?.[employeeId]) {
-                                        const current = state.roadRouteCasings[employeeId].getLatLngs();
-                                        if (current?.length >= 2) {
-                                            current[current.length - 1] = animatedPosition;
-                                            state.roadRouteCasings[employeeId].setLatLngs(current);
-                                        }
-                                    }
+                                    // Update road route endpoint to match visual marker motion without creating a diagonal chord to the office
+                                    window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteLines?.[employeeId], animatedPosition);
+                                    window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteCasings?.[employeeId], animatedPosition);
 
                                     if (state.labels[employeeId]) {
                                         state.labels[employeeId].setLatLng(
@@ -4946,26 +5125,65 @@ window.enhanceAdminLiveMap = function (mapId, office, staff, selectedId) {
         if (!state.premiumControls) {
             const esc = window.payrollEscapeHtml || (v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[c])));
             if (!window.__payrollAdminMapFullscreenBound) {
-                document.addEventListener('fullscreenchange', function () {
+                const exitAdminFullscreen = function () {
+                    const isFs = !!document.fullscreenElement;
+                    if (!isFs) {
+                        document.querySelectorAll('.payroll-map-fullscreen').forEach(function (node) {
+                            node.classList.remove('payroll-map-fullscreen');
+                        });
+                        document.body.classList.remove('payroll-fullscreen-active');
+                    }
                     document.querySelectorAll('.payroll-map-commandbar.is-fullscreen-hidden').forEach(function (bar) {
-                        const map = bar.closest('.leaflet-container');
-                        if (!document.fullscreenElement || document.fullscreenElement !== map) {
+                        if (!isFs) {
                             bar.classList.remove('is-fullscreen-hidden');
                         }
                     });
                     Object.values(window.adminLiveMaps || {}).forEach(function (state) {
                         if (!state?.map) return;
-                        const rail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(state.mapId || '')) + '"]');
-                        const fullscreenHost = state.map.getContainer().closest('.admin-map-wrapper') || state.map.getContainer();
-                        if (document.fullscreenElement !== fullscreenHost) {
+                        const container = state.map.getContainer();
+                        const fullscreenHost = container.closest('.admin-map-wrapper') || container;
+                        const inFs = isFs && (document.fullscreenElement === fullscreenHost || document.fullscreenElement === container);
+
+                        if (!inFs) {
+                            container.classList.remove('payroll-map-fullscreen');
+                            fullscreenHost.classList.remove('payroll-map-fullscreen');
                             if (state.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
                             state.fullscreenSelectedRail = null;
-                        } else if (rail) {
-                            window.syncAdminSelectedRailFullscreen?.(state, rail, state.selectedId);
+                            window.payrollUpdateAdminMapFullscreenUI?.(state.mapId, false);
+                        } else {
+                            const rail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(state.mapId || '')) + '"]');
+                            if (rail) {
+                                window.syncAdminSelectedRailFullscreen?.(state, rail, state.selectedId);
+                            }
+                            window.payrollUpdateAdminMapFullscreenUI?.(state.mapId, true);
                         }
-                        try { state.map.invalidateSize({ animate: true }); } catch { }
+                        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 50);
+                        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 200);
+                        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 450);
                     });
+                };
+
+                document.addEventListener('fullscreenchange', exitAdminFullscreen);
+                document.addEventListener('webkitfullscreenchange', exitAdminFullscreen);
+                document.addEventListener('mozfullscreenchange', exitAdminFullscreen);
+                document.addEventListener('MSFullscreenChange', exitAdminFullscreen);
+
+                document.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape' || e.key === 'Esc' || e.keyCode === 27) {
+                        const fsElements = document.querySelectorAll('.payroll-map-fullscreen');
+                        if (fsElements.length > 0 || document.fullscreenElement) {
+                            if (document.fullscreenElement) {
+                                try { document.exitFullscreen(); } catch { }
+                            }
+                            fsElements.forEach(function (node) {
+                                node.classList.remove('payroll-map-fullscreen');
+                            });
+                            document.body.classList.remove('payroll-fullscreen-active');
+                            exitAdminFullscreen();
+                        }
+                    }
                 });
+
                 window.__payrollAdminMapFullscreenBound = true;
             }
             const panel = document.createElement('div');
@@ -5388,6 +5606,20 @@ window.focusAdminLiveEmployee = function (mapId, employeeId) {
     }
 };
 
+window.payrollUpdateAdminMapFullscreenUI = function (mapId, isFullscreen) {
+    try {
+        const icons = document.querySelectorAll(`[data-fullscreen-icon="${CSS.escape(String(mapId))}"]`);
+        icons.forEach(function (icon) {
+            icon.className = isFullscreen ? 'bi bi-fullscreen-exit' : 'bi bi-fullscreen';
+        });
+        const state = window.adminLiveMaps?.[mapId];
+        const btn = state?.premiumControls?.querySelector('[data-map-action="fullscreen"]');
+        if (btn) {
+            btn.innerHTML = (isFullscreen ? '<i class="bi bi-fullscreen-exit"></i><span>Exit</span>' : '<i class="bi bi-fullscreen"></i><span>Full</span>');
+        }
+    } catch { }
+};
+
 window.handlePremiumAdminMapAction = function (mapId, action) {
     const state = window.adminLiveMaps?.[mapId];
     if (!state?.map) return;
@@ -5443,20 +5675,34 @@ window.handlePremiumAdminMapAction = function (mapId, action) {
         const el = state.map.getContainer();
         const fullscreenHost = el.closest('.admin-map-wrapper') || el;
         const bar = state.premiumControls?.querySelector('.payroll-map-commandbar');
-        if (!document.fullscreenElement) {
-            if (fullscreenHost.requestFullscreen) fullscreenHost.requestFullscreen();
+        const isCurrentlyFs = !!(document.fullscreenElement || fullscreenHost.classList.contains('payroll-map-fullscreen') || el.classList.contains('payroll-map-fullscreen'));
+
+        if (!isCurrentlyFs) {
+            fullscreenHost.classList.add('payroll-map-fullscreen');
             el.classList.add('payroll-map-fullscreen');
+            document.body.classList.add('payroll-fullscreen-active');
+            if (fullscreenHost.requestFullscreen) {
+                fullscreenHost.requestFullscreen().catch(function () { });
+            }
             if (bar) bar.classList.remove('is-fullscreen-hidden');
             const selectedRail = state.selectedRailElement || document.querySelector('[data-admin-selected-rail="' + CSS.escape(String(mapId)) + '"]');
             if (selectedRail) window.syncAdminSelectedRailFullscreen?.(state, selectedRail, state.selectedId);
+            window.payrollUpdateAdminMapFullscreenUI?.(mapId, true);
         } else {
-            document.exitFullscreen?.();
+            if (document.fullscreenElement) {
+                try { document.exitFullscreen(); } catch { }
+            }
+            fullscreenHost.classList.remove('payroll-map-fullscreen');
             el.classList.remove('payroll-map-fullscreen');
+            document.body.classList.remove('payroll-fullscreen-active');
             if (bar) bar.classList.remove('is-fullscreen-hidden');
             if (state.fullscreenSelectedRail?.parentElement) state.fullscreenSelectedRail.remove();
             state.fullscreenSelectedRail = null;
+            window.payrollUpdateAdminMapFullscreenUI?.(mapId, false);
         }
-        setTimeout(function () { try { state.map.invalidateSize({ animate: true }); } catch { } }, 250);
+        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 50);
+        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 200);
+        setTimeout(function () { try { state.map.invalidateSize({ animate: false }); } catch { } }, 450);
     }
     window.applyPremiumAdminMapFilter(mapId);
 };

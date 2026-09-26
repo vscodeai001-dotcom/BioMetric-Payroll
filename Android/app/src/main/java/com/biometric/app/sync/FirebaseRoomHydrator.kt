@@ -105,39 +105,46 @@ class FirebaseRoomHydrator @Inject constructor(
             // dropping the records and leaving the Admin dashboard empty.
             observeValue("shops", existing = { shopDao.getAllRecords().map { it.shopId to it.syncState } }, onDelete = { key -> shopDao.deleteById(key) }) { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
             observeValue("employees", existing = { employeeDao.getAllRecords().map { it.employeeId to it.syncState } }, onDelete = { key -> employeeDao.deleteById(key) }) { it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) } }
-            observeValue("attendance", existing = { attendanceDao.getAll().map { it.attendanceId to it.syncState } }, onDelete = { key -> attendanceDao.deleteById(key) }) { it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) } }
+            // SPARK PLAN OPTIMIZATION: Bound attendance to recent records (300). Prevents multi-MB historical download.
+            observeValue("attendance", query = firebaseSync.getOwnerRef()?.child("attendance")?.limitToLast(300), existing = { attendanceDao.getAll().map { it.attendanceId to it.syncState } }, onDelete = { key -> attendanceDao.deleteById(key) }) { it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) } }
             observeValue("advance_payments", existing = { advanceDao.getAll().map { it.advanceId to it.syncState } }, onDelete = { key -> advanceDao.deleteById(key) }) { it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) } }
             observeValue("employee_history", existing = { historyDao.getAll().map { it.historyId to it.syncState } }, onDelete = { key -> historyDao.deleteById(key) }) { it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) } }
             observeValue("shop_closed_days", existing = { closedDayDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> closedDayDao.deleteById(key) }) { it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) } }
             observeValue("regularizations", existing = { regularizationDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> regularizationDao.deleteById(key) }) { it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) } }
-            observeValue("attendance_punches", existing = { punchDao.getAll().map { it.punchId to it.syncState } }, onDelete = { key -> punchDao.deleteById(key) }) { it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) } }
+            // SPARK PLAN OPTIMIZATION: Bound attendance_punches to last 500 punches. Realtime new punches still fire via onChildAdded.
+            observeValue("attendance_punches", query = firebaseSync.getOwnerRef()?.child("attendance_punches")?.limitToLast(500), existing = { punchDao.getAll().map { it.punchId to it.syncState } }, onDelete = { key -> punchDao.deleteById(key) }) { it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) } }
             observeValue("leave_requests", existing = { leaveDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> leaveDao.deleteById(key) }) { it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) } }
             observeValue("resignation_requests", existing = { resignationDao.getAll().map { it.requestId to it.syncState } }, onDelete = { key -> resignationDao.deleteById(key) }) { it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) } }
 
-            // Admin/SuperAdmin data. These listeners mirror changes and
-            // deletions into the existing Room cache, so current UI flows
-            // update immediately without a manual refresh.
+            // Admin/SuperAdmin data. Bounded with limitToLast to prevent multi-megabyte downloads.
             observe("salary_snapshots",
+                query = firebaseSync.getOwnerRef()?.child("salary_snapshots")?.limitToLast(100),
                 onUpsert = { salarySnapshotDao.upsert(it.toLocalSalarySnapshot()) },
                 onDelete = { salarySnapshotDao.deleteById(it.stringValue("snapshotId") ?: it.key.orEmpty()) })
-            observe("audit_logs",
-                onUpsert = { auditLogDao.upsert(it.toLocalAuditLog()) },
-                onDelete = { auditLogDao.deleteById(it.stringValue("logId") ?: it.key.orEmpty()) })
+            // BANDWIDTH OPTIMIZATION: Do NOT globally observe audit_logs in background.
+            // audit_logs is a massive append-only table. AuditTrailActivity queries its own
+            // date-bounded paged range on demand, so downloading the entire collection here
+            // wastes multiple megabytes of bandwidth on every app start.
             observe("daily_summaries",
+                query = firebaseSync.getOwnerRef()?.child("daily_summaries")?.limitToLast(300),
                 onUpsert = { dailySummaryDao.upsert(it.toLocalDailySummary()) },
                 onDelete = { dailySummaryDao.deleteById(it.intValue("summaryId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             observeShiftSchedules()
             observePayrollHistory()
             observe("bonus_records",
+                query = firebaseSync.getOwnerRef()?.child("bonus_records")?.limitToLast(100),
                 onUpsert = { bonusRecordDao.upsert(it.toLocalBonusRecord()) },
                 onDelete = { bonusRecordDao.deleteById(it.intValue("bonusId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             observe("tax_declarations",
+                query = firebaseSync.getOwnerRef()?.child("tax_declarations")?.limitToLast(100),
                 onUpsert = { taxDeclarationDao.upsert(it.toLocalTaxDeclaration()) },
                 onDelete = { taxDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             observe("fbp_components",
+                query = firebaseSync.getOwnerRef()?.child("fbp_components")?.limitToLast(100),
                 onUpsert = { fbpComponentDao.upsert(it.toLocalFbpComponent()) },
                 onDelete = { fbpComponentDao.deleteById(it.intValue("componentId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             observe("fbp_declarations",
+                query = firebaseSync.getOwnerRef()?.child("fbp_declarations")?.limitToLast(100),
                 onUpsert = { fbpDeclarationDao.upsert(it.toLocalFbpDeclaration()) },
                 onDelete = { fbpDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
 
@@ -152,11 +159,12 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun observeValue(
         table: String,
+        query: Query? = null,
         existing: suspend () -> List<Pair<String, Int>>,
         onDelete: suspend (String) -> Unit,
         onUpsert: suspend (DataSnapshot) -> Unit
     ) {
-        val ref = firebaseSync.getOwnerRef()?.child(table) ?: return
+        val targetQuery: Query = query ?: (firebaseSync.getOwnerRef()?.child(table) ?: return)
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch { hydrate(table, snapshot, onUpsert) }
@@ -198,8 +206,8 @@ class FirebaseRoomHydrator @Inject constructor(
             }
         }
         // Small master & transactional request tables need explicit initial hydration & reconciliation
-        if (table in setOf("shops", "employees", "shop_closed_days", "leave_requests", "regularizations", "resignation_requests", "advance_payments", "shift_schedules")) {
-            ref.addListenerForSingleValueEvent(object : ValueEventListener {
+        if (query == null && table in setOf("shops", "employees", "shop_closed_days", "leave_requests", "regularizations", "resignation_requests", "advance_payments", "shift_schedules")) {
+            (targetQuery as? DatabaseReference)?.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     scope.launch {
                         writeMutex.withLock {
@@ -234,9 +242,9 @@ class FirebaseRoomHydrator @Inject constructor(
             })
         }
         // CRITICAL: Attach the ChildEventListener to Firebase reference so onChildAdded/onChildChanged fire!
-        ref.addChildEventListener(listener)
+        targetQuery.addChildEventListener(listener)
         // Keep the ChildEventListener alive for the application lifetime.
-        listeners += ref to listener
+        listeners += targetQuery to listener
     }
 
     private suspend fun hydrate(
@@ -647,7 +655,8 @@ class FirebaseRoomHydrator @Inject constructor(
                 ?.orderByChild("employeeId")
                 ?.equalTo(employeeId.toDouble())
         } else {
-            firebaseSync.getOwnerRef()?.child("payroll_history")
+            // SPARK PLAN OPTIMIZATION: Bound Admin payroll history listener to recent records
+            firebaseSync.getOwnerRef()?.child("payroll_history")?.limitToLast(120)
         } ?: return
 
         val listener = object : ChildEventListener {
@@ -689,7 +698,8 @@ class FirebaseRoomHydrator @Inject constructor(
                 ?.orderByChild("employeeId")
                 ?.equalTo(employeeId.toDouble())
         } else {
-            firebaseSync.getOwnerRef()?.child("shift_schedules")
+            // SPARK PLAN OPTIMIZATION: Bound Admin shift schedule listener to recent records
+            firebaseSync.getOwnerRef()?.child("shift_schedules")?.limitToLast(300)
         } ?: return
 
         val listener = object : ChildEventListener {
@@ -725,10 +735,11 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun observe(
         table: String,
+        query: Query? = null,
         onUpsert: suspend (DataSnapshot) -> Unit,
         onDelete: suspend (DataSnapshot) -> Unit
     ) {
-        val ref = firebaseSync.getOwnerRef()?.child(table) ?: return
+        val targetQuery: Query = query ?: (firebaseSync.getOwnerRef()?.child(table) ?: return)
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch { runCatching { onUpsert(snapshot) } }
@@ -749,8 +760,8 @@ class FirebaseRoomHydrator @Inject constructor(
                 scheduleRebind("realtime table cancelled: ${error.message}")
             }
         }
-        ref.addChildEventListener(listener)
-        listeners += ref to listener
+        targetQuery.addChildEventListener(listener)
+        listeners += targetQuery to listener
     }
 
     /** Rebind all Firebase -> Room realtime listeners without logout/login. */

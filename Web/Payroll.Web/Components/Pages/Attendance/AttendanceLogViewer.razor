@@ -1321,12 +1321,7 @@
                 // Re-check after loading the current summary and after taking
                 // the employee/date lock. This closes the duplicate-processing
                 // window between two realtime callbacks.
-                bool isOddPunch = group.Count() % 2 != 0;
-                var indiaNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, IndiaTimeZone);
-                bool isLiveDate = date == DateOnly.FromDateTime(indiaNow) ||
-                                  date == DateOnly.FromDateTime(indiaNow.AddDays(-1));
-
-                if (!forceRecalculate && !(isOddPunch && isLiveDate) &&
+                if (!forceRecalculate &&
                     AttendanceProcessingCoordinator.IsAlreadyProcessed(
                         cacheKey,
                         fingerprint,
@@ -1418,50 +1413,44 @@
                 // existing manual ReprocessAttendance().
                 // ----------------------------------------------------
 
-                existing.Status =
-                    result.Status;
+                var newEarnedHours =
+                    result.EarnedStandardDuration.TotalHours < 0
+                        ? 0
+                        : (decimal)result.EarnedStandardDuration.TotalHours;
 
-                existing.EarnedStandardHours =
-                    result
-                        .EarnedStandardDuration
-                        .TotalHours < 0
-                            ? 0
-                            : (decimal)
-                                result
-                                    .EarnedStandardDuration
-                                    .TotalHours;
+                bool isNew = dbContext.Entry(existing).State == EntityState.Added;
+                bool isDifferent = isNew ||
+                    existing.Status != result.Status ||
+                    existing.EarnedStandardHours != newEarnedHours ||
+                    existing.TotalOvertimeDuration != result.TotalOvertimeDuration ||
+                    existing.TotalPenaltyDuration != result.TotalPenalty ||
+                    existing.TotalLateness != result.TotalLateness ||
+                    existing.TotalBreakPenalty != result.TotalBreakPenalty ||
+                    existing.ScheduledShiftDuration != result.ScheduledShiftDuration ||
+                    existing.ShiftAllowanceEarned != result.ShiftAllowanceEarned ||
+                    existing.IsManualOverride != false;
 
-                existing.TotalOvertimeDuration =
-                    result.TotalOvertimeDuration;
+                if (isDifferent)
+                {
+                    existing.Status = result.Status;
+                    existing.EarnedStandardHours = newEarnedHours;
+                    existing.TotalOvertimeDuration = result.TotalOvertimeDuration;
+                    existing.TotalPenaltyDuration = result.TotalPenalty;
+                    existing.TotalLateness = result.TotalLateness;
+                    existing.TotalBreakPenalty = result.TotalBreakPenalty;
+                    existing.ScheduledShiftDuration = result.ScheduledShiftDuration;
+                    existing.ShiftAllowanceEarned = result.ShiftAllowanceEarned;
+                    existing.IsManualOverride = false;
 
-                existing.TotalPenaltyDuration =
-                    result.TotalPenalty;
-
-                existing.TotalLateness =
-                    result.TotalLateness;
-
-                existing.TotalBreakPenalty =
-                    result.TotalBreakPenalty;
-
-                existing.ScheduledShiftDuration =
-                    result.ScheduledShiftDuration;
-
-                existing.ShiftAllowanceEarned =
-                    result.ShiftAllowanceEarned;
-
-                existing.IsManualOverride =
-                    false;
-
-                changed = true;
-                updatedSummaries.Add(existing);
+                    changed = true;
+                    updatedSummaries.Add(existing);
+                }
 
                 // ----------------------------------------------------
-                // Do not mark the fingerprint as committed until the EF save
-                // succeeds. Otherwise a failed save could permanently suppress
-                // the next legitimate retry.
+                // Mark fingerprint as processed for this exact punch set.
                 // ----------------------------------------------------
 
-               processedAfterSave.Add((
+                processedAfterSave.Add((
                     cacheKey,
                     fingerprint,
                     ManualOverride: false));
@@ -1482,14 +1471,14 @@
                         _logger.LogWarning(ex, "Failed to sync daily summary to Firebase for EmpID {EmpId}, Date {Date}", summaryToSync.EmployeeID, summaryToSync.ShiftDate);
                     }
                 }
+            }
 
-                foreach (var processed in processedAfterSave)
-                {
-                    AttendanceProcessingCoordinator.MarkProcessed(
-                        processed.Key,
-                        processed.Fingerprint,
-                        processed.ManualOverride);
-                }
+            foreach (var processed in processedAfterSave)
+            {
+                AttendanceProcessingCoordinator.MarkProcessed(
+                    processed.Key,
+                    processed.Fingerprint,
+                    processed.ManualOverride);
             }
         }
         catch (Exception ex)

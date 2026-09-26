@@ -185,6 +185,9 @@
                 <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'layer')" title="Switch Map Layer" aria-label="Switch Map Layer">
                     <i class="bi bi-layers"></i>
                 </button>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'fullscreen')" title="Toggle Fullscreen (Esc to Exit)" aria-label="Toggle Fullscreen">
+                    <i class="bi bi-fullscreen" data-fullscreen-icon="@mapId"></i>
+                </button>
             </div>
 
             <!-- Leaflet zoom controls are moved by JavaScript into the horizontal

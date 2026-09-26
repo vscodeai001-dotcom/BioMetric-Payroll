@@ -79,11 +79,6 @@ class SuperAdminManagementActivity : MotionBaseActivity() {
         }
     }
 
-    override fun onDestroy() {
-        realtimeCoordinator.stop()
-        super.onDestroy()
-    }
-
     private fun setupRecyclerView() {
         val allFeatures = featureManager.getAllFeatures()
         adapter = FeatureToggleAdapter(allFeatures, emptySet()) { _, _ ->

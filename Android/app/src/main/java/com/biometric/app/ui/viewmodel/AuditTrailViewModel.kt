@@ -23,7 +23,7 @@ data class AuditSummary(
 
 data class AuditTrailState(
     val summary: AuditSummary = AuditSummary(),
-    val isLoading: Boolean = true,
+    val isLoading: Boolean = false,
 )
 
 @HiltViewModel
@@ -63,15 +63,32 @@ class AuditTrailViewModel @Inject constructor(
             }
 
             launch {
-                repository.getAuditLogsSummary(shopId, start, end).collectLatest { summaryLogs ->
-                    val summary = AuditSummary(
-                        updates = summaryLogs.count { it.action == "UPDATE" },
-                        deletions = summaryLogs.count { it.action == "DELETE" },
-                        restorations = summaryLogs.count { it.action == "RESTORE" },
-                        newEntries = summaryLogs.count { it.action == "ADD" }
-                    )
-                    repository.saveListCache(cacheKey, listOf(summary))
-                    _state.update { it.copy(summary = summary, isLoading = false) }
+                try {
+                    repository.getAuditLogsSummary(shopId, start, end)
+                        .catch { e ->
+                            android.util.Log.e("AuditTrailVM", "Summary error", e)
+                            _state.update { it.copy(isLoading = false) }
+                        }
+                        .collectLatest { summaryLogs ->
+                            val summary = AuditSummary(
+                                updates = summaryLogs.count { it.action.equals("UPDATE", ignoreCase = true) || it.action.equals("EDIT", ignoreCase = true) },
+                                deletions = summaryLogs.count { it.action.contains("DELETE", ignoreCase = true) || it.action.contains("REJECT", ignoreCase = true) },
+                                restorations = summaryLogs.count { it.action.contains("RESTORE", ignoreCase = true) || it.action.contains("APPROVE", ignoreCase = true) },
+                                newEntries = summaryLogs.count { it.action.equals("ADD", ignoreCase = true) || it.action.equals("CREATE", ignoreCase = true) || it.action.equals("INSERT", ignoreCase = true) }
+                            )
+                            repository.saveListCache(cacheKey, listOf(summary))
+                            _state.update { it.copy(summary = summary, isLoading = false) }
+                        }
+                } finally {
+                    _state.update { it.copy(isLoading = false) }
+                }
+            }
+
+            // Safety timeout: Guarantee that isLoading is never stuck as true
+            launch {
+                delay(2500)
+                if (_state.value.isLoading) {
+                    _state.update { it.copy(isLoading = false) }
                 }
             }
         }

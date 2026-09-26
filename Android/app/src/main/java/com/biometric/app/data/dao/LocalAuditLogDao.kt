@@ -24,6 +24,12 @@ interface LocalAuditLogDao {
     @Query("SELECT * FROM local_audit_logs WHERE syncState = 0")
     fun getUnsynced(): List<LocalAuditLog>
 
+    @Query("SELECT * FROM local_audit_logs WHERE timestamp >= :start AND timestamp <= :end ORDER BY timestamp DESC")
+    suspend fun getByRange(start: Long, end: Long): List<LocalAuditLog>
+
+    @Query("SELECT * FROM local_audit_logs WHERE timestamp >= :start AND timestamp <= :end ORDER BY timestamp DESC")
+    fun getByRangeFlow(start: Long, end: Long): Flow<List<LocalAuditLog>>
+
     @Query("DELETE FROM local_audit_logs WHERE logId = :id")
     fun deleteById(id: String)
 }
