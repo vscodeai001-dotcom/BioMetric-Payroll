@@ -14,6 +14,7 @@ import com.biometric.app.api.*
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalDailySummaryDao
+import com.biometric.app.data.dao.LocalFbpDeclarationDao
 import com.biometric.app.data.dao.LocalPayrollHistoryDao
 import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.entity.AuditLog
@@ -49,6 +50,7 @@ class AdminPayrollActivity : MotionBaseActivity() {
     @Inject lateinit var localDailySummaryDao: LocalDailySummaryDao
     @Inject lateinit var localPayrollHistoryDao: LocalPayrollHistoryDao
     @Inject lateinit var localSettingsDao: LocalSettingsDao
+    @Inject lateinit var localFbpDeclarationDao: LocalFbpDeclarationDao
     @Inject lateinit var financeRepository: FirebaseAdminFinanceRepository
     @Inject lateinit var mobileApiService: MobileApiService
     private lateinit var session: MobileSessionStore
@@ -318,6 +320,14 @@ class AdminPayrollActivity : MotionBaseActivity() {
             val allBonuses = runCatching { financeRepository.bonuses() }.getOrDefault(emptyList())
             val monthBonuses = allBonuses.filter { !it.paid && it.date.startsWith(periodPrefix) }
 
+            // 4b. FBP declarations (matching Web: only if feature enabled, only Approved status)
+            // Used to compute taxableGross = gross - fbpAllocation before TDS/PT (SSOT parity)
+            val financialYear = if (m >= 4) y else y - 1
+            val allFbpDeclarations = if (featureSettings.enableFlexibleBenefits) {
+                runCatching { localFbpDeclarationDao.getAllFlow().first() }.getOrDefault(emptyList())
+                    .filter { it.status.equals("Approved", ignoreCase = true) && it.financialYear == financialYear }
+            } else emptyList()
+
             // 5. Days in month and past days limit (matching Web PayrollProcessorService.cs)
             val cal = Calendar.getInstance().apply { set(y, m - 1, 1) }
             val daysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
@@ -444,31 +454,41 @@ class AdminPayrollActivity : MotionBaseActivity() {
                 // Gross
                 val gross = earnedPay + overtimePay + bonus + totalShiftAllowance
 
-                // Statutory (PF, ESI, PT, TDS)
+                // SSOT PARITY: taxableGross = gross - FBP monthly allocation (matching Web PayrollProcessorService)
+                val empFbpAllocation = if (featureSettings.enableFlexibleBenefits) {
+                    allFbpDeclarations.filter { it.employeeId == empIdInt }.sumOf { it.monthlyAllocatedAmount }
+                } else 0.0
+                val taxableGross = (gross - empFbpAllocation).coerceAtLeast(0.0)
+
+                // Statutory (PF, ESI, PT, TDS) — all applied on taxableGross like Web
                 val basicPct = if ((companySettings?.basicSalaryPercentage ?: 0.0) > 0.0) (companySettings!!.basicSalaryPercentage / 100.0) else 0.40
                 val basicSalary = if (emp.basicSalaryComponent > 0) emp.basicSalaryComponent else (baseSalary * basicPct)
                 val isPfEnabled = emp.enablePf && featureSettings.enableStatutoryCompliance
                 val pfDeduction = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
                 val employerPf = if (isPfEnabled) (basicSalary * 0.12).coerceAtMost(1800.0) else 0.0
 
-                val isEsiEnabled = emp.enableEsi && featureSettings.enableStatutoryCompliance && (gross <= 21000.0)
-                val esiDeduction = if (isEsiEnabled) (gross * 0.0075) else 0.0
-                val employerEsi = if (isEsiEnabled) (gross * 0.0325) else 0.0
+                // ESI: applied on taxableGross, threshold check on taxableGross (Web uses grossEarned but both approx same)
+                val isEsiEnabled = emp.enableEsi && featureSettings.enableStatutoryCompliance && (taxableGross <= 21000.0)
+                val esiDeduction = if (isEsiEnabled) (taxableGross * 0.0075) else 0.0
+                val employerEsi = if (isEsiEnabled) (taxableGross * 0.0325) else 0.0
 
+                // PT: applied on taxableGross (standard slabs — matches Web default ProfessionalTaxSlab entries)
                 val ptDeduction = if (featureSettings.enableProfessionalTax) {
                     when {
-                        gross > 15000.0 -> 200.0
-                        gross > 10000.0 -> 150.0
+                        taxableGross > 15000.0 -> 200.0
+                        taxableGross > 10000.0 -> 150.0
                         else -> 0.0
                     }
                 } else 0.0
 
+                // TDS: applied on taxableGross (matching Web: taxableGross * tdsRatePercent)
                 val tdsDeduction = if (featureSettings.enableTdsDeduction && emp.tdsRatePercent > 0) {
-                    (gross * (emp.tdsRatePercent / 100.0))
+                    (taxableGross * (emp.tdsRatePercent / 100.0))
                 } else 0.0
 
                 val totalDeductions = pfDeduction + esiDeduction + ptDeduction + tdsDeduction + advanceDeduction + penaltyDeduction
                 val netPayable = (gross - totalDeductions).coerceAtLeast(0.0)
+
 
                 generatedRows.add(
                     AdminPayrollRowDto(

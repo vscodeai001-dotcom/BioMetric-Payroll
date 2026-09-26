@@ -186,29 +186,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val allPunches = sharedViewModel.allAttendancePunches.value
         val allAttendance = sharedViewModel.allAttendance.value
 
-        // Compute KPI Cumulative Metrics across all filtered summaries
-        val employeesProcessed = summariesInRange.map { it.employeeId }.distinct().count()
-        val scheduledMs = summariesInRange.sumOf { it.scheduledShiftDurationMs }
-        val workedHours = summariesInRange.sumOf { it.earnedStandardHours }
-        val otMs = summariesInRange.sumOf { it.totalOvertimeMs }
-        val penaltyMs = summariesInRange.sumOf { it.totalPenaltyMs }
-        val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }
-        val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
-
-        binding.tvScheduled.text = formatDurationMs(scheduledMs)
-        binding.tvWorked.text = formatWorkedHours(workedHours)
-        binding.tvOvertime.text = formatDurationMs(otMs)
-        binding.tvPenalty.text = formatDurationMs(penaltyMs)
-        binding.tvLateness.text = formatDurationMs(latenessMs)
-        binding.tvBreakPenalty.text = formatDurationMs(breakPenaltyMs)
-
-        binding.tvSummary.text = if (summariesInRange.isEmpty()) {
-            "No attendance logs recorded for selected period"
-        } else {
-            "👥 $employeesProcessed employees • ⏱️ Worked ${formatWorkedHours(workedHours)} • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
-        }
-
-        // Map to display row objects
+        // Map existing summary row objects
         val allRows = summariesInRange.map { s ->
             val emp = employees[s.employeeId]
             val dateParsed = runCatching { isoDateFormat.parse(s.shiftDate) }.getOrNull()
@@ -277,15 +255,145 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 scheduledShiftText = scheduledShiftText,
                 punches = rawPunchesText
             )
+        }.toMutableList()
+
+        // Synthesize missing active employee records for evaluated dates (including today)
+        val distinctDates = summariesInRange.map { it.shiftDate }.distinct().toMutableSet()
+        val todayStr = isoDateFormat.format(Date())
+        if (todayStr in f..t) {
+            distinctDates.add(todayStr)
+        }
+        if (distinctDates.isEmpty() && f == t) {
+            distinctDates.add(f)
+        }
+
+        val existingKeys = summariesInRange.map { "${it.employeeId}:${it.shiftDate}" }.toHashSet()
+        val activeEmps = sharedViewModel.allEmployees.value.filter {
+            (it.isActive) && (employeeFilterId == null || it.employeeId.toIntOrNull() == employeeFilterId)
+        }
+
+        val synthesizedRows = mutableListOf<AdminAttendanceRow>()
+        for (dateStr in distinctDates) {
+            val dateParsed = runCatching { isoDateFormat.parse(dateStr) }.getOrNull()
+            val formattedDate = if (dateParsed != null) shiftDateFormat.format(dateParsed) else dateStr
+
+            for (emp in activeEmps) {
+                val empIdInt = emp.employeeId.toIntOrNull() ?: continue
+                if (existingKeys.contains("$empIdInt:$dateStr")) continue
+
+                // Check for direct punches
+                val directPunches = allPunches.filter { p ->
+                    val idMatches = p.staffId == emp.employeeId ||
+                        p.staffId.toIntOrNull() == empIdInt ||
+                        (emp.biometricId.isNotBlank() && p.staffId == emp.biometricId)
+                    val dateMatches = p.date == dateStr ||
+                        (p.timestamp > 0 && isoDateFormat.format(Date(p.timestamp)) == dateStr)
+                    idMatches && dateMatches
+                }.map { p -> Pair(p.timestamp, p.type.ifBlank { "IN" }) }
+
+                val resolvedPunches = if (directPunches.isNotEmpty()) {
+                    directPunches
+                } else {
+                    allAttendance.filter { a ->
+                        val idMatches = a.employeeId == emp.employeeId ||
+                            a.employeeId.toIntOrNull() == empIdInt ||
+                            (emp.biometricId.isNotBlank() && a.employeeId == emp.biometricId)
+                        val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == dateStr
+                        idMatches && dateMatches
+                    }.flatMap { a ->
+                        val list = mutableListOf<Pair<Long, String>>()
+                        if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
+                        val outTime = a.checkOutTime ?: 0L
+                        if (outTime > 0) list.add(Pair(outTime, "OUT"))
+                        list
+                    }
+                }.distinctBy { Pair(it.first / 60000, it.second) }.sortedBy { it.first }
+
+                val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
+                    resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
+                        val time = punchTimeFormat.format(Date(timeMs))
+                        "$time $type"
+                    }
+                } else {
+                    "No punches recorded"
+                }
+
+                val status = if (resolvedPunches.isNotEmpty()) {
+                    if (resolvedPunches.size % 2 == 1) "Missing Punch" else "Present"
+                } else {
+                    "Absent"
+                }
+
+                val schedMs = if (!emp.shiftStart.isNullOrBlank() && !emp.shiftEnd.isNullOrBlank()) {
+                    runCatching {
+                        val s = punchTimeFormat.parse(emp.shiftStart)
+                        val e = punchTimeFormat.parse(emp.shiftEnd)
+                        if (s != null && e != null) {
+                            var diff = e.time - s.time
+                            if (diff < 0) diff += 24 * 3600 * 1000
+                            diff
+                        } else 0L
+                    }.getOrDefault(0L)
+                } else 0L
+
+                val scheduledDuration = formatDurationMs(schedMs)
+                val scheduledShiftText = if (schedMs > 0) {
+                    "⏰ Scheduled Shift: $scheduledDuration"
+                } else {
+                    "⏰ Shift: Flexible / Unscheduled"
+                }
+
+                synthesizedRows.add(
+                    AdminAttendanceRow(
+                        employeeID = empIdInt,
+                        employeeName = emp.name,
+                        date = dateStr,
+                        formattedDate = formattedDate,
+                        status = status,
+                        workedHours = 0.0,
+                        overtimeMinutes = 0.0,
+                        penaltyMinutes = 0.0,
+                        latenessMinutes = 0.0,
+                        breakPenaltyMinutes = 0.0,
+                        scheduledMinutes = schedMs / 60000.0,
+                        scheduledShiftText = scheduledShiftText,
+                        punches = rawPunchesText
+                    )
+                )
+            }
+        }
+
+        val combinedRows = (allRows + synthesizedRows)
+
+        // Compute KPI Cumulative Metrics across all filtered summaries and synthesized rows
+        val employeesProcessed = combinedRows.map { it.employeeID }.distinct().count()
+        val scheduledMs = summariesInRange.sumOf { it.scheduledShiftDurationMs } + synthesizedRows.sumOf { (it.scheduledMinutes * 60000).toLong() }
+        val workedHours = summariesInRange.sumOf { it.earnedStandardHours }
+        val otMs = summariesInRange.sumOf { it.totalOvertimeMs }
+        val penaltyMs = summariesInRange.sumOf { it.totalPenaltyMs }
+        val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }
+        val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
+
+        binding.tvScheduled.text = formatDurationMs(scheduledMs)
+        binding.tvWorked.text = formatWorkedHours(workedHours)
+        binding.tvOvertime.text = formatDurationMs(otMs)
+        binding.tvPenalty.text = formatDurationMs(penaltyMs)
+        binding.tvLateness.text = formatDurationMs(latenessMs)
+        binding.tvBreakPenalty.text = formatDurationMs(breakPenaltyMs)
+
+        binding.tvSummary.text = if (combinedRows.isEmpty()) {
+            "No attendance logs recorded for selected period"
+        } else {
+            "👥 $employeesProcessed employees • ⏱️ Worked ${formatWorkedHours(workedHours)} • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
         }
 
         // Apply quick status chip filter
         val filteredRows = when (statusFilter) {
-            "PRESENT" -> allRows.filter { it.status.equals("Present", ignoreCase = true) }
-            "ABSENT" -> allRows.filter { it.status.equals("Absent", ignoreCase = true) }
-            "HALFDAY" -> allRows.filter { it.status.contains("Half", ignoreCase = true) }
-            "LATE" -> allRows.filter { it.latenessMinutes > 0 }
-            else -> allRows
+            "PRESENT" -> combinedRows.filter { it.status.equals("Present", ignoreCase = true) }
+            "ABSENT" -> combinedRows.filter { it.status.equals("Absent", ignoreCase = true) }
+            "HALFDAY" -> combinedRows.filter { it.status.contains("Half", ignoreCase = true) }
+            "LATE" -> combinedRows.filter { it.latenessMinutes > 0 }
+            else -> combinedRows
         }.sortedWith(compareByDescending<AdminAttendanceRow> { it.date }.thenBy { it.employeeName })
 
         adapter.submit(filteredRows)

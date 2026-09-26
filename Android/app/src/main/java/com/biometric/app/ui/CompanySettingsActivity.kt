@@ -65,6 +65,29 @@ class CompanySettingsActivity : MotionBaseActivity() {
         "168 hours (7 Days)" to 168
     )
 
+    private val stayDwellLabels = listOf(
+        "2 minutes" to 2,
+        "5 minutes" to 5,
+        "10 minutes (Default)" to 10,
+        "30 minutes" to 30,
+        "1 hour" to 60,
+        "2 hours" to 120,
+        "5 hours" to 300,
+        "12 hours" to 720,
+        "24 hours" to 1440
+    )
+
+    private val stayRadiusLabels = listOf(
+        "5 metres" to 5,
+        "10 metres" to 10,
+        "15 metres" to 15,
+        "20 metres" to 20,
+        "30 metres" to 30,
+        "50 metres (Default)" to 50,
+        "100 metres" to 100,
+        "200 metres" to 200
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCompanySettingsBinding.inflate(layoutInflater)
@@ -128,6 +151,12 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
         val backupAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, backupIntervalLabels.map { it.first })
         binding.spinnerBackupInterval.setAdapter(backupAdapter)
+
+        val stayDwellAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, stayDwellLabels.map { it.first })
+        binding.spinnerStayDwellTime.setAdapter(stayDwellAdapter)
+
+        val stayRadiusAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, stayRadiusLabels.map { it.first })
+        binding.spinnerStayClusterRadius.setAdapter(stayRadiusAdapter)
     }
 
     private fun setupListeners() {
@@ -262,6 +291,16 @@ class CompanySettingsActivity : MotionBaseActivity() {
         val backupIntervalItem = backupIntervalLabels.find { it.second == localCompany.autoBackupIntervalHours }
             ?: backupIntervalLabels.find { it.second == 24 } ?: backupIntervalLabels[3]
         binding.spinnerBackupInterval.setText(backupIntervalItem.first, false)
+
+        // Location Stay Minimum Dwell Time (Default 10)
+        val dwellItem = stayDwellLabels.find { it.second == localCompany.stayDwellMinutes }
+            ?: stayDwellLabels.find { it.second == 10 } ?: stayDwellLabels[2]
+        binding.spinnerStayDwellTime.setText(dwellItem.first, false)
+
+        // Location Stay Cluster Radius (Default 50)
+        val radiusItem = stayRadiusLabels.find { it.second == localCompany.stayClusterRadiusMeters }
+            ?: stayRadiusLabels.find { it.second == 50 } ?: stayRadiusLabels[5]
+        binding.spinnerStayClusterRadius.setText(radiusItem.first, false)
 
         binding.etGenLatitude.setText(if (localCompany.officeLatitude != 0.0) localCompany.officeLatitude.toString() else "")
         binding.etGenLongitude.setText(if (localCompany.officeLongitude != 0.0) localCompany.officeLongitude.toString() else "")
@@ -410,7 +449,14 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 val backupHours = backupIntervalLabels.find { it.first == selectedBackupLabel }?.second ?: 24
                 localCompany.autoBackupIntervalHours = backupHours
 
-                // Save into Room (with updated backup interval)
+                // Save Stay Dwell Time and Cluster Radius
+                val selectedDwellLabel = binding.spinnerStayDwellTime.text?.toString()
+                localCompany.stayDwellMinutes = stayDwellLabels.find { it.first == selectedDwellLabel }?.second ?: 10
+
+                val selectedRadiusLabel = binding.spinnerStayClusterRadius.text?.toString()
+                localCompany.stayClusterRadiusMeters = stayRadiusLabels.find { it.first == selectedRadiusLabel }?.second ?: 50
+
+                // Save into Room (with updated backup interval & stay settings)
                 withContext(Dispatchers.IO) {
                     localSettingsDao.upsertCompanySettings(localCompany)
                 }
@@ -451,7 +497,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "enableLeaveAccrual" to localCompany.enableLeaveAccrual,
                             "leaveAccrualRate" to localCompany.leaveAccrualRate,
                             "enableSandwichRule" to localCompany.enableSandwichRule,
-                            "autoBackupIntervalHours" to localCompany.autoBackupIntervalHours
+                            "autoBackupIntervalHours" to localCompany.autoBackupIntervalHours,
+                            "stayDwellMinutes" to localCompany.stayDwellMinutes,
+                            "stayClusterRadiusMeters" to localCompany.stayClusterRadiusMeters
                         )
                         owner.child("company_settings").child("1").setValue(companyPayload).await()
 

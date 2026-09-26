@@ -120,7 +120,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var rangeCircle: Polygon? = null
     private var routePolyline: Polyline? = null
     private var routeCasing: Polyline? = null
-    private var isAutoFocusEnabled = true
+    private var isAutoFocusEnabled = false
     private val iconCache = mutableMapOf<String, Drawable>()
     private var lastRoadRouteUpdate: Long = 0L
 

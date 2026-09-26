@@ -142,6 +142,11 @@ interface MobileApiService {
         @Header("Authorization") authorization: String
     ): Response<List<AdminLiveLocationDto>>
 
+    @GET("api/mobile/admin/users")
+    suspend fun getAdminUsers(
+        @Header("Authorization") authorization: String
+    ): Response<List<AdminUserDto>>
+
     @POST("api/mobile/admin/users")
     suspend fun createAdminUser(
         @Header("Authorization") authorization: String,
@@ -153,6 +158,13 @@ interface MobileApiService {
         @Header("Authorization") authorization: String,
         @Path("firebaseUid") firebaseUid: String,
         @Body request: AdminChangeUserRoleRequest
+    ): Response<AdminUserManagementResponse>
+
+    @POST("api/mobile/admin/users/{firebaseUid}/reset-password")
+    suspend fun resetAdminUserPassword(
+        @Header("Authorization") authorization: String,
+        @Path("firebaseUid") firebaseUid: String,
+        @Body request: AdminResetPasswordRequest
     ): Response<AdminUserManagementResponse>
 
     @PUT("api/mobile/admin/users/{firebaseUid}/disabled")
@@ -623,10 +635,22 @@ data class AdminCreateUserRequest(
 )
 
 data class AdminChangeUserRoleRequest(@SerializedName("role") val role: String)
+data class AdminResetPasswordRequest(@SerializedName("newPassword") val newPassword: String)
 data class AdminDisabledUserRequest(@SerializedName("disabled") val disabled: Boolean)
 data class AdminUserManagementResponse(
     @SerializedName("success") val success: Boolean = false,
     @SerializedName("firebaseUid") val firebaseUid: String? = null,
     @SerializedName("identityUserId") val identityUserId: String? = null,
     @SerializedName("message") val message: String = ""
+)
+
+data class AdminUserDto(
+    @SerializedName("userId") val userId: String = "",
+    @SerializedName("firebaseUid") val firebaseUid: String? = null,
+    @SerializedName("email") val email: String = "",
+    @SerializedName("userName") val userName: String? = null,
+    @SerializedName("role") val role: String = "Employee",
+    @SerializedName("employeeId") val employeeId: Int? = null,
+    @SerializedName("employeeName") val employeeName: String? = null,
+    @SerializedName("isDisabled") val isDisabled: Boolean = false
 )

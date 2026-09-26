@@ -1149,11 +1149,6 @@
                         p => p.PunchTime)
                     .ToListAsync();
 
-            if (punches.Count == 0)
-            {
-                return;
-            }
-
             // --------------------------------------------------------
             // Load settings required by the EXISTING calculator.
             // --------------------------------------------------------
@@ -1454,6 +1449,114 @@
                     cacheKey,
                     fingerprint,
                     ManualOverride: false));
+            }
+
+            // ----------------------------------------------------
+            // Active employees without punches for evaluated dates.
+            // Guarantees all active employees appear (Absent / Off / Leave)
+            // for Today and any searched date, matching AutomatedJobsService.
+            // ----------------------------------------------------
+            var processedPunchKeys = groups.Select(g => (g.Key.EmployeeId, g.Key.Date)).ToHashSet();
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var maxDateToEvaluate = dEnd < today ? dEnd : today;
+
+            for (var curDate = dStart; curDate <= maxDateToEvaluate; curDate = curDate.AddDays(1))
+            {
+                foreach (var emp in activeEmployees)
+                {
+                    if (processedPunchKeys.Contains((emp.EmployeeID, curDate)))
+                    {
+                        continue;
+                    }
+
+                    if (emp.HireDate.HasValue && emp.HireDate.Value > curDate)
+                    {
+                        continue;
+                    }
+
+                    if (emp.TerminationDate.HasValue && emp.TerminationDate.Value < curDate)
+                    {
+                        continue;
+                    }
+
+                    var existing = await dbContext.DailySummaries
+                        .FirstOrDefaultAsync(s => s.EmployeeID == emp.EmployeeID && s.ShiftDate == curDate);
+
+                    if (existing != null && existing.IsManualOverride)
+                    {
+                        continue;
+                    }
+
+                    if (existing != null && curDate < today && !forceRecalculate)
+                    {
+                        continue;
+                    }
+
+                    var schedule = schedules.FirstOrDefault(s => s.EmployeeID == emp.EmployeeID && s.ShiftDate == curDate);
+                    var leave = allLeaves
+                        .Where(l => l.EmployeeID == emp.EmployeeID && l.LeaveDate.HasValue && DateOnly.FromDateTime(l.LeaveDate.Value.Date) == curDate)
+                        .OrderBy(l => l.LeaveType == "Loss of Pay (Auto)" ? 1 : 0)
+                        .ThenByDescending(l => l.LeaveRequestID)
+                        .FirstOrDefault();
+
+                    var result = Calculator.CalculateDailyResult(
+                        emp,
+                        curDate.ToDateTime(TimeOnly.MinValue),
+                        new List<AttendanceLog>(),
+                        leave,
+                        schedule,
+                        settings,
+                        holidays,
+                        featureSettings);
+
+                    if (result.Status == "Not Employed")
+                    {
+                        continue;
+                    }
+
+                    if (existing == null)
+                    {
+                        existing = new DailySummary
+                        {
+                            EmployeeID = emp.EmployeeID,
+                            ShiftDate = curDate
+                        };
+                        dbContext.DailySummaries.Add(existing);
+                    }
+
+                    var standardHours = result.EarnedStandardDuration.TotalHours < 0
+                        ? 0
+                        : (decimal)result.EarnedStandardDuration.TotalHours;
+
+                    bool isNew = existing.SummaryID == 0;
+                    bool hasChanged = isNew ||
+                        existing.Status != result.Status ||
+                        existing.EarnedStandardHours != standardHours ||
+                        existing.TotalOvertimeDuration != result.TotalOvertimeDuration ||
+                        existing.TotalPenaltyDuration != result.TotalPenalty ||
+                        existing.TotalLateness != result.TotalLateness ||
+                        existing.TotalBreakPenalty != result.TotalBreakPenalty ||
+                        existing.ScheduledShiftDuration != result.ScheduledShiftDuration;
+
+                    if (hasChanged)
+                    {
+                        existing.Status = result.Status;
+                        existing.EarnedStandardHours = standardHours;
+                        existing.TotalOvertimeDuration = result.TotalOvertimeDuration;
+                        existing.TotalPenaltyDuration = result.TotalPenalty;
+                        existing.TotalLateness = result.TotalLateness;
+                        existing.TotalBreakPenalty = result.TotalBreakPenalty;
+                        existing.ScheduledShiftDuration = result.ScheduledShiftDuration;
+                        existing.ShiftAllowanceEarned = result.ShiftAllowanceEarned;
+                        existing.IsManualOverride = false;
+
+                        changed = true;
+                        if (!updatedSummaries.Contains(existing))
+                        {
+                            updatedSummaries.Add(existing);
+                        }
+                    }
+                }
             }
 
             if (changed)

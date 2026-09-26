@@ -460,7 +460,9 @@ else
                         ["workDayCutoffHour"] = settings.WorkDayCutoffHour,
                         ["lateGraceMinutes"] = settings.LateGraceMinutes,
                         ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes,
-                        ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours
+                        ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours,
+                        ["stayDwellMinutes"] = settings.StayDwellMinutes,
+                        ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                 }

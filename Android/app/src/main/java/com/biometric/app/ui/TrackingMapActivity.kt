@@ -94,7 +94,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val iconCache = mutableMapOf<String, Drawable>()
     private var statusFilter = "All"
     private var searchFilter = ""
-    private var isAutoFocusEnabled = true
+    private var isAutoFocusEnabled = false
     private var followingEmployeeId: Int? = null
     private var selectedAddressEmployeeId: Int? = null
     private var selectedAddressLat: Double? = null
@@ -178,6 +178,23 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun setupSelectedLocationRail() {
         binding.cardSelectedLocationRail.visibility = View.GONE
+        binding.cardSelectedEmployee.setOnClickListener {
+            followingEmployeeId?.let { prevId ->
+                roadLines[prevId]?.outlinePaint?.alpha = 0
+                roadCasings[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadLines[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadCasings[prevId]?.outlinePaint?.alpha = 0
+            }
+            followingEmployeeId = null
+            isAutoFocusEnabled = false
+            binding.btnAdminMapFollow.alpha = 0.4f
+            binding.cardSelectedLocationRail.visibility = View.GONE
+            stopSelectedRailAutoScroll()
+            selectedAddressJob?.cancel()
+            selectedAddressEmployeeId = null
+            fitCompanyAndStaff(animated = true)
+            Toast.makeText(this@TrackingMapActivity, "All staff view 🏢👥", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun updateSelectedLocationRail(
@@ -453,17 +470,13 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
         binding.btnAdminMapFollow.setOnClickListener {
             resetTrackingMapIdleTimer()
+            if (followingEmployeeId == null) {
+                Toast.makeText(this, "Select an employee first to follow 📍", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             isAutoFocusEnabled = !isAutoFocusEnabled
             binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
-            if (isAutoFocusEnabled && followingEmployeeId == null) {
-                val firstLive = signalR.liveLocations.value.values.firstOrNull { getLocStatus(it) == "Live" }
-                    ?: signalR.liveLocations.value.values.firstOrNull()
-                if (firstLive != null) {
-                    followingEmployeeId = firstLive.employeeId
-                    updateMapMarkers(signalR.liveLocations.value.values.toList())
-                }
-            }
-            Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, if (isAutoFocusEnabled) "Following selected employee ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
         }
 
         binding.btnAdminMapZone.setOnClickListener {
@@ -553,21 +566,15 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnRecenterStaff.setOnClickListener {
             resetTrackingMapIdleTimer()
             val empId = followingEmployeeId
-            val empLoc = if (empId != null) signalR.liveLocations.value[empId] else signalR.liveLocations.value.values.firstOrNull()
-            if (empLoc != null) {
-                isAutoFocusEnabled = true
-                binding.btnAdminMapFollow.alpha = 1.0f
-                if (followingEmployeeId != empLoc.employeeId) {
-                    followingEmployeeId = empLoc.employeeId
-                    updateMapMarkers(signalR.liveLocations.value.values.toList())
+            if (empId != null) {
+                val empLoc = signalR.liveLocations.value[empId]
+                if (empLoc != null) {
+                    fitCompanyAndStaff(animated = true)
+                    Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"} & Office 🏢📍", Toast.LENGTH_SHORT).show()
                 }
-                binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
-                binding.mapview.controller.setZoom(17.0)
-                Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"} ⦿", Toast.LENGTH_SHORT).show()
-            } else if (officeLat != 0.0 && officeLon != 0.0) {
-                binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
-                binding.mapview.controller.setZoom(16.0)
-                Toast.makeText(this, "Centered on Office 🏢", Toast.LENGTH_SHORT).show()
+            } else {
+                fitCompanyAndStaff(animated = true)
+                Toast.makeText(this, "Fitting Company & All Staff 🏢👥", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -988,6 +995,26 @@ class TrackingMapActivity : MotionBaseActivity() {
                         // Marker selection is handled by the selected-details rail.
                         // Never open an information popup/snippet above the marker.
                         clicked.closeInfoWindow()
+                        if (followingEmployeeId == loc.employeeId) {
+                            // Toggle deselect: return to All Staff view
+                            followingEmployeeId?.let { prevId ->
+                                roadLines[prevId]?.outlinePaint?.alpha = 0
+                                roadCasings[prevId]?.outlinePaint?.alpha = 0
+                                travelledRoadLines[prevId]?.outlinePaint?.alpha = 0
+                                travelledRoadCasings[prevId]?.outlinePaint?.alpha = 0
+                            }
+                            followingEmployeeId = null
+                            isAutoFocusEnabled = false
+                            binding.btnAdminMapFollow.alpha = 0.4f
+                            binding.cardSelectedLocationRail.visibility = View.GONE
+                            stopSelectedRailAutoScroll()
+                            selectedAddressJob?.cancel()
+                            selectedAddressEmployeeId = null
+                            fitCompanyAndStaff(animated = true)
+                            Toast.makeText(this@TrackingMapActivity, "All staff view 🏢👥", Toast.LENGTH_SHORT).show()
+                            return@setOnMarkerClickListener true
+                        }
+
                         followingEmployeeId?.let { prevId ->
                             if (prevId != loc.employeeId) {
                                 roadLines[prevId]?.outlinePaint?.alpha = 0
@@ -997,8 +1024,9 @@ class TrackingMapActivity : MotionBaseActivity() {
                             }
                         }
                         followingEmployeeId = loc.employeeId
-                        isAutoFocusEnabled = true
-                        map.controller.animateTo(clicked.position)
+                        isAutoFocusEnabled = false
+                        binding.btnAdminMapFollow.alpha = 0.4f
+                        fitCompanyAndStaff(animated = true)
                         val selectedDistance = if (officeLat != 0.0 && officeLon != 0.0) {
                             distanceMeters(officeLat, officeLon, loc.latitude, loc.longitude)
                         } else {

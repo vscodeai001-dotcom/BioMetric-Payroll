@@ -586,6 +586,8 @@ class FirebaseRoomHydrator @Inject constructor(
         enableLeaveManagement = b("enableLeaveManagement"),
         enableTdsDeduction = b("enableTdsDeduction"),
         autoBackupIntervalHours = i("autoBackupIntervalHours").takeIf { it > 0 } ?: 24,
+        stayDwellMinutes = i("stayDwellMinutes").takeIf { it > 0 } ?: 10,
+        stayClusterRadiusMeters = i("stayClusterRadiusMeters").takeIf { it > 0 } ?: 50,
         syncState = 1
     )
 

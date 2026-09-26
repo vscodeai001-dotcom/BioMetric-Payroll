@@ -42,14 +42,45 @@ class UserViewModel @Inject constructor(
         }
     }
 
-    fun deleteUser(userId: String) {
+    fun deleteUser(userId: String, onResult: ((Boolean, String) -> Unit)? = null) {
         viewModelScope.launch {
             _isLoading.value = true
             try {
                 userRepository.deleteUser(userId)
                 loadUsers()
+                onResult?.invoke(true, "User deleted successfully 🗑️")
             } catch (e: Exception) {
-                // Handle error
+                onResult?.invoke(false, e.message ?: "Failed to delete user ⚠️")
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun changeRole(userId: String, newRole: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                userRepository.updateUserRole(userId, newRole)
+                loadUsers()
+                onResult(true, "Role updated to $newRole successfully ✅")
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Failed to update role ⚠️")
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun resetPassword(userId: String, newPassword: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                userRepository.resetPassword(userId, newPassword)
+                loadUsers()
+                onResult(true, "Password updated successfully ✅")
+            } catch (e: Exception) {
+                onResult(false, e.message ?: "Failed to update password ⚠️")
             } finally {
                 _isLoading.value = false
             }

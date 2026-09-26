@@ -58,6 +58,39 @@
                     <small class="text-muted">Controls scheduled automatic database backups. Default: 24 hours.</small>
                 </div>
             </div>
+            <div class="col-12">
+                <div class="border rounded p-2 bg-body-tertiary">
+                    <label class="small fw-bold text-primary">Location Stay Minimum Dwell Time</label>
+                    <select class="form-select form-select-sm" @bind="Settings.StayDwellMinutes">
+                        <option value="2">2 minutes</option>
+                        <option value="5">5 minutes</option>
+                        <option value="10">10 minutes (Default)</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="300">5 hours</option>
+                        <option value="720">12 hours</option>
+                        <option value="1440">24 hours</option>
+                    </select>
+                    <small class="text-muted">Minimum duration an employee must halt within the cluster radius to be recorded as a stay.</small>
+                </div>
+            </div>
+            <div class="col-12">
+                <div class="border rounded p-2 bg-body-tertiary">
+                    <label class="small fw-bold text-primary">Location Stay Cluster Radius</label>
+                    <select class="form-select form-select-sm" @bind="Settings.StayClusterRadiusMeters">
+                        <option value="5">5 metres</option>
+                        <option value="10">10 metres</option>
+                        <option value="15">15 metres</option>
+                        <option value="20">20 metres</option>
+                        <option value="30">30 metres</option>
+                        <option value="50">50 metres (Default)</option>
+                        <option value="100">100 metres</option>
+                        <option value="200">200 metres</option>
+                    </select>
+                    <small class="text-muted">Distance threshold to cluster consecutive GPS points into a single stationary halt.</small>
+                </div>
+            </div>
             <div class="row g-2 border-top pt-2 mt-2">
                 <div class="col-12 mb-1">
                     <label class="small fw-bold text-primary">Geo-Fencing (Office Location)</label>

@@ -24,7 +24,7 @@
 
     <div class="alert alert-info border-0 shadow-sm">
         <i class="bi bi-shield-check me-2"></i>
-        A stay is detected only when the employee remains within a <strong>50-metre radius</strong> across the same GPS session for <strong>10 minutes or longer</strong>. Easily filter by stay duration below.
+        A stay is detected only when the employee remains within a <strong>@(configuredClusterRadiusMeters)-metre radius</strong> across the same GPS session for <strong>@(configuredDwellMinutes) minutes or longer</strong>. Easily filter by stay duration below.
     </div>
 
     <div class="card border-0 shadow-sm mb-3">
@@ -51,11 +51,15 @@
                 <div class="col-12 col-md-3">
                     <label class="form-label fw-semibold">Min Stay Duration</label>
                     <select class="form-select" @bind="minDurationFilterMinutes" @bind:after="ApplyStayFilterAsync">
+                        <option value="2">≥ 2 Minutes</option>
+                        <option value="5">≥ 5 Minutes</option>
                         <option value="10">≥ 10 Minutes</option>
-                        <option value="20">≥ 20 Minutes</option>
                         <option value="30">≥ 30 Minutes</option>
                         <option value="60">≥ 1 Hour</option>
                         <option value="120">≥ 2 Hours</option>
+                        <option value="300">≥ 5 Hours</option>
+                        <option value="720">≥ 12 Hours</option>
+                        <option value="1440">≥ 24 Hours</option>
                     </select>
                 </div>
                 <div class="col-12 col-md-2">
@@ -70,7 +74,7 @@
     <div class="row g-3 mb-3">
         @Metric("Detected stays", stays.Count.ToString(), "bi-geo-alt")
         @Metric("Employees", stays.Select(x => x.EmployeeId).Distinct().Count().ToString(), "bi-people")
-        @Metric("10+ min", stays.Count(x => x.Duration >= TimeSpan.FromMinutes(10)).ToString(), "bi-hourglass-split")
+        @Metric($"{configuredDwellMinutes}+ min", stays.Count(x => x.Duration >= TimeSpan.FromMinutes(configuredDwellMinutes)).ToString(), "bi-hourglass-split")
         @Metric("GPS points", stays.Sum(x => x.PointCount).ToString(), "bi-broadcast-pin")
     </div>
 
@@ -100,11 +104,24 @@
                     <div class="col-6 col-md-3"><small class="text-muted d-block">Session</small><code>@selectedStay.SessionId.ToString("N")[..8]</code></div>
                     <div class="col-12"><small class="text-muted d-block">Time</small><strong>@FormatIst(selectedStay.StartUtc) → @FormatIst(selectedStay.EndUtc)</strong></div>
                     <div class="col-12"><small class="text-muted d-block">Exact GPS</small><code>@selectedStay.Latitude.ToString("F6") , @selectedStay.Longitude.ToString("F6")</code></div>
-                    <div class="col-12"><small class="text-muted d-block">Map address</small><span id="@AddressElementId">Click the marker again if the address is still resolving.</span></div>
+                    <div class="col-12">
+                        <small class="text-muted d-block">Physical Address</small>
+                        <strong class="text-primary">
+                            @if (!string.IsNullOrWhiteSpace(selectedStay.Address))
+                            {
+                                <span>📍 @selectedStay.Address</span>
+                            }
+                            else
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                <span>Resolving address...</span>
+                            }
+                        </strong>
+                    </div>
                     <div class="col-12">
                         <div class="alert alert-light border small mb-0">
                             <i class="bi bi-info-circle-fill text-primary me-2"></i>
-                            Employee stayed <strong>@FormatDuration(selectedStay.Duration)</strong> at this location within a 50m radius (&ge;10m dwell).
+                            Employee stayed <strong>@FormatDuration(selectedStay.Duration)</strong> at this location within a @(configuredClusterRadiusMeters)m radius (≥@(configuredDwellMinutes)m dwell).
                         </div>
                     </div>
                 </div>
@@ -226,6 +243,10 @@
     private int minDurationFilterMinutes = 10;
     private bool loading;
 
+    private int configuredDwellMinutes = 10;
+    private int configuredClusterRadiusMeters = 50;
+    private bool hasLoadedSettings;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -239,6 +260,18 @@
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (!hasLoadedSettings)
+            {
+                var setting = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync();
+                if (setting != null)
+                {
+                    configuredDwellMinutes = setting.StayDwellMinutes > 0 ? setting.StayDwellMinutes : 10;
+                    configuredClusterRadiusMeters = setting.StayClusterRadiusMeters > 0 ? setting.StayClusterRadiusMeters : 50;
+                    minDurationFilterMinutes = configuredDwellMinutes;
+                }
+                hasLoadedSettings = true;
+            }
 
             employees = await db.Employees.AsNoTracking()
                 .Where(x => !x.IsDeleted)
@@ -261,7 +294,7 @@
                 .ToListAsync();
 
             var names = employees.ToDictionary(x => x.EmployeeID, x => x.Name);
-            allDetectedStays = DetectStays(points, names);
+            allDetectedStays = DetectStays(points, names, configuredDwellMinutes, configuredClusterRadiusMeters);
             await ApplyStayFilterAsync();
         }
         finally
@@ -289,6 +322,10 @@
         {
             await JSRuntime.InvokeVoidAsync("focusLocationStay", mapId, stay.Id);
             StateHasChanged();
+            if (string.IsNullOrWhiteSpace(stay.Address))
+            {
+                await ResolveStayAddressAsync(stay);
+            }
         });
     }
 
@@ -297,14 +334,45 @@
     {
         selectedStay = stays.FirstOrDefault(x => x.Id == stayId);
         await InvokeAsync(StateHasChanged);
+        if (selectedStay != null && string.IsNullOrWhiteSpace(selectedStay.Address))
+        {
+            await ResolveStayAddressAsync(selectedStay);
+        }
+    }
+
+    private async Task ResolveStayAddressAsync(StayRow stay)
+    {
+        try
+        {
+            using var client = new System.Net.Http.HttpClient();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("BioMetricPayrollApp/1.0");
+            var url = $"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={stay.Latitude:F6}&lon={stay.Longitude:F6}";
+            var response = await client.GetAsync(url);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("display_name", out var displayName))
+                {
+                    stay.Address = displayName.GetString();
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch
+        {
+            stay.Address = $"{stay.Latitude:F6}, {stay.Longitude:F6}";
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void ClearSelection() => selectedStay = null;
 
-    private static List<StayRow> DetectStays(List<EmployeeLocationHistory> points, Dictionary<int, string> names)
+    private static List<StayRow> DetectStays(List<EmployeeLocationHistory> points, Dictionary<int, string> names, int dwellMinutes, int clusterRadiusMeters)
     {
         var result = new List<StayRow>();
         long syntheticId = 1;
+        var maxGapMinutes = Math.Max(15, dwellMinutes);
 
         foreach (var sessionGroup in points.GroupBy(x => new { x.EmployeeId, x.SessionId }))
         {
@@ -319,29 +387,29 @@
                 var distance = HaversineMeters(previous.Latitude, previous.Longitude, current.Latitude, current.Longitude);
                 var gap = current.CapturedAtUtc - previous.CapturedAtUtc;
 
-                if (distance <= 50d && gap >= TimeSpan.Zero && gap <= TimeSpan.FromMinutes(10))
+                if (distance <= clusterRadiusMeters && gap >= TimeSpan.Zero && gap <= TimeSpan.FromMinutes(maxGapMinutes))
                 {
                     cluster.Add(current);
                     continue;
                 }
 
-                AddStay(cluster, sessionGroup.Key.EmployeeId, sessionGroup.Key.SessionId, names, result, ref syntheticId);
+                AddStay(cluster, sessionGroup.Key.EmployeeId, sessionGroup.Key.SessionId, names, result, ref syntheticId, dwellMinutes);
                 cluster = new List<EmployeeLocationHistory> { current };
             }
 
-            AddStay(cluster, sessionGroup.Key.EmployeeId, sessionGroup.Key.SessionId, names, result, ref syntheticId);
+            AddStay(cluster, sessionGroup.Key.EmployeeId, sessionGroup.Key.SessionId, names, result, ref syntheticId, dwellMinutes);
         }
 
         return result.OrderByDescending(x => x.StartUtc).ToList();
     }
 
-    private static void AddStay(List<EmployeeLocationHistory> cluster, int employeeId, Guid sessionId, Dictionary<int, string> names, List<StayRow> result, ref long id)
+    private static void AddStay(List<EmployeeLocationHistory> cluster, int employeeId, Guid sessionId, Dictionary<int, string> names, List<StayRow> result, ref long id, int dwellMinutes)
     {
         if (cluster.Count < 2) return;
         var start = cluster[0].CapturedAtUtc;
         var end = cluster[^1].CapturedAtUtc;
         var duration = end - start;
-        if (duration < TimeSpan.FromMinutes(10)) return;
+        if (duration < TimeSpan.FromMinutes(dwellMinutes)) return;
 
         result.Add(new StayRow
         {
@@ -394,5 +462,6 @@
         public double AverageAccuracyMeters { get; set; }
         public double Latitude { get; set; }
         public double Longitude { get; set; }
+        public string? Address { get; set; }
     }
 }

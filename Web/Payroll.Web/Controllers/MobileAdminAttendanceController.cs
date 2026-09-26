@@ -39,6 +39,47 @@ public sealed class MobileAdminAttendanceController : ControllerBase
             LatenessMinutes=s.TotalLateness.TotalMinutes, BreakPenaltyMinutes=s.TotalBreakPenalty.TotalMinutes, ScheduledMinutes=s.ScheduledShiftDuration.TotalMinutes,
             Punches=string.Join("  •  ", punches.Where(p => (p.EmployeeID ?? 0)==s.EmployeeID && DateOnly.FromDateTime(p.PunchTime)==s.ShiftDate).Select(p => $"{p.PunchTime:HH:mm} {p.LogType}"))
         }).ToList();
+
+        var existingEmpDate = summaries.Select(s => (s.EmployeeID, s.ShiftDate)).ToHashSet();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var distinctDates = summaries.Select(s => s.ShiftDate).Distinct().ToList();
+        if (!distinctDates.Contains(today) && start <= today && today <= end)
+        {
+            distinctDates.Add(today);
+        }
+
+        foreach (var d in distinctDates)
+        {
+            foreach (var emp in employees)
+            {
+                if (existingEmpDate.Contains((emp.EmployeeID, d))) continue;
+                if (emp.HireDate.HasValue && emp.HireDate.Value > d) continue;
+                if (emp.TerminationDate.HasValue && emp.TerminationDate.Value < d) continue;
+
+                var empPunches = punches.Where(p => (p.EmployeeID ?? 0) == emp.EmployeeID && DateOnly.FromDateTime(p.PunchTime) == d).ToList();
+                var hasPunches = empPunches.Any();
+                var status = hasPunches ? (empPunches.Count % 2 == 1 ? "Missing Punch" : "Present") : "Absent";
+                var schedMin = emp.ShiftStartTime.HasValue && emp.ShiftEndTime.HasValue 
+                    ? (emp.ShiftEndTime.Value - emp.ShiftStartTime.Value).TotalMinutes 
+                    : 0;
+                if (schedMin < 0) schedMin += 24 * 60;
+
+                rows.Add(new DailyRowDto {
+                    EmployeeID = emp.EmployeeID,
+                    EmployeeName = emp.Name,
+                    Date = d.ToString("yyyy-MM-dd"),
+                    Status = status,
+                    WorkedHours = 0,
+                    OvertimeMinutes = 0,
+                    PenaltyMinutes = 0,
+                    LatenessMinutes = 0,
+                    BreakPenaltyMinutes = 0,
+                    ScheduledMinutes = schedMin > 0 ? schedMin : 0,
+                    Punches = hasPunches ? string.Join("  •  ", empPunches.Select(p => $"{p.PunchTime:HH:mm} {p.LogType}")) : "No punches recorded"
+                });
+            }
+        }
+        rows = rows.OrderByDescending(r => r.Date).ThenBy(r => r.EmployeeName).ToList();
         return Ok(new { success=true, rows });
     }
 

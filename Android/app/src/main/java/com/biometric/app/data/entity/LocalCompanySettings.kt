@@ -41,5 +41,7 @@ data class LocalCompanySettings(
     var enableLeaveManagement: Boolean = false,
     var enableTdsDeduction: Boolean = false,
     var autoBackupIntervalHours: Int = 24,
+    var stayDwellMinutes: Int = 10,
+    var stayClusterRadiusMeters: Int = 50,
     val syncState: Int = 1
 )

@@ -454,8 +454,10 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "employees", "shift_mode", "TEXT DEFAULT 'SINGLE_DAY'", ct);
             await EnsureColumnExistsAsync(connection, "employees", "tracking_mode", "TEXT DEFAULT '24/7'", ct);
 
-            // 4. Ensure auto_backup_interval_hours on CompanySettings
+            // 4. Ensure auto_backup_interval_hours, stay_dwell_minutes, and stay_cluster_radius_meters on CompanySettings
             await EnsureColumnExistsAsync(connection, "CompanySettings", "auto_backup_interval_hours", "INTEGER NOT NULL DEFAULT 24", ct);
+            await EnsureColumnExistsAsync(connection, "CompanySettings", "stay_dwell_minutes", "INTEGER NOT NULL DEFAULT 10", ct);
+            await EnsureColumnExistsAsync(connection, "CompanySettings", "stay_cluster_radius_meters", "INTEGER NOT NULL DEFAULT 50", ct);
 
             // 5. Ensure missing columns on leaverequests
             await EnsureColumnExistsAsync(connection, "leaverequests", "AdminNotes", "TEXT NULL", ct);

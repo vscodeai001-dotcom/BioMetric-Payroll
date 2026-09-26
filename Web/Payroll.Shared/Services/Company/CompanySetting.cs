@@ -110,5 +110,12 @@ namespace Payroll.Shared.Data
         // --- NEW: AUTO-BACKUP CONFIGURATION ---
         [Column("auto_backup_interval_hours")]
         public int AutoBackupIntervalHours { get; set; } = 24;
+
+        // --- NEW: STAY LOCATION DETECTION CONFIGURATION ---
+        [Column("stay_dwell_minutes")]
+        public int StayDwellMinutes { get; set; } = 10;
+
+        [Column("stay_cluster_radius_meters")]
+        public int StayClusterRadiusMeters { get; set; } = 50;
     }
 }

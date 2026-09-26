@@ -48,14 +48,17 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlin.math.*
+import com.biometric.app.data.dao.LocalSettingsDao
 
 @AndroidEntryPoint
 class LocationStaysActivity : MotionBaseActivity() {
 
     @Inject lateinit var repo: MainRepository
     @Inject lateinit var signal: SignalRManager
+    @Inject lateinit var localSettingsDao: LocalSettingsDao
 
     private lateinit var mapView: MapView
     private lateinit var spnEmployee: Spinner
@@ -83,6 +86,22 @@ class LocationStaysActivity : MotionBaseActivity() {
     private var allDetectedStays: List<LocationStayItem> = emptyList()
     private var currentFilteredPoints: List<SignalRManager.LiveLocation> = emptyList()
     private var minDurationMinutes: Int = 10
+    private var configuredDwellMinutes: Int = 10
+    private var configuredClusterRadiusMeters: Int = 50
+
+    private val addressCache = ConcurrentHashMap<String, String>()
+
+    private val durationFilterOptions = listOf(
+        "≥ 2 mins" to 2,
+        "≥ 5 mins" to 5,
+        "≥ 10 mins (Default)" to 10,
+        "≥ 30 mins" to 30,
+        "≥ 1 hour" to 60,
+        "≥ 2 hours" to 120,
+        "≥ 5 hours" to 300,
+        "≥ 12 hours" to 720,
+        "≥ 24 hours" to 1440
+    )
 
     private val calFrom = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0)
@@ -166,7 +185,11 @@ class LocationStaysActivity : MotionBaseActivity() {
     }
 
     private fun setupAdapters() {
-        stayAdapter = LocationStayAdapter { stay ->
+        stayAdapter = LocationStayAdapter(
+            scope = lifecycleScope,
+            reverseGeocode = ::reverseGeocodeStay,
+            getDwellMinutes = { configuredDwellMinutes }
+        ) { stay ->
             focusOnStay(stay)
         }
         rvStays.apply {
@@ -265,6 +288,16 @@ class LocationStaysActivity : MotionBaseActivity() {
                 allShops = shops
             }
         }
+
+        lifecycleScope.launch {
+            val cs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
+            if (cs != null) {
+                configuredDwellMinutes = if (cs.stayDwellMinutes > 0) cs.stayDwellMinutes else 10
+                configuredClusterRadiusMeters = if (cs.stayClusterRadiusMeters > 0) cs.stayClusterRadiusMeters else 50
+                minDurationMinutes = configuredDwellMinutes
+                updateDurationSpinnerSelection()
+            }
+        }
     }
 
     private fun updateEmployeeSpinner() {
@@ -276,27 +309,22 @@ class LocationStaysActivity : MotionBaseActivity() {
     }
 
     private fun setupDurationSpinner() {
-        val options = listOf(
-            "All Stays (≥ 10 mins)",
-            "≥ 20 mins",
-            "≥ 30 mins",
-            "≥ 1 hour",
-            "≥ 2 hours"
-        )
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, durationFilterOptions.map { it.first })
         spnMinDuration.adapter = adapter
+        updateDurationSpinnerSelection()
         spnMinDuration.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                minDurationMinutes = when (position) {
-                    1 -> 20
-                    2 -> 30
-                    3 -> 60
-                    4 -> 120
-                    else -> 10
-                }
+                minDurationMinutes = durationFilterOptions.getOrNull(position)?.second ?: configuredDwellMinutes
                 applyStayFilters()
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun updateDurationSpinnerSelection() {
+        val idx = durationFilterOptions.indexOfFirst { it.second == minDurationMinutes }
+        if (idx >= 0 && spnMinDuration.selectedItemPosition != idx) {
+            spnMinDuration.setSelection(idx)
         }
     }
 
@@ -405,8 +433,9 @@ class LocationStaysActivity : MotionBaseActivity() {
                 val endEpoch = parseTrackingTimestamp(run.last().timestamp)
                 val durationMs = endEpoch - startEpoch
 
-                // Minimum stay requirement: 10 minutes (600,000 ms)
-                if (durationMs >= 10 * 60 * 1000L) {
+                // Minimum stay requirement from configured company settings
+                val minStayMs = configuredDwellMinutes * 60 * 1000L
+                if (durationMs >= minStayMs) {
                     val eid = run.first().employeeId
                     val empName = empNameMap[eid] ?: "Employee #$eid"
 
@@ -441,7 +470,7 @@ class LocationStaysActivity : MotionBaseActivity() {
                             matchedLocation = "External Location / Field Halt",
                             placeCategory = "Field Halt",
                             distanceFromMatchedLocationMeters = 0.0,
-                            radiusMeters = 50,
+                            radiusMeters = configuredClusterRadiusMeters,
                             arrivalSpeedKmh = arrSpeedKmh,
                             departureSpeedKmh = depSpeedKmh
                         )
@@ -461,8 +490,8 @@ class LocationStaysActivity : MotionBaseActivity() {
                 }
 
                 val dist = calculateDistance(curAnchor.latitude, curAnchor.longitude, point.latitude, point.longitude)
-                // 50-meter cluster radius as required for stays
-                if (dist <= 50.0) {
+                // Cluster radius from company settings
+                if (dist <= configuredClusterRadiusMeters.toDouble()) {
                     run.add(point)
                 } else {
                     finishRun()
@@ -501,14 +530,48 @@ class LocationStaysActivity : MotionBaseActivity() {
                 stay.matchedLocation = shop.name.ifBlank { "Branch Office / Shop" }
                 stay.placeCategory = "Worksite"
                 stay.distanceFromMatchedLocationMeters = dist
-                stay.radiusMeters = 50
+                stay.radiusMeters = configuredClusterRadiusMeters
             } else {
                 stay.matchedLocation = "External Client Site / Field Halt"
                 stay.placeCategory = "Field Halt"
                 stay.distanceFromMatchedLocationMeters = 0.0
-                stay.radiusMeters = 50
+                stay.radiusMeters = configuredClusterRadiusMeters
             }
         }
+    }
+
+    suspend fun reverseGeocodeStay(latitude: Double, longitude: Double): String {
+        val cacheKey = "${String.format(Locale.US, "%.4f", latitude)},${String.format(Locale.US, "%.4f", longitude)}"
+        addressCache[cacheKey]?.let { return it }
+
+        val resolved = withContext(Dispatchers.IO) {
+            try {
+                if (android.location.Geocoder.isPresent()) {
+                    val geocoder = android.location.Geocoder(this@LocationStaysActivity, Locale.getDefault())
+                    val list = geocoder.getFromLocation(latitude, longitude, 1)
+                    val addr = list?.firstOrNull()
+                    if (addr != null) {
+                        val parts = listOfNotNull(
+                            addr.thoroughfare?.takeIf { it.isNotBlank() },
+                            addr.subLocality?.takeIf { it.isNotBlank() } ?: addr.locality?.takeIf { it.isNotBlank() },
+                            addr.subAdminArea?.takeIf { it.isNotBlank() } ?: addr.locality?.takeIf { it.isNotBlank() },
+                            addr.adminArea?.takeIf { it.isNotBlank() },
+                            addr.postalCode?.takeIf { it.isNotBlank() }
+                        ).distinct()
+                        if (parts.isNotEmpty()) parts.joinToString(", ")
+                        else addr.getAddressLine(0) ?: "${String.format(Locale.US, "%.6f", latitude)}, ${String.format(Locale.US, "%.6f", longitude)}"
+                    } else {
+                        "${String.format(Locale.US, "%.6f", latitude)}, ${String.format(Locale.US, "%.6f", longitude)}"
+                    }
+                } else {
+                    "${String.format(Locale.US, "%.6f", latitude)}, ${String.format(Locale.US, "%.6f", longitude)}"
+                }
+            } catch (_: Exception) {
+                "${String.format(Locale.US, "%.6f", latitude)}, ${String.format(Locale.US, "%.6f", longitude)}"
+            }
+        }
+        addressCache[cacheKey] = resolved
+        return resolved
     }
 
     private fun renderMap(
@@ -700,10 +763,14 @@ data class LocationStayItem(
     var distanceFromMatchedLocationMeters: Double,
     var radiusMeters: Int,
     val arrivalSpeedKmh: Double,
-    val departureSpeedKmh: Double
+    val departureSpeedKmh: Double,
+    var address: String? = null
 )
 
 private class LocationStayAdapter(
+    private val scope: androidx.lifecycle.LifecycleCoroutineScope,
+    private val reverseGeocode: suspend (Double, Double) -> String,
+    private val getDwellMinutes: () -> Int,
     private val onStayClick: (LocationStayItem) -> Unit
 ) : RecyclerView.Adapter<LocationStayAdapter.Holder>() {
 
@@ -721,7 +788,7 @@ private class LocationStayAdapter(
     }
 
     override fun onBindViewHolder(holder: Holder, position: Int) {
-        holder.bind(items[position], onStayClick)
+        holder.bind(items[position], scope, reverseGeocode, getDwellMinutes, onStayClick)
     }
 
     override fun getItemCount(): Int = items.size
@@ -738,9 +805,16 @@ private class LocationStayAdapter(
         private val tvPoints = view.findViewById<TextView>(R.id.tvStayPoints)
         private val tvSpeeds = view.findViewById<TextView>(R.id.tvStaySpeeds)
         private val tvCoords = view.findViewById<TextView>(R.id.tvStayCoords)
+        private val tvAddress = view.findViewById<TextView>(R.id.tvStayAddress)
         private val card = view.findViewById<MaterialCardView>(R.id.cardStay)
 
-        fun bind(item: LocationStayItem, onStayClick: (LocationStayItem) -> Unit) {
+        fun bind(
+            item: LocationStayItem,
+            scope: androidx.lifecycle.LifecycleCoroutineScope,
+            reverseGeocode: suspend (Double, Double) -> String,
+            getDwellMinutes: () -> Int,
+            onStayClick: (LocationStayItem) -> Unit
+        ) {
             tvSeq.text = item.sequence.toString()
             tvEmployee.text = item.employeeName
 
@@ -758,7 +832,9 @@ private class LocationStayAdapter(
             tvLocation.text = item.matchedLocation
             tvCategory.text = item.placeCategory
             tvCategory.setTextColor(if (item.placeCategory == "Worksite") Color.parseColor("#1565C0") else Color.parseColor("#E65100"))
-            tvAdminSummary.text = "Stayed $durText at this location (within 50m radius, ≥10m dwell)"
+            
+            val dwell = getDwellMinutes()
+            tvAdminSummary.text = "Stayed $durText at this location (within ${item.radiusMeters}m radius, ≥${dwell}m dwell)"
 
             tvAccuracy.text = "±${String.format(Locale.US, "%.1f", item.accuracyMeters)} m"
             tvPoints.text = "${item.pointCount} GPS fixes analyzed"
@@ -768,6 +844,17 @@ private class LocationStayAdapter(
             tvSpeeds.text = "Arr: $arrStr • Dep: $depStr"
 
             tvCoords.text = String.format(Locale.US, "%.6f, %.6f", item.latitude, item.longitude)
+
+            if (!item.address.isNullOrBlank()) {
+                tvAddress.text = item.address
+            } else {
+                tvAddress.text = "Resolving address..."
+                scope.launch {
+                    val addr = reverseGeocode(item.latitude, item.longitude)
+                    item.address = addr
+                    tvAddress.text = addr
+                }
+            }
 
             card.setOnClickListener {
                 onStayClick(item)
