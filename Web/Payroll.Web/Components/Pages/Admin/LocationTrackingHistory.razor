@@ -43,7 +43,7 @@
     <div class="card border-0 shadow-sm mb-3 filter-card">
         <div class="card-body p-3">
             <div class="filter-grid">
-                <div class="filter-item">
+                <div class="filter-item filter-item-employee">
                     <label class="form-label"><i class="bi bi-person me-1 text-primary"></i>Employee</label>
                     <select class="form-select" @bind="employeeFilter">
                         <option value="0">All employees</option>
@@ -53,11 +53,11 @@
                         }
                     </select>
                 </div>
-                <div class="filter-item">
+                <div class="filter-item filter-item-date">
                     <label class="form-label"><i class="bi bi-calendar-event me-1 text-primary"></i>Date From</label>
                     <input type="date" class="form-control" @bind="fromDate" />
                 </div>
-                <div class="filter-item">
+                <div class="filter-item filter-item-date">
                     <label class="form-label"><i class="bi bi-calendar2-check me-1 text-primary"></i>Date To</label>
                     <input type="date" class="form-control" @bind="toDate" />
                 </div>
@@ -81,8 +81,16 @@
                 </div>
                 <div class="filter-item filter-item-btn">
                     <button class="btn btn-primary w-100 d-flex align-items-center justify-content-center gap-2 shadow-sm" @onclick="LoadAsync" disabled="@loading">
-                        <i class="bi bi-search"></i>
-                        <span>Search</span>
+                        @if (loading)
+                        {
+                            <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            <span>Searching...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-search"></i>
+                            <span>Search</span>
+                        }
                     </button>
                 </div>
             </div>
@@ -214,10 +222,15 @@
 <style>
     .location-stays-page { min-width: 0; }
     .location-stays-page .card { border-radius: 15px; overflow: hidden; }
-    .filter-card { background: linear-gradient(180deg, rgba(127,127,127,.05), transparent); border-radius: 12px; }
+    .filter-card {
+        background: linear-gradient(180deg, rgba(127,127,127,.05), transparent);
+        border-radius: 12px;
+        container-type: inline-size;
+        container-name: filterCard;
+    }
     .filter-grid {
         display: grid;
-        grid-template-columns: minmax(180px, 1.5fr) minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 0.9fr) minmax(130px, 0.9fr) minmax(160px, 1.2fr) minmax(105px, auto);
+        grid-template-columns: minmax(180px, 1.4fr) minmax(125px, 1fr) minmax(125px, 1fr) minmax(95px, 0.85fr) minmax(95px, 0.85fr) minmax(145px, 1.1fr) minmax(110px, auto);
         gap: 12px;
         align-items: flex-end;
     }
@@ -238,33 +251,65 @@
         font-size: .85rem;
         border-radius: 8px;
         padding: 6px 10px;
+        width: 100%;
     }
     .filter-item input[type="time"] {
-        min-width: 125px;
         font-variant-numeric: tabular-nums;
+        min-width: 0;
     }
     .filter-item input[type="date"] {
-        min-width: 135px;
+        min-width: 0;
     }
     .filter-item .btn {
         height: 38px;
         font-weight: 600;
         font-size: .85rem;
         border-radius: 8px;
+        white-space: nowrap;
     }
-    @@media (max-width: 1280px) {
+    @@container filterCard (max-width: 1200px) {
         .filter-grid {
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            grid-template-columns: repeat(4, 1fr);
         }
+        .filter-item-employee {
+            grid-column: span 2;
+        }
+        .filter-item-stay {
+            grid-column: span 1;
+        }
+        .filter-item-btn {
+            grid-column: span 1;
+        }
+    }
+    @@container filterCard (max-width: 680px) {
+        .filter-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        .filter-item-employee,
+        .filter-item-stay,
         .filter-item-btn {
             grid-column: 1 / -1;
         }
     }
-    @@media (max-width: 576px) {
+    @@media (max-width: 1480px) {
+        .filter-grid {
+            grid-template-columns: repeat(4, 1fr);
+        }
+        .filter-item-employee {
+            grid-column: span 2;
+        }
+        .filter-item-stay {
+            grid-column: span 1;
+        }
+        .filter-item-btn {
+            grid-column: span 1;
+        }
+    }
+    @@media (max-width: 680px) {
         .filter-grid {
             grid-template-columns: 1fr 1fr;
         }
-        .filter-item:first-child,
+        .filter-item-employee,
         .filter-item-stay,
         .filter-item-btn {
             grid-column: 1 / -1;

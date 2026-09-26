@@ -470,8 +470,9 @@ class SignalRManager @Inject constructor(
                         )
                         Log.i("SignalRManager", "Firebase Auth ID token refreshed. Re-establishing listeners...")
                     }
+                    runCatching { FirebaseDatabase.getInstance().goOnline() }
                     delay(300L)
-                    stop()
+                    stop(clearState = false)
                     delay(200L)
                     start()
 
@@ -505,6 +506,47 @@ class SignalRManager @Inject constructor(
                 Log.e("SignalRManager", "Auth recovery failed: ${ex.message}", ex)
             } finally {
                 isRecoveringFromAuth = false
+            }
+        }
+    }
+
+    /**
+     * Force-rebinds the live-location and employee listeners without requiring
+     * a logout/login cycle. This is invoked when the application resumes from
+     * background or when the network/Firebase transport reconnects.
+     */
+    @Synchronized
+    fun forceRebind(reason: String = "connection/auth recovery") {
+        if (!sessionStore.isLoggedIn()) return
+        Log.i("SignalRManager", "Forcing rebind of live location listeners: $reason")
+
+        managerScope.launch {
+            runCatching {
+                val user = FirebaseAuth.getInstance().currentUser
+                val tokenResult = user?.getIdToken(true)?.await()
+                tokenResult?.token?.let { freshToken ->
+                    sessionStore.saveLogin(
+                        token = freshToken,
+                        employeeId = sessionStore.employeeId(),
+                        name = sessionStore.employeeName(),
+                        email = user.email.orEmpty(),
+                        firebaseOwnerUid = sessionStore.firebaseOwnerUid()
+                    )
+                }
+            }
+            runCatching {
+                FirebaseDatabase.getInstance().goOnline()
+            }
+            delay(100L)
+            withContext(Dispatchers.Main.immediate) {
+                val ownerUid = activeOwnerUid ?: firebaseSync.getOwnerUid()
+                val listenersMissing = locationListener == null || employeeListener == null
+                if (listenersMissing || (activeOwnerUid != null && activeOwnerUid != ownerUid)) {
+                    stop(clearState = false)
+                    start()
+                } else {
+                    reconcileLiveLocationsNow()
+                }
             }
         }
     }
@@ -544,8 +586,6 @@ class SignalRManager @Inject constructor(
             }
 
         managerScope.launch {
-            var permissionDeniedOccurred = false
-
             runCatching {
                 val snapshot = liveRef.get().await()
                 withContext(Dispatchers.Main.immediate) {
@@ -554,11 +594,8 @@ class SignalRManager @Inject constructor(
             }.onFailure { error ->
                 Log.d(
                     "SignalRManager",
-                    "Immediate live-location reconciliation skipped: ${error.message}"
+                    "Immediate live-location reconciliation skipped (waiting for active listener sync): ${error.message}"
                 )
-                if (error.message?.contains("permission", ignoreCase = true) == true) {
-                    permissionDeniedOccurred = true
-                }
             }
 
             // Also pull fresh employee directory so live markers always map to valid employees
@@ -572,14 +609,7 @@ class SignalRManager @Inject constructor(
                     employeeListener?.onDataChange(empSnapshot)
                 }
             }.onFailure { error ->
-                Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
-                if (error.message?.contains("permission", ignoreCase = true) == true) {
-                    permissionDeniedOccurred = true
-                }
-            }
-
-            if (permissionDeniedOccurred) {
-                triggerAuthRecovery("reconcileLiveLocationsNow permission denied")
+                Log.d("SignalRManager", "Immediate employees directory reconciliation skipped (waiting for active listener sync): ${error.message}")
             }
         }
     }
@@ -839,7 +869,7 @@ class SignalRManager @Inject constructor(
         firebaseSync.getGlobalRef().child("owners").child(ownerUid).child("employees")
 
     @Synchronized
-    fun stop() {
+    fun stop(clearState: Boolean = true) {
         val ownerUid = activeOwnerUid
         reconciliationJob?.cancel()
         reconciliationJob = null
@@ -878,15 +908,17 @@ class SignalRManager @Inject constructor(
         locationListener = null
         employeeListener = null
         clientEventsRootListener = null
-        synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
-        _ownerEmployees.value = emptyMap()
-        lastOwnerLiveLocations = emptyMap()
+        if (clearState) {
+            synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
+            _ownerEmployees.value = emptyMap()
+            lastOwnerLiveLocations = emptyMap()
+            _liveLocations.value = emptyMap()
+            lastSuccessfulLiveReadAt = 0L
+        }
         applicationJob?.cancel()
         applicationJob = null
         connectionJob?.cancel()
         connectionJob = null
-        _liveLocations.value = emptyMap()
-        lastSuccessfulLiveReadAt = 0L
         activeOwnerUid = null
     }
 

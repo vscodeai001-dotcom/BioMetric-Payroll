@@ -4437,19 +4437,15 @@ foreach (var point in ordered)
                     .Select(e => e.EmployeeID)
                     .ToHashSet();
 
-                var previousByEmployee =
-                    locations.ToDictionary(
-                        x => x.EmployeeId);
-
-                var nextByEmployee =
-                    new Dictionary<int, LiveEmployeeLocation>();
+                // Merge into dictionary: start with ALL current active employees
+                // so partial patch events from Firebase never wipe unmentioned employees.
+                var mergedByEmployee = locations.ToDictionary(x => x.EmployeeId);
 
                 void ApplyLiveNode(
                     int employeeId,
                     JsonElement node)
                 {
                     if (employeeId <= 0 ||
-                        !validEmployeeIds.Contains(employeeId) ||
                         node.ValueKind != JsonValueKind.Object)
                         return;
 
@@ -4467,6 +4463,7 @@ foreach (var point in ordered)
                             StringComparison.OrdinalIgnoreCase))
                     {
                         // Explicit terminal state is authoritative.
+                        mergedByEmployee.Remove(employeeId);
                         return;
                     }
 
@@ -4475,19 +4472,12 @@ foreach (var point in ordered)
                         node,
                         out var parsed))
                     {
-                        nextByEmployee[employeeId] = parsed;
+                        mergedByEmployee[employeeId] = parsed;
                         return;
                     }
 
-                    // Firebase can briefly expose a partial child while a
-                    // multi-field live update is settling. Preserve the last
-                    // known-good ACTIVE marker rather than making it disappear.
-                    if (previousByEmployee.TryGetValue(
-                            employeeId,
-                            out var previous))
-                    {
-                        nextByEmployee[employeeId] = previous;
-                    }
+                    // If incoming node is partial/malformed, preserve the existing
+                    // known-good active location instead of dropping it.
                 }
 
                 if (root.ValueKind == JsonValueKind.Object)
@@ -4531,28 +4521,7 @@ foreach (var point in ordered)
                 }
 
                 var next =
-                    nextByEmployee.Values.ToList();
-
-                // A root snapshot with data but no parseable ACTIVE/terminal
-                // employee entries is usually a partial reconnect payload.
-                // Never replace a healthy live set with an empty transient set.
-                // Explicit terminal child/session events remain authoritative and
-                // remove employees immediately through their dedicated path.
-                var rootObjectCount =
-                    root.ValueKind == JsonValueKind.Object
-                        ? root.EnumerateObject().Count()
-                        : root.ValueKind == JsonValueKind.Array
-                            ? root.EnumerateArray().Count()
-                            : 0;
-
-                if (rootObjectCount > 0 &&
-                    next.Count == 0 &&
-                    locations.Count > 0)
-                {
-                    lastRefresh = DateTime.Now;
-                    mapNeedsUpdate = false;
-                    return;
-                }
+                    mergedByEmployee.Values.ToList();
 
                 var previousSignature = string.Join(
                     '|',
@@ -5229,13 +5198,8 @@ foreach (var point in ordered)
 
             if (!employeeNode.HasValue || employeeNode.Value.ValueKind == JsonValueKind.Null)
             {
-                var removed = locations.RemoveAll(x => x.EmployeeId == employeeId) > 0;
-                if (removed)
-                {
-                    lastRefresh = DateTime.Now;
-                    mapNeedsUpdate = true;
-                    await InvokeAsync(StateHasChanged);
-                }
+                // A transient null or network timeout is not an authoritative ENDED/OFFLINE signal.
+                // Preserve the last known-good active location instead of dropping it.
                 return;
             }
 

@@ -31,6 +31,7 @@ class FirebaseReconnectCoordinator @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val firebaseSync: FirebaseSyncManager,
     private val hydrator: FirebaseRoomHydrator,
+    private val signalR: SignalRManager,
     private val sessionStore: MobileSessionStore
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -54,15 +55,13 @@ class FirebaseReconnectCoordinator @Inject constructor(
                 if (!connected) return
 
                 // Firebase has resumed transport. Force a full listener rebind so
-                // stale ChildEventListeners (which silently stop delivering updates
-                // after a long background/idle period) are detached and reattached.
-                // Using forceRebind() bypasses the listeners.isNotEmpty() guard that
-                // made hydrator.start() a no-op after a long idle, which was the root
-                // cause of the "no live emp / stale data" bug after hours of inactivity.
+                // stale ChildEventListeners and live-location listeners (which silently stop
+                // delivering updates after a long background/idle period) are detached and reattached.
                 scope.launch {
                     runCatching {
                         firebaseSync.startSync()
                         hydrator.forceRebind("Firebase transport reconnected after idle")
+                        signalR.forceRebind("Firebase transport reconnected after idle")
                         OfflineSyncWorker.schedule(context)
                     }.onFailure {
                         Log.w("FirebaseReconnect", "Reconnect recovery scheduling failed", it)

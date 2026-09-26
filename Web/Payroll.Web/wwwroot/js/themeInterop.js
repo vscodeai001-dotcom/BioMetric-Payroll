@@ -4402,69 +4402,83 @@ window.updateAdminLiveStaffMap =
                     const employeeId =
                         Number(id);
 
-                    if (
-                        !staffIds.has(
-                            employeeId
-                        )
-                    ) {
-                        try {
+                    if (staffIds.has(employeeId)) {
+                        if (state.pendingRemoval) {
+                            delete state.pendingRemoval[employeeId];
+                        }
+                        return;
+                    }
+
+                    // 20-second grace period prevents temporary network gaps or
+                    // partial SSE packets from blinking/removing live markers.
+                    state.pendingRemoval = state.pendingRemoval || {};
+                    const now = Date.now();
+                    if (!state.pendingRemoval[employeeId]) {
+                        state.pendingRemoval[employeeId] = now;
+                        return;
+                    }
+                    if (now - state.pendingRemoval[employeeId] < 20000) {
+                        return;
+                    }
+                    delete state.pendingRemoval[employeeId];
+
+                    try {
+                        state.map.removeLayer(
+                            state.markers[id]
+                        );
+                    }
+                    catch { }
+
+                    try {
+                        if (
+                            state.lines[id]
+                        ) {
                             state.map.removeLayer(
-                                state.markers[id]
+                                state.lines[id]
                             );
                         }
-                        catch { }
-
-                        try {
-                            if (
-                                state.lines[id]
-                            ) {
-                                state.map.removeLayer(
-                                    state.lines[id]
-                                );
-                            }
-                        }
-                        catch { }
-
-                        try {
-                            if (state.trails[id]) {
-                                state.map.removeLayer(state.trails[id]);
-                            }
-                        }
-                        catch { }
-
-                        try {
-                            if (
-                                state.labels[id]
-                            ) {
-                                state.map.removeLayer(
-                                    state.labels[id]
-                                );
-                            }
-                        }
-                        catch { }
-
-                        delete state.markers[id];
-                        delete state.lines[id];
-                        delete state.trails[id];
-                        delete state.trailPoints[id];
-                        delete state.labels[id];
-                        delete state.journeyLabels[id];
-                        try {
-                            if (state.collisionConnectors[id]) {
-                                state.map.removeLayer(state.collisionConnectors[id]);
-                            }
-                        }
-                        catch { }
-                        delete state.collisionConnectors[id];
-                        try { state.roadRouteLines[id] && state.map.removeLayer(state.roadRouteLines[id]); } catch { }
-                        try { state.roadRouteCasings[id] && state.map.removeLayer(state.roadRouteCasings[id]); } catch { }
-                        try { state.routeStates[id]?.controller?.abort(); } catch { }
-                        delete state.roadRouteLines[id];
-                        delete state.roadRouteCasings[id];
-                        delete state.routeStates[id];
-                        delete state.journeyStartedAt[id];
-                        delete state.markerSessions[id];
                     }
+                    catch { }
+
+                    try {
+                        if (state.trails[id]) {
+                            state.map.removeLayer(state.trails[id]);
+                        }
+                    }
+                    catch { }
+
+                    try {
+                        if (
+                            state.labels[id]
+                        ) {
+                            state.map.removeLayer(
+                                state.labels[id]
+                            );
+                        }
+                    }
+                    catch { }
+
+                    delete state.markers[id];
+                    delete state.lines[id];
+                    delete state.trails[id];
+                    delete state.trailPoints[id];
+                    delete state.labels[id];
+                    delete state.journeyLabels[id];
+                    try {
+                        if (state.collisionConnectors[id]) {
+                            state.map.removeLayer(state.collisionConnectors[id]);
+                        }
+                    }
+                    catch { }
+                    delete state.collisionConnectors[id];
+                    try { state.roadRouteLines[id] && state.map.removeLayer(state.roadRouteLines[id]); } catch { }
+                    try { state.roadRouteCasings[id] && state.map.removeLayer(state.roadRouteCasings[id]); } catch { }
+                    try { state.routeStates[id]?.controller?.abort(); } catch { }
+                    delete state.roadRouteLines[id];
+                    delete state.roadRouteCasings[id];
+                    delete state.routeStates[id];
+                    delete state.journeyStartedAt[id];
+                    delete state.markerSessions[id];
                 }
             );
 

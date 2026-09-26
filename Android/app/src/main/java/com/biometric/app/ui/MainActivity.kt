@@ -1340,11 +1340,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 triggerExclusiveRefresh()
                 viewModel.startRealtimeSync()
                 viewModel.triggerRefresh()
-                signalR.start()
-                // Force a canonical Firebase/SSOT live-location read whenever
-                // Admin returns to the foreground. start() also reconciles when
-                // the realtime manager is already running.
-                signalR.reconcileLiveLocationsNow()
+                // Force-rebind Firebase SSOT live location listener on resume so an idle or
+                // backgrounded Admin dashboard never stays disconnected or requires logout/login.
+                signalR.forceRebind("MainActivity onResume")
 
                 val currentLocs = signalR.liveLocations.value.values.toList()
                 if (currentLocs.isNotEmpty()) {
