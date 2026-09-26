@@ -482,7 +482,6 @@ class SignalRManager @Inject constructor(
                         }
                         Log.i("SignalRManager", "Successfully recovered live locations and employees after auth renewal!")
                     }
-                }
             } catch (ex: Exception) {
                 Log.e("SignalRManager", "Auth recovery failed: ${ex.message}", ex)
             } finally {
