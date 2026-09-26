@@ -22,6 +22,7 @@ object MarkerAnimationHelper {
         toPosition: GeoPoint,
         toBearing: Float,
         empId: Int,
+        elapsedMs: Long = 2000L,
         onUpdate: (GeoPoint) -> Unit
     ) {
         activeAnimators[empId]?.cancel()
@@ -35,8 +36,14 @@ object MarkerAnimationHelper {
             if (targetRotation > startRotation) targetRotation -= 360 else targetRotation += 360
         }
 
+        // Animate over 92% of the real GPS-fix interval so the marker appears
+        // to travel continuously between fixes (Zomato/Swiggy-style liveness).
+        // Clamped: minimum 1.5 s so short-burst updates still look smooth;
+        // maximum 65 s for very slow / idle sessions.
+        val animDuration = elapsedMs.coerceIn(1_500L, 65_000L)
+
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 2000L // 2 second transition for extreme smoothness
+            duration = animDuration
             interpolator = LinearInterpolator()
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {

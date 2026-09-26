@@ -1733,7 +1733,7 @@ window.payrollSmoothMoveMarker =
         const duration = Math.max(
             250,
             Math.min(
-                6000,
+                62000,
                 Number(durationMs) || 4000
             )
         );
@@ -4013,22 +4013,18 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
 
             // Match the real GPS cadence while preventing either a jump or
             // an excessively slow animation when the browser/network pauses.
+            // Max is 62 000 ms to cover full 60-second GPS update intervals —
+            // the marker will glide continuously from fix to fix with no jumps.
             const duration =
                 Math.max(
                     1200,
                     Math.min(
-                        8000,
+                        62000,
                         elapsed > 250
                             ? elapsed * 0.92
                             : 2500
                     )
                 );
-
-            if (state.followSelected && Number(state.lastSelectedId) === employeeId && Number(state.lastSelectedId) > 0) {
-                try {
-                    state.map.panTo(displayTarget, { animate: true, duration: 0.7 });
-                } catch { }
-            }
 
             if (typeof window.payrollSmoothMoveMarker === 'function') {
                 window.payrollSmoothMoveMarker(
@@ -4053,6 +4049,32 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                             // Smoother road route line connection without crossing to office
                             window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteLines?.[employeeId], animatedPosition);
                             window.payrollUpdateRouteEmployeeEndpoint(state.roadRouteCasings?.[employeeId], animatedPosition);
+
+                            // Follow the animated marker position in real-time so the camera
+                            // tracks smooth motion rather than snapping to the raw GPS target.
+                            // Auto-zoom-out if the employee drifts near or off the visible edge.
+                            if (state.followSelected && Number(state.lastSelectedId) === employeeId && Number(state.lastSelectedId) > 0) {
+                                try {
+                                    const map = state.map;
+                                    const bounds = map.getBounds();
+                                    const latSpan = bounds.getNorth() - bounds.getSouth();
+                                    const lonSpan = bounds.getEast() - bounds.getWest();
+                                    const margin = 0.18;
+                                    const nearEdge =
+                                        animatedPosition.lat < bounds.getSouth() + latSpan * margin ||
+                                        animatedPosition.lat > bounds.getNorth() - latSpan * margin ||
+                                        animatedPosition.lng < bounds.getWest()  + lonSpan * margin ||
+                                        animatedPosition.lng > bounds.getEast()  - lonSpan * margin;
+                                    if (nearEdge) {
+                                        // Employee approaching viewport edge — zoom out one level to keep them centred
+                                        const currentZoom = map.getZoom();
+                                        const targetZoom = Math.max(currentZoom - 1, 10);
+                                        map.flyTo(animatedPosition, targetZoom, { animate: true, duration: 0.5 });
+                                    } else {
+                                        map.panTo(animatedPosition, { animate: true, duration: 0.3 });
+                                    }
+                                } catch { }
+                            }
                         }
                         catch { }
                     }
@@ -4060,6 +4082,10 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             }
             else {
                 marker.setLatLng(displayTarget);
+                // Fallback synchronous follow when animation is unavailable
+                if (state.followSelected && Number(state.lastSelectedId) === employeeId && Number(state.lastSelectedId) > 0) {
+                    try { state.map.panTo(displayTarget, { animate: true, duration: 0.7 }); } catch { }
+                }
             }
 
             // Keep the visual journey trail continuous between SignalR fixes.
@@ -4715,7 +4741,7 @@ window.updateAdminLiveStaffMap =
                         const moveDuration = Math.max(
                             900,
                             Math.min(
-                                4800,
+                                62000,
                                 elapsed > 250
                                     ? elapsed * 0.9
                                     : 2200
@@ -4752,27 +4778,32 @@ window.updateAdminLiveStaffMap =
                                             )
                                         );
                                     }
+
+                                    // Follow the animated marker in real-time with auto-zoom-out when near the edge.
+                                    if (isSelected && state.followSelected && !isPlayback && Number(selectedId) > 0) {
+                                        try {
+                                            const map = state.map;
+                                            const bounds = map.getBounds();
+                                            const latSpan = bounds.getNorth() - bounds.getSouth();
+                                            const lonSpan = bounds.getEast() - bounds.getWest();
+                                            const margin = 0.18;
+                                            const nearEdge =
+                                                animatedPosition.lat < bounds.getSouth() + latSpan * margin ||
+                                                animatedPosition.lat > bounds.getNorth() - latSpan * margin ||
+                                                animatedPosition.lng < bounds.getWest()  + lonSpan * margin ||
+                                                animatedPosition.lng > bounds.getEast()  - lonSpan * margin;
+                                            if (nearEdge) {
+                                                const targetZoom = Math.max(map.getZoom() - 1, 10);
+                                                map.flyTo(animatedPosition, targetZoom, { animate: true, duration: 0.5 });
+                                            } else {
+                                                map.panTo(animatedPosition, { animate: true, duration: 0.3 });
+                                            }
+                                        } catch { }
+                                    }
                                 }
                                 catch { }
                             }
                         );
-
-                        /*
-                         * Do not auto-fit the camera on every GPS sample.
-                         * Re-centering the Leaflet map for each point causes
-                         * visible screen movement and fights normal map usage.
-                         * The explicit Follow control remains the only automatic
-                         * camera-follow path.
-                         */
-                        if (isSelected && state.followSelected && !isPlayback && Number(selectedId) > 0) {
-                            try {
-                                state.map.panTo(displayPosition, {
-                                    animate: true,
-                                    duration: 0.65,
-                                    easeLinearity: 0.25
-                                });
-                            } catch { }
-                        }
                     }
 
                     state.markers[employeeId]._adminEmployeeName = rawName;

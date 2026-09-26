@@ -133,6 +133,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private val collisionConnectors = mutableMapOf<Int, Polyline>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
+    // Tracks the wall-clock time of the last GPS update per employee so we can
+    // compute a realistic animation duration that spans the full fix interval.
+    private val lastMarkerUpdateAtMs = mutableMapOf<Int, Long>()
     private var lastRenderedLiveSignature: String? = null
     private val adminRoadRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
@@ -372,7 +375,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         map.setBackgroundColor(Color.TRANSPARENT)
         map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         map.minZoomLevel = 3.0
-        map.maxZoomLevel = 20.0
+        map.maxZoomLevel = 19.0 // OSM Mapnik max is 19; z=20 returns HTTP 400 Bad Request
         map.controller.setZoom(14.0)
         map.controller.setCenter(GeoPoint(11.9139, 79.8145))
         applyCurrentThemeToMap(map)
@@ -1014,11 +1017,21 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 m1.alpha = 1f
                 m1.title = employeeName
 
+                // Compute elapsed time since the last GPS fix for this employee so
+                // the animation duration spans the full inter-fix gap (smooth, not jumpy).
+                val nowMs = System.currentTimeMillis()
+                val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: nowMs
+                // Use 92% of the elapsed gap so the next update always finds the marker
+                // already at its destination — this guarantees continuous smooth motion.
+                val gpsElapsedMs = ((nowMs - lastMs) * 0.92).toLong().coerceIn(1_500L, 65_000L)
+                lastMarkerUpdateAtMs[loc.employeeId] = nowMs
+
                 MarkerAnimationHelper.animateMarker(
                     m1, 
                     point, 
                     loc.bearing.toFloat(), 
-                    loc.employeeId
+                    loc.employeeId,
+                    elapsedMs = gpsElapsedMs
                 ) { animatedPoint ->
                     dashboardMap.invalidate()
 
@@ -1047,12 +1060,32 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                             }
                             c.outlinePaint.alpha = casingAlpha
                         }
-                    }
-                }
 
-                // Smoothly follow the selected employee.
-                if (isAdminAutoFocusEnabled && adminFollowingEmployeeId == loc.employeeId) {
-                    dashboardMap.controller.animateTo(point)
+                        // Follow the animated marker position in real-time so the camera
+                        // tracks the smooth motion rather than snapping to the raw GPS target.
+                        if (isAdminAutoFocusEnabled && adminFollowingEmployeeId == loc.employeeId) {
+                            val map = dashboardMap
+                            val bounds = map.boundingBox
+                            val marginFraction = 0.18 // trigger re-center when within 18% of edge
+                            val latSpan = bounds.latNorth - bounds.latSouth
+                            val lonSpan = bounds.lonEast - bounds.lonWest
+                            val nearEdge = animatedPoint.latitude < bounds.latSouth + latSpan * marginFraction
+                                    || animatedPoint.latitude > bounds.latNorth - latSpan * marginFraction
+                                    || animatedPoint.longitude < bounds.lonWest + lonSpan * marginFraction
+                                    || animatedPoint.longitude > bounds.lonEast - lonSpan * marginFraction
+                            if (nearEdge) {
+                                // Employee is near or outside the visible edge — zoom out slightly
+                                // to keep them comfortably centred without disrupting manual zoom.
+                                // Capped at 19.0 max: OSM Mapnik only serves zoom ≤19 (z=20 → HTTP 400).
+                                val currentZoom = map.zoomLevelDouble
+                                val targetZoom = (currentZoom - 1.0).coerceIn(10.0, 19.0)
+                                map.controller.setZoom(targetZoom)
+                                map.controller.animateTo(animatedPoint)
+                            } else {
+                                map.controller.animateTo(animatedPoint)
+                            }
+                        }
+                    }
                 }
 
                 val office = officeMarker?.position

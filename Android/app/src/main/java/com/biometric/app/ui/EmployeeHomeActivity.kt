@@ -123,6 +123,8 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private var isAutoFocusEnabled = false
     private val iconCache = mutableMapOf<String, Drawable>()
     private var lastRoadRouteUpdate: Long = 0L
+    // Tracks when the last GPS sample arrived to compute realistic animation duration
+    private var lastGpsSampleAtMs: Long = 0L
 
     private var showRouteToOffice = false
 
@@ -415,7 +417,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             overlays.add(rotationGestureOverlay)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             minZoomLevel = 3.0
-            maxZoomLevel = 20.0
+            maxZoomLevel = 19.0 // OSM Mapnik max is z=19; z=20 → HTTP 400 Bad Request
             controller.setZoom(16.0)
 
             applyCurrentThemeToMap()
@@ -809,16 +811,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 val etaSec = (distance / 1.4).toInt()
                 b.tvEta.text = if (etaSec < 60) "Soon" else "${etaSec / 60} min"
 
-                // Do not refit the map on every GPS sample. Auto-follow already
-                // moves the camera smoothly when enabled; repeated fitBounds-style
-                // zooming causes visual jumping/flicker.
-                if (isAutoFocusEnabled && isActivityUiActive) {
-                    try {
-                        mapView.controller.animateTo(userPoint)
-                    } catch (_: Exception) {
-                        // Ignore a lifecycle/map transition race.
-                    }
-                }
+                // Auto-follow is driven inside animateMarkerMovement's per-frame callback
+                // so the camera tracks the animated position, not the raw GPS target.
+                // Do NOT call animateTo(userPoint) here — it would cause a camera snap.
                 // Default startup focus: Company and Employee in view
                 if (!hasInitialMapFocused && officeLat != 0.0 && currentLat != 0.0) {
                     hasInitialMapFocused = true
@@ -919,11 +914,22 @@ class EmployeeHomeActivity : MotionBaseActivity() {
             MODE_PRIVATE
         ).getFloat("last_bearing", 0f)
 
+        // Compute elapsed time since the last GPS sample to derive a smooth animation
+        // duration that matches the actual inter-fix cadence of the device's GPS.
+        val nowMs = System.currentTimeMillis()
+        val gpsElapsedMs = if (lastGpsSampleAtMs > 0L) {
+            ((nowMs - lastGpsSampleAtMs) * 0.92).toLong().coerceIn(1_500L, 35_000L)
+        } else {
+            2_500L // first-fix default — safe and fast
+        }
+        lastGpsSampleAtMs = nowMs
+
         MarkerAnimationHelper.animateMarker(
             marker,
             toPosition,
             bearing,
-            sessionStore.employeeId()
+            sessionStore.employeeId(),
+            elapsedMs = gpsElapsedMs
         ) { animatedPoint ->
             // Animation frames can race Activity teardown. Never dereference
             // the ViewBinding unless the Activity is still active and attached.
@@ -948,15 +954,17 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                     }
                 }
 
+                // Follow the animated position in real-time so the camera never
+                // snaps to the raw GPS target while the marker is still in motion.
+                if (isActivityUiActive && isAutoFocusEnabled && !isFinishing && !isDestroyed) {
+                    b.mapview.controller.animateTo(animatedPoint)
+                }
+
                 b.mapview.invalidate()
             }.onFailure {
                 // A lifecycle transition can still race the animation frame.
                 Log.d("EmployeeHome", "Marker animation frame ignored: ${it.message}")
             }
-        }
-
-        if (isActivityUiActive && isAutoFocusEnabled && !isFinishing && !isDestroyed) {
-            _binding?.mapview?.controller?.animateTo(toPosition)
         }
     }
 

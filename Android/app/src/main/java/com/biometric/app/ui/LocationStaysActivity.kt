@@ -36,6 +36,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import org.osmdroid.config.Configuration as OsmConfig
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -548,8 +550,31 @@ class LocationStaysActivity : MotionBaseActivity() {
             try {
                 if (android.location.Geocoder.isPresent()) {
                     val geocoder = android.location.Geocoder(this@LocationStaysActivity, Locale.getDefault())
-                    val list = geocoder.getFromLocation(latitude, longitude, 1)
-                    val addr = list?.firstOrNull()
+                    val addr: android.location.Address? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        suspendCancellableCoroutine { continuation ->
+                            try {
+                                geocoder.getFromLocation(
+                                    latitude,
+                                    longitude,
+                                    1,
+                                    object : android.location.Geocoder.GeocodeListener {
+                                        override fun onGeocode(addresses: MutableList<android.location.Address>) {
+                                            continuation.resume(addresses.firstOrNull())
+                                        }
+
+                                        override fun onError(errorMessage: String?) {
+                                            continuation.resume(null)
+                                        }
+                                    }
+                                )
+                            } catch (_: Exception) {
+                                if (continuation.isActive) continuation.resume(null)
+                            }
+                        }
+                    } else {
+                        @Suppress("DEPRECATION")
+                        geocoder.getFromLocation(latitude, longitude, 1)?.firstOrNull()
+                    }
                     if (addr != null) {
                         val parts = listOfNotNull(
                             addr.thoroughfare?.takeIf { it.isNotBlank() },

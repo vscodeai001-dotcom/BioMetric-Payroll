@@ -532,21 +532,23 @@ class SignalRManager @Inject constructor(
                         email = user.email.orEmpty(),
                         firebaseOwnerUid = sessionStore.firebaseOwnerUid()
                     )
+                    Log.i("SignalRManager", "ID token refreshed for rebind ($reason)")
                 }
             }
             runCatching {
                 FirebaseDatabase.getInstance().goOnline()
             }
-            delay(100L)
+            // Give the Firebase SDK time to internally propagate the new ID token
+            // to the RTDB auth state. 100ms was too short — stale tokens caused
+            // Permission-denied on the first listener attach after foreground resume.
+            delay(800L)
             withContext(Dispatchers.Main.immediate) {
-                val ownerUid = activeOwnerUid ?: firebaseSync.getOwnerUid()
-                val listenersMissing = locationListener == null || employeeListener == null
-                if (listenersMissing || (activeOwnerUid != null && activeOwnerUid != ownerUid)) {
-                    stop(clearState = false)
-                    start()
-                } else {
-                    reconcileLiveLocationsNow()
-                }
+                // Always do a full stop/start so that any listener cancelled with
+                // Permission-denied gets replaced cleanly with the refreshed token.
+                // This is safe because stop(clearState=false) preserves cached locations.
+                stop(clearState = false)
+                delay(100L)
+                start()
             }
         }
     }

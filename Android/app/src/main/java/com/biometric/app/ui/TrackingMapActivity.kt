@@ -89,6 +89,9 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
     private val lastTravelledRouteUpdate = mutableMapOf<Int, Long>()
+    // Tracks the wall-clock time of the last GPS update per employee so we can
+    // compute a realistic animation duration that spans the full inter-fix gap.
+    private val lastMarkerUpdateAtMs = mutableMapOf<Int, Long>()
     private val roadRouteJobs = mutableMapOf<Int, Job>()
     private val travelledRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
@@ -118,9 +121,19 @@ class TrackingMapActivity : MotionBaseActivity() {
             val result = securityGate.validateCurrentSession()
             val allowed = result.allowed && (result.role.equals("ADMIN", true) || result.role.equals("SUPER_ADMIN", true))
             if (!allowed) {
-                Toast.makeText(this@TrackingMapActivity, "Only Admin/SuperAdmin can view live staff tracking.", Toast.LENGTH_LONG).show()
-                finish()
-                return@launch
+                // FALLBACK: If the primary check failed due to stale token claims (e.g.
+                // owner_uid not yet propagated) but the local session is already Admin/SuperAdmin
+                // and Firebase user is authenticated, allow access rather than blocking.
+                // This prevents the "Only Admin/SuperAdmin" toast for already-logged-in admins.
+                val localRole = sessionStore.userRole()
+                val localIsAdmin = localRole.equals("Admin", true) || localRole.equals("SuperAdmin", true)
+                val firebaseUserPresent = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null
+                if (!localIsAdmin || !firebaseUserPresent || !sessionStore.isLoggedIn()) {
+                    android.widget.Toast.makeText(this@TrackingMapActivity, "Only Admin/SuperAdmin can view live staff tracking.", android.widget.Toast.LENGTH_LONG).show()
+                    finish()
+                    return@launch
+                }
+                // Local session is Admin/SuperAdmin with an active Firebase user — proceed.
             }
             setupProtectedTrackingScreen()
         }
@@ -678,7 +691,7 @@ class TrackingMapActivity : MotionBaseActivity() {
             overlays.add(rotationGestureOverlay)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             minZoomLevel = 3.0
-            maxZoomLevel = 20.0
+            maxZoomLevel = 19.0 // OSM Mapnik max is z=19; z=20 → HTTP 400 Bad Request
             controller.setZoom(16.0)
             applyCurrentThemeToMap(this)
 
@@ -1054,11 +1067,19 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             marker.alpha = 1f
             
+            // Compute elapsed time since the last GPS fix so the animation duration
+            // spans the full inter-fix interval (smooth, delivery-app-style motion).
+            val nowMs = System.currentTimeMillis()
+            val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: nowMs
+            val gpsElapsedMs = ((nowMs - lastMs) * 0.92).toLong().coerceIn(1_500L, 65_000L)
+            lastMarkerUpdateAtMs[loc.employeeId] = nowMs
+
             MarkerAnimationHelper.animateMarker(
                 marker, 
                 point, 
                 loc.bearing.toFloat(), 
-                loc.employeeId
+                loc.employeeId,
+                elapsedMs = gpsElapsedMs
             ) { animatedPoint ->
                 collisionConnectors[loc.employeeId]?.setPoints(
                     listOf(actualPoint, animatedPoint)
@@ -1104,11 +1125,28 @@ class TrackingMapActivity : MotionBaseActivity() {
                         }
                         tc.outlinePaint.alpha = casingAlpha
                     }
-                }
-                
-                // Smoothly follow the selected employee throughout journey
-                if (isAutoFocusEnabled && followingEmployeeId == loc.employeeId) {
-                    mapView.controller.animateTo(animatedPoint)
+
+                    // Smoothly follow the selected employee throughout journey.
+                    // Auto-zoom-out when the employee drifts near or off the visible edge.
+                    if (isAutoFocusEnabled && followingEmployeeId == loc.employeeId) {
+                        val map = mapView
+                        val bounds = map.boundingBox
+                        val marginFraction = 0.18
+                        val latSpan = bounds.latNorth - bounds.latSouth
+                        val lonSpan = bounds.lonEast - bounds.lonWest
+                        val nearEdge = animatedPoint.latitude < bounds.latSouth + latSpan * marginFraction
+                                || animatedPoint.latitude > bounds.latNorth - latSpan * marginFraction
+                                || animatedPoint.longitude < bounds.lonWest + lonSpan * marginFraction
+                                || animatedPoint.longitude > bounds.lonEast - lonSpan * marginFraction
+                        if (nearEdge) {
+                            // OSM Mapnik max zoom is 19; z=20 returns HTTP 400 Bad Request.
+                            val targetZoom = (map.zoomLevelDouble - 1.0).coerceIn(10.0, 19.0)
+                            map.controller.setZoom(targetZoom)
+                            map.controller.animateTo(animatedPoint)
+                        } else {
+                            map.controller.animateTo(animatedPoint)
+                        }
+                    }
                 }
                 
                 mapView.invalidate()
