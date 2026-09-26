@@ -83,10 +83,14 @@ class TrackingMapActivity : MotionBaseActivity() {
     private val markers = mutableMapOf<Int, Marker>()
     private val roadLines = mutableMapOf<Int, Polyline>()
     private val roadCasings = mutableMapOf<Int, Polyline>()
+    private val travelledRoadLines = mutableMapOf<Int, Polyline>()
+    private val travelledRoadCasings = mutableMapOf<Int, Polyline>()
     private val collisionConnectors = mutableMapOf<Int, Polyline>()
     private val markerAnimations = mutableMapOf<Int, ValueAnimator>()
     private val lastRouteUpdate = mutableMapOf<Int, Long>()
+    private val lastTravelledRouteUpdate = mutableMapOf<Int, Long>()
     private val roadRouteJobs = mutableMapOf<Int, Job>()
+    private val travelledRouteJobs = mutableMapOf<Int, Job>()
     private val iconCache = mutableMapOf<String, Drawable>()
     private var statusFilter = "All"
     private var searchFilter = ""
@@ -415,6 +419,12 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnMapFit.setOnClickListener {
             resetTrackingMapIdleTimer()
             isAutoFocusEnabled = false
+            followingEmployeeId?.let { prevId ->
+                roadLines[prevId]?.outlinePaint?.alpha = 0
+                roadCasings[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadLines[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadCasings[prevId]?.outlinePaint?.alpha = 0
+            }
             followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
             fitCompanyAndStaff(animated = true)
@@ -424,6 +434,12 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnAdminMapOffice.setOnClickListener {
             resetTrackingMapIdleTimer()
             isAutoFocusEnabled = false
+            followingEmployeeId?.let { prevId ->
+                roadLines[prevId]?.outlinePaint?.alpha = 0
+                roadCasings[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadLines[prevId]?.outlinePaint?.alpha = 0
+                travelledRoadCasings[prevId]?.outlinePaint?.alpha = 0
+            }
             followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = 0.4f
             
@@ -438,8 +454,15 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.btnAdminMapFollow.setOnClickListener {
             resetTrackingMapIdleTimer()
             isAutoFocusEnabled = !isAutoFocusEnabled
-            followingEmployeeId = null
             binding.btnAdminMapFollow.alpha = if (isAutoFocusEnabled) 1.0f else 0.4f
+            if (isAutoFocusEnabled && followingEmployeeId == null) {
+                val firstLive = signalR.liveLocations.value.values.firstOrNull { getLocStatus(it) == "Live" }
+                    ?: signalR.liveLocations.value.values.firstOrNull()
+                if (firstLive != null) {
+                    followingEmployeeId = firstLive.employeeId
+                    updateMapMarkers(signalR.liveLocations.value.values.toList())
+                }
+            }
             Toast.makeText(this, if (isAutoFocusEnabled) "Auto-follow enabled ⦿" else "Auto-follow disabled ◌", Toast.LENGTH_SHORT).show()
         }
 
@@ -457,10 +480,20 @@ class TrackingMapActivity : MotionBaseActivity() {
             resetTrackingMapIdleTimer()
             adminTrailsVisible = !adminTrailsVisible
             val alpha = if (adminTrailsVisible) 255 else 0
-            val casingAlpha = if (adminTrailsVisible) 150 else 0
+            val casingAlpha = if (adminTrailsVisible) 180 else 0
             
-            roadLines.values.forEach { it.outlinePaint.alpha = alpha }
-            roadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
+            val empId = followingEmployeeId
+            if (empId != null) {
+                roadLines[empId]?.let { it.outlinePaint.alpha = alpha }
+                roadCasings[empId]?.let { it.outlinePaint.alpha = casingAlpha }
+                travelledRoadLines[empId]?.let { it.outlinePaint.alpha = alpha }
+                travelledRoadCasings[empId]?.let { it.outlinePaint.alpha = casingAlpha }
+            } else {
+                roadLines.values.forEach { it.outlinePaint.alpha = alpha }
+                roadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
+                travelledRoadLines.values.forEach { it.outlinePaint.alpha = alpha }
+                travelledRoadCasings.values.forEach { it.outlinePaint.alpha = casingAlpha }
+            }
             
             binding.mapview.invalidate()
             Toast.makeText(this, if (adminTrailsVisible) "Trails Enabled ↝" else "Trails Disabled 📍", Toast.LENGTH_SHORT).show()
@@ -522,16 +555,15 @@ class TrackingMapActivity : MotionBaseActivity() {
             val empId = followingEmployeeId
             val empLoc = if (empId != null) signalR.liveLocations.value[empId] else signalR.liveLocations.value.values.firstOrNull()
             if (empLoc != null) {
-                if (officeLat != 0.0 && officeLon != 0.0) {
-                    val points = listOf(GeoPoint(officeLat, officeLon), GeoPoint(empLoc.latitude, empLoc.longitude))
-                    val bounds = BoundingBox.fromGeoPoints(points)
-                    binding.mapview.zoomToBoundingBox(bounds, true, 140)
-                    Toast.makeText(this, "Focusing Office & Selected Staff 🏢📍", Toast.LENGTH_SHORT).show()
-                } else {
-                    binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
-                    binding.mapview.controller.setZoom(17.0)
-                    Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"}", Toast.LENGTH_SHORT).show()
+                isAutoFocusEnabled = true
+                binding.btnAdminMapFollow.alpha = 1.0f
+                if (followingEmployeeId != empLoc.employeeId) {
+                    followingEmployeeId = empLoc.employeeId
+                    updateMapMarkers(signalR.liveLocations.value.values.toList())
                 }
+                binding.mapview.controller.animateTo(GeoPoint(empLoc.latitude, empLoc.longitude))
+                binding.mapview.controller.setZoom(17.0)
+                Toast.makeText(this, "Centered on ${sharedViewModel.allEmployees.value.firstOrNull { it.employeeId == empLoc.employeeId.toString() }?.name ?: "Staff"} ⦿", Toast.LENGTH_SHORT).show()
             } else if (officeLat != 0.0 && officeLon != 0.0) {
                 binding.mapview.controller.animateTo(GeoPoint(officeLat, officeLon))
                 binding.mapview.controller.setZoom(16.0)
@@ -849,10 +881,14 @@ class TrackingMapActivity : MotionBaseActivity() {
             mapView.overlays.remove(markers[id])
             mapView.overlays.remove(roadLines[id])
             mapView.overlays.remove(roadCasings[id])
+            mapView.overlays.remove(travelledRoadLines[id])
+            mapView.overlays.remove(travelledRoadCasings[id])
             mapView.overlays.remove(collisionConnectors[id])
             markers.remove(id)
             roadLines.remove(id)
             roadCasings.remove(id)
+            travelledRoadLines.remove(id)
+            travelledRoadCasings.remove(id)
             collisionConnectors.remove(id)
         }
 
@@ -875,6 +911,8 @@ class TrackingMapActivity : MotionBaseActivity() {
                 collisionConnectors[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                travelledRoadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                travelledRoadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 return@forEach
             }
 
@@ -950,6 +988,14 @@ class TrackingMapActivity : MotionBaseActivity() {
                         // Marker selection is handled by the selected-details rail.
                         // Never open an information popup/snippet above the marker.
                         clicked.closeInfoWindow()
+                        followingEmployeeId?.let { prevId ->
+                            if (prevId != loc.employeeId) {
+                                roadLines[prevId]?.outlinePaint?.alpha = 0
+                                roadCasings[prevId]?.outlinePaint?.alpha = 0
+                                travelledRoadLines[prevId]?.outlinePaint?.alpha = 0
+                                travelledRoadCasings[prevId]?.outlinePaint?.alpha = 0
+                            }
+                        }
                         followingEmployeeId = loc.employeeId
                         isAutoFocusEnabled = true
                         map.controller.animateTo(clicked.position)
@@ -968,8 +1014,11 @@ class TrackingMapActivity : MotionBaseActivity() {
                             status = status
                         )
 
-                        // Immediately trigger route for selected employee
-                        updateActivityRoadRoute(loc.employeeId, actualPoint)
+                        // Immediately trigger travelled route (green) and office route (blue) for selected employee
+                        if (adminTrailsVisible) {
+                            updateSelectedEmployeeJourneyRoute(loc.employeeId, actualPoint)
+                            updateActivityRoadRoute(loc.employeeId, actualPoint)
+                        }
                         true
                     }
                 }
@@ -989,9 +1038,9 @@ class TrackingMapActivity : MotionBaseActivity() {
 
                 // Update road lines synchronously with marker movement
                 runCatching {
-                    val isSelected = followingEmployeeId == loc.employeeId
+                    val isSelected = followingEmployeeId == loc.employeeId && adminTrailsVisible
                     val trailAlpha = if (isSelected) 255 else 0
-                    val casingAlpha = if (isSelected) 150 else 0
+                    val casingAlpha = if (isSelected) 180 else 0
 
                     roadLines[loc.employeeId]?.let { l ->
                         val pts = l.actualPoints.toMutableList()
@@ -1009,9 +1058,27 @@ class TrackingMapActivity : MotionBaseActivity() {
                         }
                         c.outlinePaint.alpha = casingAlpha
                     }
+
+                    // Also synchronize travelled road route endpoint with marker animation
+                    travelledRoadLines[loc.employeeId]?.let { tl ->
+                        val pts = tl.actualPoints.toMutableList()
+                        if (pts.isNotEmpty()) {
+                            pts[pts.size - 1] = animatedPoint
+                            tl.setPoints(pts)
+                        }
+                        tl.outlinePaint.alpha = trailAlpha
+                    }
+                    travelledRoadCasings[loc.employeeId]?.let { tc ->
+                        val pts = tc.actualPoints.toMutableList()
+                        if (pts.isNotEmpty()) {
+                            pts[pts.size - 1] = animatedPoint
+                            tc.setPoints(pts)
+                        }
+                        tc.outlinePaint.alpha = casingAlpha
+                    }
                 }
                 
-                // Smoothly follow the selected employee
+                // Smoothly follow the selected employee throughout journey
                 if (isAutoFocusEnabled && followingEmployeeId == loc.employeeId) {
                     mapView.controller.animateTo(animatedPoint)
                 }
@@ -1036,10 +1103,15 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             // REQUIREMENT: Only show route for selected employee
             if (followingEmployeeId == loc.employeeId) {
-                updateActivityRoadRoute(loc.employeeId, point)
+                if (adminTrailsVisible) {
+                    updateSelectedEmployeeJourneyRoute(loc.employeeId, point)
+                    updateActivityRoadRoute(loc.employeeId, point)
+                }
             } else {
                 roadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
                 roadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                travelledRoadLines[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
+                travelledRoadCasings[loc.employeeId]?.let { it.outlinePaint.alpha = 0 }
             }
             geoPoints.add(point)
         }
@@ -1071,6 +1143,135 @@ class TrackingMapActivity : MotionBaseActivity() {
         return result[0].toDouble().coerceAtLeast(0.0)
     }
 
+    private fun updateSelectedEmployeeJourneyRoute(empId: Int, currentPoint: GeoPoint) {
+        val last = lastTravelledRouteUpdate[empId] ?: 0L
+        if (System.currentTimeMillis() - last < 15000L) return
+
+        travelledRouteJobs[empId]?.cancel()
+        travelledRouteJobs[empId] = lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // Fetch recent tracking history for this employee
+                val history = signalR.loadTrackingHistory(empId, limit = 50)
+                val rawPoints = history.map { GeoPoint(it.latitude, it.longitude) }.toMutableList()
+                if (rawPoints.isEmpty() || distanceMeters(rawPoints.last().latitude, rawPoints.last().longitude, currentPoint.latitude, currentPoint.longitude) > 5.0) {
+                    rawPoints.add(currentPoint)
+                }
+
+                // Filter outliers and duplicates (suppress teleport spikes > 1500m & duplicates < 4m)
+                val filtered = mutableListOf<GeoPoint>()
+                for (pt in rawPoints) {
+                    if (filtered.isEmpty()) {
+                        filtered.add(pt)
+                    } else {
+                        val d = distanceMeters(filtered.last().latitude, filtered.last().longitude, pt.latitude, pt.longitude)
+                        if (d in 4.0..1500.0) {
+                            filtered.add(pt)
+                        }
+                    }
+                }
+                if (filtered.size < 2 && rawPoints.size >= 2) {
+                    filtered.add(rawPoints.last())
+                }
+
+                var snapped: List<GeoPoint> = emptyList()
+                if (filtered.size >= 2) {
+                    // Downsample if too many points for OSRM URL
+                    val sampled = if (filtered.size > 25) {
+                        val step = (filtered.size / 24).coerceAtLeast(1)
+                        val s = mutableListOf<GeoPoint>()
+                        s.add(filtered.first())
+                        for (i in 1 until filtered.size - 1 step step) {
+                            s.add(filtered[i])
+                        }
+                        s.add(filtered.last())
+                        s
+                    } else filtered
+
+                    try {
+                        val coords = sampled.joinToString(";") { "${it.longitude},${it.latitude}" }
+                        val response = osrmApi.getRoute(coords)
+                        if (response.isSuccessful) {
+                            val encoded = response.body()?.routes?.firstOrNull()?.geometry
+                            if (!encoded.isNullOrBlank()) {
+                                snapped = PolylineDecoder.decode(encoded)
+                            }
+                        }
+                    } catch (_: Exception) {}
+
+                    // Fallback to Catmull-Rom smooth spline interpolation if OSRM is unavailable
+                    if (snapped.size < 2) {
+                        snapped = generateSmoothSpline(filtered)
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (_binding != null && followingEmployeeId == empId) {
+                        drawTravelledRoadRoute(empId, snapped)
+                        lastTravelledRouteUpdate[empId] = System.currentTimeMillis()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun drawTravelledRoadRoute(empId: Int, points: List<GeoPoint>) {
+        val mapView = binding.mapview
+        if (points.size < 2) {
+            travelledRoadLines[empId]?.outlinePaint?.alpha = 0
+            travelledRoadCasings[empId]?.outlinePaint?.alpha = 0
+            mapView.invalidate()
+            return
+        }
+
+        val casing = travelledRoadCasings.getOrPut(empId) {
+            Polyline(mapView).apply {
+                outlinePaint.color = Color.WHITE
+                outlinePaint.strokeWidth = 14f
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+                outlinePaint.alpha = 180
+                mapView.overlays.add(0, this)
+            }
+        }
+        val line = travelledRoadLines.getOrPut(empId) {
+            Polyline(mapView).apply {
+                outlinePaint.color = Color.parseColor("#10B981") // Vibrant Emerald Green (Way Arrived)
+                outlinePaint.strokeWidth = 8f
+                outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+                outlinePaint.alpha = 255
+                mapView.overlays.add(1, this)
+            }
+        }
+
+        casing.setPoints(points)
+        casing.outlinePaint.alpha = 180
+        line.setPoints(points)
+        line.outlinePaint.alpha = 255
+        mapView.invalidate()
+    }
+
+    private fun generateSmoothSpline(points: List<GeoPoint>, pointsPerSegment: Int = 5): List<GeoPoint> {
+        if (points.size <= 2) return points
+        val result = mutableListOf<GeoPoint>()
+        for (i in 0 until points.size - 1) {
+            val p0 = if (i > 0) points[i - 1] else points[i]
+            val p1 = points[i]
+            val p2 = points[i + 1]
+            val p3 = if (i < points.size - 2) points[i + 2] else p2
+            for (step in 0 until pointsPerSegment) {
+                val t = step.toDouble() / pointsPerSegment
+                val t2 = t * t
+                val t3 = t2 * t
+                val lat = 0.5 * ((2 * p1.latitude) + (-p0.latitude + p2.latitude) * t + (2 * p0.latitude - 5 * p1.latitude + 4 * p2.latitude - p3.latitude) * t2 + (-p0.latitude + 3 * p1.latitude - 3 * p2.latitude + p3.latitude) * t3)
+                val lng = 0.5 * ((2 * p1.longitude) + (-p0.longitude + p2.longitude) * t + (2 * p0.longitude - 5 * p1.longitude + 4 * p2.longitude - p3.longitude) * t2 + (-p0.longitude + 3 * p1.longitude - 3 * p2.longitude + p3.longitude) * t3)
+                result.add(GeoPoint(lat, lng))
+            }
+        }
+        result.add(points.last())
+        return result
+    }
+
     private fun updateActivityRoadRoute(empId: Int, userPoint: GeoPoint) {
         val last = lastRouteUpdate[empId] ?: 0L
         if (System.currentTimeMillis() - last < 30000L) return
@@ -1078,11 +1279,10 @@ class TrackingMapActivity : MotionBaseActivity() {
         roadRouteJobs[empId]?.cancel()
         roadRouteJobs[empId] = lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val settings = sharedViewModel.selectedShop.value
-                val officeLat = settings?.latitude ?: 11.9416
-                val officeLon = settings?.longitude ?: 79.8083
+                val destLat = if (officeLat != 0.0) officeLat else (sharedViewModel.selectedShop.value?.latitude ?: 11.9416)
+                val destLon = if (officeLon != 0.0) officeLon else (sharedViewModel.selectedShop.value?.longitude ?: 79.8083)
                 
-                val coords = "${userPoint.longitude},${userPoint.latitude};$officeLon,$officeLat"
+                val coords = "${userPoint.longitude},${userPoint.latitude};$destLon,$destLat"
                 val response = osrmApi.getRoute(coords)
                 if (response.isSuccessful) {
                     val encoded = response.body()?.routes?.firstOrNull()?.geometry
@@ -1107,20 +1307,24 @@ class TrackingMapActivity : MotionBaseActivity() {
                 outlinePaint.color = Color.WHITE
                 outlinePaint.strokeWidth = 14f
                 outlinePaint.strokeCap = Paint.Cap.ROUND
-                outlinePaint.alpha = 150
+                outlinePaint.strokeJoin = Paint.Join.ROUND
+                outlinePaint.alpha = 180
                 mapView.overlays.add(0, this)
             }
         }
         val line = roadLines.getOrPut(empId) {
             Polyline(mapView).apply {
-                outlinePaint.color = Color.parseColor("#4F46E5")
+                outlinePaint.color = Color.parseColor("#3B82F6") // Blue for office path as per legend
                 outlinePaint.strokeWidth = 8f
                 outlinePaint.strokeCap = Paint.Cap.ROUND
+                outlinePaint.strokeJoin = Paint.Join.ROUND
                 mapView.overlays.add(1, this)
             }
         }
         casing.setPoints(points)
+        casing.outlinePaint.alpha = 180
         line.setPoints(points)
+        line.outlinePaint.alpha = 255
         mapView.invalidate()
     }
 
@@ -1210,9 +1414,15 @@ class TrackingMapActivity : MotionBaseActivity() {
         officeSettingsJob?.cancel()
         roadRouteJobs.values.forEach { it.cancel() }
         roadRouteJobs.clear()
+        travelledRouteJobs.values.forEach { it.cancel() }
+        travelledRouteJobs.clear()
         markerAnimations.values.forEach { it.cancel() }
         markerAnimations.clear()
         collisionConnectors.clear()
+        roadLines.clear()
+        roadCasings.clear()
+        travelledRoadLines.clear()
+        travelledRoadCasings.clear()
         hideMapControlsRunnable?.let { mapControlsHandler.removeCallbacks(it) }
         trackingMapIdleHandler.removeCallbacks(trackingMapIdleRunnable)
         stopSelectedRailAutoScroll()

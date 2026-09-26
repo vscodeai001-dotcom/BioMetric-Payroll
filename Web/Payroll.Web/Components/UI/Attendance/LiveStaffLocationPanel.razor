@@ -22,43 +22,47 @@
          LIVE STAFF HEADER
          ============================================================ -->
 
-    <div class="live-staff-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="live-staff-header">
 
-        <div class="d-flex align-items-center gap-3">
-            <div class="emoji-icon-badge emoji-icon-badge-primary">
-                📍
+        <div class="live-staff-header-top d-flex justify-content-between align-items-center flex-wrap gap-3">
+
+            <div class="d-flex align-items-center gap-3 live-staff-title-wrap">
+                <div class="emoji-icon-badge emoji-icon-badge-primary flex-shrink-0">
+                    📍
+                </div>
+                <div>
+                    <h5 class="fw-bold mb-0 d-flex align-items-center gap-2 flex-wrap">
+                        <span class="live-staff-title-text">Live Staff GPS Radar</span>
+                        <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-2 py-1 fs-6">🛰️ Active</span>
+                    </h5>
+
+                    <small class="text-muted d-block mt-1 live-staff-subtitle">
+                        ⚡ Real-time employee positioning from active mobile GPS tracking sessions
+                    </small>
+                </div>
             </div>
-            <div>
-                <h5 class="fw-bold mb-0 d-flex align-items-center gap-2">
-                    <span>Live Staff GPS Radar</span>
-                    <span class="badge bg-primary bg-opacity-10 text-primary rounded-pill px-2 py-1 fs-6">🛰️ Active</span>
-                </h5>
 
-                <small class="text-muted">
-                    ⚡ Real-time employee positioning from active mobile GPS tracking sessions
-                </small>
-            </div>
-        </div>
+            <div class="d-flex align-items-center gap-2 live-staff-actions flex-wrap">
 
-        <div class="d-flex align-items-center gap-2 live-staff-actions flex-wrap">
-
-            <span class="live-count badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill fw-semibold" data-live-count-for="@mapId">
-                <span class="pulse-indicator pulse-indicator-success me-1"></span>
-                🟢 @liveCount Live Staff / @employees.Count
-            </span>
-
-            <button type="button"
-                    class="btn btn-outline-primary action-pill-btn btn-sm"
-                    @onclick="RefreshLocations"
-                    disabled="@isRefreshing">
-
-                <i class="bi bi-arrow-clockwise @(isRefreshing ? "spin" : "")"></i>
-
-                <span class="d-none d-md-inline ms-1">
-                    🔄 Refresh
+                <span class="live-count badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill fw-semibold" data-live-count-for="@mapId">
+                    <span class="pulse-indicator pulse-indicator-success me-1"></span>
+                    🟢 @liveCount Live Staff / @employees.Count
                 </span>
 
-            </button>
+                <button type="button"
+                        class="btn btn-outline-primary action-pill-btn btn-sm"
+                        @onclick="RefreshLocations"
+                        disabled="@isRefreshing">
+
+                    <i class="bi bi-arrow-clockwise @(isRefreshing ? "spin" : "")"></i>
+
+                    <span class="d-none d-md-inline ms-1">
+                        🔄 Refresh
+                    </span>
+
+                </button>
+
+            </div>
 
         </div>
 
@@ -165,6 +169,9 @@
                     <i class="bi bi-dash-lg"></i>
                 </button>
                 <div class="floating-nav-divider"></div>
+                <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'follow')" title="Toggle Auto-Follow Selected Staff" aria-label="Follow Selected">
+                    <i class="bi bi-geo"></i>
+                </button>
                 <button type="button" class="floating-nav-btn" onclick="window.handlePremiumAdminMapAction('@mapId', 'recenter')" title="Recenter Selected / Staff" aria-label="Recenter Target">
                     <i class="bi bi-crosshair2"></i>
                 </button>
@@ -197,7 +204,9 @@
             }
 
             <div class="map-live-legend">
-                <span><i class="legend-dot within"></i> Within range</span>
+                <span><span class="legend-line arrived-route"></span> Way Arrived (Green Route)</span>
+                <span><span class="legend-line office-route"></span> Office Path</span>
+                <span><i class="legend-dot within"></i> Inside range</span>
                 <span><i class="legend-dot outside"></i> Outside range</span>
             </div>
 
@@ -1422,6 +1431,24 @@
         backdrop-filter: blur(14px) saturate(1.15);
         box-shadow: 0 12px 30px rgba(2,8,23,.24);
         font-size: .63rem;
+    }
+    .legend-line {
+        display: inline-block;
+        width: 14px;
+        height: 4px;
+        border-radius: 2px;
+        vertical-align: middle;
+        margin-right: 4px;
+    }
+    .legend-line.arrived-route {
+        background: #10b981;
+        border: 1px solid #ffffff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+    .legend-line.office-route {
+        background: #1688ff;
+        border: 1px solid #ffffff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.35);
     }
 
     /* Raw GPS samples are intentionally not rendered as straight-line trails.
@@ -2970,98 +2997,158 @@
     .payroll-employee-map-accuracy { color:#9fb0c7; }
     .payroll-map-fullscreen { border-radius:0 !important; }
 
-    /* Selected employee intelligence rail: compact, centered in the Live Staff header. */
+    /* ============================================================
+       PROFESSIONAL RESPONSIVE LIVE STAFF HEADER & TELEMETRY RAIL
+       ============================================================ */
     .live-staff-header {
-        position:relative;
-        display:grid !important;
-        grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-        align-items:center;
-        gap:12px;
-        min-height:92px;
-        padding:12px 14px !important;
+        position: relative !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        padding: 16px 20px !important;
+        background: var(--bs-card-bg, #ffffff) !important;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+        box-sizing: border-box !important;
+        width: 100% !important;
+        min-height: auto !important;
     }
-    .live-staff-header > div:first-child { grid-column:1; min-width:0; }
-    .live-staff-header .live-staff-actions { grid-column:3; justify-self:end; min-width:0; z-index:3; }
-    .live-staff-header .admin-selected-employee-rail {
-        grid-column:2;
-        grid-row:1;
-        position:relative;
-        top:auto; left:auto; right:auto;
-        width:min(50vw,620px);
-        height:62px;
-        z-index:4;
-        margin:0;
-        box-sizing:border-box;
+
+    body.dark .live-staff-header,
+    [data-theme="dark"] .live-staff-header,
+    [data-bs-theme="dark"] .live-staff-header {
+        background: #1b2635 !important;
+        border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    .live-staff-header-top {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+
+    .live-staff-title-wrap {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .live-staff-title-text {
+        font-size: 1.15rem;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+    }
+
+    .live-staff-subtitle {
+        font-size: 0.82rem;
+        color: #64748b;
+        line-height: 1.35;
+    }
+
+    body.dark .live-staff-subtitle,
+    [data-theme="dark"] .live-staff-subtitle,
+    [data-bs-theme="dark"] .live-staff-subtitle {
+        color: #94a3b8 !important;
+    }
+
+    .live-staff-actions {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+
+    /* Selected employee telemetry rail: elegant, full-width, non-overlapping */
+    .admin-selected-employee-rail {
+        position: relative !important;
+        top: auto !important;
+        left: auto !important;
+        right: auto !important;
+        bottom: auto !important;
+        width: 100% !important;
+        height: 68px !important;
+        margin: 2px 0 0 0 !important;
+        z-index: 5 !important;
+        overflow: hidden !important;
+        border: 1px solid var(--admin-selected-rail-border, rgba(15,23,42,.12)) !important;
+        border-radius: 14px !important;
+        background: var(--admin-selected-rail-bg, rgba(255,255,255,.96)) !important;
+        box-shadow: 0 4px 16px var(--admin-selected-rail-shadow, rgba(15,23,42,.06)) !important;
+        color: var(--admin-selected-rail-text, var(--bs-body-color,#172238)) !important;
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        outline: none;
+        box-sizing: border-box !important;
     }
 
     .admin-selected-employee-rail {
-        background:var(--admin-selected-rail-bg,rgba(255,255,255,.96));
-        border-color:var(--admin-selected-rail-border,rgba(15,23,42,.12));
-        color:var(--admin-selected-rail-text,var(--bs-body-color,#172238));
-        box-shadow:0 8px 22px var(--admin-selected-rail-shadow,rgba(15,23,42,.10));
+        background: var(--admin-selected-rail-bg, rgba(255,255,255,.96));
+        border-color: var(--admin-selected-rail-border, rgba(15,23,42,.12));
+        color: var(--admin-selected-rail-text, var(--bs-body-color,#172238));
+        box-shadow: 0 6px 20px var(--admin-selected-rail-shadow, rgba(15,23,42,.08));
     }
     .admin-selected-rail-item {
-        background:var(--admin-selected-item-bg,rgba(248,250,252,.92));
-        border-color:var(--admin-selected-item-border,rgba(100,116,139,.14));
+        background: var(--admin-selected-item-bg, rgba(248,250,252,.92));
+        border-color: var(--admin-selected-item-border, rgba(100,116,139,.14));
     }
-    .admin-selected-rail-item .rail-label { color:var(--admin-selected-label,#68778c); }
-    .admin-selected-rail-item small { color:var(--admin-selected-muted,#718096); }
+    .admin-selected-rail-item .rail-label { color: var(--admin-selected-label, #68778c); }
+    .admin-selected-rail-item small { color: var(--admin-selected-muted, #718096); }
+
     [data-theme="dark"] .admin-selected-employee-rail,
     [data-bs-theme="dark"] .admin-selected-employee-rail,
     body.dark .admin-selected-employee-rail {
-        --admin-selected-rail-bg:rgba(12,18,30,.94);
-        --admin-selected-rail-border:rgba(255,255,255,.14);
-        --admin-selected-rail-text:#eef5ff;
-        --admin-selected-rail-shadow:rgba(2,8,23,.30);
-        --admin-selected-item-bg:rgba(255,255,255,.065);
-        --admin-selected-item-border:rgba(148,163,184,.16);
-        --admin-selected-label:#9fb0c7;
-        --admin-selected-muted:#aebdd0;
-    }
-    @@media (max-width: 1050px) {
-        .live-staff-header { grid-template-columns:minmax(0,1fr) auto; }
-        .live-staff-header .admin-selected-employee-rail { grid-column:1 / -1; grid-row:2; width:min(100%,760px); justify-self:center; }
-        .live-staff-header .live-staff-actions { grid-column:2; grid-row:1; }
-        .live-staff-header { padding-bottom:10px !important; }
-    }
-    @@media (max-width: 600px) {
-        .live-staff-header { grid-template-columns:1fr auto; min-height:145px; gap:8px; }
-        .live-staff-header > div:first-child { grid-column:1; grid-row:1; }
-        .live-staff-header .live-staff-actions { grid-column:2; grid-row:1; }
-        .live-staff-header .admin-selected-employee-rail { grid-column:1 / -1; grid-row:2; width:100%; height:58px; }
+        --admin-selected-rail-bg: rgba(12, 18, 30, .94);
+        --admin-selected-rail-border: rgba(255, 255, 255, .14);
+        --admin-selected-rail-text: #eef5ff;
+        --admin-selected-rail-shadow: rgba(2, 8, 23, .30);
+        --admin-selected-item-bg: rgba(255, 255, 255, .065);
+        --admin-selected-item-border: rgba(148, 163, 184, .16);
+        --admin-selected-label: #9fb0c7;
+        --admin-selected-muted: #aebdd0;
     }
 
-    .admin-selected-employee-rail {
-        position:absolute;
-        left:10px;
-        right:10px;
-        top:66px;
-        z-index:1300;
-        height:74px;
-        overflow:hidden;
-        border:1px solid rgba(255,255,255,.16);
-        border-radius:14px;
-        background:rgba(12,18,30,.84);
-        backdrop-filter:blur(16px);
-        -webkit-backdrop-filter:blur(16px);
-        box-shadow:0 10px 28px rgba(2,8,23,.28);
-        color:#eef5ff;
-        outline:none;
+    @@media (max-width: 768px) {
+        .live-staff-header {
+            padding: 12px 14px !important;
+            gap: 10px !important;
+        }
+        .live-staff-header-top {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 10px !important;
+        }
+        .live-staff-actions {
+            width: 100% !important;
+            justify-content: space-between !important;
+        }
+        .live-staff-title-text {
+            white-space: normal !important;
+            font-size: 1.05rem !important;
+        }
+        .admin-selected-employee-rail {
+            height: 64px !important;
+        }
     }
+
     .admin-selected-employee-rail-fullscreen {
-        position:absolute !important;
-        top:12px !important;
-        left:50% !important;
-        right:auto !important;
-        transform:translateX(-50%) !important;
-        width:min(82vw,900px) !important;
-        height:74px !important;
-        z-index:1600 !important;
-        pointer-events:auto !important;
-        display:block !important;
+        position: absolute !important;
+        top: 14px !important;
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(-50%) !important;
+        width: min(90vw, 980px) !important;
+        height: 72px !important;
+        z-index: 1600 !important;
+        pointer-events: auto !important;
+        display: block !important;
+        border-radius: 16px !important;
+        box-shadow: 0 12px 36px rgba(2, 8, 23, 0.42) !important;
     }
     .payroll-map-fullscreen .admin-selected-employee-rail-fullscreen {
-        box-shadow:0 12px 32px rgba(2,8,23,.34);
+        box-shadow: 0 12px 32px rgba(2, 8, 23, .34);
     }
 
     .admin-selected-employee-rail-track {
@@ -3122,13 +3209,13 @@
         text-overflow:ellipsis;
     }
     @@media (max-width:900px) {
-        .admin-selected-employee-rail { top:72px; left:8px; right:8px; height:68px; }
+        .admin-selected-employee-rail { height:64px !important; }
         .admin-selected-rail-item { min-width:116px; }
         .admin-selected-rail-item.identity { min-width:160px; }
         .admin-selected-rail-item.address { min-width:230px; }
     }
     @@media (max-width:600px) {
-        .admin-selected-employee-rail { top:106px; left:8px; right:8px; height:62px; }
+        .admin-selected-employee-rail { height:60px !important; }
         .admin-selected-rail-item { min-width:108px; padding:6px 8px; }
         .admin-selected-rail-item.identity { min-width:145px; }
         .admin-selected-rail-item.address { min-width:205px; }

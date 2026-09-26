@@ -1895,28 +1895,114 @@ window.payrollFetchRoadRoute = async function (from, to, options = {}) {
     const a = [Number(from[0]), Number(from[1])];
     const b = [Number(to[0]), Number(to[1])];
     if (![...a, ...b].every(Number.isFinite)) return null;
-    const base = String(window.payrollRoutingServiceUrl || '').replace(/\/$/, '');
+    const base = String(window.payrollRoutingServiceUrl || 'https://router.project-osrm.org').replace(/\/$/, '');
     if (!base) return null;
     const url = `${base}/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson&steps=true&annotations=false`;
-    const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', signal: options.controller?.signal });
-    if (!response.ok) throw new Error(`Routing service HTTP ${response.status}`);
-    const data = await response.json();
-    if (data.code !== 'Ok' || !data.routes?.[0]) return null;
-    const route = data.routes[0];
-    const geometry = (route.geometry?.coordinates || [])
-        .filter(c => Array.isArray(c) && c.length >= 2)
-        .map(c => [Number(c[1]), Number(c[0])])
-        .filter(c => c.every(Number.isFinite));
-    if (geometry.length < 2) return null;
-    const steps = (route.legs || []).flatMap(leg => Array.isArray(leg.steps) ? leg.steps : [])
-        .filter(step => step && (step.name || step.ref));
+    try {
+        const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', signal: options.controller?.signal });
+        if (!response.ok) throw new Error(`Routing service HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.code !== 'Ok' || !data.routes?.[0]) return null;
+        const route = data.routes[0];
+        const geometry = (route.geometry?.coordinates || [])
+            .filter(c => Array.isArray(c) && c.length >= 2)
+            .map(c => [Number(c[1]), Number(c[0])])
+            .filter(c => c.every(Number.isFinite));
+        if (geometry.length < 2) return null;
+        const steps = (route.legs || []).flatMap(leg => Array.isArray(leg.steps) ? leg.steps : [])
+            .filter(step => step && (step.name || step.ref));
+        return {
+            distanceMeters: Number(route.distance) || 0,
+            durationSeconds: Number(route.duration) || 0,
+            geometry,
+            steps,
+            generatedAt: Date.now()
+        };
+    } catch (err) {
+        if (err?.name !== 'AbortError') console.warn('Road route fetch failed:', err);
+        return null;
+    }
+};
+
+window.payrollFetchMultiPointRoadRoute = async function (rawPoints, options = {}) {
+    if (!Array.isArray(rawPoints) || rawPoints.length < 2) return null;
+    const valid = rawPoints
+        .map(p => [Number(p[0] ?? p.latitude ?? p.lat), Number(p[1] ?? p.longitude ?? p.lng ?? p.lon)])
+        .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (valid.length < 2) return null;
+
+    // Filter outlier spikes (jumps > 1000m between consecutive samples)
+    const cleaned = [valid[0]];
+    for (let i = 1; i < valid.length; i++) {
+        const d = window.payrollHaversineMeters(cleaned[cleaned.length - 1], valid[i]);
+        if (d > 0.5 && d < 2000) {
+            cleaned.push(valid[i]);
+        }
+    }
+    if (cleaned.length < 2) cleaned.push(valid[valid.length - 1]);
+
+    // Downsample for OSRM URL limits (min 20m apart, max 30 points)
+    const waypoints = [cleaned[0]];
+    for (let i = 1; i < cleaned.length - 1; i++) {
+        const d = window.payrollHaversineMeters(waypoints[waypoints.length - 1], cleaned[i]);
+        if (d >= 25) waypoints.push(cleaned[i]);
+    }
+    waypoints.push(cleaned[cleaned.length - 1]);
+    const sampled = waypoints.length > 30
+        ? waypoints.filter((_, idx) => idx === 0 || idx === waypoints.length - 1 || idx % Math.ceil(waypoints.length / 28) === 0)
+        : waypoints;
+
+    const base = String(window.payrollRoutingServiceUrl || 'https://router.project-osrm.org').replace(/\/$/, '');
+    const coordString = sampled.map(p => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';');
+    const url = `${base}/route/v1/driving/${coordString}?overview=full&geometries=geojson&steps=false&annotations=false`;
+
+    try {
+        const response = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store', signal: options.controller?.signal });
+        if (response.ok) {
+            const data = await response.json();
+            if (data.code === 'Ok' && data.routes?.[0]?.geometry?.coordinates) {
+                const geom = data.routes[0].geometry.coordinates
+                    .filter(c => Array.isArray(c) && c.length >= 2)
+                    .map(c => [Number(c[1]), Number(c[0])]);
+                if (geom.length >= 2) {
+                    return {
+                        distanceMeters: Number(data.routes[0].distance) || 0,
+                        durationSeconds: Number(data.routes[0].duration) || 0,
+                        geometry: geom,
+                        isSnapped: true
+                    };
+                }
+            }
+        }
+    } catch (_) { }
+
+    // Fallback: smooth spline interpolation so path curves organically instead of harsh straight-line chords
     return {
-        distanceMeters: Number(route.distance) || 0,
-        durationSeconds: Number(route.duration) || 0,
-        geometry,
-        steps,
-        generatedAt: Date.now()
+        geometry: window.payrollGenerateSmoothSpline(cleaned),
+        isSnapped: false
     };
+};
+
+window.payrollGenerateSmoothSpline = function (points, pointsPerSegment = 5) {
+    if (!Array.isArray(points) || points.length < 2) return points || [];
+    if (points.length === 2) return points;
+    const result = [];
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = i > 0 ? points[i - 1] : points[i];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = i < points.length - 2 ? points[i + 2] : p2;
+        for (let step = 0; step < pointsPerSegment; step++) {
+            const t = step / pointsPerSegment;
+            const t2 = t * t;
+            const t3 = t2 * t;
+            const lat = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2 + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3);
+            const lng = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2 + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3);
+            result.push([lat, lng]);
+        }
+    }
+    result.push(points[points.length - 1]);
+    return result;
 };
 
 window.payrollGetNextRoadName = function (route) {
@@ -4271,9 +4357,13 @@ window.updateAdminLiveStaffMap =
                     if (!previousPoint ||
                         previousPoint[0] !== position[0] ||
                         previousPoint[1] !== position[1]) {
-                        points.push(position);
-                        if (points.length > 60) {
-                            points.shift();
+                        // Suppress GPS teleport spikes (> 1500m jumps between consecutive samples)
+                        const jumpDist = previousPoint ? window.payrollHaversineMeters(previousPoint, position) : 0;
+                        if (!previousPoint || (jumpDist > 1 && jumpDist < 2500)) {
+                            points.push(position);
+                            if (points.length > 80) {
+                                points.shift();
+                            }
                         }
                     }
 
@@ -4493,34 +4583,75 @@ window.updateAdminLiveStaffMap =
                         state.lastLocationAt[employeeId] = Date.now();
                     }
 
-                    // Default live map is marker-only. The selected employee
-                    // may show the existing route/trail; unselected employees
-                    // never create or display route lines.
+                    // Professional road-snapped travelled route for the selected employee ("which way he came").
+                    // Follows streets cleanly (Swiggy/Zomato style) with green fill and white casing; never sharp straight lines.
                     if (isSelected && points.length > 1) {
-                        if (!state.trails[employeeId]) {
-                            state.trails[employeeId] = L.polyline(
-                                points,
+                        state.trailCasings = state.trailCasings || {};
+                        state.travelledRouteState = state.travelledRouteState || {};
+
+                        if (!state.trailCasings[employeeId]) {
+                            state.trailCasings[employeeId] = L.polyline(
+                                window.payrollGenerateSmoothSpline(points),
                                 {
-                                    color: markerColor,
-                                    weight: 5,
-                                    opacity: .9,
-                                    dashArray: null
+                                    color: '#ffffff',
+                                    weight: 8,
+                                    opacity: 0.85,
+                                    lineCap: 'round',
+                                    lineJoin: 'round'
                                 }
                             ).addTo(state.map);
                         }
-                        else {
-                            state.trails[employeeId].setLatLngs(points);
-                            state.trails[employeeId].setStyle({
-                                color: markerColor,
-                                weight: 5,
-                                opacity: .9,
-                                dashArray: null
-                            });
+
+                        if (!state.trails[employeeId]) {
+                            state.trails[employeeId] = L.polyline(
+                                window.payrollGenerateSmoothSpline(points),
+                                {
+                                    color: '#10b981',
+                                    weight: 5,
+                                    opacity: 0.98,
+                                    lineCap: 'round',
+                                    lineJoin: 'round'
+                                }
+                            ).addTo(state.map);
+                        }
+
+                        const trs = state.travelledRouteState[employeeId] || {};
+                        state.travelledRouteState[employeeId] = trs;
+                        const lastPoint = points[points.length - 1];
+                        const lastRouted = trs.lastPoint;
+                        const hasMovedEnough = !lastRouted || window.payrollHaversineMeters(lastRouted, lastPoint) >= 20 || trs.lastCount !== points.length;
+
+                        if (hasMovedEnough && !trs.fetching) {
+                            trs.fetching = true;
+                            trs.lastPoint = [lastPoint[0], lastPoint[1]];
+                            trs.lastCount = points.length;
+
+                            window.payrollFetchMultiPointRoadRoute(points)
+                                .then(function (result) {
+                                    if (!result?.geometry || Number(selectedId) !== employeeId) return;
+                                    if (state.trailCasings[employeeId]) {
+                                        state.trailCasings[employeeId].setLatLngs(result.geometry);
+                                    }
+                                    if (state.trails[employeeId]) {
+                                        state.trails[employeeId].setLatLngs(result.geometry);
+                                    }
+                                })
+                                .catch(function () { })
+                                .finally(function () { trs.fetching = false; });
                         }
                     }
-                    else if (state.trails[employeeId]) {
-                        try { state.map.removeLayer(state.trails[employeeId]); } catch (e) { }
-                        delete state.trails[employeeId];
+                    else {
+                        if (state.trails[employeeId]) {
+                            try { state.map.removeLayer(state.trails[employeeId]); } catch (e) { }
+                            delete state.trails[employeeId];
+                        }
+                        if (state.trailCasings?.[employeeId]) {
+                            try { state.map.removeLayer(state.trailCasings[employeeId]); } catch (e) { }
+                            delete state.trailCasings[employeeId];
+                        }
+                        if (state.travelledRouteState?.[employeeId]) {
+                            delete state.travelledRouteState[employeeId];
+                        }
                     }
 
                     if (hasCollisionOffset) {
@@ -4557,21 +4688,31 @@ window.updateAdminLiveStaffMap =
 
                     if (state.trails[employeeId]) {
                         state.trails[employeeId].setStyle({
-                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : (isSelected ? .9 : .45)
+                            color: '#10b981',
+                            weight: 5,
+                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : (isSelected ? .98 : 0)
+                        });
+                    }
+                    if (state.trailCasings?.[employeeId]) {
+                        state.trailCasings[employeeId].setStyle({
+                            color: '#ffffff',
+                            weight: 8,
+                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : (isSelected ? .85 : 0)
                         });
                     }
 
                     if (state.roadRouteLines[employeeId]) {
                         state.roadRouteLines[employeeId].setStyle({
                             color: '#1688ff',
-                            weight: isSelected ? 6 : 4,
-                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : (isSelected ? .98 : .72)
+                            weight: isSelected ? 5 : 3.5,
+                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : (isSelected ? .95 : .6)
                         });
                     }
                     if (state.roadRouteCasings[employeeId]) {
                         state.roadRouteCasings[employeeId].setStyle({
-                            weight: isSelected ? 9 : 7,
-                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : .72
+                            color: '#ffffff',
+                            weight: isSelected ? 8 : 6,
+                            opacity: Number(selectedId) > 0 && !isSelected ? 0 : .65
                         });
                     }
 
@@ -5521,23 +5662,36 @@ window.updateAdminHistoryRoute =
                     }
                 );
 
-            const routeColor =
-                '#0d6efd';
+            const initialSmooth = window.payrollGenerateSmoothSpline(route);
 
-            state.historyRoute =
-                L.polyline(
-                    route,
-                    {
-                        color:
-                            routeColor,
-                        weight: 5,
-                        opacity: .85,
-                        lineJoin: 'round',
-                        lineCap: 'round'
-                    }
-                ).addTo(
-                    state.map
-                );
+            state.historyRouteCasing = L.polyline(
+                initialSmooth,
+                {
+                    color: '#ffffff',
+                    weight: 8,
+                    opacity: 0.85,
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                }
+            ).addTo(state.map);
+
+            state.historyRoute = L.polyline(
+                initialSmooth,
+                {
+                    color: '#10b981',
+                    weight: 5,
+                    opacity: 0.95,
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                }
+            ).addTo(state.map);
+
+            window.payrollFetchMultiPointRoadRoute(route).then(function (res) {
+                if (res?.geometry && state.historyRoute && state.historyRouteCasing) {
+                    state.historyRouteCasing.setLatLngs(res.geometry);
+                    state.historyRoute.setLatLngs(res.geometry);
+                }
+            }).catch(function () { });
 
             state.historyMarkers = [];
 
@@ -5875,7 +6029,17 @@ window.clearAdminHistoryRoute =
         }
         catch { }
 
+        try {
+            if (state.historyRouteCasing) {
+                state.map.removeLayer(
+                    state.historyRouteCasing
+                );
+            }
+        }
+        catch { }
+
         state.historyRoute = null;
+        state.historyRouteCasing = null;
         state.historyMarkers = [];
         state.historyStartMarker = null;
         state.historyEndMarker = null;
@@ -6293,14 +6457,27 @@ window.startAdminHistoryPlayback =
                 }
             );
 
+            playback.travelledCasing = L.polyline(
+                points.slice(0, initialIndex + 1).map(function (point) {
+                    return [point.latitude, point.longitude];
+                }),
+                {
+                    color: "#ffffff",
+                    weight: 9,
+                    opacity: 0.85,
+                    lineJoin: "round",
+                    lineCap: "round"
+                }
+            ).addTo(state.map);
+
             playback.travelledLine = L.polyline(
                 points.slice(0, initialIndex + 1).map(function (point) {
                     return [point.latitude, point.longitude];
                 }),
                 {
-                    color: "#1688ff",
-                    weight: 6,
-                    opacity: 0.95,
+                    color: "#10b981",
+                    weight: 5.5,
+                    opacity: 0.98,
                     lineJoin: "round",
                     lineCap: "round"
                 }
@@ -6313,8 +6490,8 @@ window.startAdminHistoryPlayback =
                 {
                     color: "#94a3b8",
                     weight: 4,
-                    opacity: 0.55,
-                    dashArray: "7,8",
+                    opacity: 0.6,
+                    dashArray: "6,6",
                     lineJoin: "round",
                     lineCap: "round"
                 }
@@ -6422,6 +6599,9 @@ window.resumeAdminHistoryPlayback =
 
                     travelled.push(position);
                     live.travelledLine.setLatLngs(travelled);
+                    if (live.travelledCasing) {
+                        live.travelledCasing.setLatLngs(travelled);
+                    }
                 }
 
                 if (live.remainingLine) {
@@ -6570,6 +6750,7 @@ window.stopAdminHistoryPlayback =
             if (state?.map) {
                 [
                     playback.marker,
+                    playback.travelledCasing,
                     playback.travelledLine,
                     playback.remainingLine,
                     playback.startMarker,
@@ -6950,14 +7131,31 @@ window.initializeLocationStayHistoryMap = async function (mapId, payload) {
             .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
 
         if (path.length > 1) {
-            L.polyline(path, {
-                color: '#0d6efd',
-                weight: 4,
-                opacity: .72,
+            const initialSmooth = window.payrollGenerateSmoothSpline(path);
+            const pathCasing = L.polyline(initialSmooth, {
+                color: '#ffffff',
+                weight: 7,
+                opacity: .85,
                 lineCap: 'round',
                 lineJoin: 'round'
             }).addTo(map);
+
+            const pathLine = L.polyline(initialSmooth, {
+                color: '#10b981',
+                weight: 4.5,
+                opacity: .95,
+                lineCap: 'round',
+                lineJoin: 'round'
+            }).addTo(map);
+
             path.forEach(p => bounds.push(p));
+
+            window.payrollFetchMultiPointRoadRoute(path).then(function (res) {
+                if (res?.geometry && pathLine && pathCasing) {
+                    pathCasing.setLatLngs(res.geometry);
+                    pathLine.setLatLngs(res.geometry);
+                }
+            }).catch(function () { });
         }
 
         stays.forEach((stay, index) => {
