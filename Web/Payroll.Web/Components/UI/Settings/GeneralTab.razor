@@ -94,9 +94,11 @@
             <div class="col-12">
                 <div class="border rounded p-2 bg-body-tertiary">
                     <label class="small fw-bold text-primary">Live Tracking Map Marker Style</label>
-                    <select class="form-select form-select-sm" @bind="Settings.UseSpeedBasedMarkers">
+                    <select class="form-select form-select-sm" 
+                            value="@(Settings.UseSpeedBasedMarkers ? "true" : "false")" 
+                            @onchange="OnMarkerStyleChanged">
                         <option value="false">Default Avatar Markers (Initial avatar + status dot)</option>
-                        <option value="true">Speed-Based Movement Markers (🧍 Stopped, 🚶 Walking, 🛵 Slow, 🚗 City, 🏎️ Fast, ✈️ Aircraft...)</option>
+                        <option value="true">Speed-Based Movement Markers (Dynamic vehicle icons: 🚶 🛵 🚗 🏎️ ✈️)</option>
                     </select>
                     <small class="text-muted">Controls whether live employee pins on Web & Android maps show classic initials or dynamic movement vehicle icons matching their current speed.</small>
                 </div>
@@ -147,5 +149,10 @@
     {
         if (int.TryParse(e.Value?.ToString(), out var seconds))
             await TrackingIntervalSecondsChanged.InvokeAsync(seconds);
+    }
+
+    private void OnMarkerStyleChanged(ChangeEventArgs e)
+    {
+        Settings.UseSpeedBasedMarkers = string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
     }
 }

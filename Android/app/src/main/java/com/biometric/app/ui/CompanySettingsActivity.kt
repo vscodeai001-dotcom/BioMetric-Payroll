@@ -88,6 +88,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
         "200 metres" to 200
     )
 
+    private val markerStyleLabels = listOf(
+        "Default Avatar Markers (initials + status dot)" to false,
+        "Speed-Based Movement Markers (🚶 🛵 🚗 🏎️ ✈️)" to true
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityCompanySettingsBinding.inflate(layoutInflater)
@@ -157,6 +162,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
         val stayRadiusAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, stayRadiusLabels.map { it.first })
         binding.spinnerStayClusterRadius.setAdapter(stayRadiusAdapter)
+
+        val markerStyleAdapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, markerStyleLabels.map { it.first })
+        binding.spinnerMarkerStyle.setAdapter(markerStyleAdapter)
     }
 
     private fun setupListeners() {
@@ -312,6 +320,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
             ?: stayRadiusLabels.find { it.second == 50 } ?: stayRadiusLabels[5]
         binding.spinnerStayClusterRadius.setText(radiusItem.first, false)
 
+        // Live Map Marker Style
+        val markerItem = markerStyleLabels.find { it.second == localCompany.useSpeedBasedMarkers }
+            ?: markerStyleLabels[0]
+        binding.spinnerMarkerStyle.setText(markerItem.first, false)
+
         binding.etGenLatitude.setText(if (localCompany.officeLatitude != 0.0) localCompany.officeLatitude.toString() else "")
         binding.etGenLongitude.setText(if (localCompany.officeLongitude != 0.0) localCompany.officeLongitude.toString() else "")
         binding.etGenRadius.setText(localCompany.geoRadiusMeters.toString())
@@ -466,6 +479,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 val selectedRadiusLabel = binding.spinnerStayClusterRadius.text?.toString()
                 localCompany.stayClusterRadiusMeters = stayRadiusLabels.find { it.first == selectedRadiusLabel }?.second ?: 50
 
+                val selectedMarkerLabel = binding.spinnerMarkerStyle.text?.toString()
+                localCompany.useSpeedBasedMarkers = markerStyleLabels.find { it.first == selectedMarkerLabel }?.second ?: false
+
                 // Save into Room (with updated backup interval & stay settings)
                 withContext(Dispatchers.IO) {
                     localSettingsDao.upsertCompanySettings(localCompany)
@@ -509,7 +525,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "enableSandwichRule" to localCompany.enableSandwichRule,
                             "autoBackupIntervalHours" to localCompany.autoBackupIntervalHours,
                             "stayDwellMinutes" to localCompany.stayDwellMinutes,
-                            "stayClusterRadiusMeters" to localCompany.stayClusterRadiusMeters
+                            "stayClusterRadiusMeters" to localCompany.stayClusterRadiusMeters,
+                            "useSpeedBasedMarkers" to localCompany.useSpeedBasedMarkers,
+                            "use_speed_based_markers" to localCompany.useSpeedBasedMarkers
                         )
                         owner.child("company_settings").child("1").setValue(companyPayload).await()
 

@@ -106,7 +106,7 @@ else
         <div class="card-body p-3">
 
             <div class="@(activeTab == "general" ? "" : "d-none")">
-                <GeneralTab Settings="settings" TrackingIntervalSeconds="trackingIntervalSeconds" TrackingIntervalSecondsChanged="OnTrackingIntervalChanged" />
+                <GeneralTab Settings="settings ?? new()" TrackingIntervalSeconds="trackingIntervalSeconds" TrackingIntervalSecondsChanged="OnTrackingIntervalChanged" />
             </div>
 
             <div class="@(activeTab == "admin" ? "" : "d-none")">

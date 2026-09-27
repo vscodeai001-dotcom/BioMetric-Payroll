@@ -74,7 +74,13 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
         try
         {
             var firebase = sp.GetRequiredService<FirebaseRealtimeService>();
-            var db = sp.GetRequiredService<AppDbContext>();
+
+            // Use IDbContextFactory to get an independent, short-lived DbContext.
+            // We cannot reuse the scoped AppDbContext that GeoLocationService
+            // already consumed — EF Core DbContext is not safe to reuse across
+            // separate top-level operations and will throw InvalidOperationException.
+            var dbFactory = sp.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
 
             var tenants = await db.CompanyTenants.AsNoTracking()
                 .Where(t => t.IsActive)
