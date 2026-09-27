@@ -1003,13 +1003,13 @@ public sealed class FirebaseRealtimeService
             ["changes"] = changes
         };
 
-        var updates = new Dictionary<string, object?>
-        {
-            [$"application_events/{eventId}"] = payload
-        };
+        var updates = new Dictionary<string, object?>();
 
         if (!string.IsNullOrWhiteSpace(ownerUid))
             updates[$"owner_events/{ownerUid}/{eventId}"] = payload;
+
+        if (updates.Count == 0)
+            return true;
 
         return await UpdateAsync(updates, cancellationToken);
     }
