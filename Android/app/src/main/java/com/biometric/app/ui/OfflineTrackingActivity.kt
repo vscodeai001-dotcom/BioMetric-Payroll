@@ -46,6 +46,14 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
+import android.text.Editable
+import android.text.TextWatcher
+import com.biometric.app.data.entity.Attendance
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
+import java.util.Calendar
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +81,32 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     private lateinit var rvEmployeeConnectionStatus: RecyclerView
     private lateinit var tvNoEmployeesRegistered: TextView
 
+    // Search & Filter
+    private lateinit var tilSearchEmployee: TextInputLayout
+    private lateinit var etSearchEmployee: TextInputEditText
+    private lateinit var chipGroupStatusFilter: ChipGroup
+
+    // Selected Employee Inspection Panel
+    private lateinit var cardSelectedEmployeeDetail: MaterialCardView
+    private lateinit var tvSelectedEmpName: TextView
+    private lateinit var tvSelectedEmpId: TextView
+    private lateinit var tvSelectedEmpSyncBadge: TextView
+    private lateinit var tvSelectedEmpStatusBadge: TextView
+    private lateinit var btnCloseSelectedEmployee: MaterialButton
+    private lateinit var tvSelectedPunchIn: TextView
+    private lateinit var tvSelectedPunchLocation: TextView
+    private lateinit var tvSelectedPunchOut: TextView
+    private lateinit var tvSelectedWorkHours: TextView
+    private lateinit var tvSelectedLiveCoord: TextView
+    private lateinit var tvSelectedLiveMovement: TextView
+    private lateinit var tvSelectedLiveGeofence: TextView
+    private lateinit var tvSelectedLiveLastSeen: TextView
+    private lateinit var tvSelectedCloudPoints: TextView
+    private lateinit var tvSelectedPendingPoints: TextView
+    private lateinit var tvSelectedOfflineIntervalsSummary: TextView
+    private lateinit var btnFocusSelectedOnMap: MaterialButton
+    private lateinit var btnReloadCloudForSelected: MaterialButton
+
     private lateinit var spnFilterEmployee: Spinner
     private lateinit var tvPeriodCountBadge: TextView
     private lateinit var rvOfflinePeriods: RecyclerView
@@ -80,6 +114,14 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
     private lateinit var tvMapRouteBanner: TextView
     private lateinit var btnResetMapFilter: MaterialButton
+    private lateinit var tvMapEmptyNotice: TextView
+
+    // Journey Timeline
+    private lateinit var cardJourneyTimeline: MaterialCardView
+    private lateinit var tvJourneyTimelineCount: TextView
+    private lateinit var rvJourneyTimeline: RecyclerView
+    private lateinit var tvNoTimelineEvents: TextView
+    private lateinit var journeyTimelineAdapter: JourneyTimelineAdapter
 
     private lateinit var tvQueue: TextView
     private lateinit var tvTotal: TextView
@@ -97,6 +139,15 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     private lateinit var periodAdapter: OfflinePeriodAdapter
 
     private var activeEmployees: List<Employee> = emptyList()
+    private var allAttendanceList: List<Attendance> = emptyList()
+    private var allPunchesList: List<LocalAttendancePunch> = emptyList()
+    private var officeLat: Double = 0.0
+    private var officeLng: Double = 0.0
+    private var officeRadiusMeters: Int = 100
+    private var searchQuery: String = ""
+    private var statusFilter: String = "ALL"
+    private var pendingGpsCount: Int = 0
+
     private var selectedEmployeeId: Int = 0 // 0 = All
     private var selectedPeriod: OfflinePeriodItem? = null
     private var refreshJob: Job? = null
@@ -141,6 +192,32 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         rvEmployeeConnectionStatus = findViewById(R.id.rvEmployeeConnectionStatus)
         tvNoEmployeesRegistered = findViewById(R.id.tvNoEmployeesRegistered)
 
+        // Search & Filter
+        tilSearchEmployee = findViewById(R.id.tilSearchEmployee)
+        etSearchEmployee = findViewById(R.id.etSearchEmployee)
+        chipGroupStatusFilter = findViewById(R.id.chipGroupStatusFilter)
+
+        // Selected Employee Detail Panel
+        cardSelectedEmployeeDetail = findViewById(R.id.cardSelectedEmployeeDetail)
+        tvSelectedEmpName = findViewById(R.id.tvSelectedEmpName)
+        tvSelectedEmpId = findViewById(R.id.tvSelectedEmpId)
+        tvSelectedEmpSyncBadge = findViewById(R.id.tvSelectedEmpSyncBadge)
+        tvSelectedEmpStatusBadge = findViewById(R.id.tvSelectedEmpStatusBadge)
+        btnCloseSelectedEmployee = findViewById(R.id.btnCloseSelectedEmployee)
+        tvSelectedPunchIn = findViewById(R.id.tvSelectedPunchIn)
+        tvSelectedPunchLocation = findViewById(R.id.tvSelectedPunchLocation)
+        tvSelectedPunchOut = findViewById(R.id.tvSelectedPunchOut)
+        tvSelectedWorkHours = findViewById(R.id.tvSelectedWorkHours)
+        tvSelectedLiveCoord = findViewById(R.id.tvSelectedLiveCoord)
+        tvSelectedLiveMovement = findViewById(R.id.tvSelectedLiveMovement)
+        tvSelectedLiveGeofence = findViewById(R.id.tvSelectedLiveGeofence)
+        tvSelectedLiveLastSeen = findViewById(R.id.tvSelectedLiveLastSeen)
+        tvSelectedCloudPoints = findViewById(R.id.tvSelectedCloudPoints)
+        tvSelectedPendingPoints = findViewById(R.id.tvSelectedPendingPoints)
+        tvSelectedOfflineIntervalsSummary = findViewById(R.id.tvSelectedOfflineIntervalsSummary)
+        btnFocusSelectedOnMap = findViewById(R.id.btnFocusSelectedOnMap)
+        btnReloadCloudForSelected = findViewById(R.id.btnReloadCloudForSelected)
+
         spnFilterEmployee = findViewById(R.id.spnFilterEmployee)
         tvPeriodCountBadge = findViewById(R.id.tvPeriodCountBadge)
         rvOfflinePeriods = findViewById(R.id.rvOfflinePeriods)
@@ -148,7 +225,14 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
         tvMapRouteBanner = findViewById(R.id.tvMapRouteBanner)
         btnResetMapFilter = findViewById(R.id.btnResetMapFilter)
+        tvMapEmptyNotice = findViewById(R.id.tvMapEmptyNotice)
         mapView = findViewById(R.id.offlineMapView)
+
+        // Journey Timeline
+        cardJourneyTimeline = findViewById(R.id.cardJourneyTimeline)
+        tvJourneyTimelineCount = findViewById(R.id.tvJourneyTimelineCount)
+        rvJourneyTimeline = findViewById(R.id.rvJourneyTimeline)
+        tvNoTimelineEvents = findViewById(R.id.tvNoTimelineEvents)
 
         tvQueue = findViewById(R.id.tvQueue)
         tvTotal = findViewById(R.id.tvTotal)
@@ -185,11 +269,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
     private fun setupAdapters() {
         employeeStatusAdapter = OfflineEmployeeStatusAdapter { empId ->
-            // On employee card click, switch spinner to this employee
-            val pos = activeEmployees.indexOfFirst { it.employeeId.toIntOrNull() == empId }
-            if (pos >= 0) {
-                spnFilterEmployee.setSelection(pos + 1)
-            }
+            selectEmployee(empId)
         }
         rvEmployeeConnectionStatus.apply {
             layoutManager = LinearLayoutManager(this@OfflineTrackingActivity)
@@ -210,6 +290,13 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             isNestedScrollingEnabled = false
         }
 
+        journeyTimelineAdapter = JourneyTimelineAdapter()
+        rvJourneyTimeline.apply {
+            layoutManager = LinearLayoutManager(this@OfflineTrackingActivity)
+            adapter = journeyTimelineAdapter
+            isNestedScrollingEnabled = false
+        }
+
         eventAdapter = OfflineEventAdapter()
         rvOfflineEvents.apply {
             layoutManager = LinearLayoutManager(this@OfflineTrackingActivity)
@@ -219,6 +306,48 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     }
 
     private fun setupListeners() {
+        // Search Input
+        etSearchEmployee.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                searchQuery = s?.toString()?.trim().orEmpty()
+                refreshStatusTable()
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+
+        // Filter Chips
+        chipGroupStatusFilter.setOnCheckedStateChangeListener { _, checkedIds ->
+            statusFilter = when (checkedIds.firstOrNull()) {
+                R.id.chipFilterLive -> "LIVE"
+                R.id.chipFilterStale -> "STALE"
+                R.id.chipFilterOffline -> "OFFLINE"
+                R.id.chipFilterPendingSync -> "PENDING_SYNC"
+                R.id.chipFilterSynced -> "SYNCED"
+                else -> "ALL"
+            }
+            refreshStatusTable()
+        }
+
+        // Close Selected Employee Inspection Panel
+        btnCloseSelectedEmployee.setOnClickListener {
+            clearSelectedEmployee()
+        }
+
+        // Focus Map on Selected Route
+        btnFocusSelectedOnMap.setOnClickListener {
+            mapView.parent?.requestChildFocus(mapView, mapView)
+        }
+
+        // Reload Cloud History for Selected Employee
+        btnReloadCloudForSelected.setOnClickListener {
+            if (selectedEmployeeId > 0) {
+                cloudHistoryCache.remove(selectedEmployeeId)
+                refreshCloudAndLocal()
+                Toast.makeText(this, "Refreshed cloud tracking history", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         btnResetMapFilter.setOnClickListener {
             selectedPeriod = null
             btnResetMapFilter.visibility = View.GONE
@@ -244,18 +373,50 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
         spnFilterEmployee.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedEmployeeId = if (position == 0) {
+                val newId = if (position == 0) {
                     0
                 } else {
                     activeEmployees.getOrNull(position - 1)?.employeeId?.toIntOrNull() ?: 0
                 }
-                selectedPeriod = null
-                btnResetMapFilter.visibility = View.GONE
-                refreshCloudAndLocal()
+                if (newId != selectedEmployeeId) {
+                    if (newId == 0) {
+                        clearSelectedEmployee()
+                    } else {
+                        selectEmployee(newId)
+                    }
+                }
             }
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+    }
+
+    private fun selectEmployee(empId: Int) {
+        selectedEmployeeId = empId
+        selectedPeriod = null
+        btnResetMapFilter.visibility = View.GONE
+
+        val pos = activeEmployees.indexOfFirst { it.employeeId.toIntOrNull() == empId }
+        if (pos >= 0 && spnFilterEmployee.selectedItemPosition != (pos + 1)) {
+            spnFilterEmployee.setSelection(pos + 1)
+        }
+
+        refreshStatusTable()
+        refreshCloudAndLocal()
+    }
+
+    private fun clearSelectedEmployee() {
+        selectedEmployeeId = 0
+        selectedPeriod = null
+        btnResetMapFilter.visibility = View.GONE
+        cardSelectedEmployeeDetail.visibility = View.GONE
+
+        if (spnFilterEmployee.selectedItemPosition != 0) {
+            spnFilterEmployee.setSelection(0)
+        }
+
+        refreshStatusTable()
+        refreshCloudAndLocal()
     }
 
     private fun observeData() {
@@ -272,6 +433,31 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 refreshStatusTable()
             }
         }
+
+        lifecycleScope.launch {
+            repo.allAttendanceFlow.collect { attList ->
+                allAttendanceList = attList
+                refreshStatusTable()
+            }
+        }
+
+        lifecycleScope.launch {
+            punchDao.getAllFlow().collect { punches ->
+                allPunchesList = punches
+                refreshStatusTable()
+            }
+        }
+
+        lifecycleScope.launch {
+            repo.companySettingsFlow.collect { settings ->
+                if (settings != null) {
+                    officeLat = settings.officeLatitude
+                    officeLng = settings.officeLongitude
+                    officeRadiusMeters = settings.geoRadiusMeters
+                    refreshStatusTable()
+                }
+            }
+        }
     }
 
     private fun updateEmployeeSpinner() {
@@ -280,6 +466,37 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
         spnFilterEmployee.adapter = adapter
+    }
+
+    private fun isToday(timestamp: Long): Boolean {
+        if (timestamp <= 0L) return false
+        val cal1 = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"))
+        val cal2 = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata")).apply { timeInMillis = timestamp }
+        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+                cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+    }
+
+    private fun formatDuration(ms: Long): String {
+        val mins = ms / 60000
+        val secs = (ms % 60000) / 1000
+        val hrs = mins / 60
+        return when {
+            hrs > 0 -> "${hrs}h ${mins % 60}m"
+            mins > 0 -> "${mins}m ${secs}s"
+            else -> "${secs}s"
+        }
+    }
+
+    private fun formatAge(seconds: Long): String {
+        if (seconds == Long.MAX_VALUE || seconds < 0) return "Offline"
+        val mins = seconds / 60
+        val hrs = mins / 60
+        return when {
+            hrs > 24 -> "${hrs / 24}d ago"
+            hrs > 0 -> "${hrs}h ${mins % 60}m ago"
+            mins > 0 -> "${mins}m ago"
+            else -> "${seconds}s ago"
+        }
     }
 
     private fun refreshStatusTable() {
@@ -317,6 +534,53 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 Triple("Offline", Long.MAX_VALUE, null)
             }
 
+            // Punches today
+            val empPunches = allPunchesList.filter { p ->
+                (p.staffId == emp.employeeId || p.staffId == empId.toString()) && isToday(p.timestamp)
+            }.sortedBy { it.timestamp }
+
+            val empAttendance = allAttendanceList.firstOrNull { a ->
+                (a.employeeId == emp.employeeId || a.employeeId == empId.toString()) && isToday(a.checkInTime)
+            }
+
+            val punchIn = empPunches.firstOrNull { it.type.equals("IN", ignoreCase = true) }
+            val punchOut = empPunches.lastOrNull { it.type.equals("OUT", ignoreCase = true) }
+            val checkInTime = punchIn?.timestamp ?: empAttendance?.checkInTime
+            val checkOutTime = punchOut?.timestamp ?: empAttendance?.checkOutTime
+
+            val punchSummary = when {
+                checkInTime != null && checkOutTime != null -> {
+                    val inTimeStr = formatTimeOnly(checkInTime)
+                    val outTimeStr = formatTimeOnly(checkOutTime)
+                    "🔴 Punched Out: $outTimeStr (In: $inTimeStr)"
+                }
+                checkInTime != null -> {
+                    val inTimeStr = formatTimeOnly(checkInTime)
+                    val rangeNote = if (punchIn != null && officeLat != 0.0) {
+                        val dist = calculateDistance(punchIn.latitude, punchIn.longitude, officeLat, officeLng)
+                        if (dist <= officeRadiusMeters) " • Inside Range" else " • Outside Range (${dist.toInt()}m)"
+                    } else ""
+                    "🟢 Punch In: $inTimeStr$rangeNote"
+                }
+                else -> "⚪ No Punch In Recorded Today"
+            }
+
+            val hasPendingPunch = empPunches.any { it.syncState == 0 }
+            val hasPendingGps = if (empId == sessionStore.employeeId()) (pendingGpsCount > 0) else false
+            val hasPendingSync = hasPendingPunch || hasPendingGps
+
+            val syncBadgeText = when {
+                hasPendingSync -> "⏳ Pending Sync"
+                status == "Live" -> "📡 Live Stream"
+                else -> "✓ Synced"
+            }
+
+            val syncBadgeColor = when {
+                hasPendingSync -> Color.parseColor("#E65100")
+                status == "Live" -> Color.parseColor("#1565C0")
+                else -> Color.parseColor("#2E7D32")
+            }
+
             EmployeeStatusRow(
                 employeeId = empId,
                 employeeName = emp.name,
@@ -327,7 +591,12 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 speedKmh = (live?.speedMps ?: 0.0) * 3.6,
                 latitude = live?.latitude ?: 0.0,
                 longitude = live?.longitude ?: 0.0,
-                isWithinRadius = live?.isWithinAllowedRadius ?: false
+                isWithinRadius = live?.isWithinAllowedRadius ?: false,
+                punchSummary = punchSummary,
+                syncBadgeText = syncBadgeText,
+                syncBadgeColor = syncBadgeColor,
+                hasPendingSync = hasPendingSync,
+                isSelected = (empId == selectedEmployeeId)
             )
         }.sortedWith(compareBy({
             when (it.status) {
@@ -343,10 +612,152 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         tvLastRefreshTime.text = SimpleDateFormat("HH:mm:ss", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("Asia/Kolkata")
         }.format(Date(now))
-        tvEmployeesCountBadge.text = "${rows.size} employees"
 
-        employeeStatusAdapter.submit(rows)
-        tvNoEmployeesRegistered.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+        // Apply Search and Status Filters
+        val filtered = rows.filter { row ->
+            val matchesSearch = if (searchQuery.isBlank()) true else {
+                row.employeeName.contains(searchQuery, ignoreCase = true) ||
+                        row.employeeId.toString().contains(searchQuery)
+            }
+            val matchesStatus = when (statusFilter) {
+                "LIVE" -> row.status == "Live"
+                "STALE" -> row.status == "Stale"
+                "OFFLINE" -> row.status == "Offline"
+                "PENDING_SYNC" -> row.hasPendingSync
+                "SYNCED" -> !row.hasPendingSync
+                else -> true
+            }
+            matchesSearch && matchesStatus
+        }
+
+        tvEmployeesCountBadge.text = if (filtered.size == activeEmployees.size) {
+            "${activeEmployees.size} employees"
+        } else {
+            "Showing ${filtered.size} of ${activeEmployees.size} employees"
+        }
+
+        employeeStatusAdapter.submit(filtered)
+        tvNoEmployeesRegistered.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
+
+        // Update selected employee inspection panel if active
+        if (selectedEmployeeId > 0) {
+            val selectedEmp = activeEmployees.firstOrNull { it.employeeId.toIntOrNull() == selectedEmployeeId }
+            val selectedRow = rows.firstOrNull { it.employeeId == selectedEmployeeId }
+            if (selectedEmp != null) {
+                val empPunches = allPunchesList.filter { p ->
+                    (p.staffId == selectedEmp.employeeId || p.staffId == selectedEmployeeId.toString()) && isToday(p.timestamp)
+                }.sortedBy { it.timestamp }
+                val empAttendance = allAttendanceList.firstOrNull { a ->
+                    (a.employeeId == selectedEmp.employeeId || a.employeeId == selectedEmployeeId.toString()) && isToday(a.checkInTime)
+                }
+                val punchIn = empPunches.firstOrNull { it.type.equals("IN", ignoreCase = true) }
+                val punchOut = empPunches.lastOrNull { it.type.equals("OUT", ignoreCase = true) }
+                val checkIn = punchIn?.timestamp ?: empAttendance?.checkInTime
+                val checkOut = punchOut?.timestamp ?: empAttendance?.checkOutTime
+
+                updateSelectedEmployeeCard(selectedEmp, selectedRow, punchIn, punchOut, checkIn, checkOut)
+            } else {
+                cardSelectedEmployeeDetail.visibility = View.GONE
+            }
+        } else {
+            cardSelectedEmployeeDetail.visibility = View.GONE
+        }
+    }
+
+    private fun updateSelectedEmployeeCard(
+        emp: Employee,
+        row: EmployeeStatusRow?,
+        punchIn: LocalAttendancePunch?,
+        punchOut: LocalAttendancePunch?,
+        checkInTime: Long?,
+        checkOutTime: Long?
+    ) {
+        cardSelectedEmployeeDetail.visibility = View.VISIBLE
+        tvSelectedEmpName.text = emp.name
+        tvSelectedEmpId.text = "ID #${emp.employeeId} • ${emp.role.ifBlank { "Staff" }}"
+
+        val status = row?.status ?: "Offline"
+        tvSelectedEmpStatusBadge.text = status.uppercase()
+        when (status) {
+            "Live" -> {
+                tvSelectedEmpStatusBadge.setTextColor(Color.parseColor("#2E7D32"))
+                tvSelectedEmpStatusBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+            }
+            "Stale" -> {
+                tvSelectedEmpStatusBadge.setTextColor(Color.parseColor("#F57F17"))
+                tvSelectedEmpStatusBadge.setBackgroundColor(Color.parseColor("#FFF8E1"))
+            }
+            else -> {
+                tvSelectedEmpStatusBadge.setTextColor(Color.parseColor("#C62828"))
+                tvSelectedEmpStatusBadge.setBackgroundColor(Color.parseColor("#FFEBEE"))
+            }
+        }
+
+        val hasPending = row?.hasPendingSync ?: false
+        tvSelectedEmpSyncBadge.text = if (hasPending) "⏳ Pending Sync" else "✓ Synced"
+        tvSelectedEmpSyncBadge.setTextColor(if (hasPending) Color.parseColor("#E65100") else Color.parseColor("#2E7D32"))
+        tvSelectedEmpSyncBadge.setBackgroundColor(if (hasPending) Color.parseColor("#FFF3E0") else Color.parseColor("#E8F5E9"))
+
+        // Section A: Attendance
+        if (checkInTime != null) {
+            tvSelectedPunchIn.text = "🟢 Punch In: ${formatIst(checkInTime)}"
+            if (punchIn != null && punchIn.latitude != 0.0 && punchIn.longitude != 0.0) {
+                val dist = if (officeLat != 0.0) calculateDistance(punchIn.latitude, punchIn.longitude, officeLat, officeLng) else 0.0
+                val geoNote = if (officeLat != 0.0 && dist <= officeRadiusMeters) {
+                    "Inside Office Radius (${dist.toInt()}m)"
+                } else if (officeLat != 0.0) {
+                    "Outside Office Radius (${dist.toInt()}m away)"
+                } else "Coords recorded"
+                tvSelectedPunchLocation.text = "Punch In Location: ${String.format(Locale.US, "%.5f, %.5f", punchIn.latitude, punchIn.longitude)} ($geoNote) • Source: ${punchIn.source}"
+            } else {
+                tvSelectedPunchLocation.text = "Punch In Location: Web / Biometric terminal punch"
+            }
+        } else {
+            tvSelectedPunchIn.text = "🟢 Punch In: Not recorded today"
+            tvSelectedPunchLocation.text = "Punch In Location: —"
+        }
+
+        if (checkOutTime != null) {
+            tvSelectedPunchOut.text = "🔴 Punch Out: ${formatIst(checkOutTime)}"
+            val durMs = (checkOutTime - (checkInTime ?: checkOutTime)).coerceAtLeast(0L)
+            tvSelectedWorkHours.text = "Total Shift Completed: ${formatDuration(durMs)}"
+        } else if (checkInTime != null) {
+            tvSelectedPunchOut.text = "🔴 Punch Out: Currently Active / Working on duty"
+            val durMs = (System.currentTimeMillis() - checkInTime).coerceAtLeast(0L)
+            tvSelectedWorkHours.text = "Current Working Duration: ${formatDuration(durMs)} (Active Shift)"
+        } else {
+            tvSelectedPunchOut.text = "🔴 Punch Out: Not on duty"
+            tvSelectedWorkHours.text = "Shift Duration: —"
+        }
+
+        // Section B: Live GPS
+        if (row != null && (row.latitude != 0.0 || row.longitude != 0.0)) {
+            tvSelectedLiveCoord.text = "📍 GPS: ${String.format(Locale.US, "%.6f, %.6f", row.latitude, row.longitude)}"
+            tvSelectedLiveMovement.text = "Movement: ${row.movementState} • Speed: ${String.format(Locale.US, "%.1f", row.speedKmh)} km/h"
+            val dist = if (officeLat != 0.0) calculateDistance(row.latitude, row.longitude, officeLat, officeLng) else 0.0
+            if (officeLat != 0.0) {
+                if (row.isWithinRadius) {
+                    tvSelectedLiveGeofence.text = "🏢 Geofence: Inside allowed office zone (${dist.toInt()}m from center)"
+                    tvSelectedLiveGeofence.setTextColor(Color.parseColor("#2E7D32"))
+                } else {
+                    tvSelectedLiveGeofence.text = "🏢 Geofence: Outside office zone (${dist.toInt()}m from center)"
+                    tvSelectedLiveGeofence.setTextColor(Color.parseColor("#C62828"))
+                }
+            } else {
+                tvSelectedLiveGeofence.text = "🏢 Geofence: ${if (row.isWithinRadius) "Inside Range" else "Outside Range"}"
+            }
+            tvSelectedLiveLastSeen.text = "Last Update: ${row.lastUpdatedUtc?.let { formatIst(it) } ?: "Never"} (${formatAge(row.ageSeconds)})"
+        } else {
+            tvSelectedLiveCoord.text = "📍 GPS: No live coordinates received today"
+            tvSelectedLiveMovement.text = "Movement: Device inactive / offline"
+            tvSelectedLiveGeofence.text = "🏢 Geofence: —"
+            tvSelectedLiveLastSeen.text = "Last Update: Device Offline"
+        }
+
+        // Section C: Cloud & Offline Telemetry
+        val cachedHistory = cloudHistoryCache[emp.employeeId.toIntOrNull() ?: 0]?.second ?: emptyList()
+        tvSelectedCloudPoints.text = "☁️ Cloud Points Synced: ${cachedHistory.size} points synchronized to Firebase"
+        tvSelectedPendingPoints.text = if (hasPending) "⏳ Local Queue: Offline data waiting to sync" else "✓ Local Queue: 0 points pending (Fully synchronized to Cloud)"
     }
 
     override fun onStart() {
@@ -371,6 +782,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             val isOnline = monitor.isOnline()
             val pending = locationDao.getPendingCount()
+            pendingGpsCount = pending
             val total = locationDao.getTotalCount()
             val recent = locationDao.getRecent(50)
             val lastSynced = locationDao.getLastSynced()
@@ -420,72 +832,104 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             val localRecent = locationDao.getRecent(300)
             val localEvents = eventDao.recent(100)
 
-            // When "All Tracked Employees" is selected, do not eagerly pull 15,000 points from Firebase.
-            // Only pull cloud history when a specific employee is chosen by the admin.
-            val empIdsToQuery = if (selectedEmployeeId > 0) {
-                listOf(selectedEmployeeId)
-            } else {
-                emptyList()
-            }
-
-            val allLocalPunches = try { punchDao.getAll() } catch (_: Exception) { emptyList<LocalAttendancePunch>() }
             val empNameMap = activeEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
+            val allLocalPunches = try { punchDao.getAll() } catch (_: Exception) { emptyList<LocalAttendancePunch>() }
             val allPeriods = mutableListOf<OfflinePeriodItem>()
-            val allPointsForMap = mutableListOf<LocalLocation>()
 
-            // 1. Check local periods first
-            val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device", allLocalPunches)
-            allPeriods.addAll(localPeriods)
-            allPointsForMap.addAll(localRecent)
+            if (selectedEmployeeId > 0) {
+                val empId = selectedEmployeeId
+                val empName = empNameMap[empId] ?: "Employee #$empId"
+                val hist = getCachedOrFetchHistory(empId, 300)
 
-            // 2. Fetch history for selected employee (cached or targeted 200 points)
-            for (eid in empIdsToQuery) {
-                if (eid <= 0) continue
-                val hist = getCachedOrFetchHistory(eid, 200)
-                if (hist.isNotEmpty()) {
-                    val localConverted = hist.map { h ->
-                        val epoch = parseTrackingTimestamp(h.timestamp)
-                        LocalLocation(
-                            id = 0,
-                            sessionId = h.sessionId,
-                            clientEventId = UUID.randomUUID().toString(),
-                            sequence = 0L,
-                            latitude = h.latitude,
-                            longitude = h.longitude,
-                            accuracy = h.accuracyMeters.toFloat(),
-                            speed = h.speedMps.toFloat(),
-                            bearing = h.bearing.toFloat(),
-                            batteryLevel = 100,
-                            timestamp = epoch,
-                            capturedElapsedRealtime = 0L,
-                            syncState = LocalLocation.SYNCED,
-                            attemptCount = 1,
-                            lastAttemptAt = epoch,
-                            syncedAt = epoch,
-                            lastError = null,
-                            isOfflineCapture = h.movementState.contains("offline", ignoreCase = true)
-                        )
+                val localConverted = hist.map { h ->
+                    val epoch = parseTrackingTimestamp(h.timestamp)
+                    LocalLocation(
+                        id = 0,
+                        sessionId = h.sessionId,
+                        clientEventId = UUID.randomUUID().toString(),
+                        sequence = 0L,
+                        latitude = h.latitude,
+                        longitude = h.longitude,
+                        accuracy = h.accuracyMeters.toFloat(),
+                        speed = h.speedMps.toFloat(),
+                        bearing = h.bearing.toFloat(),
+                        batteryLevel = 100,
+                        timestamp = epoch,
+                        capturedElapsedRealtime = 0L,
+                        syncState = LocalLocation.SYNCED,
+                        attemptCount = 1,
+                        lastAttemptAt = epoch,
+                        syncedAt = epoch,
+                        lastError = null,
+                        isOfflineCapture = h.movementState.contains("offline", ignoreCase = true)
+                    )
+                }
+
+                // If this is the current device's employee, also combine localRecent
+                val combinedPoints = if (empId == sessionStore.employeeId()) {
+                    (localConverted + localRecent).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
+                } else {
+                    localConverted
+                }
+
+                val empPeriods = buildOfflinePeriods(combinedPoints, localEvents, empId, empName, allLocalPunches)
+                allPeriods.addAll(empPeriods)
+
+                val liveLoc = signalR.liveLocations.value[empId]
+                val empPunches = allLocalPunches.filter { p ->
+                    (p.staffId == empId.toString()) && isToday(p.timestamp)
+                }.sortedBy { it.timestamp }
+
+                val empAttendance = allAttendanceList.firstOrNull { a ->
+                    (a.employeeId == empId.toString()) && isToday(a.checkInTime)
+                }
+                val punchIn = empPunches.firstOrNull { it.type.equals("IN", ignoreCase = true) }
+                val punchOut = empPunches.lastOrNull { it.type.equals("OUT", ignoreCase = true) }
+                val checkIn = punchIn?.timestamp ?: empAttendance?.checkInTime
+                val checkOut = punchOut?.timestamp ?: empAttendance?.checkOutTime
+
+                val timeline = buildJourneyTimeline(empName, punchIn, punchOut, checkIn, checkOut, hist, empPeriods, liveLoc)
+
+                withContext(Dispatchers.Main) {
+                    tvPeriodCountBadge.text = "${empPeriods.size} periods"
+                    periodAdapter.submit(empPeriods)
+                    tvNoOfflinePeriods.visibility = if (empPeriods.isEmpty()) View.VISIBLE else View.GONE
+
+                    tvSelectedCloudPoints.text = "☁️ Cloud Points Synced: ${hist.size} points synchronized to Firebase"
+                    tvSelectedOfflineIntervalsSummary.text = if (empPeriods.isNotEmpty()) {
+                        "📴 Offline Intervals: ${empPeriods.size} period(s) detected • All reconciled"
+                    } else {
+                        "📴 Offline Intervals: None detected today. Realtime continuous stream."
                     }
 
-                    val empName = empNameMap[eid] ?: "Employee #$eid"
-                    val empPeriods = buildOfflinePeriods(localConverted, emptyList(), eid, empName, allLocalPunches)
-                    allPeriods.addAll(empPeriods)
-                    allPointsForMap.addAll(localConverted)
+                    // Draw map
+                    drawSelectedEmployeeMap(empName, punchIn, punchOut, hist, empPeriods, liveLoc)
+
+                    // Update timeline
+                    cardJourneyTimeline.visibility = View.VISIBLE
+                    tvJourneyTimelineCount.text = "${timeline.size} events"
+                    journeyTimelineAdapter.submit(timeline)
+                    tvNoTimelineEvents.visibility = if (timeline.isEmpty()) View.VISIBLE else View.GONE
                 }
-            }
+            } else {
+                // All Employees Overview
+                val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device", allLocalPunches)
+                allPeriods.addAll(localPeriods)
 
-            val sortedPeriods = allPeriods.distinctBy { it.id }.sortedByDescending { it.startTime }
+                val sortedPeriods = allPeriods.distinctBy { it.id }.sortedByDescending { it.startTime }
 
-            withContext(Dispatchers.Main) {
-                tvPeriodCountBadge.text = "${sortedPeriods.size} periods"
-                periodAdapter.submit(sortedPeriods)
-                tvNoOfflinePeriods.visibility = if (sortedPeriods.isEmpty()) View.VISIBLE else View.GONE
+                withContext(Dispatchers.Main) {
+                    tvPeriodCountBadge.text = "${sortedPeriods.size} periods"
+                    periodAdapter.submit(sortedPeriods)
+                    tvNoOfflinePeriods.visibility = if (sortedPeriods.isEmpty()) View.VISIBLE else View.GONE
 
-                val activeSel = selectedPeriod
-                if (activeSel != null) {
-                    drawLocalRoute(activeSel.points, isOfflinePeriod = true, periodLabel = "${formatTimeOnly(activeSel.startTime)} - ${formatTimeOnly(activeSel.endTime)}")
-                } else if (allPointsForMap.isNotEmpty()) {
-                    drawLocalRoute(allPointsForMap.take(300))
+                    drawAllEmployeesMap()
+
+                    cardJourneyTimeline.visibility = View.VISIBLE
+                    tvJourneyTimelineCount.text = "All Employees"
+                    journeyTimelineAdapter.submit(emptyList())
+                    tvNoTimelineEvents.visibility = View.VISIBLE
+                    tvNoTimelineEvents.text = "Tap any employee above to view their chronological punch, tracking and sync timeline."
                 }
             }
         }
@@ -516,8 +960,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     "Cloud history: ${history.size} points for #$empId • $first → $last"
                 }
 
-                if (history.isNotEmpty()) {
-                    drawRemoteRoute(history)
+                if (history.isNotEmpty() && selectedEmployeeId == empId) {
+                    refreshCloudAndLocal()
                 }
             }
         }
@@ -541,7 +985,6 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             val loc = sorted[i]
             val last = curCluster.lastOrNull()
 
-            // A cluster is either consecutive offline points, OR points surrounding a large gap (>15m)
             val gap = if (last != null) loc.timestamp - last.timestamp else 0L
             if (loc.isOfflineCapture || (gap > 15 * 60 * 1000L && gap < 24 * 3600 * 1000L)) {
                 if (curCluster.isNotEmpty() && gap > 30 * 60 * 1000L) {
@@ -586,7 +1029,6 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 else -> "Network Disconnected / Signal Loss"
             }
 
-            // Reconcile attendance punches taken during this offline period
             val punchesInGap = localPunches.filter { p ->
                 val pStaffId = p.staffId.toIntOrNull() ?: 0
                 (pStaffId == employeeId || employeeId == 0 || p.staffId == employeeId.toString()) &&
@@ -621,6 +1063,310 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         }
 
         return result
+    }
+
+    private fun buildJourneyTimeline(
+        empName: String,
+        punchIn: LocalAttendancePunch?,
+        punchOut: LocalAttendancePunch?,
+        checkInTime: Long?,
+        checkOutTime: Long?,
+        history: List<SignalRManager.LiveLocation>,
+        offlinePeriods: List<OfflinePeriodItem>,
+        live: SignalRManager.LiveLocation?
+    ): List<TimelineStepItem> {
+        val steps = mutableListOf<TimelineStepItem>()
+
+        // 1. Punch In
+        if (checkInTime != null) {
+            val latLngStr = if (punchIn != null && punchIn.latitude != 0.0) {
+                String.format(Locale.US, "Coords: %.5f, %.5f", punchIn.latitude, punchIn.longitude)
+            } else "Biometric / Web Punch"
+            val distStr = if (punchIn != null && officeLat != 0.0) {
+                val d = calculateDistance(punchIn.latitude, punchIn.longitude, officeLat, officeLng)
+                if (d <= officeRadiusMeters) " • Inside Office Radius (${d.toInt()}m)" else " • Outside Radius (${d.toInt()}m)"
+            } else ""
+            val sourceStr = punchIn?.source?.let { " • Source: $it" } ?: ""
+            val syncLabel = if (punchIn?.syncState == 1) "✓ Synced to Cloud & Web" else "⏳ Stored Locally (Pending Sync)"
+
+            steps.add(
+                TimelineStepItem(
+                    time = checkInTime,
+                    icon = "🟢",
+                    badge = "PUNCH IN",
+                    title = "Punched IN at Work",
+                    description = "$latLngStr$distStr$sourceStr",
+                    syncStatus = syncLabel,
+                    isSuccess = true
+                )
+            )
+        }
+
+        // 2. Offline Periods
+        for (period in offlinePeriods) {
+            val distText = if (period.distanceMeters >= 1000) String.format(Locale.US, "%.1f km", period.distanceMeters / 1000.0) else "${period.distanceMeters.toInt()}m"
+            val syncLabel = if (period.isSynced) "✓ Reconciled & Synced to Cloud" else "⏳ Queued in Local Memory"
+            steps.add(
+                TimelineStepItem(
+                    time = period.startTime,
+                    icon = if (period.reason.contains("airplane", true)) "✈️" else "📴",
+                    badge = "OFFLINE GAP",
+                    title = "Offline Disconnection: ${period.reason}",
+                    description = "Duration: ${formatDuration(period.durationMs)} • ${period.pointsCount} points captured offline ($distText traveled)",
+                    syncStatus = syncLabel,
+                    isSuccess = false
+                )
+            )
+            if (period.isSynced) {
+                steps.add(
+                    TimelineStepItem(
+                        time = period.endTime,
+                        icon = "🔄",
+                        badge = "RECONCILED",
+                        title = "Connection Restored & Reconciled",
+                        description = "Network returned at ${formatTimeOnly(period.endTime)} • ${period.pointsCount} offline points uploaded to Cloud",
+                        syncStatus = "✓ Integrated into Live Route",
+                        isSuccess = true
+                    )
+                )
+            }
+        }
+
+        // 3. Historical Route Breadcrumbs
+        if (history.isNotEmpty()) {
+            val firstH = history.first()
+            val lastH = history.last()
+            val tFirst = parseTrackingTimestamp(firstH.timestamp)
+            val tLast = parseTrackingTimestamp(lastH.timestamp)
+            val maxSpeed = (history.maxOfOrNull { it.speedMps } ?: 0.0) * 3.6
+            steps.add(
+                TimelineStepItem(
+                    time = if (tFirst > 0L) tFirst else (checkInTime ?: System.currentTimeMillis()),
+                    icon = "📍",
+                    badge = "ROUTE",
+                    title = "GPS Route Streaming Active",
+                    description = "${history.size} points recorded (${formatTimeOnly(tFirst)} → ${formatTimeOnly(tLast)}) • Peak Speed: ${String.format(Locale.US, "%.1f", maxSpeed)} km/h",
+                    syncStatus = "✓ Continuously Synced to Cloud",
+                    isSuccess = true
+                )
+            )
+        }
+
+        // 4. Punch Out
+        if (checkOutTime != null) {
+            val latLngStr = if (punchOut != null && punchOut.latitude != 0.0) {
+                String.format(Locale.US, "Coords: %.5f, %.5f", punchOut.latitude, punchOut.longitude)
+            } else "Biometric / Web Punch"
+            val durMs = (checkOutTime - (checkInTime ?: checkOutTime)).coerceAtLeast(0L)
+            val syncLabel = if (punchOut?.syncState == 1) "✓ Synced to Cloud & Web" else "⏳ Stored Locally (Pending Sync)"
+
+            steps.add(
+                TimelineStepItem(
+                    time = checkOutTime,
+                    icon = "🔴",
+                    badge = "PUNCH OUT",
+                    title = "Punched OUT from Work",
+                    description = "$latLngStr • Total Shift: ${formatDuration(durMs)}",
+                    syncStatus = syncLabel,
+                    isSuccess = true
+                )
+            )
+        }
+
+        // 5. Live Now
+        if (live != null && live.timestamp != null) {
+            val tLive = parseTrackingTimestamp(live.timestamp)
+            val distStr = if (officeLat != 0.0 && live.latitude != 0.0) {
+                val d = calculateDistance(live.latitude, live.longitude, officeLat, officeLng)
+                if (d <= officeRadiusMeters) " • Inside Office Range (${d.toInt()}m)" else " • Outside Range (${d.toInt()}m)"
+            } else ""
+            steps.add(
+                TimelineStepItem(
+                    time = if (tLive > 0L) tLive else System.currentTimeMillis(),
+                    icon = "🎯",
+                    badge = "LIVE NOW",
+                    title = "Current Live Position",
+                    description = "${String.format(Locale.US, "%.5f, %.5f", live.latitude, live.longitude)}$distStr • Speed: ${String.format(Locale.US, "%.1f", live.speedMps * 3.6)} km/h (${live.movementState})",
+                    syncStatus = "📡 Streaming Live via SignalR/Firebase",
+                    isSuccess = true
+                )
+            )
+        }
+
+        return steps.sortedBy { it.time }
+    }
+
+    private fun drawSelectedEmployeeMap(
+        empName: String,
+        punchIn: LocalAttendancePunch?,
+        punchOut: LocalAttendancePunch?,
+        historyPoints: List<SignalRManager.LiveLocation>,
+        offlinePeriods: List<OfflinePeriodItem>,
+        liveLoc: SignalRManager.LiveLocation?
+    ) {
+        mapView.overlays.clear()
+        val allGeoPoints = mutableListOf<GeoPoint>()
+
+        // 1. Office Location Marker
+        if (officeLat != 0.0 && officeLng != 0.0) {
+            val officeGeo = GeoPoint(officeLat, officeLng)
+            Marker(mapView).apply {
+                position = officeGeo
+                title = "🏢 Office Location"
+                snippet = "Geofence Radius: ${officeRadiusMeters}m"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                mapView.overlays.add(this)
+            }
+            allGeoPoints.add(officeGeo)
+        }
+
+        // 2. Punch In Marker
+        if (punchIn != null && punchIn.latitude != 0.0 && punchIn.longitude != 0.0) {
+            val punchInGeo = GeoPoint(punchIn.latitude, punchIn.longitude)
+            val dist = if (officeLat != 0.0) calculateDistance(punchIn.latitude, punchIn.longitude, officeLat, officeLng) else 0.0
+            val geoLabel = if (officeLat != 0.0 && dist <= officeRadiusMeters) "Inside Range" else "Outside Range"
+            Marker(mapView).apply {
+                position = punchInGeo
+                title = "🟢 Punch In: $empName"
+                snippet = "${formatTimeOnly(punchIn.timestamp)} • $geoLabel (${dist.toInt()}m from office)"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                mapView.overlays.add(this)
+            }
+            allGeoPoints.add(punchInGeo)
+        }
+
+        // 3. Historical Route Polyline
+        val validHist = historyPoints.filter { it.latitude != 0.0 && it.longitude != 0.0 }
+        if (validHist.isNotEmpty()) {
+            val histGeo = validHist.map { GeoPoint(it.latitude, it.longitude) }
+            val polyline = Polyline().apply {
+                setPoints(histGeo)
+                outlinePaint.color = Color.parseColor("#1565C0")
+                outlinePaint.strokeWidth = 8f
+            }
+            mapView.overlays.add(polyline)
+            allGeoPoints.addAll(histGeo)
+        }
+
+        // 4. Offline Periods Polylines & Reconnect Markers
+        for (period in offlinePeriods) {
+            val validPeriodPoints = period.points.filter { it.latitude != 0.0 && it.longitude != 0.0 }
+            if (validPeriodPoints.isNotEmpty()) {
+                val periodGeo = validPeriodPoints.map { GeoPoint(it.latitude, it.longitude) }
+                val offlinePoly = Polyline().apply {
+                    setPoints(periodGeo)
+                    outlinePaint.color = Color.parseColor("#E65100")
+                    outlinePaint.strokeWidth = 10f
+                }
+                mapView.overlays.add(offlinePoly)
+                allGeoPoints.addAll(periodGeo)
+
+                val reconnectPoint = periodGeo.last()
+                Marker(mapView).apply {
+                    position = reconnectPoint
+                    title = "🟠 Reconnected: ${formatTimeOnly(period.endTime)}"
+                    snippet = "${period.reason} • ${period.pointsCount} offline points"
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    mapView.overlays.add(this)
+                }
+            }
+        }
+
+        // 5. Punch Out Marker
+        if (punchOut != null && punchOut.latitude != 0.0 && punchOut.longitude != 0.0) {
+            val punchOutGeo = GeoPoint(punchOut.latitude, punchOut.longitude)
+            Marker(mapView).apply {
+                position = punchOutGeo
+                title = "🔴 Punch Out: $empName"
+                snippet = "Time: ${formatTimeOnly(punchOut.timestamp)}"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                mapView.overlays.add(this)
+            }
+            allGeoPoints.add(punchOutGeo)
+        }
+
+        // 6. Live Current Location Marker
+        if (liveLoc != null && liveLoc.latitude != 0.0 && liveLoc.longitude != 0.0) {
+            val liveGeo = GeoPoint(liveLoc.latitude, liveLoc.longitude)
+            Marker(mapView).apply {
+                position = liveGeo
+                title = "🎯 Live Location: $empName"
+                snippet = "${liveLoc.movementState} • ${String.format(Locale.US, "%.1f", liveLoc.speedMps * 3.6)} km/h • ${if (liveLoc.isWithinAllowedRadius) "Inside Range" else "Outside Range"}"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                mapView.overlays.add(this)
+            }
+            allGeoPoints.add(liveGeo)
+        }
+
+        // 7. Zoom & Banner
+        if (allGeoPoints.isNotEmpty()) {
+            tvMapEmptyNotice.visibility = View.GONE
+            tvMapRouteBanner.text = "Showing route & punches for $empName (${allGeoPoints.size} waypoints plotted)"
+            zoomToFit(allGeoPoints)
+        } else {
+            tvMapEmptyNotice.visibility = View.VISIBLE
+            tvMapEmptyNotice.text = "No GPS tracking breadcrumbs or punch coordinates recorded today for $empName"
+            tvMapRouteBanner.text = "No route points recorded today for $empName"
+            if (officeLat != 0.0) {
+                mapView.controller.setCenter(GeoPoint(officeLat, officeLng))
+                mapView.controller.setZoom(16.0)
+            }
+            mapView.invalidate()
+        }
+    }
+
+    private fun drawAllEmployeesMap() {
+        mapView.overlays.clear()
+        val liveMap = signalR.liveLocations.value
+        val allGeo = mutableListOf<GeoPoint>()
+
+        if (officeLat != 0.0 && officeLng != 0.0) {
+            val officeGeo = GeoPoint(officeLat, officeLng)
+            Marker(mapView).apply {
+                position = officeGeo
+                title = "🏢 Office Location"
+                snippet = "Geofence Radius: ${officeRadiusMeters}m"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                mapView.overlays.add(this)
+            }
+            allGeo.add(officeGeo)
+        }
+
+        for (emp in activeEmployees) {
+            val eid = emp.employeeId.toIntOrNull() ?: continue
+            val live = liveMap[eid] ?: continue
+            if (live.latitude != 0.0 && live.longitude != 0.0) {
+                val geo = GeoPoint(live.latitude, live.longitude)
+                Marker(mapView).apply {
+                    position = geo
+                    title = "${emp.name} (#$eid)"
+                    snippet = "${live.movementState} • ${String.format(Locale.US, "%.1f", live.speedMps * 3.6)} km/h • ${if (live.isWithinAllowedRadius) "Inside Range" else "Outside Range"}"
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setOnMarkerClickListener { _, _ ->
+                        selectEmployee(eid)
+                        true
+                    }
+                    mapView.overlays.add(this)
+                }
+                allGeo.add(geo)
+            }
+        }
+
+        if (allGeo.isNotEmpty()) {
+            tvMapEmptyNotice.visibility = View.GONE
+            val empCount = allGeo.size - (if (officeLat != 0.0) 1 else 0)
+            tvMapRouteBanner.text = "All Employees Overview • $empCount employee(s) active on live map"
+            zoomToFit(allGeo)
+        } else {
+            tvMapEmptyNotice.visibility = View.VISIBLE
+            tvMapEmptyNotice.text = "No live employee GPS positions received today."
+            tvMapRouteBanner.text = "All Employees Overview"
+            if (officeLat != 0.0) {
+                mapView.controller.setCenter(GeoPoint(officeLat, officeLng))
+                mapView.controller.setZoom(15.0)
+            }
+            mapView.invalidate()
+        }
     }
 
     private fun drawLocalRoute(
@@ -780,7 +1526,12 @@ data class EmployeeStatusRow(
     val speedKmh: Double,
     val latitude: Double,
     val longitude: Double,
-    val isWithinRadius: Boolean
+    val isWithinRadius: Boolean,
+    val punchSummary: String = "⚪ No Punch Today",
+    val syncBadgeText: String = "✓ Synced",
+    val syncBadgeColor: Int = Color.parseColor("#2E7D32"),
+    val hasPendingSync: Boolean = false,
+    val isSelected: Boolean = false
 )
 
 data class OfflinePunchInfo(
@@ -804,6 +1555,16 @@ data class OfflinePeriodItem(
     val isSynced: Boolean,
     val points: List<LocalLocation>,
     val punches: List<OfflinePunchInfo> = emptyList()
+)
+
+data class TimelineStepItem(
+    val time: Long,
+    val icon: String,
+    val badge: String,
+    val title: String,
+    val description: String,
+    val syncStatus: String,
+    val isSuccess: Boolean
 )
 
 private class OfflineEmployeeStatusAdapter(
@@ -832,7 +1593,10 @@ private class OfflineEmployeeStatusAdapter(
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
         private val tvEmpName = view.findViewById<TextView>(R.id.tvEmpName)
         private val tvEmpId = view.findViewById<TextView>(R.id.tvEmpId)
+        private val tvSyncBadge = view.findViewById<TextView>(R.id.tvSyncBadge)
         private val tvStatusBadge = view.findViewById<TextView>(R.id.tvStatusBadge)
+        private val tvAttendancePunch = view.findViewById<TextView>(R.id.tvAttendancePunch)
+        private val tvSelectHint = view.findViewById<TextView>(R.id.tvSelectHint)
         private val tvLastUpdate = view.findViewById<TextView>(R.id.tvLastUpdate)
         private val tvAge = view.findViewById<TextView>(R.id.tvAge)
         private val tvMovementAndSpeed = view.findViewById<TextView>(R.id.tvMovementAndSpeed)
@@ -860,6 +1624,34 @@ private class OfflineEmployeeStatusAdapter(
                     tvStatusBadge.setTextColor(Color.parseColor("#C62828"))
                     tvStatusBadge.setBackgroundColor(Color.parseColor("#FFEBEE"))
                 }
+            }
+
+            // Sync Badge
+            tvSyncBadge.text = item.syncBadgeText
+            tvSyncBadge.setTextColor(item.syncBadgeColor)
+            tvSyncBadge.setBackgroundColor(if (item.hasPendingSync) Color.parseColor("#FFF3E0") else Color.parseColor("#E8F5E9"))
+
+            // Attendance Punch Today
+            tvAttendancePunch.text = item.punchSummary
+            tvAttendancePunch.setTextColor(when {
+                item.punchSummary.startsWith("🟢") -> Color.parseColor("#2E7D32")
+                item.punchSummary.startsWith("🔴") -> Color.parseColor("#C62828")
+                else -> Color.parseColor("#757575")
+            })
+
+            // Card Selection Highlight
+            if (item.isSelected) {
+                card.strokeColor = Color.parseColor("#1565C0")
+                card.strokeWidth = 4
+                card.setCardBackgroundColor(Color.parseColor("#F0F7FF"))
+                tvSelectHint.text = "Currently Inspecting ✓"
+                tvSelectHint.setTextColor(Color.parseColor("#1565C0"))
+            } else {
+                card.strokeColor = Color.parseColor("#E0E0E0")
+                card.strokeWidth = 2
+                card.setCardBackgroundColor(Color.WHITE)
+                tvSelectHint.text = "Tap to inspect ➔"
+                tvSelectHint.setTextColor(Color.parseColor("#1976D2"))
             }
 
             val tz = TimeZone.getTimeZone("Asia/Kolkata")
@@ -892,6 +1684,79 @@ private class OfflineEmployeeStatusAdapter(
                 mins > 0 -> "${mins}m ago"
                 else -> "${seconds}s ago"
             }
+        }
+    }
+}
+
+private class JourneyTimelineAdapter : RecyclerView.Adapter<JourneyTimelineAdapter.Holder>() {
+    private var items = listOf<TimelineStepItem>()
+
+    fun submit(newItems: List<TimelineStepItem>) {
+        items = newItems
+        notifyDataSetChanged()
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
+        val view = LayoutInflater.from(parent.context)
+            .inflate(R.layout.item_journey_timeline_step, parent, false)
+        return Holder(view)
+    }
+
+    override fun onBindViewHolder(holder: Holder, position: Int) {
+        holder.bind(items[position], isLast = (position == items.size - 1))
+    }
+
+    override fun getItemCount(): Int = items.size
+
+    class Holder(view: View) : RecyclerView.ViewHolder(view) {
+        private val tvIcon = view.findViewById<TextView>(R.id.tvTimelineIcon)
+        private val viewConnector = view.findViewById<View>(R.id.viewTimelineConnector)
+        private val tvTime = view.findViewById<TextView>(R.id.tvTimelineTime)
+        private val tvBadge = view.findViewById<TextView>(R.id.tvTimelineBadge)
+        private val tvTitle = view.findViewById<TextView>(R.id.tvTimelineTitle)
+        private val tvDesc = view.findViewById<TextView>(R.id.tvTimelineDesc)
+        private val tvSyncStatus = view.findViewById<TextView>(R.id.tvTimelineSyncStatus)
+
+        fun bind(item: TimelineStepItem, isLast: Boolean) {
+            tvIcon.text = item.icon
+            viewConnector.visibility = if (isLast) View.INVISIBLE else View.VISIBLE
+
+            val tz = TimeZone.getTimeZone("Asia/Kolkata")
+            val fmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
+            tvTime.text = "${fmt.format(Date(item.time))} IST"
+
+            tvBadge.text = item.badge
+            when (item.badge) {
+                "PUNCH IN" -> {
+                    tvBadge.setTextColor(Color.parseColor("#2E7D32"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+                }
+                "PUNCH OUT" -> {
+                    tvBadge.setTextColor(Color.parseColor("#C62828"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#FFEBEE"))
+                }
+                "LIVE NOW" -> {
+                    tvBadge.setTextColor(Color.parseColor("#00838F"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#E0F7FA"))
+                }
+                "OFFLINE GAP" -> {
+                    tvBadge.setTextColor(Color.parseColor("#E65100"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#FFF3E0"))
+                }
+                "RECONCILED" -> {
+                    tvBadge.setTextColor(Color.parseColor("#1565C0"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#E3F2FD"))
+                }
+                else -> {
+                    tvBadge.setTextColor(Color.parseColor("#1565C0"))
+                    tvBadge.setBackgroundColor(Color.parseColor("#E3F2FD"))
+                }
+            }
+
+            tvTitle.text = item.title
+            tvDesc.text = item.description
+            tvSyncStatus.text = item.syncStatus
+            tvSyncStatus.setTextColor(if (item.isSuccess) Color.parseColor("#2E7D32") else Color.parseColor("#E65100"))
         }
     }
 }

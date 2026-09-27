@@ -194,9 +194,21 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 if (string.IsNullOrWhiteSpace(deviceId))
                     return;
 
-                var firebaseUid = (await _firebaseEmployees.GetFirebaseAuthUidByEmailAsync(
-                    user.Email ?? string.Empty,
-                    HttpContext.RequestAborted)) ?? string.Empty;
+                var firebaseUid = User.FindFirst("FirebaseUid")?.Value;
+                if (string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    firebaseUid = await _firebaseEmployees.GetFirebaseAuthUidByEmailAsync(
+                        user.Email ?? string.Empty,
+                        HttpContext.RequestAborted);
+                }
+                if (string.IsNullOrWhiteSpace(firebaseUid) && !string.IsNullOrWhiteSpace(employee.AspNetUserId))
+                {
+                    firebaseUid = employee.AspNetUserId;
+                }
+                if (string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    firebaseUid = user.Id;
+                }
 
                 if (!string.IsNullOrWhiteSpace(firebaseUid))
                 {
@@ -204,6 +216,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                         employee.EmployeeID,
                         deviceId,
                         firebaseUid,
+                        employee.TenantId,
                         HttpContext.RequestAborted);
                 }
             }

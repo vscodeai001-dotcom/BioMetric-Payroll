@@ -176,6 +176,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         ("Shop", "shops"),
         ("ShiftSchedule", "shift_schedules"),
         ("BonusRecord", "bonus_records"),
+        ("CompanyHoliday", "shop_closed_days"),
+        ("PayrollHistory", "payroll_history"),
     };
 
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
@@ -985,6 +987,22 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             ["RecordedAtUtc"] = timestamp.ToString("O"),
             ["EventId"] = eventId
         };
+
+        foreach (var prop in eventData.Value.EnumerateObject())
+        {
+            if (!details.ContainsKey(prop.Name))
+            {
+                details[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString(),
+                    JsonValueKind.Number => prop.Value.TryGetInt64(out var l) ? (object)l : prop.Value.GetDouble(),
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    JsonValueKind.Null => null,
+                    _ => prop.Value.GetRawText()
+                };
+            }
+        }
 
         var log = new Payroll.Shared.Data.AuditLog
         {

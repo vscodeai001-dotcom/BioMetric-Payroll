@@ -1681,13 +1681,99 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     override fun onPaymentSuccess(p0: String?) { Toast.makeText(this, "Subscription Successful! 💎 ✅", Toast.LENGTH_LONG).show() }
     override fun onPaymentError(p0: Int, p1: String?) { Toast.makeText(this, "Subscription Failed: $p1 ⚠️", Toast.LENGTH_LONG).show() }
 
+    private var currentSelectedMenuTab: Int = 0 // 0 = minimized, 1 = Payroll, 2 = Attendance, 3 = Settings
+
     private fun setupApplicationMenus() {
         val menus = binding.appMenus
 
-        // Accordion Expand / Collapse toggles
-        setupAccordionToggle(menus.headerPayroll, menus.llPayrollContainer, menus.ivPayrollToggle)
-        setupAccordionToggle(menus.headerAttendance, menus.llAttendanceContainer, menus.ivAttendanceToggle)
-        setupAccordionToggle(menus.headerAdminSettings, menus.llSettingsContainer, menus.ivSettingsToggle)
+        fun updateTabUI(selectedTab: Int) {
+            currentSelectedMenuTab = selectedTab
+            val isExpanded = selectedTab > 0
+            menus.llTabContentDrawer.isVisible = isExpanded
+            menus.ivMasterMenuToggle.animate().rotation(if (isExpanded) 0f else -90f).setDuration(200).start()
+
+            val defaultBg = ContextCompat.getColor(this@MainActivity, R.color.colorSurfaceVariant)
+            val activeBg = ContextCompat.getColor(this@MainActivity, R.color.dashboard_kpi_primary_bg)
+            val defaultStroke = ContextCompat.getColor(this@MainActivity, R.color.outline_variant)
+            val activeStroke = ContextCompat.getColor(this@MainActivity, R.color.colorPrimary)
+
+            // Tab 1 (Payroll)
+            menus.cardSectionPayroll.setCardBackgroundColor(if (selectedTab == 1) activeBg else defaultBg)
+            menus.cardSectionPayroll.strokeColor = if (selectedTab == 1) activeStroke else defaultStroke
+            menus.cardSectionPayroll.strokeWidth = if (selectedTab == 1) 4 else 2
+
+            // Tab 2 (Attendance)
+            menus.cardSectionAttendance.setCardBackgroundColor(if (selectedTab == 2) activeBg else defaultBg)
+            menus.cardSectionAttendance.strokeColor = if (selectedTab == 2) activeStroke else defaultStroke
+            menus.cardSectionAttendance.strokeWidth = if (selectedTab == 2) 4 else 2
+
+            // Tab 3 (Settings)
+            menus.cardSectionAdminSettings.setCardBackgroundColor(if (selectedTab == 3) activeBg else defaultBg)
+            menus.cardSectionAdminSettings.strokeColor = if (selectedTab == 3) activeStroke else defaultStroke
+            menus.cardSectionAdminSettings.strokeWidth = if (selectedTab == 3) 4 else 2
+
+            // Containers visibility
+            menus.llPayrollContainer.isVisible = (selectedTab == 1)
+            menus.llAttendanceContainer.isVisible = (selectedTab == 2)
+            menus.llSettingsContainer.isVisible = (selectedTab == 3)
+
+            when (selectedTab) {
+                1 -> {
+                    menus.tvActiveCategoryName.text = "💰 Payroll Management (7 Tools)"
+                    menus.tvTabExpandIndicator.text = "🟢 Active: Payroll"
+                    menus.tvActiveTabHint.text = "Showing payroll, tax & salary management tools"
+                }
+                2 -> {
+                    menus.tvActiveCategoryName.text = "⏱️ Attendance & Tracking (9 Tools)"
+                    menus.tvTabExpandIndicator.text = "🟢 Active: Attendance"
+                    menus.tvActiveTabHint.text = "Showing real-time logs, reports & GPS tracking"
+                }
+                3 -> {
+                    menus.tvActiveCategoryName.text = "⚙️ Administration & Tools (9 Tools)"
+                    menus.tvTabExpandIndicator.text = "🟢 Active: Admin"
+                    menus.tvActiveTabHint.text = "Showing company setup, staff records & system tools"
+                }
+                else -> {
+                    menus.tvTabExpandIndicator.text = "📁 Minimized"
+                    menus.tvActiveTabHint.text = "3 Categories · Tap any tab below to expand"
+                }
+            }
+        }
+
+        // Initialize as minimized by default per user requirement
+        updateTabUI(0)
+
+        // Tab click listeners
+        menus.cardSectionPayroll.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            if (currentSelectedMenuTab == 1) updateTabUI(0) else updateTabUI(1)
+        }
+
+        menus.cardSectionAttendance.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            if (currentSelectedMenuTab == 2) updateTabUI(0) else updateTabUI(2)
+        }
+
+        menus.cardSectionAdminSettings.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            if (currentSelectedMenuTab == 3) updateTabUI(0) else updateTabUI(3)
+        }
+
+        menus.headerMasterMenus.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            if (currentSelectedMenuTab > 0) updateTabUI(0) else updateTabUI(1)
+        }
+
+        menus.btnMinimizeDrawer.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            updateTabUI(0)
+        }
+
+        menus.btnFooterCollapse.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            updateTabUI(0)
+        }
+
         setupAccordionToggle(menus.headerEmployeeTools, menus.llEmployeeToolsContainer, menus.ivEmployeeToolsToggle)
 
         // 0. SuperAdmin Multi-Tenant Portal

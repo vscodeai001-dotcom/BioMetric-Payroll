@@ -92,7 +92,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Workforce Hub Overview"
+                                android:text="🏢 Workforce Command Center ⚡"
                                 android:textColor="@color/white"
                                 android:textSize="22sp"
                                 android:textStyle="bold" />
@@ -100,7 +100,7 @@
                                 android:id="@+id/tvLiveDate"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="Real-time insights for Monday, 07 September 2026"
+                                android:text="📅 Real-time operations for Monday, 07 September 2026"
                                 android:textColor="#B0FFFFFF"
                                 android:textSize="14sp"
                                 android:layout_marginTop="4dp" />
@@ -367,7 +367,7 @@
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="📍 Live Staff Operations"
+                                    android:text="📍 Live Staff Operations 🛰️"
                                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                                     android:textStyle="bold" />
                                 <TextView
@@ -418,26 +418,26 @@
                                             style="@style/Widget.Material3.Chip.Filter"
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:text="All"
+                                            android:text="👥 All Staff"
                                             android:checked="true" />
                                         <com.google.android.material.chip.Chip
                                             android:id="@+id/chipAdminLive"
                                             style="@style/Widget.Material3.Chip.Filter"
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:text="Live" />
+                                            android:text="🟢 Live" />
                                         <com.google.android.material.chip.Chip
                                             android:id="@+id/chipAdminStale"
                                             style="@style/Widget.Material3.Chip.Filter"
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:text="Stale" />
+                                            android:text="🟡 Stale" />
                                         <com.google.android.material.chip.Chip
                                             android:id="@+id/chipAdminOffline"
                                             style="@style/Widget.Material3.Chip.Filter"
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
-                                            android:text="Offline" />
+                                            android:text="🔴 Offline" />
                                     </com.google.android.material.chip.ChipGroup>
                                 </HorizontalScrollView>
                             </LinearLayout>
@@ -468,7 +468,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="⌖ Both"
+                                        android:text="⌖ Focus"
                                         android:textSize="11sp"
                                         android:textStyle="bold"
                                         android:contentDescription="Focus Company and Selected Employee"
@@ -482,7 +482,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="👤 Emp"
+                                        android:text="👤 Staff"
                                         android:textSize="11sp"
                                         android:textStyle="bold"
                                         android:contentDescription="Focus Selected Employee"
@@ -524,7 +524,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="⦿ Follow"
+                                        android:text="🎯 Follow"
                                         android:textSize="11sp"
                                         android:contentDescription="Toggle auto-follow"
                                         app:cornerRadius="10dp" />
@@ -578,7 +578,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="◎ Zone"
+                                        android:text="🛡️ Zone"
                                         android:textSize="11sp"
                                         android:contentDescription="Toggle geofence zone"
                                         app:cornerRadius="10dp" />
@@ -591,7 +591,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="↝ Trail"
+                                        android:text="〰️ Trail"
                                         android:textSize="11sp"
                                         android:contentDescription="Toggle movement trails"
                                         app:cornerRadius="10dp" />
@@ -604,7 +604,7 @@
                                         android:layout_marginEnd="6dp"
                                         android:minWidth="0dp"
                                         android:paddingHorizontal="10dp"
-                                        android:text="▦ Layers"
+                                        android:text="🗺️ Layer"
                                         android:textSize="11sp"
                                         android:contentDescription="Change map layer"
                                         app:cornerRadius="10dp" />

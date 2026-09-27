@@ -25,6 +25,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -35,10 +36,14 @@ class AdminAttendanceActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
 
     private lateinit var adapter: AttendanceAdapter
-    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    private val displayDateFormat = SimpleDateFormat("dd-MMM-yyyy", Locale.getDefault())
-    private val punchTimeFormat = SimpleDateFormat("HH:mm", Locale.US)
-    private val shiftDateFormat = SimpleDateFormat("dd-MMM (EEE)", Locale.getDefault())
+    companion object {
+        private val istTimeZone = TimeZone.getTimeZone("Asia/Kolkata")
+    }
+
+    private val isoDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = istTimeZone }
+    private val displayDateFormat = SimpleDateFormat("dd-MMM-yyyy", Locale.getDefault()).apply { timeZone = istTimeZone }
+    private val punchTimeFormat = SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = istTimeZone }
+    private val shiftDateFormat = SimpleDateFormat("dd-MMM (EEE)", Locale.getDefault()).apply { timeZone = istTimeZone }
 
     private var fromCalendar = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
     private var toCalendar = Calendar.getInstance()
@@ -151,11 +156,19 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         }
         lifecycleScope.launch {
             sharedViewModel.allEmployees.collectLatest { employees ->
+                val prevSelectedId = employeeFilterId
+                val sorted = employees.sortedBy { it.name }
                 val items = mutableListOf("All Employees")
-                items += employees.sortedBy { it.name }.map { "${it.name} (#${it.employeeId})" }
+                items += sorted.map { "${it.name} (#${it.employeeId})" }
                 val spinnerAdapter = ArrayAdapter(this@AdminAttendanceActivity, android.R.layout.simple_spinner_dropdown_item, items)
                 binding.spEmployee.adapter = spinnerAdapter
-                binding.spEmployee.setSelection(0)
+                val selectedIndex = if (prevSelectedId != null) {
+                    val idx = sorted.indexOfFirst { it.employeeId.toIntOrNull() == prevSelectedId }
+                    if (idx >= 0) idx + 1 else 0
+                } else {
+                    0
+                }
+                binding.spEmployee.setSelection(selectedIndex)
                 render()
             }
         }
@@ -266,6 +279,20 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         if (distinctDates.isEmpty() && f == t) {
             distinctDates.add(f)
         }
+        for (p in allPunches) {
+            val d = p.date.ifBlank { if (p.timestamp > 0) isoDateFormat.format(Date(p.timestamp)) else "" }
+            if (d.isNotBlank() && d in f..t) {
+                distinctDates.add(d)
+            }
+        }
+        for (a in allAttendance) {
+            if (a.checkInTime > 0) {
+                val d = isoDateFormat.format(Date(a.checkInTime))
+                if (d in f..t) {
+                    distinctDates.add(d)
+                }
+            }
+        }
 
         val existingKeys = summariesInRange.map { "${it.employeeId}:${it.shiftDate}" }.toHashSet()
         val activeEmps = sharedViewModel.allEmployees.value.filter {
@@ -343,6 +370,18 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     "⏰ Shift: Flexible / Unscheduled"
                 }
 
+                var calculatedWorkedMs = 0L
+                var inTime: Long? = null
+                for ((timeMs, type) in resolvedPunches) {
+                    if (type.equals("IN", ignoreCase = true)) {
+                        inTime = timeMs
+                    } else if (type.equals("OUT", ignoreCase = true) && inTime != null) {
+                        calculatedWorkedMs += (timeMs - inTime).coerceAtLeast(0L)
+                        inTime = null
+                    }
+                }
+                val calculatedWorkedHours = calculatedWorkedMs / 3600000.0
+
                 synthesizedRows.add(
                     AdminAttendanceRow(
                         employeeID = empIdInt,
@@ -350,7 +389,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                         date = dateStr,
                         formattedDate = formattedDate,
                         status = status,
-                        workedHours = 0.0,
+                        workedHours = calculatedWorkedHours,
                         overtimeMinutes = 0.0,
                         penaltyMinutes = 0.0,
                         latenessMinutes = 0.0,
@@ -368,7 +407,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         // Compute KPI Cumulative Metrics across all filtered summaries and synthesized rows
         val employeesProcessed = combinedRows.map { it.employeeID }.distinct().count()
         val scheduledMs = summariesInRange.sumOf { it.scheduledShiftDurationMs } + synthesizedRows.sumOf { (it.scheduledMinutes * 60000).toLong() }
-        val workedHours = summariesInRange.sumOf { it.earnedStandardHours }
+        val workedHours = summariesInRange.sumOf { it.earnedStandardHours } + synthesizedRows.sumOf { it.workedHours }
         val otMs = summariesInRange.sumOf { it.totalOvertimeMs }
         val penaltyMs = summariesInRange.sumOf { it.totalPenaltyMs }
         val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }

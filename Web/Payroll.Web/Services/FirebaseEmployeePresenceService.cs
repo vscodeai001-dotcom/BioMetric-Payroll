@@ -25,12 +25,15 @@ public sealed class FirebaseEmployeePresenceService
         string sessionId,
         string authUid,
         string email,
+        string? explicitOwnerUid = null,
         CancellationToken ct = default)
     {
         if (employeeId <= 0 || string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(authUid))
             return false;
 
-        var ownerUid = _firebase.ResolveOwnerUid(authUid, "Employee");
+        var ownerUid = !string.IsNullOrWhiteSpace(explicitOwnerUid)
+            ? explicitOwnerUid.Trim()
+            : _firebase.ResolveOwnerUid(authUid, "Employee");
         if (string.IsNullOrWhiteSpace(ownerUid)) return false;
 
         var key = SanitizeKey(sessionId);
@@ -59,6 +62,8 @@ public sealed class FirebaseEmployeePresenceService
                 ["employeeId"] = employeeId,
                 ["ownerUid"] = ownerUid,
                 ["uid"] = authUid,
+                ["platform"] = "WEB",
+                ["deviceName"] = "Web Browser",
                 ["lastSeenAt"] = nowMs,
                 ["createdAt"] = nowMs
             };
@@ -79,18 +84,41 @@ public sealed class FirebaseEmployeePresenceService
         int employeeId,
         string sessionId,
         string authUid,
+        string? explicitOwnerUid = null,
         CancellationToken ct = default)
     {
         if (employeeId <= 0 || string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(authUid))
             return false;
 
-        var ownerUid = _firebase.ResolveOwnerUid(authUid, "Employee");
+        var ownerUid = !string.IsNullOrWhiteSpace(explicitOwnerUid)
+            ? explicitOwnerUid.Trim()
+            : _firebase.ResolveOwnerUid(authUid, "Employee");
         if (string.IsNullOrWhiteSpace(ownerUid)) return false;
+
+        var key = SanitizeKey(sessionId);
+        var browserDevicePrefix = "WEB_BROWSER_" + key.Substring(0, Math.Min(8, key.Length));
 
         try
         {
+            // Clear employee_sessions node if owned by this Web session
+            try
+            {
+                var existingSession = await _firebase.GetGlobalRecordAsync($"employee_sessions/{authUid}", ct);
+                if (existingSession.HasValue &&
+                    existingSession.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                    existingSession.Value.TryGetProperty("deviceId", out var devProp) &&
+                    devProp.GetString() == browserDevicePrefix)
+                {
+                    await _firebase.DeleteGlobalRecordAsync($"employee_sessions/{authUid}", ct);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not clear employee_sessions on Web logout");
+            }
+
             return await _firebase.DeleteOwnerRecordAsync(
-                ownerUid, "presence", $"{employeeId}_{SanitizeKey(sessionId)}", ct);
+                ownerUid, "presence", $"{employeeId}_{key}", ct);
         }
         catch (Exception ex)
         {

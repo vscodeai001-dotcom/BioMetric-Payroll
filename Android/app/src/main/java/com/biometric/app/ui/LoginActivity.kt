@@ -464,26 +464,67 @@ class LoginActivity : MotionBaseActivity() {
                         }
 
                         setLoading(false)
-                        firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId())
+                        val loginDetails = mapOf(
+                            "forceReplace" to forceReplace,
+                            "summary" to if (forceReplace) "Employee login successful on Android after force displacing previous session." else "Employee login successful on Android."
+                        )
+                        firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId(), loginDetails)
                         proceedToMain()
                         return@launch
                     }
 
                     if (sessionResult.conflict) {
                         setLoading(false)
+                        val existingPlat = sessionResult.existingPlatform.ifBlank {
+                            if (sessionResult.existingDeviceId.startsWith("WEB_BROWSER", ignoreCase = true)) "Web Browser" else "Android"
+                        }
+                        val existingDev = sessionResult.existingDeviceName.ifBlank {
+                            if (sessionResult.existingDeviceId.startsWith("WEB_BROWSER", ignoreCase = true)) "Web Dashboard" else sessionResult.existingDeviceId
+                        }
+                        val timeStr = if (sessionResult.existingLastSeenAt > 0) {
+                            java.text.SimpleDateFormat("dd-MMM HH:mm", java.util.Locale.getDefault())
+                                .format(java.util.Date(sessionResult.existingLastSeenAt))
+                        } else "Recent"
+
+                        val alertMsg = "This employee account is already active on $existingPlat ($existingDev) last active at $timeStr.\n\n" +
+                            "Continuing will log out that device and establish this Android device as the single active session."
+
+                        // Record blocked attempt in mobile_auth_events
+                        lifecycleScope.launch {
+                            val attemptDetails = mapOf(
+                                "existingDeviceId" to sessionResult.existingDeviceId,
+                                "existingPlatform" to existingPlat,
+                                "existingDeviceName" to existingDev,
+                                "existingLastSeenAt" to sessionResult.existingLastSeenAt,
+                                "summary" to "Login attempt blocked: Account active on $existingPlat ($existingDev). Force logout confirmation required."
+                            )
+                            firebaseSync.pushMobileAuthEvent(
+                                "SECOND_DEVICE_ATTEMPT",
+                                firebaseUser.email ?: email,
+                                getAndroidDeviceId(),
+                                attemptDetails
+                            )
+                        }
+
                         MaterialAlertDialogBuilder(this@LoginActivity)
                             .setTitle("Employee already logged in")
-                            .setMessage(
-                                "This employee account is already active on another device or platform. " +
-                                    "Continuing will log out the existing device and create a new login here."
-                            )
+                            .setMessage(alertMsg)
                             .setNegativeButton("Cancel", null)
                             .setPositiveButton("Log out & Continue") { _, _ ->
                                 lifecycleScope.launch {
+                                    val replaceDetails = mapOf(
+                                        "displacedDeviceId" to sessionResult.existingDeviceId,
+                                        "displacedPlatform" to existingPlat,
+                                        "displacedDeviceName" to existingDev,
+                                        "displacedLastSeenAt" to sessionResult.existingLastSeenAt,
+                                        "newDeviceId" to getAndroidDeviceId(),
+                                        "summary" to "Single-Device Rule Enforced: Displaced previous $existingPlat session ($existingDev). New session established on Android (${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL})."
+                                    )
                                     firebaseSync.pushMobileAuthEvent(
                                         "FORCED_SESSION_LOGOUT",
                                         firebaseUser.email ?: email,
-                                        getAndroidDeviceId()
+                                        getAndroidDeviceId(),
+                                        replaceDetails
                                     )
                                     handleEmployeeLogin(email, pass, forceReplace = true)
                                 }

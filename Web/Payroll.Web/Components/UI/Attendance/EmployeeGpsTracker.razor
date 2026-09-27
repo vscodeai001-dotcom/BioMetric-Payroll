@@ -10,6 +10,7 @@
 @inject IHubContext<AttendanceRefreshHub> AttendanceHub
 @inject AuthenticationStateProvider AuthState
 @inject FirebaseRealtimeService FirebaseRealtime
+@inject FirebaseEmployeeManagementService FirebaseEmployees
 @inject NavigationManager Navigation
 
 @*
@@ -105,6 +106,15 @@
             var authState = await AuthState.GetAuthenticationStateAsync();
             firebaseUid = authState.User.FindFirst("FirebaseUid")?.Value;
             browserDeviceId = authState.User.FindFirst("BioMetric-Employee-Device")?.Value;
+
+            if (string.IsNullOrWhiteSpace(firebaseUid) && EmployeeId > 0)
+            {
+                var userEmail = authState.User.Identity?.Name ?? authState.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+                if (!string.IsNullOrWhiteSpace(userEmail))
+                {
+                    firebaseUid = await FirebaseEmployees.GetFirebaseAuthUidByEmailAsync(userEmail);
+                }
+            }
 
             if (!trackingEnabled)
             {

@@ -36,7 +36,20 @@ class FirebaseEmployeeSessionManager @Inject constructor(
     data class Result(
         val success: Boolean,
         val conflict: Boolean = false,
-        val message: String = ""
+        val message: String = "",
+        val existingDeviceId: String = "",
+        val existingPlatform: String = "",
+        val existingDeviceName: String = "",
+        val existingLastSeenAt: Long = 0L
+    )
+
+    private data class TxResult(
+        val success: Boolean,
+        val conflict: Boolean = false,
+        val existingDeviceId: String = "",
+        val existingPlatform: String = "",
+        val existingDeviceName: String = "",
+        val existingLastSeenAt: Long = 0L
     )
 
     suspend fun acquire(
@@ -58,11 +71,15 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         return runCatching {
             val transaction = runTransaction(ref, employeeId, ownerUid, deviceId, now, forceReplace)
             when {
-                transaction.first -> Result(true)
-                transaction.second -> Result(
+                transaction.success -> Result(true)
+                transaction.conflict -> Result(
                     success = false,
                     conflict = true,
-                    message = "This employee is already logged in on another device."
+                    message = "This employee is already logged in on another device.",
+                    existingDeviceId = transaction.existingDeviceId,
+                    existingPlatform = transaction.existingPlatform,
+                    existingDeviceName = transaction.existingDeviceName,
+                    existingLastSeenAt = transaction.existingLastSeenAt
                 )
                 else -> Result(false, message = "Unable to establish the Firebase employee session.")
             }
@@ -170,11 +187,11 @@ class FirebaseEmployeeSessionManager @Inject constructor(
         deviceId: String,
         now: Long,
         forceReplace: Boolean
-    ): Pair<Boolean, Boolean> = suspendCancellableCoroutine { continuation ->
+    ): TxResult = suspendCancellableCoroutine { continuation ->
 
         val resumed = AtomicBoolean(false)
 
-        fun resumeOnce(result: Pair<Boolean, Boolean>) {
+        fun resumeOnce(result: TxResult) {
             if (resumed.compareAndSet(false, true)) {
                 continuation.resume(result)
             }
@@ -221,6 +238,8 @@ class FirebaseEmployeeSessionManager @Inject constructor(
                 currentData.child("deviceId").value = deviceId
                 currentData.child("employeeId").value = employeeId
                 currentData.child("ownerUid").value = ownerUid
+                currentData.child("platform").value = "Android"
+                currentData.child("deviceName").value = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
 
                 /*
                  * Firebase authenticated user UID.
@@ -248,14 +267,14 @@ class FirebaseEmployeeSessionManager @Inject constructor(
 
                 if (error != null) {
                     continuation.resume(
-                        Pair(false, false)
+                        TxResult(success = false, conflict = false)
                     )
                     return
                 }
 
                 if (committed) {
                     continuation.resume(
-                        Pair(true, false)
+                        TxResult(success = true, conflict = false)
                     )
                     return
                 }
@@ -264,7 +283,7 @@ class FirebaseEmployeeSessionManager @Inject constructor(
                  * Transaction was not committed.
                  *
                  * If another device currently owns the session,
-                 * report the second value as true.
+                 * extract its metadata so the caller can present rich telemetry.
                  */
                 val currentDevice =
                     currentData
@@ -272,12 +291,37 @@ class FirebaseEmployeeSessionManager @Inject constructor(
                         ?.getValue(String::class.java)
                         .orEmpty()
 
+                val currentPlatform =
+                    currentData
+                        ?.child("platform")
+                        ?.getValue(String::class.java)
+                        .orEmpty()
+
+                val currentDeviceName =
+                    currentData
+                        ?.child("deviceName")
+                        ?.getValue(String::class.java)
+                        .orEmpty()
+
+                val currentLastSeen =
+                    currentData
+                        ?.child("lastSeenAt")
+                        ?.getValue(Long::class.java)
+                        ?: 0L
+
                 val anotherDeviceOwnsSession =
                     currentDevice.isNotBlank() &&
                             currentDevice != deviceId
 
                 continuation.resume(
-                    Pair(false, anotherDeviceOwnsSession)
+                    TxResult(
+                        success = false,
+                        conflict = anotherDeviceOwnsSession,
+                        existingDeviceId = currentDevice,
+                        existingPlatform = currentPlatform,
+                        existingDeviceName = currentDeviceName,
+                        existingLastSeenAt = currentLastSeen
+                    )
                 )
             }
         })

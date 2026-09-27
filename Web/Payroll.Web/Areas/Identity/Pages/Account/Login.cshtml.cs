@@ -379,6 +379,35 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     email,
                     Input.Password,
                     ct: HttpContext.RequestAborted);
+
+                if (string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    firebaseUid = await _firebaseEmployees.GetFirebaseAuthUidByEmailAsync(
+                        email,
+                        HttpContext.RequestAborted);
+                }
+
+                if (string.IsNullOrWhiteSpace(firebaseUid))
+                {
+                    var fbResult = await _firebaseRealtime.VerifyEmailPasswordAsync(
+                        email,
+                        Input.Password,
+                        HttpContext.RequestAborted);
+                    if (fbResult.Success && !string.IsNullOrWhiteSpace(fbResult.LocalId))
+                    {
+                        firebaseUid = fbResult.LocalId;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(firebaseUid) && !string.IsNullOrWhiteSpace(firebaseEmployee.AspNetUserId))
+                {
+                    firebaseUid = firebaseEmployee.AspNetUserId;
+                }
+
+                if (string.IsNullOrWhiteSpace(firebaseUid) && user != null && !string.IsNullOrWhiteSpace(user.Id))
+                {
+                    firebaseUid = user.Id;
+                }
             }
 
             // ========================================================
@@ -489,20 +518,76 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             // ========================================================
 
             var firebaseActiveDevice = string.Empty;
-            if (isEmployee && !string.IsNullOrWhiteSpace(firebaseUid))
+            var firebaseActivePlatform = string.Empty;
+            var firebaseActiveDeviceName = string.Empty;
+            long firebaseActiveLastSeen = 0;
+            string? foundSessionUid = null;
+
+            if (isEmployee)
             {
                 try
                 {
-                    var firebaseSession = await _firebaseRealtime.GetGlobalRecordAsync(
-                        $"employee_sessions/{firebaseUid}",
-                        HttpContext.RequestAborted);
-
-                    if (firebaseSession.HasValue &&
-                        firebaseSession.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
-                        firebaseSession.Value.TryGetProperty("deviceId", out var deviceProp) &&
-                        deviceProp.ValueKind == System.Text.Json.JsonValueKind.String)
+                    // 1. Direct path check if firebaseUid is known
+                    if (!string.IsNullOrWhiteSpace(firebaseUid))
                     {
-                        firebaseActiveDevice = deviceProp.GetString() ?? string.Empty;
+                        var firebaseSession = await _firebaseRealtime.GetGlobalRecordAsync(
+                            $"employee_sessions/{firebaseUid}",
+                            HttpContext.RequestAborted);
+
+                        if (firebaseSession.HasValue && firebaseSession.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            foundSessionUid = firebaseUid;
+                            if (firebaseSession.Value.TryGetProperty("deviceId", out var deviceProp))
+                                firebaseActiveDevice = deviceProp.GetString() ?? string.Empty;
+                            if (firebaseSession.Value.TryGetProperty("platform", out var platProp))
+                                firebaseActivePlatform = platProp.GetString() ?? string.Empty;
+                            if (firebaseSession.Value.TryGetProperty("deviceName", out var devNameProp))
+                                firebaseActiveDeviceName = devNameProp.GetString() ?? string.Empty;
+                            if (firebaseSession.Value.TryGetProperty("lastSeenAt", out var lastSeenProp))
+                            {
+                                if (lastSeenProp.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                    firebaseActiveLastSeen = lastSeenProp.GetInt64();
+                            }
+                        }
+                    }
+
+                    // 2. Fallback scan of employee_sessions if direct lookup had no active device
+                    if (string.IsNullOrWhiteSpace(firebaseActiveDevice) && firebaseEmployee != null)
+                    {
+                        var allSessions = await _firebaseRealtime.GetGlobalRecordAsync("employee_sessions", HttpContext.RequestAborted);
+                        if (allSessions.HasValue && allSessions.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            foreach (var sProp in allSessions.Value.EnumerateObject())
+                            {
+                                if (sProp.Value.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                                var empIdVal = 0;
+                                if (sProp.Value.TryGetProperty("employeeId", out var empIdProp))
+                                {
+                                    if (empIdProp.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                        empIdVal = empIdProp.GetInt32();
+                                    else if (empIdProp.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(empIdProp.GetString(), out var parsed))
+                                        empIdVal = parsed;
+                                }
+
+                                if (empIdVal == firebaseEmployee.EmployeeID)
+                                {
+                                    foundSessionUid = sProp.Name;
+                                    if (string.IsNullOrWhiteSpace(firebaseUid)) firebaseUid = foundSessionUid;
+                                    if (sProp.Value.TryGetProperty("deviceId", out var deviceProp))
+                                        firebaseActiveDevice = deviceProp.GetString() ?? string.Empty;
+                                    if (sProp.Value.TryGetProperty("platform", out var platProp))
+                                        firebaseActivePlatform = platProp.GetString() ?? string.Empty;
+                                    if (sProp.Value.TryGetProperty("deviceName", out var devNameProp))
+                                        firebaseActiveDeviceName = devNameProp.GetString() ?? string.Empty;
+                                    if (sProp.Value.TryGetProperty("lastSeenAt", out var lastSeenProp))
+                                    {
+                                        if (lastSeenProp.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                            firebaseActiveLastSeen = lastSeenProp.GetInt64();
+                                    }
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -511,10 +596,79 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 }
             }
 
-            var firebaseOtherDeviceActive =
-                !string.IsNullOrWhiteSpace(firebaseActiveDevice) &&
-                !(firebaseActiveDevice.StartsWith("WEB_BROWSER_", StringComparison.OrdinalIgnoreCase) &&
-                  firebaseActiveDevice.EndsWith(deviceId[..Math.Min(8, deviceId.Length)], StringComparison.OrdinalIgnoreCase));
+            // Retrieve last known GPS location & workplace distance for the displaced/existing device
+            double existingLat = 0;
+            double existingLng = 0;
+            double existingDistanceMeters = 0;
+            bool existingWithinRadius = false;
+            DateTime? existingLocationTime = null;
+
+            if (firebaseEmployee != null)
+            {
+                var liveLoc = LiveLocationStore.Get(firebaseEmployee.EmployeeID);
+                if (liveLoc != null)
+                {
+                    existingLat = liveLoc.Latitude;
+                    existingLng = liveLoc.Longitude;
+                    existingDistanceMeters = liveLoc.DistanceMeters;
+                    existingWithinRadius = liveLoc.IsWithinAllowedRadius;
+                    existingLocationTime = liveLoc.LastUpdatedUtc;
+                }
+                else
+                {
+                    try
+                    {
+                        await using var gpsDb = await _dbFactory.CreateDbContextAsync();
+                        var activeGpsSession = await gpsDb.EmployeeGpsSessions.AsNoTracking()
+                            .Where(s => s.EmployeeId == firebaseEmployee.EmployeeID && s.EndedAtUtc == null)
+                            .OrderByDescending(s => s.LastUpdateAtUtc)
+                            .FirstOrDefaultAsync();
+
+                        if (activeGpsSession != null)
+                        {
+                            existingLat = activeGpsSession.LastLatitude ?? 0;
+                            existingLng = activeGpsSession.LastLongitude ?? 0;
+                            existingDistanceMeters = activeGpsSession.LastDistanceFromOfficeMeters ?? 0;
+                            existingWithinRadius = activeGpsSession.LastIsWithinAllowedRadius ?? false;
+                            existingLocationTime = activeGpsSession.LastUpdateAtUtc;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            var isCurrentWebBrowser = !string.IsNullOrWhiteSpace(firebaseActiveDevice) &&
+                firebaseActiveDevice.StartsWith("WEB_BROWSER_", StringComparison.OrdinalIgnoreCase) &&
+                firebaseActiveDevice.EndsWith(deviceId[..Math.Min(8, deviceId.Length)], StringComparison.OrdinalIgnoreCase);
+
+            var firebaseOtherDeviceActive = !string.IsNullOrWhiteSpace(firebaseActiveDevice) && !isCurrentWebBrowser;
+
+            var existingPlatformName = !string.IsNullOrWhiteSpace(firebaseActivePlatform)
+                ? firebaseActivePlatform
+                : (firebaseActiveDevice.StartsWith("WEB_BROWSER_", StringComparison.OrdinalIgnoreCase) ? "Web" : "Android");
+
+            var existingDeviceLabel = !string.IsNullOrWhiteSpace(firebaseActiveDeviceName)
+                ? firebaseActiveDeviceName
+                : (existingPlatformName.Equals("Android", StringComparison.OrdinalIgnoreCase) ? $"Android Device ({firebaseActiveDevice})" : $"Web Browser ({firebaseActiveDevice})");
+
+            var existingLocationDesc = (existingLat != 0 || existingLng != 0)
+                ? $"Lat {existingLat:F5}, Lng {existingLng:F5} ({existingDistanceMeters:F0}m from office {(existingWithinRadius ? "[Inside Geofence]" : "[Outside Geofence]")})"
+                : "No active GPS fix";
+
+            var indiaZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+            var existingTimeDesc = existingLocationTime.HasValue
+                ? TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(existingLocationTime.Value, DateTimeKind.Utc), indiaZone).ToString("dd-MMM HH:mm:ss")
+                : (firebaseActiveLastSeen > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(firebaseActiveLastSeen).ToOffset(TimeSpan.FromHours(5.5)).ToString("dd-MMM HH:mm:ss") : "Recent");
+
+            var httpContext = HttpContext;
+            var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "Unavailable";
+            var forwardedIp = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(forwardedIp))
+                ipAddress = forwardedIp.Split(',')[0].Trim();
+
+            var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+            if (string.IsNullOrWhiteSpace(userAgent))
+                userAgent = "Unavailable";
 
             if (isEmployee &&
                 (activeDeviceBeforeLogin != null || firebaseOtherDeviceActive) &&
@@ -522,18 +676,45 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 !ForceLogoutExisting)
             {
                 ShowForceLogout = true;
-                ModelState.AddModelError(string.Empty, AlreadyLoggedInMessage + " " + ForceLogoutInstruction);
+                var warningMessage = $"This employee account is already active on {existingPlatformName} ({existingDeviceLabel}). " +
+                    $"Last active: {existingTimeDesc}, Location: {existingLocationDesc}. " +
+                    $"Check 'Log out previous device and continue' to switch to this device.";
+
+                ModelState.AddModelError(string.Empty, warningMessage);
 
                 await _attendanceMonitor.RecordAsync(
-                    "LOGIN_BLOCKED_EXISTING_SESSION",
+                    "SECOND_DEVICE_ATTEMPT",
                     user.Id,
                     user.Email ?? email,
                     deviceId,
                     "Web",
-                    "BLOCKED",
-                    "EXPLICIT_FORCE_LOGOUT_REQUIRED",
-                    new { FirebaseActiveDevice = firebaseActiveDevice, ActiveDevice = activeDeviceBeforeLogin },
-                    activeDeviceBeforeLogin ?? firebaseActiveDevice);
+                    "BLOCKED_REQUIRE_CONFIRMATION",
+                    "EXISTING_DEVICE_ACTIVE",
+                    new
+                    {
+                        EmployeeId = firebaseEmployee?.EmployeeID,
+                        Summary = $"Login attempt blocked: Account is already active on {existingPlatformName} ({existingDeviceLabel}) at {existingLocationDesc}. Explicit confirmation required to displace.",
+                        DisplacedDevice = new
+                        {
+                            DeviceId = firebaseActiveDevice,
+                            Platform = existingPlatformName,
+                            DeviceName = existingDeviceLabel,
+                            LastSeen = existingTimeDesc,
+                            LastLatitude = existingLat,
+                            LastLongitude = existingLng,
+                            LastDistanceMeters = existingDistanceMeters,
+                            WithinAllowedRadius = existingWithinRadius
+                        },
+                        NewDevice = new
+                        {
+                            DeviceId = deviceId,
+                            Platform = "Web",
+                            IpAddress = ipAddress,
+                            UserAgent = userAgent,
+                            AttemptedAtUtc = DateTime.UtcNow
+                        }
+                    },
+                    firebaseActiveDevice);
 
                 return Page();
             }
@@ -548,26 +729,70 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     return Page();
                 }
 
-                if (isEmployee && firebaseOtherDeviceActive && !string.IsNullOrWhiteSpace(firebaseUid))
+                // Authoritatively write Web's session lock into employee_sessions/{firebaseUid}
+                // so Android's observeSessionActive() immediately sees that activeDevice has changed
+                // to WEB_BROWSER_... and stops tracking / logs out.
+                if (isEmployee && !string.IsNullOrWhiteSpace(firebaseUid))
                 {
                     try
                     {
-                        await _firebaseRealtime.DeleteGlobalRecordAsync(
+                        var sessionRow = new Dictionary<string, object?>
+                        {
+                            ["deviceId"] = "WEB_BROWSER_" + deviceId[..Math.Min(8, deviceId.Length)],
+                            ["employeeId"] = firebaseEmployee?.EmployeeID,
+                            ["ownerUid"] = firebaseEmployee?.TenantId,
+                            ["uid"] = firebaseUid,
+                            ["platform"] = "WEB",
+                            ["deviceName"] = "Web Browser",
+                            ["lastSeenAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                            ["createdAt"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                        };
+                        await _firebaseRealtime.SetGlobalRecordAsync(
                             $"employee_sessions/{firebaseUid}",
+                            sessionRow,
                             HttpContext.RequestAborted);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to clear prior Firebase employee session for forced replacement. EmployeeId={EmployeeId}", firebaseEmployee?.EmployeeID);
+                        _logger.LogWarning(ex, "Failed to update Firebase employee session for forced replacement. EmployeeId={EmployeeId}", firebaseEmployee?.EmployeeID);
                     }
                 }
 
-                if (activeDeviceBeforeLogin != null)
+                if (isEmployee && (firebaseOtherDeviceActive || activeDeviceBeforeLogin != null))
                 {
                     await _attendanceMonitor.RecordAsync(
-                        "FORCED_SESSION_LOGOUT", user.Id, user.Email ?? email, activeDeviceBeforeLogin, "Web",
-                        "TERMINATED", "REPLACED_BY_NEW_LOGIN",
-                        new { NewDeviceId = deviceId }, activeDeviceBeforeLogin);
+                        "FORCED_SESSION_LOGOUT",
+                        user.Id,
+                        user.Email ?? email,
+                        firebaseActiveDevice,
+                        "Web",
+                        "TERMINATED",
+                        "REPLACED_BY_NEW_DEVICE",
+                        new
+                        {
+                            EmployeeId = firebaseEmployee?.EmployeeID,
+                            Summary = $"Single-Device Rule Enforced: Displaced {existingPlatformName} session ({existingDeviceLabel} at {existingLocationDesc}). New session established on Web Browser (IP: {ipAddress}).",
+                            DisplacedDevice = new
+                            {
+                                DeviceId = firebaseActiveDevice,
+                                Platform = existingPlatformName,
+                                DeviceName = existingDeviceLabel,
+                                LastSeen = existingTimeDesc,
+                                LastLatitude = existingLat,
+                                LastLongitude = existingLng,
+                                LastDistanceMeters = existingDistanceMeters,
+                                WithinAllowedRadius = existingWithinRadius
+                            },
+                            NewDevice = new
+                            {
+                                DeviceId = deviceId,
+                                Platform = "Web",
+                                IpAddress = ipAddress,
+                                UserAgent = userAgent,
+                                EstablishedAtUtc = DateTime.UtcNow
+                            }
+                        },
+                        deviceId);
                 }
             }
 
@@ -650,16 +875,6 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     Path = "/"
                 });
 
-            var httpContext = HttpContext;
-            var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString() ?? "Unavailable";
-            var forwardedIp = httpContext.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(forwardedIp))
-                ipAddress = forwardedIp.Split(',')[0].Trim();
-
-            var userAgent = httpContext.Request.Headers.UserAgent.ToString();
-            if (string.IsNullOrWhiteSpace(userAgent))
-                userAgent = "Unavailable";
-
             if (isEmployee && firebaseEmployee != null && !string.IsNullOrWhiteSpace(firebaseUid))
             {
                 await _firebasePresence.SetWebPresenceAsync(
@@ -667,6 +882,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     deviceId,
                     firebaseUid,
                     email,
+                    firebaseEmployee.TenantId,
                     HttpContext.RequestAborted);
             }
 
@@ -693,7 +909,38 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             await _attendanceMonitor.RecordAsync(
                 "LOGIN_SUCCESS", user.Id, user.Email ?? email, deviceId, "Web", "SUCCESS",
                 ForceLogoutExisting ? "NEW_DEVICE_AFTER_FORCE_REPLACE" : "SESSION_STARTED",
-                new { ForceLogoutExisting }, ForceLogoutExisting ? activeDeviceBeforeLogin : null);
+                new
+                {
+                    ForceLogoutExisting,
+                    Platform = "Web",
+                    DeviceName = "Web Browser",
+                    IpAddress = ipAddress,
+                    UserAgent = userAgent,
+                    Summary = ForceLogoutExisting
+                        ? $"Login successful on Web after force displacing previous {existingPlatformName} ({existingDeviceLabel})."
+                        : "Login successful on Web.",
+                    DisplacedDevice = ForceLogoutExisting ? new
+                    {
+                        DeviceId = firebaseActiveDevice,
+                        Platform = existingPlatformName,
+                        DeviceName = existingDeviceLabel,
+                        LastSeen = existingTimeDesc,
+                        LastLatitude = existingLat,
+                        LastLongitude = existingLng,
+                        LastDistanceMeters = existingDistanceMeters,
+                        WithinAllowedRadius = existingWithinRadius
+                    } : null,
+                    NewDevice = new
+                    {
+                        DeviceId = deviceId,
+                        Platform = "Web",
+                        DeviceName = "Web Browser",
+                        IpAddress = ipAddress,
+                        UserAgent = userAgent,
+                        EstablishedAtUtc = DateTime.UtcNow
+                    }
+                },
+                ForceLogoutExisting ? firebaseActiveDevice : null);
 
             // ========================================================
             // SUCCESS

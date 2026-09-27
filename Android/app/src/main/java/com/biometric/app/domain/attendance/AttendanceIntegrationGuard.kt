@@ -37,7 +37,7 @@ object AttendanceIntegrationGuard {
         )
     }
 
-    /** Automatic geofence punching is a Web-authoritative operation. */
+    /** Evaluates automatic geofence punching decision. */
     fun automaticGeofenceDecision(
         feature: EmployeeAttendanceStateMachine.FeatureState,
         inside: Boolean,
@@ -50,7 +50,7 @@ object AttendanceIntegrationGuard {
         }
         return Decision(
             allowed = true,
-            reason = "Web-authoritative automatic reconciliation",
+            reason = "Automatic geofence attendance",
             punchType = EmployeeAttendanceStateMachine.requiredAutomaticPunchType(
                 inside, attendanceCurrentlyOpen
             )

@@ -637,7 +637,16 @@ class MainRepository(
         val existing = regularizationDao.getAllFlow().first().find { it.id == requestId }
         if (existing != null) {
             regularizationDao.upsert(existing.copy(status = status, adminRemarks = remarks, syncState = 0))
+            runCatching {
+                firebaseSync.getOwnerRef()?.child("regularizations")?.child(requestId)?.updateChildren(
+                    mapOf(
+                        "status" to status,
+                        "adminRemarks" to remarks
+                    )
+                )
+                firebaseSync.notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", requestId)
             }
+        }
     }
 
     fun getPendingRegularizations(): Flow<List<RegularizationRequest>> = allRegularizationsFlow

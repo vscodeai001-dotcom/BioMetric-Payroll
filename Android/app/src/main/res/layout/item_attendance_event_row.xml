@@ -4,9 +4,9 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="10dp"
-    app:cardCornerRadius="14dp"
-    app:cardElevation="0dp"
+    android:layout_marginBottom="12dp"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="1dp"
     app:strokeWidth="1dp"
     app:strokeColor="?attr/colorOutlineVariant"
     app:cardBackgroundColor="?attr/colorSurface">
@@ -17,10 +17,47 @@
         android:orientation="vertical"
         android:padding="14dp">
 
-        <!-- Top Row: Event Type Badge + Timestamp -->
+        <!-- Top Row: Icon + Title + Badges -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvEventIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="20sp"
+                android:layout_marginEnd="6dp"
+                android:text="🛡️" />
+
+            <TextView
+                android:id="@+id/tvEventTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textAppearance="@style/TextAppearance.Material3.TitleSmall"
+                android:textStyle="bold"
+                tools:text="Device Switched &amp; Session Activated" />
+
+            <TextView
+                android:id="@+id/tvRelativeTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_chip_rounded"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:textSize="10sp"
+                android:textColor="?android:attr/textColorSecondary"
+                tools:text="12m ago" />
+        </LinearLayout>
+
+        <!-- Subheader: Badges & Timestamp -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -29,11 +66,22 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_chip_rounded"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="4dp"
-                android:textSize="12sp"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:textSize="11sp"
                 android:textStyle="bold"
                 tools:text="LOGIN_SUCCESS" />
+
+            <TextView
+                android:id="@+id/tvPlatformBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_chip_rounded"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:textSize="11sp"
+                tools:text="📱 Android" />
 
             <View
                 android:layout_width="0dp"
@@ -48,7 +96,7 @@
                 android:drawablePadding="4dp"
                 android:textSize="11sp"
                 android:textColor="?android:attr/textColorSecondary"
-                tools:text="24-Sep-2026 18:30:15" />
+                tools:text="27-Sep-2026 10:43:18" />
         </LinearLayout>
 
         <!-- Divider -->
@@ -66,17 +114,17 @@
             android:orientation="horizontal">
 
             <TextView
-                android:layout_width="32dp"
-                android:layout_height="32dp"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
                 android:background="@drawable/bg_circle_icon"
                 android:gravity="center"
                 android:text="👤"
-                android:textSize="16sp" />
+                android:textSize="14sp" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="10dp"
+                android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:orientation="vertical">
 
@@ -86,7 +134,7 @@
                     android:layout_height="wrap_content"
                     android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                     android:textStyle="bold"
-                    tools:text="admin@biometric.com" />
+                    tools:text="employee@biometric.com" />
 
                 <TextView
                     android:id="@+id/tvEntityId"
@@ -94,13 +142,12 @@
                     android:layout_height="wrap_content"
                     android:textSize="11sp"
                     android:textColor="?android:attr/textColorSecondary"
-                    tools:text="Staff #1042 • Device: SM-G998B" />
+                    tools:text="Staff #12 • Firebase UID: aBc123XyZ" />
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Diagnostic Details Container -->
+        <!-- 3 Pillars Container: WHY, PURPOSE, HOW -->
         <LinearLayout
-            android:id="@+id/llDiagnosticDetails"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
@@ -108,24 +155,304 @@
             android:orientation="vertical"
             android:padding="10dp">
 
+            <!-- Why -->
+            <LinearLayout
+                android:id="@+id/llWhyContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="❓ Why Did This Happen?"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorPrimary" />
+
+                <TextView
+                    android:id="@+id/tvEventWhy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textSize="12sp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    tools:text="Employee chose to sign in on Web and confirmed replacing their active session on Android." />
+            </LinearLayout>
+
+            <!-- Purpose -->
+            <LinearLayout
+                android:id="@+id/llPurposeContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="6dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎯 Security Purpose &amp; Policy"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorPrimary" />
+
+                <TextView
+                    android:id="@+id/tvEventPurpose"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textSize="12sp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    tools:text="Strict Single-Device Policy: Only one active session and GPS tracker allowed per employee across all platforms." />
+            </LinearLayout>
+
+            <!-- How -->
+            <LinearLayout
+                android:id="@+id/llHowContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⚙️ How The System Handled It"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorPrimary" />
+
+                <TextView
+                    android:id="@+id/tvEventHow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textSize="12sp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    tools:text="Realtime Database lock updated. Android background tracking terminated and new session authorized." />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Device Comparison Container -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="vertical">
+
+            <!-- Active / Current Device Card -->
+            <LinearLayout
+                android:id="@+id/cardActiveDevice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/badge_bg_green"
+                android:orientation="vertical"
+                android:padding="10dp"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🟢 ACTIVE / INCOMING DEVICE"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="#2E7D32" />
+
+                    <TextView
+                        android:id="@+id/tvActivePlatform"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="#2E7D32"
+                        tools:text="Android" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvActiveDeviceName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="#1B5E20"
+                    tools:text="Samsung Galaxy S23 (SM-S911B)" />
+
+                <TextView
+                    android:id="@+id/tvActiveDeviceId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textSize="10sp"
+                    android:textColor="#388E3C"
+                    tools:text="ID: android-c98a72..." />
+
+                <TextView
+                    android:id="@+id/tvActiveIp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#2E7D32"
+                    tools:text="IP: 192.168.1.45" />
+
+                <TextView
+                    android:id="@+id/tvActiveStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#1B5E20"
+                    tools:text="✓ Status: Granted Authoritative Session Lock" />
+            </LinearLayout>
+
+            <!-- Displaced / Previous Device Card -->
+            <LinearLayout
+                android:id="@+id/cardDisplacedDevice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/badge_bg_red"
+                android:orientation="vertical"
+                android:padding="10dp"
+                android:visibility="gone"
+                tools:visibility="visible">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="🔴 DISPLACED / PREVIOUS DEVICE"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:textColor="#C62828" />
+
+                    <TextView
+                        android:id="@+id/tvDisplacedPlatform"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        android:textColor="#C62828"
+                        tools:text="Android" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvDisplacedDeviceName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:textColor="#B71C1C"
+                    tools:text="Samsung Galaxy S22" />
+
+                <TextView
+                    android:id="@+id/tvDisplacedDeviceId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textSize="10sp"
+                    android:textColor="#D32F2F"
+                    tools:text="ID: android-88a9f..." />
+
+                <TextView
+                    android:id="@+id/tvDisplacedLastSeen"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#C62828"
+                    tools:text="Last Active: 27-Sep 10:40 AM" />
+
+                <TextView
+                    android:id="@+id/tvDisplacedGps"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#C62828"
+                    tools:text="Last GPS: Lat 13.0827, Lng 80.2707" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tvDisplacedDistance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="11sp"
+                        android:textColor="#C62828"
+                        tools:text="Distance: 345m" />
+
+                    <TextView
+                        android:id="@+id/tvDisplacedGeofenceBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_chip_rounded"
+                        android:paddingHorizontal="6dp"
+                        android:paddingVertical="2dp"
+                        android:textSize="10sp"
+                        android:textStyle="bold"
+                        tools:text="Outside Geofence" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvDisplacedStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#B71C1C"
+                    tools:text="✕ Action: Session Revoked &amp; GPS Tracking Halted" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Collapsible Raw JSON Container for Tech Diagnostics -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
             <TextView
-                android:id="@+id/tvDiagnosticTitle"
+                android:id="@+id/tvToggleRawJson"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="📋 Diagnostic Details"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:textColor="?attr/colorPrimary"
-                android:layout_marginBottom="4dp" />
+                android:text="⚙️ Technical Diagnostic JSON"
+                android:textSize="10sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:paddingVertical="4dp"
+                android:clickable="true"
+                android:focusable="true" />
 
             <TextView
                 android:id="@+id/tvDiagnosticText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:fontFamily="monospace"
-                android:textSize="11sp"
+                android:textSize="10sp"
+                android:background="@drawable/bg_code_box"
+                android:padding="8dp"
+                android:visibility="gone"
                 android:textColor="?android:attr/textColorSecondary"
-                tools:text="{&quot;EventType&quot;:&quot;LOGIN_SUCCESS&quot;,&quot;DeviceId&quot;:&quot;d938b81&quot;,&quot;AppVersion&quot;:&quot;3.8.4&quot;}" />
+                tools:text="{...}" />
         </LinearLayout>
 
     </LinearLayout>

@@ -64,6 +64,7 @@ public sealed class FirebaseAttendanceMutationService
             ["timestamp"] = timestamp,
             ["checkInTime"] = timestamp,
             ["createdAt"] = timestamp,
+            ["date"] = punch.PunchTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             ["deviceId"] = punch.DeviceID ?? string.Empty,
             ["type"] = punch.LogType ?? "Punch",
             ["source"] = punch.LogType ?? "Punch",

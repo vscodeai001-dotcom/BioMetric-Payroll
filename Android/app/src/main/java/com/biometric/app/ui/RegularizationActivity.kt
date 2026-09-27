@@ -15,6 +15,7 @@ import com.biometric.app.R
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.api.*
+import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.data.entity.RegularizationRequest
 import com.biometric.app.databinding.ActivityRegularizationBinding
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -79,8 +80,37 @@ class RegularizationActivity : MotionBaseActivity() {
             .setPositiveButton("Confirm") { _, _ ->
                 lifecycleScope.launch {
                     try {
-                        val response = mobileApi.setAdminRegularizationStatus("Bearer ${sessionStore.token().orEmpty()}", request.id, AdminRegularizationStatusRequest(status, notesInput.text.toString()))
-                        if (!response.isSuccessful) throw IllegalStateException("Server rejected action (${response.code()})")
+                        val remarks = notesInput.text.toString().trim()
+                        // 1. Offline-first Room and Firebase SSOT update
+                        repository.updateRegularizationStatus(request.id, status, remarks)
+
+                        // If approved, create and insert the punch into Room and Firebase SSOT
+                        if (approve) {
+                            val punchDate = if (request.date.isNotBlank()) request.date else SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(request.requestedTime))
+                            val approvedPunch = AttendancePunch(
+                                punchId = UUID.randomUUID().toString(),
+                                staffId = request.staffId.ifBlank { request.employeeId },
+                                date = punchDate,
+                                type = request.punchType.uppercase(Locale.US),
+                                timestamp = if (request.requestedTime > 0) request.requestedTime else System.currentTimeMillis(),
+                                source = "REGULARIZATION_APPROVED",
+                                status = "APPROVED"
+                            )
+                            repository.insertPunch(approvedPunch)
+                        }
+
+                        // 2. Best-effort inform HTTP server
+                        val token = sessionStore.token()
+                        if (!token.isNullOrBlank()) {
+                            runCatching {
+                                mobileApi.setAdminRegularizationStatus(
+                                    "Bearer $token",
+                                    request.id,
+                                    AdminRegularizationStatusRequest(status, remarks)
+                                )
+                            }
+                        }
+
                         Toast.makeText(this@RegularizationActivity, "Request $status ✅", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(this@RegularizationActivity, "Unable to update request: ${e.message} ⚠️", Toast.LENGTH_LONG).show()

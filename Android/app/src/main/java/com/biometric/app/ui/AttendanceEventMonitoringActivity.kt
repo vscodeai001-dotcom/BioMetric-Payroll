@@ -457,6 +457,273 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
     // ============================================================
     // RECYCLERVIEW ADAPTER
     // ============================================================
+    data class SecurityEventModel(
+        val icon: String,
+        val title: String,
+        val relativeTime: String,
+        val eventType: String,
+        val platform: String,
+        val why: String,
+        val purpose: String,
+        val how: String,
+        val activePlatform: String,
+        val activeDeviceName: String,
+        val activeDeviceId: String,
+        val activeIp: String,
+        val activeStatus: String,
+        val hasDisplaced: Boolean,
+        val displacedPlatform: String = "",
+        val displacedDeviceName: String = "",
+        val displacedDeviceId: String = "",
+        val displacedLastSeen: String = "",
+        val displacedGps: String = "",
+        val displacedDistance: String = "",
+        val displacedWithinGeofence: Boolean? = null,
+        val displacedStatus: String = ""
+    )
+
+    private fun getRelativeTimeSpan(timestamp: Long): String {
+        val diff = System.currentTimeMillis() - timestamp
+        val seconds = diff / 1000
+        val minutes = seconds / 60
+        val hours = minutes / 60
+        val days = hours / 24
+        return when {
+            seconds < 45 -> "Just now"
+            minutes < 60 -> "${minutes}m ago"
+            hours < 24 -> "${hours}h ago"
+            days < 7 -> "${days}d ago"
+            else -> displayDateFormat.format(Date(timestamp))
+        }
+    }
+
+    private fun parseSecurityEvent(rawJson: String?, timestamp: Long): SecurityEventModel {
+        val relative = getRelativeTimeSpan(timestamp)
+        if (rawJson.isNullOrBlank()) {
+            return SecurityEventModel(
+                icon = "🛡️",
+                title = "Security Event",
+                relativeTime = relative,
+                eventType = "AUTH_SESSION",
+                platform = "System",
+                why = "Authentication event logged without diagnostic payload.",
+                purpose = "Employee session verification.",
+                how = "Processed through identity verification.",
+                activePlatform = "System",
+                activeDeviceName = "Application Client",
+                activeDeviceId = "",
+                activeIp = "",
+                activeStatus = "Processed",
+                hasDisplaced = false
+            )
+        }
+
+        return try {
+            val unwrapped = unwrapDiagnosticDetails(rawJson)
+            val json = JSONObject(unwrapped)
+
+            val eventType = json.optString("EventType", json.optString("eventType", "AUTH_SESSION"))
+            val platform = json.optString("Platform", json.optString("platform", "Android"))
+            val deviceId = json.optString("DeviceId", json.optString("deviceId", ""))
+            val reason = json.optString("Reason", json.optString("reason", ""))
+            val relatedDeviceId = json.optString("RelatedDeviceId", "")
+
+            val contextObj = json.optJSONObject("Context")
+            val forceLogoutExisting = contextObj?.optBoolean("ForceLogoutExisting")
+                ?: json.optBoolean("forceLogoutExisting", false)
+
+            // Active Device info
+            var devName = contextObj?.optString("DeviceName")?.takeIf { it.isNotBlank() }
+                ?: json.optString("DeviceName", json.optString("deviceName", ""))
+            if (devName.isBlank()) {
+                devName = if (platform.equals("Web", true)) "Web Browser" else "Android Device"
+            }
+
+            var ip = contextObj?.optString("IpAddress")?.takeIf { it.isNotBlank() }
+                ?: json.optString("IpAddress", json.optString("ipAddress", ""))
+            if (ip == "Unavailable") ip = ""
+
+            // Displaced Device
+            var hasDisplaced = false
+            var dPlatform = ""
+            var dDeviceName = ""
+            var dDeviceId = ""
+            var dLastSeen = ""
+            var dGps = ""
+            var dDistance = ""
+            var dWithinGeofence: Boolean? = null
+            var dStatus = ""
+
+            val dispObj = contextObj?.optJSONObject("DisplacedDevice") ?: json.optJSONObject("DisplacedDevice")
+            if (dispObj != null) {
+                hasDisplaced = true
+                dPlatform = dispObj.optString("Platform", "Device")
+                dDeviceName = dispObj.optString("DeviceName", "")
+                dDeviceId = dispObj.optString("DeviceId", "")
+                dLastSeen = dispObj.optString("LastSeen", "")
+                val lat = dispObj.optDouble("LastLatitude", 0.0)
+                val lng = dispObj.optDouble("LastLongitude", 0.0)
+                if (lat != 0.0 || lng != 0.0) {
+                    dGps = String.format(Locale.US, "Last GPS: Lat %.4f, Lng %.4f", lat, lng)
+                }
+                val dist = dispObj.optDouble("LastDistanceMeters", -1.0)
+                if (dist >= 0) {
+                    dDistance = String.format(Locale.US, "Distance: %.0fm", dist)
+                }
+                if (dispObj.has("WithinAllowedRadius")) {
+                    dWithinGeofence = dispObj.optBoolean("WithinAllowedRadius")
+                }
+                dStatus = "Session Disconnected & Tracking Stopped"
+            } else if (json.has("displacedPlatform")) {
+                hasDisplaced = true
+                dPlatform = json.optString("displacedPlatform", "Device")
+                dDeviceName = json.optString("displacedDeviceName", "Previous Device")
+                dDeviceId = json.optString("displacedDeviceId", "")
+                dStatus = "Session Terminated by Remote Login"
+            } else if (relatedDeviceId.isNotBlank()) {
+                hasDisplaced = true
+                dPlatform = if (relatedDeviceId.startsWith("WEB_BROWSER_", true)) "Web" else "Android"
+                dDeviceName = if (relatedDeviceId.startsWith("WEB_BROWSER_", true)) "Web Browser" else "Mobile Device"
+                dDeviceId = relatedDeviceId
+                dStatus = "Session Replaced"
+            } else if (forceLogoutExisting || reason.equals("NEW_DEVICE_AFTER_FORCE_REPLACE", true)) {
+                hasDisplaced = true
+                dPlatform = if (platform.equals("Web", true)) "Android" else "Web"
+                dDeviceName = if (platform.equals("Web", true)) "Previous Mobile Device" else "Previous Web Browser"
+                dDeviceId = "Previous Session"
+                dStatus = "Session Disconnected & Tracking Stopped"
+            }
+
+            var icon = "🛡️"
+            var title = "Security Event"
+            var why = ""
+            var purpose = ""
+            var how = ""
+            var activeStatus = "Active"
+
+            when (eventType.uppercase(Locale.US)) {
+                "LOGIN_SUCCESS" -> {
+                    if (forceLogoutExisting || reason.equals("NEW_DEVICE_AFTER_FORCE_REPLACE", true) || hasDisplaced) {
+                        icon = "🔄"
+                        title = "Device Switched & Session Activated"
+                        activeStatus = "✓ Granted Authoritative Session Lock"
+                        why = "Employee signed into $platform and confirmed terminating their previous active session."
+                        purpose = "Enforce strict single active session rule across Web & Android to prevent dual-device attendance."
+                        how = "Updated Firebase RTDB session lock at employee_sessions. Notified old device observer to stop GPS tracking and logout."
+                    } else {
+                        icon = "🟢"
+                        title = "Login Successful"
+                        activeStatus = "✓ Granted Active Session Lock"
+                        why = "Employee entered valid credentials and logged into $platform with no conflicting session."
+                        purpose = "Authenticate employee identity and establish authorized attendance session."
+                        how = "Verified credentials, registered active session in Firebase Realtime Database, and began attendance presence."
+                    }
+                }
+                "SECOND_DEVICE_ATTEMPT", "LOGIN_BLOCKED_EXISTING_SESSION" -> {
+                    icon = "⛔"
+                    title = "Dual Login Blocked (Active Session on Another Device)"
+                    activeStatus = "Blocked Pending Confirmation"
+                    if (hasDisplaced) dStatus = "Holds Active Session Lock"
+                    why = "Employee entered credentials on $platform, but their account is already actively logged in on another device."
+                    purpose = "Strict Single-Device Policy: Only one active device allowed per employee across all platforms."
+                    how = "Authentication held in pending state without issuing login token. Displayed confirmation prompt."
+                }
+                "FORCED_SESSION_LOGOUT", "FORCE_LOGOUT_REQUESTED" -> {
+                    icon = "⚡"
+                    title = "Previous Device Forcefully Displaced"
+                    activeStatus = "Replaced Previous Session"
+                    if (hasDisplaced) dStatus = "✕ Forcefully Disconnected & Tracking Stopped"
+                    why = "A new login was confirmed on another device, triggering immediate displacement of the previous session."
+                    purpose = "Single Source of Truth: Ensure all attendance tracking points originate from only one active device."
+                    how = "Terminated active GPS sessions in database, revoked session lock in Firebase RTDB, and notified client."
+                }
+                "LOGOUT_COMPLETED", "MANUAL_LOGOUT_COMPLETED" -> {
+                    icon = "👋"
+                    title = "Normal User Sign-Out"
+                    activeStatus = "Session Ended & Lock Released"
+                    why = "Employee logged out to safely conclude their work session on $platform."
+                    purpose = "Clean session termination and cessation of background location tracking."
+                    how = "Ended GPS tracking session, deleted session presence from Firebase, and cleared authentication tokens."
+                }
+                "SESSION_DISCONNECTED_BY_SERVER" -> {
+                    icon = "🛑"
+                    title = "Remote Disconnection (Single Session Rule)"
+                    activeStatus = "Terminated Remotely"
+                    why = "This device was displaced because the employee logged in from another device/browser."
+                    purpose = "Prevent ghost location updates and eliminate orphaned background tracking services."
+                    how = "Realtime observer detected ownership change, stopped TrackingService, dismissed notifications, and logged out."
+                }
+                "LOGIN_ATTEMPT" -> {
+                    icon = "🔑"
+                    title = "Login Password Verified"
+                    activeStatus = "Credentials Validated"
+                    why = "Employee submitted credentials to sign in on $platform."
+                    purpose = "Verify user identity before evaluating single-session constraints."
+                    how = "Validated user identity against ASP.NET Identity authentication store."
+                }
+                "LOGIN_FAILED", "LOGIN_PASSWORD_FAILED" -> {
+                    icon = "❌"
+                    title = "Authentication Failed"
+                    activeStatus = "Access Denied"
+                    why = "Invalid credentials were provided during sign-in attempt."
+                    purpose = "Security protection against unauthorized access."
+                    how = "Rejected login attempt and logged audit failure."
+                }
+                else -> {
+                    title = eventType.replace("_", " ")
+                    why = "System processed a $eventType event for $platform."
+                    purpose = "System audit trail."
+                    how = "Recorded into database audit logs."
+                }
+            }
+
+            SecurityEventModel(
+                icon = icon,
+                title = title,
+                relativeTime = relative,
+                eventType = eventType,
+                platform = platform,
+                why = why,
+                purpose = purpose,
+                how = how,
+                activePlatform = platform,
+                activeDeviceName = devName,
+                activeDeviceId = if (deviceId.isNotBlank()) "ID: $deviceId" else "",
+                activeIp = if (ip.isNotBlank()) "IP: $ip" else "",
+                activeStatus = activeStatus,
+                hasDisplaced = hasDisplaced,
+                displacedPlatform = dPlatform,
+                displacedDeviceName = dDeviceName,
+                displacedDeviceId = if (dDeviceId.isNotBlank()) "ID: $dDeviceId" else "",
+                displacedLastSeen = if (dLastSeen.isNotBlank()) "Last Active: $dLastSeen" else "",
+                displacedGps = dGps,
+                displacedDistance = dDistance,
+                displacedWithinGeofence = dWithinGeofence,
+                displacedStatus = dStatus
+            )
+        } catch (e: Exception) {
+            SecurityEventModel(
+                icon = "🛡️",
+                title = "Security Event",
+                relativeTime = relative,
+                eventType = "AUTH_SESSION",
+                platform = "System",
+                why = "Error parsing telemetry details: ${e.message}",
+                purpose = "Security audit trail.",
+                how = "Recorded into database.",
+                activePlatform = "System",
+                activeDeviceName = "Client",
+                activeDeviceId = "",
+                activeIp = "",
+                activeStatus = "Logged",
+                hasDisplaced = false
+            )
+        }
+    }
+
+    // ============================================================
+    // RECYCLERVIEW ADAPTER
+    // ============================================================
     private inner class AttendanceEventAdapter : RecyclerView.Adapter<AttendanceEventAdapter.EventViewHolder>() {
 
         private val items = mutableListOf<AuditLog>()
@@ -486,24 +753,29 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
             RecyclerView.ViewHolder(itemBinding.root) {
 
             fun bind(item: AuditLog) {
-                val eventType = extractEventType(item.newValue)
+                val eventModel = parseSecurityEvent(item.newValue, item.timestamp)
 
-                itemBinding.tvEventTypeBadge.text = eventType
+                itemBinding.tvEventIcon.text = eventModel.icon
+                itemBinding.tvEventTitle.text = eventModel.title
+                itemBinding.tvRelativeTime.text = "⏱️ ${eventModel.relativeTime}"
+
+                itemBinding.tvEventTypeBadge.text = eventModel.eventType
+                itemBinding.tvPlatformBadge.text = if (eventModel.platform.equals("Web", true)) "🌐 Web Browser" else "📱 Android Mobile"
                 itemBinding.tvTimestamp.text = fullTimestampFormat.format(Date(item.timestamp))
 
                 // Configure Badge styling based on Web event definitions
-                when (eventType) {
+                when (eventModel.eventType) {
                     "LOGIN_SUCCESS", "LOGOUT_COMPLETED", "DEVICE_LOCK_RELEASED" -> {
                         itemBinding.tvEventTypeBadge.setBackgroundResource(R.drawable.bg_chip_rounded)
                         itemBinding.tvEventTypeBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E8F5E9"))
                         itemBinding.tvEventTypeBadge.setTextColor(Color.parseColor("#2E7D32"))
                     }
-                    "SECOND_DEVICE_ATTEMPT", "FORCE_LOGOUT_REQUESTED", "LOGOUT_REQUESTED" -> {
+                    "SECOND_DEVICE_ATTEMPT", "FORCE_LOGOUT_REQUESTED", "LOGOUT_REQUESTED", "LOGIN_BLOCKED_EXISTING_SESSION" -> {
                         itemBinding.tvEventTypeBadge.setBackgroundResource(R.drawable.bg_chip_rounded)
                         itemBinding.tvEventTypeBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFF3E0"))
                         itemBinding.tvEventTypeBadge.setTextColor(Color.parseColor("#EF6C00"))
                     }
-                    "FORCED_SESSION_LOGOUT", "LOGIN_FAILED" -> {
+                    "FORCED_SESSION_LOGOUT", "LOGIN_FAILED", "LOGIN_PASSWORD_FAILED", "SESSION_DISCONNECTED_BY_SERVER" -> {
                         itemBinding.tvEventTypeBadge.setBackgroundResource(R.drawable.bg_chip_rounded)
                         itemBinding.tvEventTypeBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFEBEE"))
                         itemBinding.tvEventTypeBadge.setTextColor(Color.parseColor("#C62828"))
@@ -534,9 +806,68 @@ class AttendanceEventMonitoringActivity : MotionBaseActivity() {
                 }
                 itemBinding.tvEntityId.text = entityIdText
 
-                // Formatted diagnostic JSON
+                // 3 Core Pillars: WHY, PURPOSE, HOW
+                itemBinding.tvEventWhy.text = eventModel.why
+                itemBinding.tvEventPurpose.text = eventModel.purpose
+                itemBinding.tvEventHow.text = eventModel.how
+
+                // Active / Incoming Device Card
+                itemBinding.tvActivePlatform.text = eventModel.activePlatform
+                itemBinding.tvActiveDeviceName.text = eventModel.activeDeviceName
+                itemBinding.tvActiveDeviceId.text = eventModel.activeDeviceId
+                itemBinding.tvActiveDeviceId.isVisible = eventModel.activeDeviceId.isNotBlank()
+                itemBinding.tvActiveIp.text = eventModel.activeIp
+                itemBinding.tvActiveIp.isVisible = eventModel.activeIp.isNotBlank()
+                itemBinding.tvActiveStatus.text = eventModel.activeStatus
+
+                // Displaced / Previous Device Card
+                if (eventModel.hasDisplaced) {
+                    itemBinding.cardDisplacedDevice.isVisible = true
+                    itemBinding.tvDisplacedPlatform.text = eventModel.displacedPlatform
+                    itemBinding.tvDisplacedDeviceName.text = eventModel.displacedDeviceName
+                    itemBinding.tvDisplacedDeviceId.text = eventModel.displacedDeviceId
+                    itemBinding.tvDisplacedDeviceId.isVisible = eventModel.displacedDeviceId.isNotBlank()
+                    itemBinding.tvDisplacedLastSeen.text = eventModel.displacedLastSeen
+                    itemBinding.tvDisplacedLastSeen.isVisible = eventModel.displacedLastSeen.isNotBlank()
+                    itemBinding.tvDisplacedGps.text = eventModel.displacedGps
+                    itemBinding.tvDisplacedGps.isVisible = eventModel.displacedGps.isNotBlank()
+                    itemBinding.tvDisplacedDistance.text = eventModel.displacedDistance
+                    itemBinding.tvDisplacedDistance.isVisible = eventModel.displacedDistance.isNotBlank()
+
+                    if (eventModel.displacedWithinGeofence != null) {
+                        itemBinding.tvDisplacedGeofenceBadge.isVisible = true
+                        if (eventModel.displacedWithinGeofence) {
+                            itemBinding.tvDisplacedGeofenceBadge.text = "Inside Allowed Geofence"
+                            itemBinding.tvDisplacedGeofenceBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#E8F5E9"))
+                            itemBinding.tvDisplacedGeofenceBadge.setTextColor(Color.parseColor("#2E7D32"))
+                        } else {
+                            itemBinding.tvDisplacedGeofenceBadge.text = "Outside Allowed Geofence"
+                            itemBinding.tvDisplacedGeofenceBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#FFEBEE"))
+                            itemBinding.tvDisplacedGeofenceBadge.setTextColor(Color.parseColor("#C62828"))
+                        }
+                    } else {
+                        itemBinding.tvDisplacedGeofenceBadge.isVisible = false
+                    }
+
+                    itemBinding.tvDisplacedStatus.text = eventModel.displacedStatus
+                } else {
+                    itemBinding.cardDisplacedDevice.isVisible = false
+                }
+
+                // Collapsible Technical Diagnostic JSON (hidden by default)
                 val diagnosticJson = unwrapDiagnosticDetails(item.newValue)
                 itemBinding.tvDiagnosticText.text = formatDiagnosticDetails(diagnosticJson)
+                itemBinding.tvDiagnosticText.visibility = View.GONE
+                itemBinding.tvToggleRawJson.text = "⚙️ Technical Diagnostic JSON"
+                itemBinding.tvToggleRawJson.setOnClickListener {
+                    if (itemBinding.tvDiagnosticText.isVisible) {
+                        itemBinding.tvDiagnosticText.visibility = View.GONE
+                        itemBinding.tvToggleRawJson.text = "⚙️ Technical Diagnostic JSON"
+                    } else {
+                        itemBinding.tvDiagnosticText.visibility = View.VISIBLE
+                        itemBinding.tvToggleRawJson.text = "⚙️ Hide Diagnostic JSON"
+                    }
+                }
             }
         }
     }

@@ -875,7 +875,10 @@ public class GeoLocationService
             var isInitialInside =
                 !previousLocationState.HasValue && currentLocationState;
 
-            if (!isTransition && !isInitialInside)
+            // If neither a state transition nor initial inside fix:
+            // Only proceed if the employee is currently inside (to check for new day opening punch).
+            // OUTSIDE -> OUTSIDE is an immediate no-op.
+            if (!isTransition && !isInitialInside && !currentLocationState)
                 return true;
 
             await using var transaction =
@@ -945,6 +948,19 @@ public class GeoLocationService
                     attendanceCurrentlyOpen = string.Equals(validPunches.Last().LogType, "IN", StringComparison.OrdinalIgnoreCase);
                 }
             }
+            // If this is an INSIDE -> INSIDE fix (neither transition nor initial inside):
+            // For single-day shift, only allow it if today's business day has ZERO punches yet
+            // (e.g. employee remained inside across midnight 12:00 AM).
+            // If punches already exist today, or if continuous mode, INSIDE -> INSIDE is a no-op.
+            if (!isTransition && !isInitialInside)
+            {
+                if (isContinuous || todaysPunches.Count > 0)
+                {
+                    await transaction.CommitAsync();
+                    return true;
+                }
+            }
+
             var punchType = currentLocationState ? "IN" : "OUT";
 
             // Initial OUT is only a state initialization, never an OUT punch.

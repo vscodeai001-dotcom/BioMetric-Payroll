@@ -59,6 +59,7 @@ class TrackingService : Service() {
     @Inject lateinit var trackingConfiguration: TrackingConfigurationRepository
     @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
     @Inject lateinit var firebaseEmployeeSessionManager: FirebaseEmployeeSessionManager
+    @Inject lateinit var autoPunchCoordinator: GeofenceAutoPunchCoordinator
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -561,6 +562,15 @@ else if (locationUpdatesStarted) {
             (timeSinceLastHistory >= 60_000L && distSinceLastHistory >= 10f) ||
             (timeSinceLastHistory >= 30_000L && distSinceLastHistory >= 25f) ||
             (timeSinceLastHistory >= 300_000L)
+
+        // Evaluate automatic geofence punch independently on Android
+        serviceScope.launch {
+            try {
+                autoPunchCoordinator.evaluateAutoPunch(location)
+            } catch (e: Exception) {
+                Log.w("TrackingService", "Auto punch evaluation error", e)
+            }
+        }
 
         processLocationCapture(location, isHistoryDue)
     }

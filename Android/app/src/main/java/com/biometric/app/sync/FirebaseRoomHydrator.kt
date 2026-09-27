@@ -479,7 +479,14 @@ class FirebaseRoomHydrator @Inject constructor(
             ?: l("employeeId").takeIf { it > 0 }?.toString()
             ?: "",
         date = s("date")?.takeIf { it.isNotBlank() }
-            ?: (l("timestamp").takeIf { it > 0 } ?: l("checkInTime")).let { if (it > 0) java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(it)) else "" },
+            ?: (l("timestamp").takeIf { it > 0 } ?: l("checkInTime")).let {
+                if (it > 0) {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("Asia/Kolkata")
+                    }
+                    sdf.format(java.util.Date(it))
+                } else ""
+            },
         type = s("type") ?: s("punchType") ?: s("note") ?: "IN",
         timestamp = l("timestamp").takeIf { it > 0 } ?: l("checkInTime").takeIf { it > 0 } ?: l("createdAt"),
         latitude = d("latitude"),
@@ -859,12 +866,12 @@ class FirebaseRoomHydrator @Inject constructor(
         when (val v = childValue(name)) {
             is Number -> {
                 val n = v.toLong()
-                if (n in 1..9999999999L) n * 1000L else n
+                if (n in 1_000_000_000L..4_100_000_000L) n * 1000L else n
             }
             else -> {
                 val s = v?.toString().orEmpty().trim()
                 s.toLongOrNull()?.let { n ->
-                    if (n in 1..9999999999L) n * 1000L else n
+                    if (n in 1_000_000_000L..4_100_000_000L) n * 1000L else n
                 } ?: runCatching {
                     java.time.Instant.parse(s).toEpochMilli()
                 }.getOrNull() ?: runCatching {

@@ -409,13 +409,13 @@ class FirebaseSyncManager @Inject constructor(
         when (this) {
             is Number -> {
                 val n = toLong()
-                if (n in 1..9999999999L) n * 1000L else n
+                if (n in 1_000_000_000L..4_100_000_000L) n * 1000L else n
             }
             null -> default
             else -> {
                 val s = toString().trim()
                 s.toLongOrNull()?.let { n ->
-                    if (n in 1..9999999999L) n * 1000L else n
+                    if (n in 1_000_000_000L..4_100_000_000L) n * 1000L else n
                 } ?: runCatching {
                     java.time.Instant.parse(s).toEpochMilli()
                 }.getOrNull() ?: runCatching {
@@ -953,8 +953,37 @@ class FirebaseSyncManager @Inject constructor(
 
     suspend fun pushAttendancePunch(punch: AttendancePunch) {
         val id = punch.punchId.ifBlank { return }
-        getOwnerRef()?.child("attendance_punches")?.child(id)?.setValue(punch)?.await()
-        notifyRealtimeChanged("AttendancePunch", "MODIFIED")
+        val ref = getOwnerRef() ?: return
+        val map = hashMapOf<String, Any?>(
+            "punchId" to punch.punchId,
+            "attendanceId" to punch.punchId,
+            "staffId" to punch.staffId,
+            "employeeId" to (punch.staffId.toIntOrNull() ?: punch.staffId),
+            "date" to punch.date,
+            "type" to punch.type,
+            "logType" to punch.type,
+            "note" to punch.type,
+            "timestamp" to punch.timestamp,
+            "checkInTime" to punch.timestamp,
+            "createdAt" to punch.timestamp,
+            "latitude" to punch.latitude,
+            "longitude" to punch.longitude,
+            "accuracy" to punch.accuracy,
+            "distanceFromGeofence" to punch.distanceFromGeofence,
+            "deviceId" to punch.deviceId,
+            "source" to punch.source,
+            "status" to punch.status,
+            "isApproved" to (punch.status.equals("APPROVED", ignoreCase = true)),
+            "_entity" to "AttendancePunch",
+            "_key" to id
+        )
+        try {
+            ref.child("attendance_punches").child(id).setValue(map).await()
+            ref.child("attendance").child(id).setValue(map).await()
+            notifyRealtimeChanged("AttendancePunch", "MODIFIED", id)
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Failed to push attendance punch $id", e)
+        }
     }
     suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
     /**
@@ -1079,7 +1108,12 @@ class FirebaseSyncManager @Inject constructor(
      * global 'mobile_auth_events' node. The Web compatibility bridge projects
      * these into the server's AuditLogs table for Admin monitoring.
      */
-    suspend fun pushMobileAuthEvent(eventType: String, email: String, deviceId: String): Boolean {
+    suspend fun pushMobileAuthEvent(
+        eventType: String,
+        email: String,
+        deviceId: String,
+        extraDetails: Map<String, Any?>? = null
+    ): Boolean {
         if (!isAuthenticated()) return false
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return false
@@ -1087,16 +1121,20 @@ class FirebaseSyncManager @Inject constructor(
         val user = auth.currentUser ?: return false
         val eventId = UUID.randomUUID().toString().replace("-", "")
         
-        val payload = mapOf(
+        val payload = mutableMapOf<String, Any?>(
             "employeeId" to employeeId,
             "eventType" to eventType,
             "firebaseUid" to user.uid,
             "email" to email,
             "deviceId" to deviceId,
             "platform" to "Android",
+            "deviceName" to "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
             "timestamp" to Date().toInstant().toString(),
             "eventId" to eventId
         )
+        if (extraDetails != null) {
+            payload.putAll(extraDetails)
+        }
         
         return try {
             database.child("mobile_auth_events").child(user.uid).child(eventId).setValue(payload).await()
