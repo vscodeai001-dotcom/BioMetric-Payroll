@@ -53,7 +53,7 @@ object ThemeManager {
 
     fun toggleTheme(context: Context, userKey: String? = null): String {
         val now = System.currentTimeMillis()
-        if (now - lastToggleTime < 1000) return themeName(context, userKey)
+        if (now - lastToggleTime < 250) return themeName(context, userKey)
         lastToggleTime = now
 
         val newTheme =

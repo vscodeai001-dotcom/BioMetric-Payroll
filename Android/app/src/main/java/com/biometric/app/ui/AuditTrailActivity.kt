@@ -114,7 +114,7 @@ class AuditTrailActivity : MotionBaseActivity() {
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        GlobalSwitcherDelegate.inflateMenu(menuInflater, menu)
+        GlobalSwitcherDelegate.inflateMenu(menuInflater, menu, activity = this)
         return true
     }
 

@@ -804,6 +804,12 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.mapview.post {
             binding.mapview.invalidate()
             binding.mapview.requestLayout()
+            // If no employee update has triggered the initial fit yet, do it now
+            // so the admin sees the office immediately on open (not a blank world view).
+            if (!hasTrackingInitialFocused) {
+                hasTrackingInitialFocused = true
+                fitCompanyAndStaff(animated = false)
+            }
         }
     }
 
@@ -1000,7 +1006,7 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             val marker = markers.getOrPut(loc.employeeId) {
                 Marker(mapView).apply {
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = emp?.name ?: "Staff #${loc.employeeId}"
                     mapView.overlays.add(this)
 
@@ -1182,9 +1188,12 @@ class TrackingMapActivity : MotionBaseActivity() {
             geoPoints.add(point)
         }
 
-        if (!hasTrackingInitialFocused && (locations.isNotEmpty() || (officeLat != 0.0 && officeLon != 0.0))) {
+        // Auto-fit on first load: show office + all employees together.
+        // Run even when no employees are live yet (office-only view).
+        // Use post() so the map has measured its size before zoomToBoundingBox.
+        if (!hasTrackingInitialFocused && (geoPoints.isNotEmpty() || (officeLat != 0.0 && officeLon != 0.0))) {
             hasTrackingInitialFocused = true
-            fitCompanyAndStaff(animated = false)
+            mapView.post { fitCompanyAndStaff(animated = false) }
         }
 
         mapView.invalidate()

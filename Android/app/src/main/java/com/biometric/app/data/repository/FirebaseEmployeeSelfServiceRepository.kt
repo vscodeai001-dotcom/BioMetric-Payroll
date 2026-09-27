@@ -530,12 +530,21 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                     if (out > it.checkInTime) (out - it.checkInTime) / 3_600_000.0 else 0.0
                 } ?: 0.0
             }
-            val status = summary?.string("status")?.takeIf { it.isNotBlank() } ?: when {
-                dayPunches.isEmpty() && dayAttendance.isEmpty() -> "Absent"
-                dayPunches.any { it.type.equals("IN", true) } && dayPunches.any { it.type.equals("OUT", true) } -> "Present"
-                dayPunches.isNotEmpty() -> "Missing Punch"
-                else -> "Present"
-            }
+            val status = summary?.string("status")?.takeIf { it.isNotBlank() } ?: run {
+                    // Check if this day is the employee's weekly off day.
+                    // compOffDayOfWeek: 1=Monday, 7=Sunday (ISO-8601 DayOfWeek.value)
+                    val isWeeklyOff = emp.compOffDayOfWeek?.let { offDay ->
+                        day.dayOfWeek.value == offDay
+                    } ?: false
+                    when {
+                        isWeeklyOff -> "Weekly Off"
+                        dayPunches.isEmpty() && dayAttendance.isEmpty() -> "Absent"
+                        dayPunches.any { it.type.equals("IN", true) } &&
+                            dayPunches.any { it.type.equals("OUT", true) } -> "Present"
+                        dayPunches.isNotEmpty() -> "Missing Punch"
+                        else -> "Present"
+                    }
+                }
             AttendanceDayDto(
                 date = date,
                 status = status,

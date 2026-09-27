@@ -1,16 +1,19 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
+using Payroll.Shared.Data;
 
 namespace Payroll.Web.Services;
 
 /// <summary>
 /// Periodically invokes the existing GPS session timeout lifecycle.
-/// The domain rules remain in GeoLocationService.
+/// Also runs the 24-Hour Cloud Pruner to automatically prevent Firebase storage bloat.
 /// </summary>
 public sealed class GpsSessionCleanupHostedService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<GpsSessionCleanupHostedService> _logger;
     private readonly IConfiguration _configuration;
+    private DateTime _lastCloudPruneUtc = DateTime.MinValue;
 
     public GpsSessionCleanupHostedService(
         IServiceScopeFactory scopeFactory,
@@ -28,7 +31,7 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
             _configuration.GetValue<int>("GpsSessionCleanup:CheckIntervalSeconds", 60));
 
         _logger.LogInformation(
-            "GPS session lifecycle cleanup started. CheckInterval={Interval}s",
+            "GPS session lifecycle cleanup & Cloud Pruner started. CheckInterval={Interval}s",
             intervalSeconds);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -38,6 +41,13 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var geo = scope.ServiceProvider.GetRequiredService<GeoLocationService>();
                 await geo.MarkTimedOutSessionsAsync();
+
+                // Periodic 24-Hour Cloud Pruner (runs every 1 hour)
+                if (DateTime.UtcNow - _lastCloudPruneUtc >= TimeSpan.FromHours(1))
+                {
+                    _lastCloudPruneUtc = DateTime.UtcNow;
+                    await RunCloudPruningAsync(scope.ServiceProvider, stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -58,4 +68,33 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
             }
         }
     }
+
+    private async Task RunCloudPruningAsync(IServiceProvider sp, CancellationToken ct)
+    {
+        try
+        {
+            var firebase = sp.GetRequiredService<FirebaseRealtimeService>();
+            var db = sp.GetRequiredService<AppDbContext>();
+
+            var tenants = await db.CompanyTenants.AsNoTracking()
+                .Where(t => t.IsActive)
+                .Select(t => t.TenantId)
+                .ToListAsync(ct);
+
+            if (!tenants.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparer.OrdinalIgnoreCase))
+            {
+                tenants.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+            }
+
+            foreach (var tid in tenants)
+            {
+                await firebase.PruneExpiredTrackingAndAuditsAsync(tid, TimeSpan.FromHours(24), ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cloud telemetry pruning cycle encountered a warning.");
+        }
+    }
 }
+

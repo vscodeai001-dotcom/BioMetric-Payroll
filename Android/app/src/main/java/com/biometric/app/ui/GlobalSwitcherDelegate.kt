@@ -1,6 +1,7 @@
 package com.biometric.app.ui
 
 import com.biometric.app.sync.AdminRealtimeCoordinator
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.sync.ThemePreferenceSync
 import android.content.Context
 import android.content.Intent
@@ -52,68 +53,48 @@ object GlobalSwitcherDelegate {
     ) {
         menuInflater.inflate(R.menu.global_switch_menu, menu)
         
-        // HIDE menu items that are now managed by the Premium Toolbar Header
-        menu?.findItem(R.id.action_theme)?.isVisible = false
+        // If the activity already has the dual header with buttons, hide the menu equivalents to prevent duplicate icons
+        val hasDualHeader = activity?.findViewById<View>(R.id.llHeaderContainer) != null
+        menu?.findItem(R.id.action_theme)?.isVisible = !hasDualHeader
+        menu?.findItem(R.id.action_logout)?.isVisible = !hasDualHeader
         menu?.findItem(R.id.action_shop)?.isVisible = false
-        
-        // Hide "More" icon if it will be empty
-        // Condition: Not MainActivity (where Sync lives) AND no extra actions provided
-        val isMain = activity is MainActivity
-        if (!isMain && extraActions.isEmpty()) {
-            menu?.findItem(R.id.action_more_global)?.isVisible = false
-            menu?.findItem(R.id.action_kitchen)?.isVisible = false
-        }
+        menu?.findItem(R.id.action_kitchen)?.isVisible = false
     }
 
     fun handleOptionsItemSelected(
         activity: AppCompatActivity,
         item: MenuItem,
-        sharedViewModel: SharedViewModel,
+        sharedViewModel: SharedViewModel? = null,
         extraActions: List<ActionItem> = emptyList(),
     ): Boolean {
         if (activity.isFinishing || activity.isDestroyed) return false
         
         when (item.itemId) {
             R.id.action_theme -> {
-                // Stagger the theme change to allow the menu to close and animations to finish
-                val view = activity.findViewById<View>(R.id.action_theme) ?: activity.window.decorView
-                view.postDelayed({
-                    val localTheme = ThemeManager.toggleTheme(
-                        activity,
-                        resolveThemeUserKey(activity)
-                    )
-                    activity.lifecycleScope.launch {
-                        runCatching {
-                            themeSync(activity).persist(localTheme)
-                        }.onFailure {
-                            // Local cache remains active; next authenticated login/start
-                            // will reconcile with the server preference.
-                        }
+                val localTheme = ThemeManager.toggleTheme(
+                    activity,
+                    resolveThemeUserKey(activity)
+                )
+                activity.lifecycleScope.launch {
+                    runCatching {
+                        themeSync(activity).persist(localTheme)
                     }
-                }, 200)
+                }
+                return true
+            }
+            R.id.action_logout -> {
+                MaterialAlertDialogBuilder(activity)
+                    .setTitle("Logout 🚪")
+                    .setMessage("Are you sure you want to sign out?")
+                    .setPositiveButton("Logout") { _, _ ->
+                        performLogout(activity)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
                 return true
             }
             R.id.action_shop -> {
-                handleShopSwitch(activity, sharedViewModel)
-                return true
-            }
-            R.id.action_more_global, R.id.action_kitchen -> {
-                val toolbar = activity.findViewById<View>(R.id.toolbar)
-                val actionView = activity.findViewById(item.itemId) 
-                    ?: toolbar?.findViewById(item.itemId)
-                    ?: toolbar
-                    ?: activity.window.decorView
-
-                val profileRole = sharedViewModel.userProfile.value?.role.orEmpty()
-                val storedRole = activity.applicationContext
-                    .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                    .getString("user_role", "")
-                    .orEmpty()
-                val isAdmin = profileRole.contains("Admin", true) ||
-                    storedRole.equals(UserRole.Admin.name, true) ||
-                    storedRole.equals(UserRole.SuperAdmin.name, true)
-                
-                showQuickActionPopup(activity, actionView, extraActions, isAdmin)
+                sharedViewModel?.let { handleShopSwitch(activity, it) }
                 return true
             }
         }
@@ -193,7 +174,7 @@ object GlobalSwitcherDelegate {
         }
     }
 
-    private fun performLogout(activity: AppCompatActivity) {
+    fun performLogout(activity: AppCompatActivity) {
         val entryPoint = EntryPointAccessors.fromApplication(
             activity.applicationContext,
             LogoutEntryPoint::class.java
@@ -201,29 +182,55 @@ object GlobalSwitcherDelegate {
         val session = entryPoint.sessionStore
         val api = entryPoint.mobileApi
         val realtime = entryPoint.realtime
+        val firebaseSync = entryPoint.firebaseSync
         val token = session.token()
+        val userEmail = session.userEmail().ifBlank { FirebaseAuth.getInstance().currentUser?.email ?: "" }
+        val role = session.userRole().ifBlank { "User" }
+        val deviceId = session.deviceId()
 
         activity.lifecycleScope.launch {
-            try {
-                if (!token.isNullOrBlank()) {
+            // Step 1 — Push the Firebase auth event (fast, non-blocking Firebase write).
+            if (userEmail.isNotBlank()) {
+                runCatching {
+                    firebaseSync.pushMobileAuthEvent(
+                        eventType = "LOGOUT_COMPLETED",
+                        email = userEmail,
+                        deviceId = deviceId,
+                        extraDetails = mapOf(
+                            "role" to role,
+                            "summary" to "$role signed out from Android mobile application (${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}).",
+                            "action" to "MANUAL_LOGOUT"
+                        )
+                    )
+                }
+            }
+
+            // Step 2 — Clear session + navigate to login IMMEDIATELY.
+            // Do NOT wait for the API logout call — it may time out (e.g. 10 seconds)
+            // when the server is unreachable on a real device, blocking the user.
+            try { realtime.stop() } catch (_: Exception) {}
+            try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) {}
+            session.clearLogin()
+            activity.applicationContext
+                .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            activity.applicationContext
+                .getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                .edit().clear().apply()
+            SecurityBaseActivity.clearProcessAuthorization(activity.applicationContext)
+
+            activity.startActivity(Intent(activity, LoginActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            })
+            activity.finish()
+
+            // Step 3 — Fire API logout in background (fire-and-forget).
+            // This must run AFTER navigate so it never delays the user.
+            // Uses GlobalScope so it survives activity destruction.
+            if (!token.isNullOrBlank()) {
+                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     runCatching { api.logout("Bearer $token") }
                 }
-            } finally {
-                try { realtime.stop() } catch (_: Exception) {}
-                try { FirebaseAuth.getInstance().signOut() } catch (_: Exception) {}
-                session.clearLogin()
-                activity.applicationContext
-                    .getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-                    .edit().clear().apply()
-                activity.applicationContext
-                    .getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                    .edit().clear().apply()
-                SecurityBaseActivity.clearProcessAuthorization(activity.applicationContext)
-
-                activity.startActivity(Intent(activity, LoginActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                })
-                activity.finish()
             }
         }
     }
@@ -240,6 +247,7 @@ object GlobalSwitcherDelegate {
         val mobileApi: MobileApiService
         val sessionStore: MobileSessionStore
         val realtime: AdminRealtimeCoordinator
+        val firebaseSync: FirebaseSyncManager
     }
 
     private fun showQuickActionPopup(

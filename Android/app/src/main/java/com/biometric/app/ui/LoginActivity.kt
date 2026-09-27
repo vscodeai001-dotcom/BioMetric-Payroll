@@ -636,7 +636,11 @@ class LoginActivity : MotionBaseActivity() {
                 }
 
             setLoading(false)
-            firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId())
+            val adminDetails = mapOf(
+                "role" to role,
+                "summary" to "$role login successful on Android mobile (${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL})."
+            )
+            firebaseSync.pushMobileAuthEvent("LOGIN_SUCCESS", firebaseUser.email ?: email, getAndroidDeviceId(), adminDetails)
 
             // SuperAdmin/Admin -> MainActivity
             // Employee -> EmployeeHomeActivity

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -663,4 +664,93 @@ public sealed class DatabaseBackupRestoreService
             _logger.LogWarning(ex, "PruneOldAutoBackupsAsync encountered a warning.");
         }
     }
+
+    /// <summary>
+    /// Creates a company-scoped JSON backup file for a specific tenant and saves it in the backup folder.
+    /// Returns the full file path.
+    /// </summary>
+    public async Task<string?> ExportTenantBackupJsonAsync(string tenantId, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var tenant = await db.CompanyTenants.AsNoTracking().FirstOrDefaultAsync(t => t.TenantId == tenantId, cancellationToken);
+        if (tenant == null)
+            return null;
+
+        var employees = await db.Employees.AsNoTracking().Where(e => e.TenantId == tenantId).ToListAsync(cancellationToken);
+        var empIds = employees.Select(e => e.EmployeeID).ToHashSet();
+
+        var attendance = await db.AttendanceLogs.AsNoTracking()
+            .Where(a => a.EmployeeID.HasValue && empIds.Contains(a.EmployeeID.Value))
+            .OrderByDescending(a => a.PunchTime)
+            .Take(2000)
+            .ToListAsync(cancellationToken);
+
+        var punches = await db.GeoPunchAudits.AsNoTracking()
+            .Where(p => empIds.Contains(p.EmployeeId))
+            .OrderByDescending(p => p.PunchTimeUtc)
+            .Take(2000)
+            .ToListAsync(cancellationToken);
+
+        var shifts = await db.ShiftSchedules.AsNoTracking()
+            .Where(s => empIds.Contains(s.EmployeeID))
+            .ToListAsync(cancellationToken);
+
+        var leaves = await db.LeaveRequests.AsNoTracking()
+            .Where(l => empIds.Contains(l.EmployeeID))
+            .ToListAsync(cancellationToken);
+
+        var advances = await db.SalaryAdvances.AsNoTracking()
+            .Where(a => empIds.Contains(a.EmployeeID))
+            .ToListAsync(cancellationToken);
+
+        var payroll = await db.PayrollHistories.AsNoTracking()
+            .Where(p => empIds.Contains(p.EmployeeID))
+            .OrderByDescending(p => p.PayYear).ThenByDescending(p => p.PayMonth)
+            .Take(500)
+            .ToListAsync(cancellationToken);
+
+        var payload = new
+        {
+            Version = "1.0",
+            ExportedAtUtc = DateTime.UtcNow,
+            TenantId = tenant.TenantId,
+            CompanyName = tenant.CompanyName,
+            AdminEmail = tenant.AdminEmail,
+            EmployeeCount = employees.Count,
+            Employees = employees,
+            AttendanceLogs = attendance,
+            GeoPunchAudits = punches,
+            ShiftSchedules = shifts,
+            LeaveRequests = leaves,
+            SalaryAdvances = advances,
+            PayrollHistory = payroll
+        };
+
+        var backupDir = GetBackupDirectory();
+        var dateStr = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        var fileName = $"company_backup_{tenant.TenantId}_{dateStr}.json";
+        var filePath = Path.Combine(backupDir, fileName);
+
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = true });
+        await File.WriteAllTextAsync(filePath, json, cancellationToken);
+
+        return filePath;
+    }
+
+    /// <summary>
+    /// Creates a compressed .zip archive of a SQLite backup file.
+    /// Returns the .zip file path.
+    /// </summary>
+    public string CreateZipOfBackup(string dbFilePath)
+    {
+        var zipPath = Path.ChangeExtension(dbFilePath, ".zip");
+        if (File.Exists(zipPath)) File.Delete(zipPath);
+
+        using (var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            archive.CreateEntryFromFile(dbFilePath, Path.GetFileName(dbFilePath), System.IO.Compression.CompressionLevel.Optimal);
+        }
+        return zipPath;
+    }
 }
+

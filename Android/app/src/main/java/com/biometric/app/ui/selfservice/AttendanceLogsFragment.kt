@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
-import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -21,7 +20,10 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.*
 import javax.inject.Inject
 
@@ -35,6 +37,12 @@ class AttendanceLogsFragment : Fragment() {
 
     private lateinit var adapter: AttendanceAdapter
 
+    /** Currently displayed month. Starts at current month. */
+    private var displayedMonth: YearMonth = YearMonth.now()
+
+    private val isoFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+    private val monthFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.US)
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentMyAttendanceBinding.inflate(inflater, container, false)
         return binding.root
@@ -44,15 +52,30 @@ class AttendanceLogsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         setupRecyclerView()
         setupSwipeRefresh()
+        setupMonthNavigation()
         loadAttendance()
         setupRealTimeSync()
     }
 
-    private fun setupSwipeRefresh() {
-        binding.swipeRefresh.setOnRefreshListener {
+    private fun setupMonthNavigation() {
+        binding.btnPrevMonth.setOnClickListener {
+            displayedMonth = displayedMonth.minusMonths(1)
             loadAttendance()
         }
-        binding.swipeRefresh.setColorSchemeColors(ContextCompat.getColor(requireContext(), R.color.colorPrimary))
+        binding.btnNextMonth.setOnClickListener {
+            // Don't allow navigating into the future beyond the current month
+            if (displayedMonth < YearMonth.now()) {
+                displayedMonth = displayedMonth.plusMonths(1)
+                loadAttendance()
+            }
+        }
+    }
+
+    private fun setupSwipeRefresh() {
+        binding.swipeRefresh.setOnRefreshListener { loadAttendance() }
+        binding.swipeRefresh.setColorSchemeColors(
+            ContextCompat.getColor(requireContext(), R.color.colorPrimary)
+        )
     }
 
     @OptIn(FlowPreview::class)
@@ -62,17 +85,13 @@ class AttendanceLogsFragment : Fragment() {
                 .debounce(500L)
                 .collect {
                     Log.d("AttendanceLogs", "Firebase real-time refresh 🛰️")
-                    if (isAdded && _binding != null) {
-                        loadAttendance()
-                    }
+                    if (isAdded && _binding != null) loadAttendance()
                 }
         }
     }
 
     private fun setupRecyclerView() {
-        adapter = AttendanceAdapter { day ->
-            if (isAdded) showDayDetails(day)
-        }
+        adapter = AttendanceAdapter { day -> if (isAdded) showDayDetails(day) }
         _binding?.let { b ->
             b.rvAttendance.layoutManager = LinearLayoutManager(requireContext())
             b.rvAttendance.adapter = adapter
@@ -81,23 +100,20 @@ class AttendanceLogsFragment : Fragment() {
 
     private fun showDayDetails(day: AttendanceDayDto) {
         val dialogBinding = DialogAttendanceDayDetailsBinding.inflate(layoutInflater)
-        
         dialogBinding.tvDialogDate.text = "Punches for ${day.date} 🗓️"
-        
+
         if (day.punches.isEmpty()) {
             dialogBinding.tvNoPunches.visibility = View.VISIBLE
             dialogBinding.svPunches.visibility = View.GONE
         } else {
             day.punches.forEach { punch ->
                 val tv = TextView(requireContext()).apply {
-                    text = "${punch.type}: ${punch.time} (${punch.source}) ⚡"
+                    text = "${punch.type}: ${punch.time}  (${punch.source})"
                     setPadding(16, 16, 16, 16)
                     textSize = 14f
                     setTextColor(ContextCompat.getColor(context, R.color.text_primary))
                 }
                 dialogBinding.llPunchesContainer.addView(tv)
-                
-                // Add a divider
                 val divider = View(requireContext()).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1)
                     setBackgroundColor(ContextCompat.getColor(context, R.color.divider))
@@ -108,22 +124,32 @@ class AttendanceLogsFragment : Fragment() {
 
         MaterialAlertDialogBuilder(requireContext())
             .setView(dialogBinding.root)
-            .setPositiveButton("Close 🛡️", null)
+            .setPositiveButton("Close", null)
             .show()
     }
 
     private fun loadAttendance() {
-        val sdf = SimpleDateFormat("yyyy-MM-01", Locale.US)
-        val fromDate = sdf.format(Date())
-        val toDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-        val monthName = SimpleDateFormat("MMMM yyyy", Locale.US).format(Date())
-        _binding?.tvSummaryTitle?.text = "Cumulative Summary ($monthName) 📊 💎"
+        val firstDay = displayedMonth.atDay(1)
+        val lastDay = minOf(displayedMonth.atEndOfMonth(), LocalDate.now())
+
+        // Don't load if month is entirely in the future
+        if (firstDay.isAfter(LocalDate.now())) return
+
+        val fromDate = firstDay.format(isoFormatter)
+        val toDate = lastDay.format(isoFormatter)
+
+        _binding?.tvSummaryTitle?.text = displayedMonth.format(monthFormatter)
+
+        // Disable next button if we're at the current month
+        _binding?.btnNextMonth?.alpha = if (displayedMonth >= YearMonth.now()) 0.3f else 1.0f
 
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val logs = selfService.attendance(fromDate, toDate)
+                // Sort newest first for easier reading
+                val sorted = logs.sortedByDescending { it.date }
                 _binding?.let { b ->
-                    adapter.submitList(logs)
+                    adapter.submitList(sorted)
                     updateSummary(logs)
                     b.swipeRefresh.isRefreshing = false
                 }
@@ -135,20 +161,26 @@ class AttendanceLogsFragment : Fragment() {
     }
 
     private fun updateSummary(logs: List<AttendanceDayDto>) {
-        var totalScheduledSec = 0L
+        var presentCount = 0
+        var absentCount = 0
         var totalWorkedSec = 0L
         var totalPenaltySec = 0L
         var totalOtSec = 0L
-        
-        logs.forEach { 
-            totalScheduledSec += (it.scheduledHours * 3600).toLong()
-            totalWorkedSec += (it.workedHours * 3600).toLong()
-            totalPenaltySec += parseDurationToSeconds(it.penalty)
-            totalOtSec += parseDurationToSeconds(it.overtime)
+
+        logs.forEach { day ->
+            when {
+                day.status.contains("Present", true) ||
+                day.status.contains("Missing", true) -> presentCount++
+                day.status.contains("Absent", true) -> absentCount++
+            }
+            totalWorkedSec += (day.workedHours * 3600).toLong()
+            totalPenaltySec += parseDurationToSeconds(day.penalty)
+            totalOtSec += parseDurationToSeconds(day.overtime)
         }
-        
+
         _binding?.let { b ->
-            b.tvTotalScheduled.text = formatDurationFromSeconds(totalScheduledSec)
+            b.tvCountPresent.text = presentCount.toString()
+            b.tvCountAbsent.text = absentCount.toString()
             b.tvTotalWorked.text = formatDurationFromSeconds(totalWorkedSec)
             b.tvTotalPenalty.text = formatDurationFromSeconds(totalPenaltySec)
             b.tvTotalOt.text = formatDurationFromSeconds(totalOtSec)
@@ -159,11 +191,11 @@ class AttendanceLogsFragment : Fragment() {
         if (duration.isNullOrBlank()) return 0L
         return try {
             val parts = duration.split(":")
-            if (parts.size == 3) {
-                parts[0].toLong() * 3600 + parts[1].toLong() * 60 + parts[2].toLong()
-            } else if (parts.size == 2) {
-                parts[0].toLong() * 60 + parts[1].toLong()
-            } else 0L
+            when {
+                parts.size == 3 -> parts[0].toLong() * 3600 + parts[1].toLong() * 60 + parts[2].toLong()
+                parts.size == 2 -> parts[0].toLong() * 60 + parts[1].toLong()
+                else -> 0L
+            }
         } catch (_: Exception) { 0L }
     }
 

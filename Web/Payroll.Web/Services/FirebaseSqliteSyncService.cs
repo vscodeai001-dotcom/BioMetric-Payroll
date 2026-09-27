@@ -966,7 +966,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     StringSplitOptions.RemoveEmptyEntries)
                 .LastOrDefault();
 
-        if (employeeId <= 0 || string.IsNullOrWhiteSpace(eventId)) return;
+        if (string.IsNullOrWhiteSpace(eventId)) eventId = Guid.NewGuid().ToString("N");
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
@@ -1007,10 +1007,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var log = new Payroll.Shared.Data.AuditLog
         {
             Timestamp = timestamp,
-            UserID = string.IsNullOrWhiteSpace(uid) ? $"ANDROID_EMPLOYEE_{employeeId}" : uid,
+            UserID = string.IsNullOrWhiteSpace(uid) ? (employeeId > 0 ? $"ANDROID_EMPLOYEE_{employeeId}" : (string.IsNullOrWhiteSpace(email) ? "Android" : email)) : uid,
             UserEmail = string.IsNullOrWhiteSpace(email) ? "Android" : email,
             ActionType = "AUTH_SESSION",
-            EntityType = "EmployeeSession",
+            EntityType = employeeId > 0 ? "EmployeeSession" : "UserSession",
             EntityID = marker,
             Details = JsonSerializer.Serialize(details)
         };
@@ -1021,8 +1021,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
         await _refreshService.NotifyApplicationDataChangedAsync(new[] { "AuditLog" });
         _logger.LogInformation(
-            "Android Firebase auth event projected to Web audit monitor. EmployeeId={EmployeeId}, Event={EventType}, DeviceId={DeviceId}",
-            employeeId, eventType, deviceId);
+            "Android Firebase auth event projected to Web audit monitor. EmployeeId={EmployeeId}, Event={EventType}, Email={Email}, DeviceId={DeviceId}",
+            employeeId, eventType, email, deviceId);
     }
 
     private async Task SyncAllTablesAsync(string ownerUid, CancellationToken ct)

@@ -56,6 +56,7 @@ import com.biometric.app.databinding.ActivityEmployeeHomeBinding
 import com.biometric.app.domain.location.TrackingService
 import com.biometric.app.sync.SignalRManager
 import com.biometric.app.sync.FirebaseEmployeeSessionManager
+import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.ui.selfservice.*
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.util.BatteryOptimizationHelper
@@ -114,6 +115,7 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     @Inject lateinit var signalR: SignalRManager
     @Inject lateinit var osrmApi: OsrmApiService
     @Inject lateinit var localSettingsDao: LocalSettingsDao
+    @Inject lateinit var firebaseSync: FirebaseSyncManager
 
     private var officeMarker: Marker? = null
     private var userMarker: Marker? = null
@@ -1634,6 +1636,18 @@ class EmployeeHomeActivity : MotionBaseActivity() {
                 Log.e("EmployeeHome", "Firebase logout auto-OUT check skipped: ${it.message}")
             }
 
+            runCatching {
+                firebaseSync.pushMobileAuthEvent(
+                    eventType = "LOGOUT_COMPLETED",
+                    email = sessionStore.userEmail().ifBlank { FirebaseAuth.getInstance().currentUser?.email ?: "" },
+                    deviceId = sessionStore.deviceId(),
+                    extraDetails = mapOf(
+                        "role" to "Employee",
+                        "summary" to "Employee signed out from Android mobile application (${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}).",
+                        "action" to "MANUAL_LOGOUT"
+                    )
+                )
+            }
             runCatching { firebaseEmployeeSessionManager.release() }
             FirebaseAuth.getInstance().signOut()
             _binding?.let {

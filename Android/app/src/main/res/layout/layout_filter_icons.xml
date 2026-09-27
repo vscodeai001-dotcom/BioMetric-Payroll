@@ -5,11 +5,13 @@
     android:layout_height="wrap_content"
     android:orientation="vertical">
 
+    <!-- Icon-based filters hidden per user request; kept in layout for future re-enabling -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/rvFilterIcons"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
+        android:visibility="gone"
         app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
         android:paddingHorizontal="12dp"
         android:paddingVertical="8dp"

@@ -2283,6 +2283,114 @@ public sealed class FirebaseRealtimeService
         => WipeOwnerAllDataAsync(ownerUid, cancellationToken);
 
     /// <summary>
+    /// Enterprise Cloud Pruner: Automatically purges historical GPS points older than maxGpsAge (e.g. 24h)
+    /// from Firebase Realtime Database.
+    /// This keeps the cloud database permanently under 2–5 MB on the free Spark plan,
+    /// while local SQLite preserves complete multi-year history.
+    /// </summary>
+    public async Task<int> PruneExpiredTrackingAndAuditsAsync(
+        string ownerUid,
+        TimeSpan maxGpsAge,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return 0;
+
+        var context = await _context.Value;
+        if (context == null)
+            return 0;
+
+        var prunedCount = 0;
+        var cleanUid = ownerUid.Trim();
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("FirebaseRealtime");
+            var token = await context.GetAccessTokenAsync();
+
+            // 1. Prune tracking/history older than maxGpsAge (e.g. 24 hours)
+            var historyPath = $"owners/{cleanUid}/tracking/history";
+            var shallow = await GetJsonAsync(historyPath, cancellationToken, "shallow=true");
+            if (shallow.HasValue && shallow.Value.ValueKind == JsonValueKind.Object)
+            {
+                var cutoff = DateTime.UtcNow.Subtract(maxGpsAge);
+                var subKeys = new List<string>();
+                foreach (var prop in shallow.Value.EnumerateObject())
+                {
+                    if (!string.IsNullOrWhiteSpace(prop.Name))
+                        subKeys.Add(prop.Name);
+                }
+
+                foreach (var sk in subKeys)
+                {
+                    var childPath = $"{historyPath}/{sk}";
+                    var childData = await GetJsonAsync(childPath, cancellationToken);
+                    if (childData.HasValue && childData.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        if (childData.Value.TryGetProperty("Timestamp", out var tsProp) ||
+                            childData.Value.TryGetProperty("timestamp", out tsProp))
+                        {
+                            if (DateTime.TryParse(tsProp.GetString(), out var eventTime) && eventTime < cutoff)
+                            {
+                                await DeletePathAsync(childPath, cancellationToken);
+                                prunedCount++;
+                            }
+                        }
+                        else
+                        {
+                            var leafKeysToDelete = new List<string>();
+                            foreach (var leaf in childData.Value.EnumerateObject())
+                            {
+                                if (leaf.Value.ValueKind == JsonValueKind.Object &&
+                                    (leaf.Value.TryGetProperty("Timestamp", out var lts) || leaf.Value.TryGetProperty("timestamp", out lts)))
+                                {
+                                    if (DateTime.TryParse(lts.GetString(), out var lTime) && lTime < cutoff)
+                                    {
+                                        leafKeysToDelete.Add(leaf.Name);
+                                    }
+                                }
+                            }
+
+                            if (leafKeysToDelete.Count > 0)
+                            {
+                                const int batchSize = 200;
+                                for (int i = 0; i < leafKeysToDelete.Count; i += batchSize)
+                                {
+                                    var count = Math.Min(batchSize, leafKeysToDelete.Count - i);
+                                    var batch = leafKeysToDelete.GetRange(i, count);
+                                    var patch = new Dictionary<string, object?>();
+                                    foreach (var k in batch) patch[k] = null;
+
+                                    var patchUri = new Uri($"{context.DatabaseUrl.TrimEnd('/')}/{childPath}.json");
+                                    using var patchReq = new HttpRequestMessage(HttpMethod.Patch, patchUri)
+                                    {
+                                        Content = new StringContent(JsonSerializer.Serialize(patch), Encoding.UTF8, "application/json")
+                                    };
+                                    patchReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                                    await client.SendAsync(patchReq, cancellationToken);
+                                    prunedCount += batch.Count;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (prunedCount > 0)
+            {
+                _logger.LogInformation("🧹 Cloud Pruner: Deleted {Count} expired GPS points (> {Hours}h) for owner {OwnerUid}",
+                    prunedCount, maxGpsAge.TotalHours, cleanUid);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Cloud Pruner encountered an issue for owner {OwnerUid}", cleanUid);
+        }
+
+        return prunedCount;
+    }
+
+    /// <summary>
     /// Restores/pushes all local SQLite data up to the Cloud (Firebase Realtime Database),
     /// ensuring Cloud matches the restored local database state.
     /// </summary>

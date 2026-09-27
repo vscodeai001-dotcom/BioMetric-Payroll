@@ -867,8 +867,24 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 b.adminMapView.requestLayout()
             }
             if (!adminMapAutoCentered) {
-                b.adminMapView.controller.setCenter(point)
-                b.adminMapView.controller.setZoom(16.0)
+                // Fit to show office + all employees that are already on the map.
+                b.adminMapView.post {
+                    val pts = mutableListOf(point)
+                    signalR.liveLocations.value.values.forEach { loc ->
+                        if (loc.latitude != 0.0 && loc.longitude != 0.0) {
+                            pts.add(GeoPoint(loc.latitude, loc.longitude))
+                        }
+                    }
+                    if (pts.size == 1) {
+                        b.adminMapView.controller.setCenter(point)
+                        b.adminMapView.controller.setZoom(16.0)
+                    } else {
+                        createBoundingBox(pts)?.let { box ->
+                            b.adminMapView.zoomToBoundingBox(box, false, 120)
+                        }
+                    }
+                    adminMapAutoCentered = true
+                }
             }
         }
     }
@@ -998,7 +1014,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
                 val m1 = markers.getOrPut(loc.employeeId) {
                     Marker(dashboardMap).apply {
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                         dashboardMap.overlays.add(this)
                         
                         setOnMarkerClickListener { clicked, map ->
@@ -1120,13 +1136,20 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 geoPoints.add(point)
             }
             
-            // Camera fit only if workforce markers grow or initial fit.
+            // Auto-fit: show office + all employees together on first load, or when new employees join.
             val markerCount = geoPoints.size
             val prevCount = dashboardMap.tag as? Int ?: 0
             if (markerCount > 0 && (markerCount > prevCount || !adminMapAutoCentered)) {
                 officeMarker?.position?.let { geoPoints.add(it) }
-                createBoundingBox(geoPoints)?.let { box ->
-                    dashboardMap.zoomToBoundingBox(box, true, 100)
+                dashboardMap.post {
+                    if (geoPoints.size == 1) {
+                        dashboardMap.controller.setCenter(geoPoints[0])
+                        dashboardMap.controller.setZoom(16.0)
+                    } else {
+                        createBoundingBox(geoPoints)?.let { box ->
+                            dashboardMap.zoomToBoundingBox(box, false, 120)
+                        }
+                    }
                 }
                 adminMapAutoCentered = true
                 dashboardMap.tag = markerCount

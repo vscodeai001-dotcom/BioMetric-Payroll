@@ -1115,14 +1115,15 @@ class FirebaseSyncManager @Inject constructor(
         extraDetails: Map<String, Any?>? = null
     ): Boolean {
         if (!isAuthenticated()) return false
-        val employeeId = sessionStore.employeeId()
-        if (employeeId <= 0) return false
+        val employeeId = sessionStore.employeeId().takeIf { it > 0 } ?: 0
+        val role = sessionStore.userRole().ifBlank { "User" }
         
         val user = auth.currentUser ?: return false
         val eventId = UUID.randomUUID().toString().replace("-", "")
         
         val payload = mutableMapOf<String, Any?>(
             "employeeId" to employeeId,
+            "role" to role,
             "eventType" to eventType,
             "firebaseUid" to user.uid,
             "email" to email,

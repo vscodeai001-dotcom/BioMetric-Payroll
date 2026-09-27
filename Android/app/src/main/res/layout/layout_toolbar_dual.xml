@@ -97,12 +97,24 @@
             android:contentDescription="Toggle Theme" />
 
         <ImageButton
+            android:id="@+id/btnHeaderLogout"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@drawable/ic_logout"
+            android:scaleType="centerInside"
+            app:tint="?attr/colorOnSurface"
+            android:contentDescription="Logout" />
+
+        <ImageButton
             android:id="@+id/btnShopToggle"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:layout_marginStart="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_shop_switch"
+            android:visibility="gone"
             android:contentDescription="Switch Shop" />
     </LinearLayout>
 

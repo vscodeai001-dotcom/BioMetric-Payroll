@@ -4,6 +4,8 @@ import android.content.res.Configuration
 import android.os.Bundle
 import android.transition.Fade
 import android.transition.TransitionSet
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -26,6 +28,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.EntryPoint
 import dagger.hilt.components.SingletonComponent
 import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.core.view.WindowInsetsControllerCompat
 import dagger.hilt.InstallIn
 
@@ -201,8 +204,10 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
         
         val btnTheme = headerView.findViewById<ImageButton>(R.id.btnThemeToggle)
         val btnShop = headerView.findViewById<ImageButton>(R.id.btnShopToggle)
+        val btnLogout = headerView.findViewById<ImageButton>(R.id.btnHeaderLogout)
         
         btnTheme?.visibility = View.VISIBLE
+        btnLogout?.visibility = View.VISIBLE
         btnShop?.visibility = View.GONE
         
         tvLine1.text = line1
@@ -210,30 +215,56 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
         
         btnTheme?.setOnClickListener {
             MotionManager.playClickBlast(it)
-            it.postDelayed({
-                val theme = ThemeManager.toggleTheme(
-                    this,
-                    getSharedPreferences("mobile_session", MODE_PRIVATE)
-                        .getString("email", "")
-                        .orEmpty()
-                        .ifBlank {
-                            getSharedPreferences("user_prefs", MODE_PRIVATE)
-                                .getString("user_uid", "default")
-                                .orEmpty()
-                        }
-                )
-                lifecycleScope.launch {
-                    runCatching {
-                        EntryPointAccessors.fromApplication(
-                            applicationContext,
-                            ThemeEntryPoint::class.java
-                        ).themePreferenceSync.persist(theme)
+            val theme = ThemeManager.toggleTheme(
+                this,
+                getSharedPreferences("mobile_session", MODE_PRIVATE)
+                    .getString("email", "")
+                    .orEmpty()
+                    .ifBlank {
+                        getSharedPreferences("user_prefs", MODE_PRIVATE)
+                            .getString("user_uid", "default")
+                            .orEmpty()
                     }
+            )
+            lifecycleScope.launch {
+                runCatching {
+                    EntryPointAccessors.fromApplication(
+                        applicationContext,
+                        ThemeEntryPoint::class.java
+                    ).themePreferenceSync.persist(theme)
                 }
-            }, 200)
+            }
+        }
+
+        btnLogout?.setOnClickListener {
+            MotionManager.playClickBlast(it)
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Logout 🚪")
+                .setMessage("Are you sure you want to sign out?")
+                .setPositiveButton("Logout") { _, _ ->
+                    GlobalSwitcherDelegate.performLogout(this)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
         
-        return HeaderRefs(tvLine1, tvLine2, tvStatus, tvLine3, btnTheme, btnShop)
+        return HeaderRefs(tvLine1, tvLine2, tvStatus, tvLine3, btnTheme, btnShop, btnLogout)
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
+        val hasDualHeader = findViewById<View>(R.id.llHeaderContainer) != null
+        if (!hasDualHeader) {
+            GlobalSwitcherDelegate.inflateMenu(menuInflater, menu, activity = this)
+            return true
+        }
+        return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (GlobalSwitcherDelegate.handleOptionsItemSelected(this, item)) {
+            return true
+        }
+        return super.onOptionsItemSelected(item)
     }
 
     @EntryPoint
@@ -249,5 +280,6 @@ abstract class MotionBaseActivity : SecurityBaseActivity() {
         val line3: TextView,
         val btnTheme: ImageButton? = null,
         val btnShop: ImageButton? = null,
+        val btnLogout: ImageButton? = null,
     )
 }

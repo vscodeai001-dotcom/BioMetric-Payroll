@@ -496,7 +496,7 @@ else if (locationUpdatesStarted) {
         fusedLocationClient.removeLocationUpdates(locationCallback)
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, currentInterval)
             .setMinUpdateIntervalMillis(10_000L)
-            .setWaitForAccurateLocation(false)
+            .setWaitForAccurateLocation(true)
             .build()
         
         locationHandlerThread?.quitSafely()
@@ -533,16 +533,34 @@ else if (locationUpdatesStarted) {
             offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Null Island (0,0) coordinate rejected — GPS not yet fixed")
             return
         }
+        // Enterprise-grade horizontal accuracy filter.
+        // Reject any fix worse than 35m (normal operation) or 65m (fallback after 60s gap)
+        // to prevent indoor GPS multipath / poor fixes from moving the map marker to wrong positions.
+        val msSinceLastFix = System.currentTimeMillis() - (lastLocation?.time ?: 0L)
+        val maxAccuracyM = if (msSinceLastFix > 60_000L) 65f else 35f
+        if (location.accuracy > maxAccuracyM) {
+            offlineMonitor.record(
+                OfflineTrackingMonitor.DATA_INTEGRITY_WARNING,
+                OfflineTrackingMonitor.WARNING,
+                "GPS fix rejected — accuracy ${location.accuracy}m exceeds ${maxAccuracyM}m threshold"
+            )
+            return
+        }
         if (qualityManager.isSuspiciousMovement(lastLocation, location)) {
             offlineMonitor.record(OfflineTrackingMonitor.DATA_INTEGRITY_WARNING, OfflineTrackingMonitor.WARNING, "Suspicious movement detected; preserving GPS fix for audit")
         }
+
+        // Apply accuracy-weighted EMA smoothing before uploading or displaying the position.
+        // Raw location is kept in lastLocation for distance/history deltas; the smoothed
+        // copy is what travels to Firebase and moves the map marker.
+        val smoothedLocation = qualityManager.smooth(location)
 
         lastLocation = location
         getSharedPreferences(PREFS, MODE_PRIVATE).edit {
             putLong(KEY_LAST_LOCATION_AT, System.currentTimeMillis())
             putFloat(KEY_LAST_ACCURACY, location.accuracy)
-            putFloat(KEY_LAST_LAT, location.latitude.toFloat())
-            putFloat(KEY_LAST_LON, location.longitude.toFloat())
+            putFloat(KEY_LAST_LAT, smoothedLocation.latitude.toFloat())
+            putFloat(KEY_LAST_LON, smoothedLocation.longitude.toFloat())
             putFloat("last_speed", location.speed)
             putFloat("last_bearing", location.bearing)
         }
@@ -566,13 +584,13 @@ else if (locationUpdatesStarted) {
         // Evaluate automatic geofence punch independently on Android
         serviceScope.launch {
             try {
-                autoPunchCoordinator.evaluateAutoPunch(location)
+                autoPunchCoordinator.evaluateAutoPunch(smoothedLocation)
             } catch (e: Exception) {
                 Log.w("TrackingService", "Auto punch evaluation error", e)
             }
         }
 
-        processLocationCapture(location, isHistoryDue)
+        processLocationCapture(smoothedLocation, isHistoryDue)
     }
 
     private fun nextGpsSequence(sessionId: String): Long {
