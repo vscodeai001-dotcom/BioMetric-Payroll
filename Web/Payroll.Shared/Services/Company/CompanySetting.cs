@@ -117,5 +117,9 @@ namespace Payroll.Shared.Data
 
         [Column("stay_cluster_radius_meters")]
         public int StayClusterRadiusMeters { get; set; } = 50;
+
+        // --- MAP MARKER DISPLAY MODE ---
+        [Column("use_speed_based_markers")]
+        public bool UseSpeedBasedMarkers { get; set; } = false;
     }
 }

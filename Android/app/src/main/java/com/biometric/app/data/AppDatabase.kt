@@ -30,7 +30,7 @@ import com.biometric.app.data.entity.*
         LocalCompanySettings::class,
         LocalFeatureSettings::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

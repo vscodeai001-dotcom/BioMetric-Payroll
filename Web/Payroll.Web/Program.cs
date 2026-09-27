@@ -357,8 +357,10 @@ builder.Services.AddScoped<
     NotificationService>();
 
 builder.Services.AddScoped<
-    IEmailSender,
     EmailSender>();
+
+builder.Services.AddScoped<
+    IEmailSender>(sp => sp.GetRequiredService<EmailSender>());
 
 builder.Services.AddScoped<
     CsvExportService>();

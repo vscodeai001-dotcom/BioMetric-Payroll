@@ -1726,6 +1726,21 @@
     .payroll-map-user-status.offline { background:#94a3b8; }
     .payroll-map-user-initials { line-height:1; user-select:none; }
 
+    /* Speed-based marker variant */
+    .payroll-map-user-speed { flex-direction:column; gap:2px; width:52px; height:52px; border-radius:18px; }
+    .payroll-map-user-speed-emoji { font-size:20px; line-height:1; }
+    .payroll-map-user-speed-name { font-size:7px; font-weight:800; line-height:1; max-width:48px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; }
+
+    /* Name label chip shown below the default initials avatar */
+    .payroll-map-user-namelabel {
+        position:absolute; top:48px; left:50%; transform:translateX(-50%);
+        background:rgba(12,18,30,.82); color:#eef5ff;
+        font-size:8.5px; font-weight:700; padding:2px 6px; border-radius:6px;
+        white-space:nowrap; pointer-events:none; backdrop-filter:blur(6px);
+        border:1px solid rgba(255,255,255,.13); box-shadow:0 3px 8px rgba(0,0,0,.22);
+    }
+
+
     .admin-office-tooltip, .admin-live-hover-tooltip {
         background:rgba(12,18,30,.94) !important; color:#eef5ff !important;
         border:1px solid rgba(255,255,255,.13) !important; border-radius:12px !important;
@@ -3399,6 +3414,7 @@
     private int currentOfficeRadius = 100;
     private double currentOfficeLatitude;
     private double currentOfficeLongitude;
+    private bool useSpeedBasedMarkers;
 
     private List<EmployeeLocationHistory> selectedHistory = new();
     private List<GeoPunchAudit> selectedPunchAudits = new();
@@ -4882,6 +4898,7 @@ foreach (var point in ordered)
                 currentOfficeLatitude = office.Latitude;
                 currentOfficeLongitude = office.Longitude;
                 currentOfficeRadius = office.Radius;
+                useSpeedBasedMarkers = office.UseSpeedBasedMarkers;
 
                 /*
                  * Firebase is the single live-location wire shared by Web and
@@ -5541,7 +5558,8 @@ foreach (var point in ordered)
                 staff,
                 selectedEmployeeId,
                 false,
-                liveLocationSignalRReference);
+                liveLocationSignalRReference,
+                office.UseSpeedBasedMarkers);
         }
         catch (Exception ex)
         {
@@ -5566,7 +5584,7 @@ foreach (var point in ordered)
         return earthRadiusMeters * 2d * Math.Atan2(Math.Sqrt(a), Math.Sqrt(Math.Max(0d, 1d - a)));
     }
 
-    private async Task<(double Latitude, double Longitude, int Radius)>
+    private async Task<(double Latitude, double Longitude, int Radius, bool UseSpeedBasedMarkers)>
         GetOfficeLocation()
     {
         await using var db =
@@ -5581,7 +5599,8 @@ foreach (var point in ordered)
         return (
             company?.OfficeLatitude ?? 0,
             company?.OfficeLongitude ?? 0,
-            company?.GeoRadiusMeters ?? 100);
+            company?.GeoRadiusMeters ?? 100,
+            company?.UseSpeedBasedMarkers ?? false);
     }
 
 

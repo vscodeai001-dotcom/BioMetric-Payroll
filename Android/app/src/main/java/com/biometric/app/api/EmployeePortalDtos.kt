@@ -65,7 +65,8 @@ data class CompanySettingsResponse(
     @SerializedName("leaveAccrualRate") val leaveAccrualRate: Double = 1.5,
     @SerializedName("enableSandwichRule") val enableSandwichRule: Boolean = false,
     @SerializedName("enableLeaveManagement") val enableLeaveManagement: Boolean = false,
-    @SerializedName("enableTdsDeduction") val enableTdsDeduction: Boolean = false
+    @SerializedName("enableTdsDeduction") val enableTdsDeduction: Boolean = false,
+    @SerializedName("useSpeedBasedMarkers") val useSpeedBasedMarkers: Boolean = false
 )
 
 data class AttendanceDayDto(

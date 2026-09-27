@@ -91,6 +91,16 @@
                     <small class="text-muted">Distance threshold to cluster consecutive GPS points into a single stationary halt.</small>
                 </div>
             </div>
+            <div class="col-12">
+                <div class="border rounded p-2 bg-body-tertiary">
+                    <label class="small fw-bold text-primary">Live Tracking Map Marker Style</label>
+                    <select class="form-select form-select-sm" @bind="Settings.UseSpeedBasedMarkers">
+                        <option value="false">Default Avatar Markers (Initial avatar + status dot)</option>
+                        <option value="true">Speed-Based Movement Markers (🧍 Stopped, 🚶 Walking, 🛵 Slow, 🚗 City, 🏎️ Fast, ✈️ Aircraft...)</option>
+                    </select>
+                    <small class="text-muted">Controls whether live employee pins on Web & Android maps show classic initials or dynamic movement vehicle icons matching their current speed.</small>
+                </div>
+            </div>
             <div class="row g-2 border-top pt-2 mt-2">
                 <div class="col-12 mb-1">
                     <label class="small fw-bold text-primary">Geo-Fencing (Office Location)</label>

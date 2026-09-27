@@ -462,7 +462,9 @@ else
                         ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes,
                         ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours,
                         ["stayDwellMinutes"] = settings.StayDwellMinutes,
-                        ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters
+                        ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters,
+                        ["useSpeedBasedMarkers"] = settings.UseSpeedBasedMarkers,
+                        ["use_speed_based_markers"] = settings.UseSpeedBasedMarkers
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                 }

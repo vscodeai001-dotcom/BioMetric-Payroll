@@ -81,5 +81,18 @@ IHost host = Host.CreateDefaultBuilder(args)
     })
     .Build();
 
+// Ensure local SQLite schema is up to date before background workers run
+try
+{
+    using var scope = host.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.EnsureCreatedAsync();
+    await AppDbContext.EnsureSqliteSchemaUpdatedAsync(db);
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"AttendanceService SQLite schema initialization warning: {ex.Message}");
+}
+
 // 5. Run the Service
 await host.RunAsync();

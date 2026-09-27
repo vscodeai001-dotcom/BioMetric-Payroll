@@ -603,6 +603,7 @@ class FirebaseRoomHydrator @Inject constructor(
         autoBackupIntervalHours = i("autoBackupIntervalHours").takeIf { it > 0 } ?: 24,
         stayDwellMinutes = i("stayDwellMinutes").takeIf { it > 0 } ?: 10,
         stayClusterRadiusMeters = i("stayClusterRadiusMeters").takeIf { it > 0 } ?: 50,
+        useSpeedBasedMarkers = b("useSpeedBasedMarkers") || b("use_speed_based_markers"),
         syncState = 1
     )
 

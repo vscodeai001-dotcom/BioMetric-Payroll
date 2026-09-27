@@ -3949,24 +3949,60 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             const metaInitials = metaParts.length === 1
                 ? metaParts[0].slice(0, 1)
                 : (metaParts[0][0] + metaParts[metaParts.length - 1][0]);
+            
+            const metaSpeedMps = Number(data.SpeedMps ?? data.speedMps ?? marker._speedMps) || 0;
+            const metaSpeedKmh = metaSpeedMps * 3.6;
+            const useSpeedIcons = !!(window.payrollCompanySettings && window.payrollCompanySettings.useSpeedBasedMarkers);
+            const speedTier = useSpeedIcons ? window.payrollGetSpeedEmoji(metaSpeedKmh) : '';
             const visualKey =
                 (realtimeWithin ? 'within' : 'outside') +
-                '|active';
+                '|active|' + speedTier;
 
             if (marker._adminVisualKey !== visualKey) {
+                const realtimeHtml = window.payrollMakeAdminMarkerHtml(
+                    metaInitials,
+                    realtimeWithin ? 'within' : 'outside',
+                    '',
+                    metaSpeedKmh,
+                    metaName,
+                    useSpeedIcons
+                );
                 const realtimeIcon = L.divIcon({
                     className: 'payroll-user-marker',
-                    html: '<div class="payroll-map-user payroll-map-user-' +
-                        (realtimeWithin ? 'within' : 'outside') + '">' +
-                        '<span class="payroll-map-user-initials">' +
-                        window.escapeAdminHtml(metaInitials.toUpperCase()) + '</span>' +
-                        '<span class="payroll-map-user-status"></span></div>',
+                    html: realtimeHtml,
                     iconSize: [46, 54],
                     iconAnchor: [23, 54]
                 });
                 marker.setIcon(realtimeIcon);
                 marker._adminVisualKey = visualKey;
             }
+
+            // Update tooltip content in realtime
+            try {
+                const safeRole = window.escapeAdminHtml ? window.escapeAdminHtml(String(marker._role || 'Staff')) : 'Staff';
+                const safeDisplayName = window.escapeAdminHtml ? window.escapeAdminHtml(metaName) : metaName;
+                const speedLabel = window.payrollGetSpeedLabel(metaSpeedKmh);
+                const speedEmoji = window.payrollGetSpeedEmoji(metaSpeedKmh);
+                const rangeClass = realtimeWithin ? 'within' : 'outside';
+                const rangeLabel = realtimeWithin ? '✅ In range' : '🔴 Outside';
+
+                const hoverHtml =
+                    '<div class="admin-live-hover-card" style="min-width:160px">' +
+                    '<div class="admin-live-hover-title">' +
+                    '<span class="hover-avatar">' + (metaInitials || '?').toUpperCase() + '</span>' +
+                    '<strong>' + safeDisplayName + '</strong>' +
+                    '<span class="hover-state ' + rangeClass + '">' + rangeLabel + '</span>' +
+                    '</div>' +
+                    '<div style="font-size:11px;color:#b0bec5;margin-top:4px;">' +
+                    '🏷️ ' + safeRole + '&nbsp;&nbsp;' + speedEmoji + ' ' + speedLabel +
+                    '</div>' +
+                    '</div>';
+
+                if (marker.getTooltip()) {
+                    marker.setTooltipContent(hoverHtml);
+                }
+                marker._speedMps = metaSpeedMps;
+            } catch { }
 
             marker._adminWithinRange = realtimeWithin;
 
@@ -4161,6 +4197,65 @@ window.unregisterAdminLiveLocationRealtime = function (mapId) {
     delete registry[mapId];
 };
 
+/**
+ * Returns an emoji icon appropriate for the given speed in km/h.
+ * Used for speed-based marker icons (company setting: UseSpeedBasedMarkers).
+ */
+window.payrollGetSpeedEmoji = function (speedKmh) {
+    const s = Number(speedKmh) || 0;
+    if (s < 1)   return '🧍'; // Stopped
+    if (s < 5)   return '🚶'; // Walking
+    if (s < 30)  return '🛵'; // Very slow / residential
+    if (s < 60)  return '🚗'; // City driving
+    if (s < 90)  return '🚕'; // Highway
+    if (s < 120) return '🚙'; // Fast highway
+    if (s < 150) return '🏎️'; // Racing / very fast
+    if (s < 200) return '🚄'; // Train speed
+    if (s < 500) return '✈️'; // Aircraft
+    if (s < 1000) return '🚀'; // Rocket
+    return '☄️'; // Hypersonic
+};
+
+/**
+ * Returns the speed tier label (for tooltip display).
+ */
+window.payrollGetSpeedLabel = function (speedKmh) {
+    const s = Number(speedKmh) || 0;
+    if (s < 1)   return 'Stopped';
+    if (s < 5)   return 'Walking';
+    if (s < 30)  return 'Slow';
+    if (s < 60)  return 'City';
+    if (s < 90)  return 'Highway';
+    if (s < 120) return 'Fast';
+    if (s < 150) return 'Racing';
+    return `${s.toFixed(0)} km/h`;
+};
+
+/**
+ * Builds the inner HTML for an employee map marker div.
+ * When useSpeedIcons=true, shows speed emoji + name label.
+ * When false, shows initials avatar (original behaviour).
+ */
+window.payrollMakeAdminMarkerHtml = function (initials, avatarClass, statusDotClass, speedKmh, employeeName, useSpeedIcons) {
+    const safeName = window.escapeAdminHtml ? window.escapeAdminHtml(employeeName) : employeeName;
+    const safeInitials = (window.escapeAdminHtml ? window.escapeAdminHtml(initials) : initials).toUpperCase();
+
+    if (useSpeedIcons) {
+        const emoji = window.payrollGetSpeedEmoji(speedKmh);
+        return '<div class="payroll-map-user payroll-map-user-' + avatarClass + ' payroll-map-user-speed">' +
+               '<span class="payroll-map-user-speed-emoji" aria-hidden="true">' + emoji + '</span>' +
+               '<span class="payroll-map-user-speed-name">' + safeName + '</span>' +
+               '<span class="payroll-map-user-status' + statusDotClass + '"></span>' +
+               '</div>';
+    }
+    // Default: initials avatar + persistent name label
+    return '<div class="payroll-map-user payroll-map-user-' + avatarClass + '">' +
+           '<span class="payroll-map-user-initials">' + safeInitials + '</span>' +
+           '<span class="payroll-map-user-status' + statusDotClass + '"></span>' +
+           '</div>' +
+           '<div class="payroll-map-user-namelabel">' + safeName + '</div>';
+};
+
 window.updateAdminLiveStaffMap =
     async function (
         mapId,
@@ -4170,8 +4265,14 @@ window.updateAdminLiveStaffMap =
         staff,
         selectedId,
         isPlayback,
-        dotNetRef
+        dotNetRef,
+        useSpeedMarkersFlag
     ) {
+        if (typeof useSpeedMarkersFlag === 'boolean') {
+            window.payrollCompanySettings = window.payrollCompanySettings || {};
+            window.payrollCompanySettings.useSpeedBasedMarkers = useSpeedMarkersFlag;
+        }
+
         // Defensive fallback for presentation-only escaping. This keeps the
         // live map usable even if a stale browser cache briefly omits the
         // shared helper. It does not affect GPS, attendance, sessions or DB.
@@ -4641,14 +4742,19 @@ window.updateAdminLiveStaffMap =
                     const statusDotClass = status === 'stale' ? ' stale' : (status === 'offline' ? ' offline' : '');
                     state.markerSessions[employeeId] = String(x.sessionId || x.SessionId || '');
 
+                    // Speed-based icon support
+                    const speedMps = Number(x.speedMps) || 0;
+                    const speedKmh = speedMps * 3.6;
+                    const useSpeedIcons = !!(window.payrollCompanySettings && window.payrollCompanySettings.useSpeedBasedMarkers);
+
+                    const markerHtml = window.payrollMakeAdminMarkerHtml(
+                        initials, avatarClass, statusDotClass, speedKmh, rawName, useSpeedIcons
+                    );
+
                     const icon =
                         L.divIcon({
                             className: 'payroll-user-marker',
-                            html:
-                                '<div class="payroll-map-user payroll-map-user-' + avatarClass + '">' +
-                                '<span class="payroll-map-user-initials">' + window.escapeAdminHtml(initials.toUpperCase()) + '</span>' +
-                                '<span class="payroll-map-user-status' + statusDotClass + '"></span>' +
-                                '</div>',
+                            html: markerHtml,
                             iconSize: [46, 54],
                             iconAnchor: [23, 54] // Exact bottom tip anchoring
                         });
@@ -4697,14 +4803,18 @@ window.updateAdminLiveStaffMap =
                         const markerRef =
                             state.markers[employeeId];
 
+                        // Include speed tier in visual key so marker refreshes on speed change
+                        const speedTier = useSpeedIcons ? window.payrollGetSpeedEmoji(speedKmh) : '';
                         const iconVisualKey =
                             (withinRange ? 'within' : 'outside') +
-                            '|' + status;
+                            '|' + status +
+                            '|' + speedTier;
 
                         if (markerRef._adminVisualKey !== iconVisualKey) {
                             markerRef.setIcon(icon);
                             markerRef._adminVisualKey = iconVisualKey;
                         }
+
 
                         // The map may have been created before the Blazor
                         // reference was available. Ensure the click handler
@@ -4969,17 +5079,50 @@ window.updateAdminLiveStaffMap =
                             x.name
                         );
 
-                    // Employee markers stay visually clean. Detailed employee
-                    // information is presented only in the selected-employee rail
-                    // and the selected details card, never as a floating marker popup.
+                    // Show hover tooltip for every employee marker: name, role, speed, status.
+                    // This eliminates the "which employee is this?" confusion without cluttering the map.
                     try {
-                        if (state.markers[employeeId].getTooltip()) {
-                            state.markers[employeeId].unbindTooltip();
+                        const safeRole = window.escapeAdminHtml(String(x.role || 'Staff'));
+                        const safeDisplayName = window.escapeAdminHtml(rawName);
+                        const speedLabel = window.payrollGetSpeedLabel(speedKmh);
+                        const speedEmoji = window.payrollGetSpeedEmoji(speedKmh);
+                        const rangeClass = withinRange ? 'within' : 'outside';
+                        const rangeLabel = withinRange ? '✅ In range' : '🔴 Outside';
+
+                        const hoverHtml =
+                            '<div class="admin-live-hover-card" style="min-width:160px">' +
+                            '<div class="admin-live-hover-title">' +
+                            '<span class="hover-avatar">' + (initials || '?').toUpperCase() + '</span>' +
+                            '<strong>' + safeDisplayName + '</strong>' +
+                            '<span class="hover-state ' + rangeClass + '">' + rangeLabel + '</span>' +
+                            '</div>' +
+                            '<div style="font-size:11px;color:#b0bec5;margin-top:4px;">' +
+                            '🏷️ ' + safeRole + '&nbsp;&nbsp;' + speedEmoji + ' ' + speedLabel +
+                            '</div>' +
+                            '</div>';
+
+                        const currentTooltip = state.markers[employeeId].getTooltip();
+                        if (currentTooltip) {
+                            state.markers[employeeId].setTooltipContent(hoverHtml);
+                        } else {
+                            state.markers[employeeId].bindTooltip(hoverHtml, {
+                                permanent: false,
+                                direction: 'top',
+                                offset: [0, -12],
+                                sticky: false,
+                                className: 'admin-live-hover-tooltip'
+                            });
                         }
+
+                        // Store speed for realtime bridge updates
+                        state.markers[employeeId]._speedMps = speedMps;
+                        state.markers[employeeId]._role = String(x.role || 'Staff');
+
                         if (state.markers[employeeId].isPopupOpen?.()) {
                             state.markers[employeeId].closePopup();
                         }
                     } catch { }
+
 
                     // Road routing is a selected-employee detail only.
                     // The default live map shows every employee marker but does

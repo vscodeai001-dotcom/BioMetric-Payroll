@@ -109,7 +109,8 @@ class MainViewModel @Inject constructor(
                     companyName = it.companyName,
                     officeLatitude = it.officeLatitude,
                     officeLongitude = it.officeLongitude,
-                    geoRadiusMeters = it.geoRadiusMeters
+                    geoRadiusMeters = it.geoRadiusMeters,
+                    useSpeedBasedMarkers = it.useSpeedBasedMarkers
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)

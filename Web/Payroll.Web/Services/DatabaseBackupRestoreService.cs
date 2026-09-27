@@ -110,10 +110,12 @@ public sealed class DatabaseBackupRestoreService
             using var sourceConn = new SqliteConnection($"Data Source={sourcePath};Cache=Shared;Mode=ReadOnly;");
             sourceConn.Open();
 
-            using var destConn = new SqliteConnection($"Data Source={destPath};");
+            using var destConn = new SqliteConnection($"Data Source={destPath};Pooling=False;");
             destConn.Open();
 
             sourceConn.BackupDatabase(destConn);
+            destConn.Close();
+            SqliteConnection.ClearPool(destConn);
         }, cancellationToken);
 
         var fileInfo = new FileInfo(destPath);
@@ -748,7 +750,28 @@ public sealed class DatabaseBackupRestoreService
 
         using (var archive = System.IO.Compression.ZipFile.Open(zipPath, System.IO.Compression.ZipArchiveMode.Create))
         {
-            archive.CreateEntryFromFile(dbFilePath, Path.GetFileName(dbFilePath), System.IO.Compression.CompressionLevel.Optimal);
+            var entry = archive.CreateEntry(Path.GetFileName(dbFilePath), System.IO.Compression.CompressionLevel.Optimal);
+            using var entryStream = entry.Open();
+
+            // Open with FileShare.ReadWrite and transient retry in case OS/indexer/antivirus holds a brief lock
+            Stream? fileStream = null;
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    fileStream = new FileStream(dbFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                    break;
+                }
+                catch (IOException) when (attempt < 4)
+                {
+                    System.Threading.Thread.Sleep(300);
+                }
+            }
+
+            using (fileStream)
+            {
+                fileStream?.CopyTo(entryStream);
+            }
         }
         return zipPath;
     }

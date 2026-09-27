@@ -151,6 +151,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private var adminZoneVisible = true
     private var adminTrailsVisible = true
     private var isAdminAutoFocusEnabled = false
+    private var useSpeedBasedMarkers: Boolean = false
     private var adminFollowingEmployeeId: Int? = null
     private var adminSelectedEmployeeId: Int? = null
 
@@ -791,6 +792,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             viewModel.companySettings.collectLatest { settings ->
                 settings?.let { s ->
                     _binding?.let { updateOfficeOnMap(s.officeLatitude, s.officeLongitude, s.geoRadiusMeters) }
+                    useSpeedBasedMarkers = s.useSpeedBasedMarkers
                 }
             }
         }
@@ -1119,11 +1121,21 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     liveDistanceMeters <= currentGeofenceRadiusMeters.toDouble()
 
                 val initials = getInitials(employeeName)
-                val cacheKey = "${initials}_${withinCurrentRadius}_$status"
-                val icon = iconCache.getOrPut(cacheKey) {
-                    createPremiumMarkerIcon(initials, withinCurrentRadius, status)
+                val empRole: String = emp?.role?.takeIf { it.isNotBlank() } ?: "Staff"
+                if (useSpeedBasedMarkers) {
+                    val speedKmh = loc.speedMps * 3.6
+                    val cacheKey = "speed_${getSpeedTier(speedKmh)}_${withinCurrentRadius}_$status"
+                    m1.icon = iconCache.getOrPut(cacheKey) {
+                        createSpeedMarkerIcon(speedKmh, withinCurrentRadius, status)
+                    }
+                } else {
+                    val cacheKey = "${initials}_${withinCurrentRadius}_$status"
+                    m1.icon = iconCache.getOrPut(cacheKey) {
+                        createPremiumMarkerIcon(initials, withinCurrentRadius, status)
+                    }
                 }
-                m1.icon = icon
+                // Show name + role on tap via the info window title
+                m1.title = if (empRole.isNotBlank()) "$employeeName • $empRole" else employeeName
                 m1.snippet = ""
 
                 // Only show route for selected employee
@@ -1310,6 +1322,71 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     private fun getInitials(name: String): String {
         val parts = name.split(" ").filter { it.isNotBlank() }
         return if (parts.size >= 2) "${parts[0][0]}${parts.last()[0]}".uppercase() else name.take(1).uppercase()
+    }
+
+    /** Returns a short string key for the current speed tier (for icon caching). */
+    private fun getSpeedTier(speedKmh: Double): String = when {
+        speedKmh < 1   -> "stopped"
+        speedKmh < 5   -> "walk"
+        speedKmh < 30  -> "slow"
+        speedKmh < 60  -> "city"
+        speedKmh < 90  -> "hwy"
+        speedKmh < 120 -> "fast"
+        speedKmh < 150 -> "race"
+        speedKmh < 200 -> "train"
+        speedKmh < 500 -> "air"
+        else           -> "rocket"
+    }
+
+    /** Returns a speed emoji matching web behaviour. */
+    private fun getSpeedEmoji(speedKmh: Double): String = when {
+        speedKmh < 1    -> "🧍"
+        speedKmh < 5    -> "🚶"
+        speedKmh < 30   -> "🛵"
+        speedKmh < 60   -> "🚗"
+        speedKmh < 90   -> "🚕"
+        speedKmh < 120  -> "🚙"
+        speedKmh < 150  -> "🏎️"
+        speedKmh < 200  -> "🚄"
+        speedKmh < 500  -> "✈️"
+        speedKmh < 1000 -> "🚀"
+        else            -> "☄️"
+    }
+
+    /** Builds a circular emoji marker bitmap for speed-based display. */
+    private fun createSpeedMarkerIcon(speedKmh: Double, within: Boolean, status: String): Drawable {
+        val color = if (within) "#3B82F6".toColorInt() else "#EF4444".toColorInt()
+        val size = 120
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        paint.color = color
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paint)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 4f
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paint)
+        paint.style = Paint.Style.FILL
+
+        paint.textSize = 48f
+        paint.textAlign = Paint.Align.CENTER
+        val emoji = getSpeedEmoji(speedKmh)
+        val fm = paint.fontMetrics
+        val textY = size / 2f - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(emoji, size / 2f, textY, paint)
+
+        val statusColor = when (status) {
+            "Live"  -> "#22C55E".toColorInt()
+            "Stale" -> "#F59E0B".toColorInt()
+            else    -> "#94A3B8".toColorInt()
+        }
+        paint.color = Color.WHITE
+        canvas.drawCircle(size - 18f, 18f, 12f, paint)
+        paint.color = statusColor
+        canvas.drawCircle(size - 18f, 18f, 8f, paint)
+
+        return BitmapDrawable(resources, bitmap)
     }
 
     private fun createPremiumMarkerIcon(initials: String, within: Boolean, status: String): Drawable {
