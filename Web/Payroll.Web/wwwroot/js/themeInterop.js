@@ -1694,6 +1694,7 @@ window.payrollSmoothMoveMarker =
             return;
         }
 
+        window.payrollGeoAnimationState = window.payrollGeoAnimationState || {};
         const stateStore = window.payrollGeoAnimationState;
         const previous = stateStore[key];
 
