@@ -4526,7 +4526,18 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
 
             if (Number.isFinite(rad) && rad > 0) {
                 state.lastOfficeRadius = rad;
-                if (state.circle) {
+                if (!state.circle && state.map && state.office) {
+                    state.circle = L.circle(state.office, {
+                        radius: rad,
+                        color: '#0d6efd',
+                        weight: 2,
+                        opacity: 0.72,
+                        fillColor: '#0d6efd',
+                        fillOpacity: 0.08,
+                        interactive: false,
+                        bubblingMouseEvents: false
+                    }).addTo(state.map);
+                } else if (state.circle) {
                     state.circle.setRadius(rad);
                     if (state.office) {
                         state.circle.setLatLng(state.office);
@@ -4535,23 +4546,25 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             }
 
             // Immediately re-evaluate all markers on the map against the new radius
-            if (state.liveData && state.markers) {
-                Object.keys(state.liveData).forEach(function (empId) {
-                    const empData = state.liveData[empId];
+            if (state.markers) {
+                Object.keys(state.markers).forEach(function (empId) {
                     const marker = state.markers[empId];
-                    if (!empData || !marker) return;
+                    if (!marker) return;
+                    const markerLatLng = marker.getLatLng();
+                    if (!markerLatLng) return;
 
-                    const target = [empData.latitude, empData.longitude];
+                    const empData = state.liveData ? state.liveData[empId] : null;
+                    const target = [markerLatLng.lat, markerLatLng.lng];
                     if (Array.isArray(state.office) && state.lastOfficeRadius > 0 && typeof window.payrollHaversineMeters === 'function') {
                         const dist = window.payrollHaversineMeters(target, state.office);
                         const within = dist <= state.lastOfficeRadius + 1;
-                        empData.isWithinAllowedRadius = within;
+                        if (empData) empData.isWithinAllowedRadius = within;
                         marker._adminWithinRange = within;
 
                         const metaName = String(marker._adminEmployeeName || 'Employee').trim();
                         const metaParts = metaName.split(/\s+/).filter(Boolean);
                         const metaInitials = metaParts.length === 1 ? metaParts[0].slice(0, 1) : (metaParts[0][0] + metaParts[metaParts.length - 1][0]);
-                        const metaSpeedMps = Number(empData.speedMps || 0);
+                        const metaSpeedMps = Number(empData?.speedMps || marker._speedMps || 0);
                         const metaSpeedKmh = metaSpeedMps * 3.6;
                         const useSpeedIcons = !!(window.payrollCompanySettings && window.payrollCompanySettings.useSpeedBasedMarkers);
                         const speedTier = useSpeedIcons ? window.payrollGetSpeedEmoji(metaSpeedKmh) : '';
@@ -4569,6 +4582,10 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                         }
                     }
                 });
+            }
+
+            if (typeof window.refreshAdminLiveMapSummary === 'function') {
+                window.refreshAdminLiveMapSummary(mapId);
             }
         } catch (e) {
             console.warn('Admin live map geo-settings event update failed:', e);
@@ -4729,6 +4746,12 @@ window.updateAdminLiveStaffMap =
                 parsedOfficeLat,
                 parsedOfficeLng
             ];
+
+            if (typeof window.registerAdminLiveLocationRealtime === 'function') {
+                try {
+                    window.registerAdminLiveLocationRealtime(mapId);
+                } catch { }
+            }
 
             const liveStaff =
                 Array.isArray(staff)

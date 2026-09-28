@@ -119,6 +119,12 @@ window.attendanceRefresh = (function () {
             firebaseGeoPunchAuditRef.on('child_added', onFirebaseGeoPunchAudit);
             firebaseGeoPunchAuditRef.on('child_changed', onFirebaseGeoPunchAudit);
 
+            // Listen to company_settings for real-time geofence & radar updates
+            const companySettingsRef = firebaseDatabase.ref(
+                'owners/' + realtimeOwnerUid + '/company_settings/1'
+            );
+            companySettingsRef.on('value', onFirebaseCompanySettings);
+
             console.log('Firebase realtime transport connected.');
         } catch (error) {
             console.warn(
@@ -436,7 +442,83 @@ window.attendanceRefresh = (function () {
         }
     }
 
-    function onGeoSettingsChanged(data) {
+    function onFirebaseCompanySettings(snapshot) {
+        try {
+            const val = snapshot.val();
+            if (!val || typeof val !== 'object') return;
+
+            const lat = Number(val.officeLatitude ?? val.OfficeLatitude ?? 0);
+            const lng = Number(val.officeLongitude ?? val.OfficeLongitude ?? 0);
+            const rad = Number(val.geoRadiusMeters ?? val.GeoRadiusMeters ?? 0);
+            const speed = Boolean(val.useSpeedBasedMarkers ?? val.use_speed_based_markers ?? false);
+
+            const geoData = {
+                OfficeLatitude: lat,
+                OfficeLongitude: lng,
+                GeoRadiusMeters: rad,
+                UseSpeedBasedMarkers: speed,
+                Timestamp: new Date().toISOString()
+            };
+
+            if (window.payrollCompanySettings) {
+                if (lat !== 0 && lng !== 0) {
+                    window.payrollCompanySettings.officeLatitude = lat;
+                    window.payrollCompanySettings.officeLongitude = lng;
+                }
+                if (rad > 0) {
+                    window.payrollCompanySettings.geoRadiusMeters = rad;
+                }
+                window.payrollCompanySettings.useSpeedBasedMarkers = speed;
+            }
+
+            onGeoSettingsChanged(geoData, false);
+        } catch (error) {
+            console.warn('Firebase company settings callback failed:', error);
+        }
+    }
+
+    const payrollBroadcastChannel = typeof window.BroadcastChannel === 'function'
+        ? new BroadcastChannel('payroll_realtime_channel')
+        : null;
+
+    if (payrollBroadcastChannel) {
+        payrollBroadcastChannel.onmessage = function (event) {
+            if (!event || !event.data) return;
+            const msg = event.data;
+            if (msg.type === 'geo-settings-changed') {
+                onGeoSettingsChanged(msg.data, true);
+            }
+        };
+    }
+
+    window.addEventListener('storage', function (e) {
+        if (e.key === 'payroll_geo_settings_sync' && e.newValue) {
+            try {
+                const data = JSON.parse(e.newValue);
+                onGeoSettingsChanged(data, true);
+            } catch { }
+        }
+    });
+
+    window.broadcastGeoSettingsChanged = function (data) {
+        try {
+            if (payrollBroadcastChannel) {
+                payrollBroadcastChannel.postMessage({ type: 'geo-settings-changed', data: data });
+            }
+            localStorage.setItem('payroll_geo_settings_sync', JSON.stringify({ ...data, _ts: Date.now() }));
+        } catch { }
+        onGeoSettingsChanged(data, true);
+    };
+
+    function onGeoSettingsChanged(data, fromLocalBroadcast) {
+        if (!fromLocalBroadcast) {
+            try {
+                if (payrollBroadcastChannel) {
+                    payrollBroadcastChannel.postMessage({ type: 'geo-settings-changed', data: data });
+                }
+                localStorage.setItem('payroll_geo_settings_sync', JSON.stringify({ ...data, _ts: Date.now() }));
+            } catch { }
+        }
         notifyListeners('GeoSettingsChanged', data);
         window.dispatchEvent(new CustomEvent('geo-settings-changed', { detail: data }));
     }

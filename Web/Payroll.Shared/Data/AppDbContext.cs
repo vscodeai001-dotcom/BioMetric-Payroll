@@ -482,6 +482,12 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "resignation_requests", "admin_remarks", "TEXT NULL", ct);
             await EnsureColumnExistsAsync(connection, "resignation_requests", "approved_last_working_day", "TEXT NULL", ct);
             await EnsureColumnExistsAsync(connection, "resignation_requests", "is_settled", "INTEGER NOT NULL DEFAULT 0", ct);
+
+            // 9. High-scale performance indexes for 5000+ employees and multi-year queries
+            await EnsureIndexExistsAsync(connection, "daily_summaries", "idx_dailysummaries_shiftdate_empid", "shiftdate, employeeid", unique: false, ct);
+            await EnsureIndexExistsAsync(connection, "attendancelogs", "idx_attendancelogs_punchtime_empid", "punchtime, employeeid", unique: false, ct);
+            await EnsureIndexExistsAsync(connection, "payrollhistory", "idx_payrollhistory_month_year_empid", "paymonth, payyear, employeeid", unique: false, ct);
+            await EnsureIndexExistsAsync(connection, "shiftschedules", "idx_shiftschedules_date_empid", "shiftdate, employeeid", unique: false, ct);
         }
         catch { }
     }

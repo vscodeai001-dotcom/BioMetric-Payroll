@@ -3401,6 +3401,7 @@
     private CancellationTokenSource? refreshCts;
     private CancellationTokenSource? firebaseLiveCts;
     private Task? firebaseLiveStreamTask;
+    private Task? firebaseCompanySettingsStreamTask;
     private DotNetObjectReference<LiveStaffLocationPanel>? liveLocationSignalRReference;
 
     private bool disposed;
@@ -3692,11 +3693,60 @@
 
         try
         {
+            if (data != null)
+            {
+                try
+                {
+                    var jsonStr = data is JsonElement je ? je.GetRawText() : data.ToString();
+                    if (!string.IsNullOrWhiteSpace(jsonStr))
+                    {
+                        using var doc = JsonDocument.Parse(jsonStr);
+                        var root = doc.RootElement;
+                        var target = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var dProp) && dProp.ValueKind == JsonValueKind.Object
+                            ? dProp
+                            : root;
+
+                        if (TryGetJsonInt(target, "GeoRadiusMeters", out var rVal) || TryGetJsonInt(target, "geoRadiusMeters", out rVal))
+                        {
+                            if (rVal > 0) currentOfficeRadius = rVal;
+                        }
+                        if (TryGetJsonDouble(target, "OfficeLatitude", out var latVal) || TryGetJsonDouble(target, "officeLatitude", out latVal))
+                        {
+                            if (latVal != 0) currentOfficeLatitude = latVal;
+                        }
+                        if (TryGetJsonDouble(target, "OfficeLongitude", out var lngVal) || TryGetJsonDouble(target, "officeLongitude", out lngVal))
+                        {
+                            if (lngVal != 0) currentOfficeLongitude = lngVal;
+                        }
+                        if (TryGetJsonBool(target, "UseSpeedBasedMarkers", out var speedVal) || TryGetJsonBool(target, "use_speed_based_markers", out speedVal))
+                        {
+                            useSpeedBasedMarkers = speedVal;
+                        }
+
+                        if (currentOfficeLatitude != 0 && currentOfficeLongitude != 0 && currentOfficeRadius > 0)
+                        {
+                            foreach (var loc in locations)
+                            {
+                                var dist = CalculateDistanceMeters(loc.Latitude, loc.Longitude, currentOfficeLatitude, currentOfficeLongitude);
+                                loc.DistanceMeters = dist;
+                                loc.AllowedRadiusMeters = currentOfficeRadius;
+                                loc.IsWithinAllowedRadius = dist <= currentOfficeRadius + 1;
+                            }
+                            mapNeedsUpdate = true;
+                            await InvokeAsync(StateHasChanged);
+                        }
+                    }
+                }
+                catch { }
+            }
+
             // Radius/office changes are an explicit realtime test path.
             // Re-read authoritative CompanySettings so the live circle,
             // selected card and inside/outside presentation immediately use
             // the current value without changing historical audit rows.
             await RefreshLocations();
+            mapNeedsUpdate = true;
+            await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex)
         {
@@ -4291,6 +4341,10 @@ foreach (var point in ordered)
             ownerUid,
             firebaseLiveCts.Token);
 
+        firebaseCompanySettingsStreamTask = StreamFirebaseCompanySettingsAsync(
+            ownerUid,
+            firebaseLiveCts.Token);
+
         /*
          * Keep the existing timer for presentation aging/playback only.
          */
@@ -4402,6 +4456,135 @@ foreach (var point in ordered)
             ex = ex.InnerException;
         }
         return false;
+    }
+
+    private async Task StreamFirebaseCompanySettingsAsync(
+        string ownerUid,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+            return;
+
+        while (!token.IsCancellationRequested && !disposed)
+        {
+            try
+            {
+                await FirebaseRealtime.StreamGlobalChangesAsync(
+                    $"owners/{ownerUid.Trim()}/company_settings/1",
+                    async (path, data, ct) =>
+                    {
+                        if (disposed || ct.IsCancellationRequested)
+                            return;
+
+                        try
+                        {
+                            await ApplyFirebaseCompanySettingsChange(data);
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                        {
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine(
+                                $"Firebase company-settings event failed: {ex}");
+                        }
+                    },
+                    token);
+
+                if (token.IsCancellationRequested || disposed)
+                    break;
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                if (!IsConnectionReset(ex))
+                {
+                    Logger.LogWarning(ex, "Firebase owner company-settings stream ended: {Message}", ex.Message);
+                }
+            }
+
+            if (token.IsCancellationRequested || disposed)
+                break;
+
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromSeconds(5),
+                    token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    private async Task ApplyFirebaseCompanySettingsChange(JsonElement? data)
+    {
+        if (!data.HasValue || disposed)
+            return;
+
+        try
+        {
+            var root = data.Value;
+            var target = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var dProp) && dProp.ValueKind == JsonValueKind.Object
+                ? dProp
+                : root;
+
+            var changed = false;
+            if (TryGetJsonInt(target, "geoRadiusMeters", out var r) || TryGetJsonInt(target, "GeoRadiusMeters", out r))
+            {
+                if (r > 0 && currentOfficeRadius != r)
+                {
+                    currentOfficeRadius = r;
+                    changed = true;
+                }
+            }
+            if (TryGetJsonDouble(target, "officeLatitude", out var lat) || TryGetJsonDouble(target, "OfficeLatitude", out lat))
+            {
+                if (lat != 0 && currentOfficeLatitude != lat)
+                {
+                    currentOfficeLatitude = lat;
+                    changed = true;
+                }
+            }
+            if (TryGetJsonDouble(target, "officeLongitude", out var lng) || TryGetJsonDouble(target, "OfficeLongitude", out lng))
+            {
+                if (lng != 0 && currentOfficeLongitude != lng)
+                {
+                    currentOfficeLongitude = lng;
+                    changed = true;
+                }
+            }
+            if (TryGetJsonBool(target, "useSpeedBasedMarkers", out var speed) || TryGetJsonBool(target, "use_speed_based_markers", out speed))
+            {
+                if (useSpeedBasedMarkers != speed)
+                {
+                    useSpeedBasedMarkers = speed;
+                    changed = true;
+                }
+            }
+
+            if (changed && currentOfficeLatitude != 0 && currentOfficeLongitude != 0 && currentOfficeRadius > 0)
+            {
+                foreach (var loc in locations)
+                {
+                    var dist = CalculateDistanceMeters(loc.Latitude, loc.Longitude, currentOfficeLatitude, currentOfficeLongitude);
+                    loc.DistanceMeters = dist;
+                    loc.AllowedRadiusMeters = currentOfficeRadius;
+                    loc.IsWithinAllowedRadius = dist <= currentOfficeRadius + 1;
+                }
+                mapNeedsUpdate = true;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Live map Firebase company settings stream parse error: {ex}");
+        }
     }
 
 
@@ -6915,6 +7098,7 @@ foreach (var point in ordered)
         firebaseLiveCts?.Dispose();
         firebaseLiveCts = null;
         firebaseLiveStreamTask = null;
+        firebaseCompanySettingsStreamTask = null;
     }
 
 

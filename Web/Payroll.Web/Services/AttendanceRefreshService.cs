@@ -328,7 +328,8 @@ namespace Payroll.Web.Services
         public async Task NotifyGeoSettingsChangedAsync(
             double officeLatitude,
             double officeLongitude,
-            int geoRadiusMeters)
+            int geoRadiusMeters,
+            bool useSpeedBasedMarkers = false)
         {
             await _hub.Clients.All.SendAsync(
                 "GeoSettingsChanged",
@@ -337,6 +338,7 @@ namespace Payroll.Web.Services
                     OfficeLatitude = officeLatitude,
                     OfficeLongitude = officeLongitude,
                     GeoRadiusMeters = geoRadiusMeters,
+                    UseSpeedBasedMarkers = useSpeedBasedMarkers,
                     Timestamp = DateTime.UtcNow
                 });
         }

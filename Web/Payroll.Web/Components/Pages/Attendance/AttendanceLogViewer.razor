@@ -771,25 +771,22 @@
             // MAP DTO
             // ----------------------------------------------------
 
+            var activeEmpMap = activeEmployees.ToDictionary(e => e.EmployeeID);
+            var schedMap = schedules
+                .GroupBy(s => (s.EmployeeID, s.ShiftDate))
+                .ToDictionary(g => g.Key, g => g.First());
+            var punchesByEmpDate = relevantLogs
+                .Where(l => l.EmployeeID.HasValue)
+                .GroupBy(l => (l.EmployeeID!.Value, DateOnly.FromDateTime(l.PunchTime.Date)))
+                .ToDictionary(g => g.Key, g => g.OrderBy(l => l.PunchTime).ThenBy(l => l.LogID).ToList());
+
             logs =
                 data
                     .Select(
                         ds =>
                         {
-                            var emp =
-                                activeEmployees
-                                    .FirstOrDefault(
-                                        e =>
-                                            e.EmployeeID ==
-                                            ds.EmployeeID);
-
-                            var scheduleOverride =
-                                schedules.FirstOrDefault(
-                                    s =>
-                                        s.EmployeeID ==
-                                            ds.EmployeeID &&
-                                        s.ShiftDate ==
-                                            ds.ShiftDate);
+                            activeEmpMap.TryGetValue(ds.EmployeeID, out var emp);
+                            schedMap.TryGetValue((ds.EmployeeID, ds.ShiftDate), out var scheduleOverride);
 
                             TimeOnly? sStart =
                                 scheduleOverride?.StartTime ??
@@ -913,36 +910,11 @@
                             // DAILY PUNCHES
                             // ------------------------------------------------
 
-                            var dayPunches =
-                                relevantLogs
-                                    .Where(
-                                        l =>
-                                            l.EmployeeID ==
-                                                ds.EmployeeID &&
-                                            DateOnly
-                                                .FromDateTime(
-                                                    l.PunchTime.Date) ==
-                                            ds.ShiftDate)
-                                    .OrderBy(
-                                        l =>
-                                            l.PunchTime)
-                                    .Select(
-                                        l =>
-                                            l.PunchTime)
-                                    .ToList();
-
-                            // Keep the attendance calculation input exactly as before,
-                            // but expose diagnostic detail in the report so identical
-                            // minute values can be traced to the real source/device.
-                            var dayPunchLogs =
-                                relevantLogs
-                                    .Where(
-                                        l =>
-                                            l.EmployeeID == ds.EmployeeID &&
-                                            DateOnly.FromDateTime(l.PunchTime.Date) == ds.ShiftDate)
-                                    .OrderBy(l => l.PunchTime)
-                                    .ThenBy(l => l.LogID)
-                                    .ToList();
+                            if (!punchesByEmpDate.TryGetValue((ds.EmployeeID, ds.ShiftDate), out var dayPunchLogs))
+                            {
+                                dayPunchLogs = new List<AttendanceLog>();
+                            }
+                            var dayPunches = dayPunchLogs.Select(l => l.PunchTime).ToList();
 
                             dto.Punches =
                                 string.Join(
@@ -1212,6 +1184,34 @@
                     .ToListAsync();
 
             // --------------------------------------------------------
+            // Pre-index existing summaries, schedules, and leaves
+            // Eliminates N+1 database round-trips for 5000+ employees
+            // --------------------------------------------------------
+
+            var existingSummaries = await dbContext.DailySummaries
+                .Where(s => activeEmployeeIds.Contains(s.EmployeeID) && s.ShiftDate >= dStart && s.ShiftDate <= dEnd)
+                .ToListAsync();
+
+            var existingSummaryMap = new Dictionary<(int EmployeeId, DateOnly Date), DailySummary>(existingSummaries.Count);
+            foreach (var s in existingSummaries)
+            {
+                existingSummaryMap[(s.EmployeeID, s.ShiftDate)] = s;
+            }
+
+            var scheduleMap = schedules
+                .GroupBy(s => (s.EmployeeID, s.ShiftDate))
+                .ToDictionary(g => g.Key, g => g.First());
+
+            var leaveMap = allLeaves
+                .Where(l => l.LeaveDate.HasValue)
+                .GroupBy(l => (l.EmployeeID, DateOnly.FromDateTime(l.LeaveDate!.Value.Date)))
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy(l => l.LeaveType == "Loss of Pay (Auto)" ? 1 : 0)
+                          .ThenByDescending(l => l.LeaveRequestID)
+                          .First());
+
+            // --------------------------------------------------------
             // Group punches by employee + business date.
             // --------------------------------------------------------
 
@@ -1281,17 +1281,10 @@
                 }
 
                 // ----------------------------------------------------
-                // Existing daily summary.
+                // Existing daily summary (O(1) memory lookup).
                 // ----------------------------------------------------
 
-                var existing =
-                    await dbContext.DailySummaries
-                        .FirstOrDefaultAsync(
-                            s =>
-                                s.EmployeeID ==
-                                    employeeId &&
-                                s.ShiftDate ==
-                                    date);
+                existingSummaryMap.TryGetValue((employeeId, date), out var existing);
 
                 // ----------------------------------------------------
                 // Respect manual overrides.
@@ -1326,41 +1319,16 @@
                 }
 
                 // ----------------------------------------------------
-                // Schedule.
+                // Schedule (O(1) memory lookup).
                 // ----------------------------------------------------
 
-                var schedule =
-                    schedules.FirstOrDefault(
-                        s =>
-                            s.EmployeeID ==
-                                employeeId &&
-                            s.ShiftDate ==
-                                date);
+                scheduleMap.TryGetValue((employeeId, date), out var schedule);
 
                 // ----------------------------------------------------
-                // Leave.
+                // Leave (O(1) memory lookup).
                 // ----------------------------------------------------
 
-                var leave =
-                    allLeaves
-                        .Where(
-                            l =>
-                                l.EmployeeID ==
-                                    employeeId &&
-                                l.LeaveDate.HasValue &&
-                                DateOnly.FromDateTime(
-                                    l.LeaveDate.Value.Date) ==
-                                    date)
-                        .OrderBy(
-                            l =>
-                                l.LeaveType ==
-                                "Loss of Pay (Auto)"
-                                    ? 1
-                                    : 0)
-                        .ThenByDescending(
-                            l =>
-                                l.LeaveRequestID)
-                        .FirstOrDefault();
+                leaveMap.TryGetValue((employeeId, date), out var leave);
 
                 // ----------------------------------------------------
                 // Use the EXISTING calculation engine.
@@ -1401,6 +1369,7 @@
 
                     dbContext.DailySummaries
                         .Add(existing);
+                    existingSummaryMap[(employeeId, date)] = existing;
                 }
 
                 // ----------------------------------------------------
@@ -1479,8 +1448,7 @@
                         continue;
                     }
 
-                    var existing = await dbContext.DailySummaries
-                        .FirstOrDefaultAsync(s => s.EmployeeID == emp.EmployeeID && s.ShiftDate == curDate);
+                    existingSummaryMap.TryGetValue((emp.EmployeeID, curDate), out var existing);
 
                     if (existing != null && existing.IsManualOverride)
                     {
@@ -1492,12 +1460,8 @@
                         continue;
                     }
 
-                    var schedule = schedules.FirstOrDefault(s => s.EmployeeID == emp.EmployeeID && s.ShiftDate == curDate);
-                    var leave = allLeaves
-                        .Where(l => l.EmployeeID == emp.EmployeeID && l.LeaveDate.HasValue && DateOnly.FromDateTime(l.LeaveDate.Value.Date) == curDate)
-                        .OrderBy(l => l.LeaveType == "Loss of Pay (Auto)" ? 1 : 0)
-                        .ThenByDescending(l => l.LeaveRequestID)
-                        .FirstOrDefault();
+                    scheduleMap.TryGetValue((emp.EmployeeID, curDate), out var schedule);
+                    leaveMap.TryGetValue((emp.EmployeeID, curDate), out var leave);
 
                     var result = Calculator.CalculateDailyResult(
                         emp,
@@ -1522,6 +1486,7 @@
                             ShiftDate = curDate
                         };
                         dbContext.DailySummaries.Add(existing);
+                        existingSummaryMap[(emp.EmployeeID, curDate)] = existing;
                     }
 
                     var standardHours = result.EarnedStandardDuration.TotalHours < 0
@@ -1563,17 +1528,29 @@
             {
                 await dbContext.SaveChangesAsync();
 
-                foreach (var summaryToSync in updatedSummaries)
+                // Non-blocking concurrent background sync to Firebase Realtime Database
+                var summariesToSync = updatedSummaries.ToList();
+                _ = Task.Run(async () =>
                 {
-                    try
+                    using var semaphore = new SemaphoreSlim(6, 6);
+                    var syncTasks = summariesToSync.Select(async summaryToSync =>
                     {
-                        await FirebaseAttendanceMutations.UpsertDailySummaryAsync(summaryToSync, "MODIFIED");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to sync daily summary to Firebase for EmpID {EmpId}, Date {Date}", summaryToSync.EmployeeID, summaryToSync.ShiftDate);
-                    }
-                }
+                        await semaphore.WaitAsync();
+                        try
+                        {
+                            await FirebaseAttendanceMutations.UpsertDailySummaryAsync(summaryToSync, "MODIFIED");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to sync daily summary to Firebase for EmpID {EmpId}, Date {Date}", summaryToSync.EmployeeID, summaryToSync.ShiftDate);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    });
+                    await Task.WhenAll(syncTasks);
+                });
             }
 
             foreach (var processed in processedAfterSave)

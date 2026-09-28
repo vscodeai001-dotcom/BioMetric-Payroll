@@ -440,7 +440,22 @@ else
             await AttendanceRefresh.NotifyGeoSettingsChangedAsync(
                 settings.OfficeLatitude,
                 settings.OfficeLongitude,
-                settings.GeoRadiusMeters);
+                settings.GeoRadiusMeters,
+                settings.UseSpeedBasedMarkers);
+
+            try
+            {
+                await JSRuntime.InvokeVoidAsync(
+                    "broadcastGeoSettingsChanged",
+                    new
+                    {
+                        OfficeLatitude = settings.OfficeLatitude,
+                        OfficeLongitude = settings.OfficeLongitude,
+                        GeoRadiusMeters = settings.GeoRadiusMeters,
+                        UseSpeedBasedMarkers = settings.UseSpeedBasedMarkers
+                    });
+            }
+            catch { }
 
             await SaveTrackingIntervalAsync();
 

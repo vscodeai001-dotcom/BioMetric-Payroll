@@ -424,11 +424,11 @@ public sealed class LiveEmployeeLocation
 
     public double AccuracyMeters { get; init; }
 
-    public double DistanceMeters { get; init; }
+    public double DistanceMeters { get; set; }
 
-    public int AllowedRadiusMeters { get; init; }
+    public int AllowedRadiusMeters { get; set; }
 
-    public bool IsWithinAllowedRadius { get; init; }
+    public bool IsWithinAllowedRadius { get; set; }
 
     public DateTime LastUpdatedUtc { get; init; }
 
