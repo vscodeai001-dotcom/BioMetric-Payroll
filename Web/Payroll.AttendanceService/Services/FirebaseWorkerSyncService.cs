@@ -343,8 +343,18 @@ public sealed class FirebaseWorkerSyncService
             var credentialsPath = _configuration["Firebase:ServiceAccountPath"]
                 ?? Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
 
-            if (string.IsNullOrWhiteSpace(credentialsPath) && File.Exists(@"C:\FirebaseSecrets\firebase-service-account.json"))
-                credentialsPath = @"C:\FirebaseSecrets\firebase-service-account.json";
+            if (string.IsNullOrWhiteSpace(credentialsPath) || !File.Exists(credentialsPath))
+            {
+                var localAppPath = Path.Combine(AppContext.BaseDirectory, "firebase-service-account.json");
+                if (File.Exists(localAppPath))
+                {
+                    credentialsPath = localAppPath;
+                }
+                else if (File.Exists(@"C:\FirebaseSecrets\firebase-service-account.json"))
+                {
+                    credentialsPath = @"C:\FirebaseSecrets\firebase-service-account.json";
+                }
+            }
 
             GoogleCredential credential;
             if (!string.IsNullOrWhiteSpace(credentialsPath))

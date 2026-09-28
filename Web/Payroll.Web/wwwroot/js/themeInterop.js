@@ -3753,17 +3753,24 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
                 [items[i].lat, items[i].lng],
                 [items[j].lat, items[j].lng]
             );
-            const bothInOffice = items[i].isWithinAllowedRadius && items[j].isWithinAllowedRadius;
-            const bothStationary = (items[i].speedMps <= 1.0) && (items[j].speedMps <= 1.0);
 
-            let threshold = 18; // Moving collision (e.g. in same vehicle)
-            if (bothInOffice) {
-                threshold = 120; // Both verified inside company office
-            } else if (bothStationary) {
-                threshold = 95; // Stationary at same premises/shop/room (handles indoor GPS jitter)
+            // Staff must be physically standing at the same spot (<= 5 meters)
+            // to ever be considered in a shared stay/desk collision.
+            // Never cluster staff who are in different houses, rooms, or streets (> 6m apart).
+            if (d > 5.0) continue;
+
+            // Check if their marker icons actually overlap on the current map zoom:
+            let p1 = null, p2 = null;
+            try {
+                p1 = map.latLngToLayerPoint([items[i].lat, items[i].lng]);
+                p2 = map.latLngToLayerPoint([items[j].lat, items[j].lng]);
+            } catch (_) { }
+
+            const pixelDist = (p1 && p2) ? p1.distanceTo(p2) : 999;
+            // Only cluster if the markers visually collide on screen (< 24 pixels):
+            if (pixelDist < 24) {
+                union(i, j);
             }
-
-            if (d <= threshold) union(i, j);
         }
     }
 
@@ -3788,8 +3795,8 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
         const center = [avgLat, avgLng];
         const centerPoint = map.latLngToLayerPoint(center);
         const count = group.length;
-        // Non-overlapping fanning radius in pixels
-        const radius = count <= 2 ? 48 : count <= 4 ? 56 : count <= 7 ? 64 : 74;
+        // Non-overlapping gentle fanning radius in pixels (just enough so both cards are clickable)
+        const radius = count <= 2 ? 16 : count <= 4 ? 22 : count <= 7 ? 28 : 34;
 
         const clusterKey = 'stay_hub_' + group.map(function (it) { return it.employeeId; }).join('_');
         const staffNames = group.map(function (it) { return it.name; });
@@ -4141,7 +4148,12 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
 
             // An incomplete browser/Firebase event is not an authoritative
             // removal signal. Preserve the last known-good live marker.
-            if (liveState !== 'ACTIVE' || !incomingSession) {
+            // Allow ACTIVE, ONLINE, or empty state if marker already exists on the map.
+            if (liveState !== '' && liveState !== 'ACTIVE' && liveState !== 'ONLINE') {
+                return;
+            }
+
+            if (!incomingSession && !state.markerSessions?.[employeeId]) {
                 return;
             }
 
@@ -4155,13 +4167,13 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
              * historical; this browser fast path never rewrites it.
              */
             const sessionChanged =
-                !!currentSession && currentSession !== incomingSession;
+                !!incomingSession && !!currentSession && currentSession !== incomingSession;
 
             if (sessionChanged) {
                 state.markerSessions[employeeId] = incomingSession;
                 state.realtimeLastAt = state.realtimeLastAt || {};
                 delete state.realtimeLastAt[employeeId];
-            } else {
+            } else if (incomingSession) {
                 state.markerSessions = state.markerSessions || {};
                 state.markerSessions[employeeId] = incomingSession;
             }
@@ -4203,6 +4215,15 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 longitude
             ];
 
+            const office = state.office;
+            const radius = Number(state.lastOfficeRadius) || 0;
+            let realtimeWithin = Boolean(data.IsWithinAllowedRadius ?? data.isWithinAllowedRadius);
+            if (Array.isArray(office) && office.length === 2 && radius > 0 &&
+                typeof window.payrollHaversineMeters === 'function') {
+                const liveDistance = window.payrollHaversineMeters(target, office);
+                realtimeWithin = liveDistance <= radius + 1;
+            }
+
             // Keep the complete set of currently known live coordinates so a
             // single realtime GPS update cannot accidentally drop collision
             // offsets for neighbouring employees. These remain exact GPS points.
@@ -4214,15 +4235,6 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 speedMps: Number(data.SpeedMps ?? data.speedMps ?? marker._speedMps) || 0,
                 isWithinAllowedRadius: realtimeWithin
             };
-
-            const office = state.office;
-            const radius = Number(state.lastOfficeRadius) || 0;
-            let realtimeWithin = Boolean(data.IsWithinAllowedRadius ?? data.isWithinAllowedRadius);
-            if (Array.isArray(office) && office.length === 2 && radius > 0 &&
-                typeof window.payrollHaversineMeters === 'function') {
-                const liveDistance = window.payrollHaversineMeters(target, office);
-                realtimeWithin = liveDistance <= radius + 1;
-            }
 
             const metaName = String(marker._adminEmployeeName || 'Employee').trim();
             const metaParts = metaName.split(/\s+/).filter(Boolean);
@@ -4418,18 +4430,21 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                                     const latSpan = bounds.getNorth() - bounds.getSouth();
                                     const lonSpan = bounds.getEast() - bounds.getWest();
                                     const margin = 0.18;
+                                    const animLat = Number(Array.isArray(animatedPosition) ? animatedPosition[0] : (animatedPosition?.lat ?? 0));
+                                    const animLng = Number(Array.isArray(animatedPosition) ? animatedPosition[1] : (animatedPosition?.lng ?? 0));
                                     const nearEdge =
-                                        animatedPosition.lat < bounds.getSouth() + latSpan * margin ||
-                                        animatedPosition.lat > bounds.getNorth() - latSpan * margin ||
-                                        animatedPosition.lng < bounds.getWest()  + lonSpan * margin ||
-                                        animatedPosition.lng > bounds.getEast()  - lonSpan * margin;
+                                        animLat < bounds.getSouth() + latSpan * margin ||
+                                        animLat > bounds.getNorth() - latSpan * margin ||
+                                        animLng < bounds.getWest()  + lonSpan * margin ||
+                                        animLng > bounds.getEast()  - lonSpan * margin;
+                                    const animTarget = [animLat, animLng];
                                     if (nearEdge) {
                                         // Employee approaching viewport edge — zoom out one level to keep them centred
                                         const currentZoom = map.getZoom();
                                         const targetZoom = Math.max(currentZoom - 1, 10);
-                                        map.flyTo(animatedPosition, targetZoom, { animate: true, duration: 0.5 });
+                                        map.flyTo(animTarget, targetZoom, { animate: true, duration: 0.5 });
                                     } else {
-                                        map.panTo(animatedPosition, { animate: true, duration: 0.3 });
+                                        map.panTo(animTarget, { animate: true, duration: 0.3 });
                                     }
                                 } catch { }
                             }
@@ -4490,13 +4505,88 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
         }
     };
 
+    const geoSettingsHandler = function (event) {
+        try {
+            const data = event?.detail;
+            if (!data) return;
+            const state = window.adminLiveMaps?.[mapId];
+            if (!state || !state.map) return;
+
+            const lat = Number(data.OfficeLatitude ?? data.officeLatitude);
+            const lng = Number(data.OfficeLongitude ?? data.officeLongitude);
+            const rad = Number(data.GeoRadiusMeters ?? data.geoRadiusMeters);
+
+            if (Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0) {
+                state.office = [lat, lng];
+                if (state.officeMarker) {
+                    state.officeMarker.setLatLng(state.office);
+                }
+            }
+
+            if (Number.isFinite(rad) && rad > 0) {
+                state.lastOfficeRadius = rad;
+                if (state.circle) {
+                    state.circle.setRadius(rad);
+                    if (state.office) {
+                        state.circle.setLatLng(state.office);
+                    }
+                }
+            }
+
+            // Immediately re-evaluate all markers on the map against the new radius
+            if (state.liveData && state.markers) {
+                Object.keys(state.liveData).forEach(function (empId) {
+                    const empData = state.liveData[empId];
+                    const marker = state.markers[empId];
+                    if (!empData || !marker) return;
+
+                    const target = [empData.latitude, empData.longitude];
+                    if (Array.isArray(state.office) && state.lastOfficeRadius > 0 && typeof window.payrollHaversineMeters === 'function') {
+                        const dist = window.payrollHaversineMeters(target, state.office);
+                        const within = dist <= state.lastOfficeRadius + 1;
+                        empData.isWithinAllowedRadius = within;
+                        marker._adminWithinRange = within;
+
+                        const metaName = String(marker._adminEmployeeName || 'Employee').trim();
+                        const metaParts = metaName.split(/\s+/).filter(Boolean);
+                        const metaInitials = metaParts.length === 1 ? metaParts[0].slice(0, 1) : (metaParts[0][0] + metaParts[metaParts.length - 1][0]);
+                        const metaSpeedMps = Number(empData.speedMps || 0);
+                        const metaSpeedKmh = metaSpeedMps * 3.6;
+                        const useSpeedIcons = !!(window.payrollCompanySettings && window.payrollCompanySettings.useSpeedBasedMarkers);
+                        const speedTier = useSpeedIcons ? window.payrollGetSpeedEmoji(metaSpeedKmh) : '';
+                        const visualKey = (within ? 'within' : 'outside') + '|active|' + speedTier;
+
+                        if (marker._adminVisualKey !== visualKey) {
+                            const html = window.payrollMakeAdminMarkerHtml(metaInitials, within ? 'within' : 'outside', '', metaSpeedKmh, metaName, useSpeedIcons);
+                            marker.setIcon(L.divIcon({
+                                className: 'payroll-user-marker',
+                                html: html,
+                                iconSize: [46, 54],
+                                iconAnchor: [23, 54]
+                            }));
+                            marker._adminVisualKey = visualKey;
+                        }
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('Admin live map geo-settings event update failed:', e);
+        }
+    };
+
     window.__adminLiveRealtime[mapId] = {
-        handler: handler
+        handler: handler,
+        geoSettingsHandler: geoSettingsHandler
     };
 
     window.addEventListener(
         'location-data-changed',
         handler
+    );
+
+    window.addEventListener(
+        'geo-settings-changed',
+        geoSettingsHandler
     );
 };
 
@@ -4513,6 +4603,16 @@ window.unregisterAdminLiveLocationRealtime = function (mapId) {
             'location-data-changed',
             registry[mapId].handler
         );
+    }
+    catch { }
+
+    try {
+        if (registry[mapId].geoSettingsHandler) {
+            window.removeEventListener(
+                'geo-settings-changed',
+                registry[mapId].geoSettingsHandler
+            );
+        }
     }
     catch { }
 

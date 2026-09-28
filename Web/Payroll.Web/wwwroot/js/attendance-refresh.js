@@ -320,6 +320,7 @@ window.attendanceRefresh = (function () {
                             connection.on("SessionStarted", onSessionStarted);
                             connection.on("SessionEnded", onSessionEnded);
                             connection.on("GeoSettingsChanged", onGeoSettingsChanged);
+                            connection.on("GeoPunchAuditChanged", onGeoPunchAuditChanged);
                             connection.on("ApplicationDataChanged", onApplicationDataChanged);
                             connection.on("RegularizationChanged", onRegularizationChanged);
                             connection.on("LeaveChanged", onLeaveChanged);
@@ -438,6 +439,11 @@ window.attendanceRefresh = (function () {
     function onGeoSettingsChanged(data) {
         notifyListeners('GeoSettingsChanged', data);
         window.dispatchEvent(new CustomEvent('geo-settings-changed', { detail: data }));
+    }
+
+    function onGeoPunchAuditChanged(data) {
+        notifyListeners('GeoPunchAuditChanged', data);
+        window.dispatchEvent(new CustomEvent('geo-punch-audit-changed', { detail: data }));
     }
 
     function onSessionInvalidated(employeeId, reason) {
@@ -680,41 +686,34 @@ window.attendanceRefresh = (function () {
 
             }
             catch (error) {
-
                 // A Blazor component can disappear while SignalR is still
                 // delivering an event. In that case the DotNetObjectReference
-                // is stale and every future realtime event would fail again.
+                // is disposed and every future realtime event would fail again.
                 //
-                // Keep the existing callback/fallback behavior, but remove
-                // the reference only when BOTH calls fail. This is lifecycle
-                // cleanup only and does not change any business logic.
+                // IMPORTANT: Only remove the listener when the DotNetObjectReference
+                // is actually disposed. Never remove a healthy listener simply because
+                // that component does not implement an optional event method!
+                const errMsg = String(error?.message || error || '');
+                const isDisposed = errMsg.includes('disposed') || errMsg.includes('has already been disposed');
 
-                let callbackFailed = true;
-
-                if (typeof data !== "undefined") {
-                    try {
-                        await listener.invokeMethodAsync(
-                            methodName
-                        );
-
-                        callbackFailed = false;
-                    }
-                    catch (fallbackError) {
-                        console.debug(
-                            "Attendance refresh listener became unavailable; removing stale listener.",
-                            methodName
-                        );
-                    }
-                }
-
-                if (callbackFailed) {
+                if (isDisposed) {
                     const index = listeners.indexOf(listener);
-
                     if (index >= 0) {
                         listeners.splice(index, 1);
                     }
+                } else if (typeof data !== "undefined") {
+                    try {
+                        await listener.invokeMethodAsync(methodName);
+                    } catch (fallbackError) {
+                        const fallbackMsg = String(fallbackError?.message || fallbackError || '');
+                        if (fallbackMsg.includes('disposed') || fallbackMsg.includes('has already been disposed')) {
+                            const index = listeners.indexOf(listener);
+                            if (index >= 0) {
+                                listeners.splice(index, 1);
+                            }
+                        }
+                    }
                 }
-
             }
         }
     }

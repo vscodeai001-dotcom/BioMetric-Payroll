@@ -73,30 +73,14 @@ object LocationClusterHelper {
             if (rootA != rootB) parent[rootB] = rootA
         }
 
-        val hasOffice = officeLat != 0.0 && officeLon != 0.0 && officeRadiusMeters > 0
-        val officeEffectiveRadius = officeRadiusMeters + 15.0
-
+        // Only group employees if they are physically at the exact same location (<= 5 meters).
+        // Never group employees who are in different houses, rooms, or streets.
         for (i in 0 until n) {
             val locA = validLocations[i]
             for (j in i + 1 until n) {
                 val locB = validLocations[j]
                 val dist = distanceMeters(locA.latitude, locA.longitude, locB.latitude, locB.longitude)
-
-                val bothInOffice = hasOffice &&
-                    (distanceMeters(officeLat, officeLon, locA.latitude, locA.longitude) <= officeEffectiveRadius) &&
-                    (distanceMeters(officeLat, officeLon, locB.latitude, locB.longitude) <= officeEffectiveRadius)
-
-                val stationaryA = locA.speedMps <= 1.0 || locA.movementState.equals("Stopped", ignoreCase = true)
-                val stationaryB = locB.speedMps <= 1.0 || locB.movementState.equals("Stopped", ignoreCase = true)
-                val bothStationary = stationaryA && stationaryB
-
-                val threshold = when {
-                    bothInOffice -> 120.0 // Both verified inside company office
-                    bothStationary -> 95.0 // Both stationary at same building/shop/room (handles indoor GPS multipath jitter)
-                    else -> 18.0 // Moving (e.g. together in same vehicle)
-                }
-
-                if (dist <= threshold) {
+                if (dist <= 5.0) {
                     union(i, j)
                 }
             }
@@ -124,22 +108,19 @@ object LocationClusterHelper {
                 // Stable ordering by employeeId so markers never swap positions or jitter
                 group.sortBy { it.employeeId }
 
-                // Centroid coordinates
-                val allInOffice = hasOffice &&
-                    group.all { distanceMeters(officeLat, officeLon, it.latitude, it.longitude) <= officeEffectiveRadius }
-
-                val avgLat = if (allInOffice) officeLat else (group.sumOf { it.latitude } / group.size)
-                val avgLon = if (allInOffice) officeLon else (group.sumOf { it.longitude } / group.size)
+                // Centroid coordinates MUST ALWAYS be calculated from the employees' real positions.
+                // NEVER override employee coordinates with office coordinates!
+                val avgLat = group.sumOf { it.latitude } / group.size
+                val avgLon = group.sumOf { it.longitude } / group.size
                 val centerPoint = GeoPoint(avgLat, avgLon)
 
                 val count = group.size
-                // Radial offset in degrees (~20m - 28m on map)
-                val radiusDeg = if (count <= 2) 0.00018 else if (count <= 4) 0.00022 else 0.00026
+                // Gentle micro-offset (~3-5m) so overlapping pins at the same counter are both clickable
+                val radiusDeg = if (count <= 2) 0.000035 else if (count <= 4) 0.000045 else 0.000055
                 val cosLat = cos(Math.toRadians(avgLat)).coerceAtLeast(0.1)
 
                 group.forEachIndexed { index, loc ->
                     val angle = if (count == 2) {
-                        // For 2 employees, place side-by-side horizontally (West and East)
                         if (index == 0) Math.PI else 0.0
                     } else {
                         (-Math.PI / 2.0) + (index * (2.0 * Math.PI / count))
@@ -162,3 +143,4 @@ object LocationClusterHelper {
         return result
     }
 }
+

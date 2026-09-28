@@ -843,19 +843,7 @@ class TrackingMapActivity : MotionBaseActivity() {
     @OptIn(FlowPreview::class)
     private fun observeLiveLocations() {
         signalR.start()
-        
-        // Initial history load to fill gaps
-        lifecycleScope.launch {
-            val employeeId = sessionStore.employeeId()
-            if (employeeId > 0) {
-                val history = signalR.loadTrackingHistory(employeeId, limit = 100)
-                if (history.isNotEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        updateMapMarkers(history)
-                    }
-                }
-            }
-        }
+
 
         lifecycleScope.launch {
             signalR.liveLocations

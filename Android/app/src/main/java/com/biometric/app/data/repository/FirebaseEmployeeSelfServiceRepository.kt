@@ -224,22 +224,37 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         lastModified = long("lastModified")
     )
 
-    private fun DataSnapshot.toAttendancePunch(): AttendancePunch = AttendancePunch(
-        punchId = string("punchId") ?: key.orEmpty(),
-        staffId = string("staffId") ?: valueOf("staffId")?.toString()?.toLongOrNull()?.toString().orEmpty(),
-        date = string("date").orEmpty(),
-        type = string("type") ?: "IN",
-        timestamp = long("timestamp"),
-        latitude = double("latitude"),
-        longitude = double("longitude"),
-        accuracy = float("accuracy"),
-        geofenceId = string("geofenceId"),
-        distanceFromGeofence = double("distanceFromGeofence"),
-        photoId = string("photoId"),
-        deviceId = string("deviceId").orEmpty(),
-        source = string("source") ?: "GEOFENCE",
-        status = string("status") ?: "PENDING"
-    )
+    private fun DataSnapshot.toAttendancePunch(): AttendancePunch {
+        val ts = long("timestamp").takeIf { it > 0 }
+            ?: long("checkInTime").takeIf { it > 0 }
+            ?: long("createdAt").takeIf { it > 0 }
+            ?: 0L
+        val punchDate = string("date")?.takeIf { it.isNotBlank() }
+            ?: if (ts > 0) formatDate(ts) else ""
+        val resolvedStaffId = string("staffId")
+            ?: string("employeeId")
+            ?: valueOf("staffId")?.toString()?.takeIf { it.isNotBlank() }
+            ?: valueOf("employeeId")?.toString()?.takeIf { it.isNotBlank() }
+            ?: ""
+
+        return AttendancePunch(
+            punchId = string("punchId") ?: string("id") ?: key.orEmpty(),
+            staffId = resolvedStaffId,
+            date = punchDate,
+            type = string("type") ?: string("logType") ?: "IN",
+            timestamp = ts,
+            latitude = double("latitude"),
+            longitude = double("longitude"),
+            accuracy = float("accuracy"),
+            geofenceId = string("geofenceId"),
+            distanceFromGeofence = double("distanceFromGeofence"),
+            photoId = string("photoId"),
+            deviceId = string("deviceId").orEmpty(),
+            source = string("source") ?: string("logType") ?: "GEOFENCE",
+            status = string("status") ?: "PENDING"
+        )
+    }
+
 
     private fun DataSnapshot.toLeaveRequest(): LeaveRequest = LeaveRequest(
         id = string("id") ?: key.orEmpty(),
@@ -352,6 +367,17 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 val fallbackSnapshot = runCatching { fallbackQuery.get().await() }.getOrNull()
                 if (fallbackSnapshot != null && fallbackSnapshot.hasChildren()) {
                     results.addAll(fallbackSnapshot.children.mapNotNull { mapper(it) })
+                }
+            }
+        }
+        if (results.isEmpty() && table == "attendance_punches") {
+            val extra1 = runCatching { ownerRef().child(table).orderByChild("employeeId").equalTo(strId).get().await() }.getOrNull()
+            if (extra1 != null && extra1.hasChildren()) {
+                results.addAll(extra1.children.mapNotNull { mapper(it) })
+            } else {
+                val extra2 = runCatching { ownerRef().child(table).orderByChild("staffId").equalTo(numId).get().await() }.getOrNull()
+                if (extra2 != null && extra2.hasChildren()) {
+                    results.addAll(extra2.children.mapNotNull { mapper(it) })
                 }
             }
         }
@@ -508,9 +534,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val start = LocalDate.parse(from, dateFormatter)
         val end = LocalDate.parse(to, dateFormatter)
         val attendance = readList("attendance") { it.toAttendance() }
-            .filter { it.employeeId == emp.employeeId }
-        val punches = readList("attendance_punches") { runCatching { it.getValue(AttendancePunch::class.java) }.getOrNull() }
-            .filter { it.staffId == emp.employeeId }
+            .filter { it.employeeId == emp.employeeId || it.employeeId == emp.employeeId.toIntOrNull()?.toString() || it.employeeId.toIntOrNull() == emp.employeeId.toIntOrNull() }
+        val punches = readList("attendance_punches") { it.toAttendancePunch() }
+            .filter { it.staffId == emp.employeeId || it.staffId == emp.employeeId.toIntOrNull()?.toString() || it.staffId.toIntOrNull() == emp.employeeId.toIntOrNull() }
         val summaries = ownerRef().child("daily_summaries")
             .orderByChild("employeeId")
             .equalTo(sessionStore.employeeId().toDouble())
@@ -520,7 +546,42 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         return generateSequence(start) { if (it < end) it.plusDays(1) else null }.map { day ->
             val date = day.format(dateFormatter)
             val dayAttendance = attendance.filter { formatDate(it.checkInTime) == date }
-            val dayPunches = punches.filter { it.date == date || formatDate(it.timestamp) == date }.sortedBy { it.timestamp }
+            val rawPunches = punches.filter { it.date == date || formatDate(it.timestamp) == date }
+            val dayPunches = if (rawPunches.isNotEmpty()) {
+                rawPunches.sortedBy { it.timestamp }
+            } else {
+                // Defensive fallback: synthesize punches from attendance record if raw punches table was not yet synced
+                dayAttendance.flatMap { att ->
+                    val list = mutableListOf<AttendancePunch>()
+                    if (att.checkInTime > 0) {
+                        list.add(
+                            AttendancePunch(
+                                punchId = "${att.attendanceId}_IN",
+                                staffId = att.employeeId,
+                                date = date,
+                                type = "IN",
+                                timestamp = att.checkInTime,
+                                source = att.type.ifBlank { "GEOFENCE" },
+                                status = "APPROVED"
+                            )
+                        )
+                    }
+                    att.checkOutTime?.takeIf { it > 0 }?.let { outTime ->
+                        list.add(
+                            AttendancePunch(
+                                punchId = "${att.attendanceId}_OUT",
+                                staffId = att.employeeId,
+                                date = date,
+                                type = "OUT",
+                                timestamp = outTime,
+                                source = att.type.ifBlank { "GEOFENCE" },
+                                status = "APPROVED"
+                            )
+                        )
+                    }
+                    list
+                }.sortedBy { it.timestamp }
+            }
             val summary = summaries[date]
             val scheduled = summary?.long("scheduledShiftDurationMs")?.div(3_600_000.0)
                 ?: scheduledHours(emp.shiftStart, emp.shiftEnd, emp.breakHours)

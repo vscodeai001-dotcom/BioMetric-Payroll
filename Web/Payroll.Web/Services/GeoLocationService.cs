@@ -159,6 +159,10 @@ public class GeoLocationService
 
         // Notify all dashboards to refresh their authoritative membership
         await _refreshService.NotifyGlobalRefreshAsync("RADIUS_REBASELINED");
+        await _refreshService.NotifyGeoSettingsChangedAsync(
+            company.OfficeLatitude,
+            company.OfficeLongitude,
+            company.GeoRadiusMeters);
     }
 
     // ================================================================

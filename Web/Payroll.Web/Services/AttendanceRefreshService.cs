@@ -341,6 +341,20 @@ namespace Payroll.Web.Services
                 });
         }
 
+        public async Task NotifyGeoPunchAuditAsync(
+            int employeeId,
+            object? audit = null)
+        {
+            await _hub.Clients.All.SendAsync(
+                "GeoPunchAuditChanged",
+                new
+                {
+                    EmployeeId = employeeId,
+                    Audit = audit,
+                    Timestamp = DateTime.UtcNow
+                });
+        }
+
 
         public async Task NotifyGlobalRefreshAsync(string? reason = null)
         {

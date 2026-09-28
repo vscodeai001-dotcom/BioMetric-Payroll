@@ -4123,6 +4123,13 @@
         }
     }
 
+    [JSInvokable]
+    public async Task GlobalRefresh(object? data = null)
+    {
+        await AttendanceChanged(data);
+    }
+
+
     private string PlaybackDistanceText
     {
         get
@@ -5525,6 +5532,10 @@ foreach (var point in ordered)
         try
         {
             var office = await GetOfficeLocation();
+            currentOfficeLatitude = office.Latitude;
+            currentOfficeLongitude = office.Longitude;
+            currentOfficeRadius = office.Radius;
+            useSpeedBasedMarkers = office.UseSpeedBasedMarkers;
 
             var staff = locations
                 .Select(x => new AdminMapLocation
@@ -5554,7 +5565,7 @@ foreach (var point in ordered)
                 mapId,
                 office.Latitude,
                 office.Longitude,
-                currentOfficeRadius,
+                office.Radius,
                 staff,
                 selectedEmployeeId,
                 false,

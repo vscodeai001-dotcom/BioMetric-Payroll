@@ -80,7 +80,7 @@ else if (string.IsNullOrWhiteSpace(existingUrls))
     // Local Windows Service deployment
     Environment.SetEnvironmentVariable(
         "ASPNETCORE_URLS",
-        "http://localhost:5050");
+        "http://0.0.0.0:5050");
 }
 
 Environment.SetEnvironmentVariable(
@@ -92,6 +92,29 @@ var builder =
 builder.Logging.AddFilter(
     "Microsoft.EntityFrameworkCore.Model.Validation",
     LogLevel.Error);
+
+var pfxCertPath = Path.Combine(AppContext.BaseDirectory, "certs", "biometric.pfx");
+if (!File.Exists(pfxCertPath))
+    pfxCertPath = Path.Combine(builder.Environment.ContentRootPath, "certs", "biometric.pfx");
+
+if (File.Exists(pfxCertPath))
+{
+    builder.WebHost.ConfigureKestrel(kestrel =>
+    {
+        kestrel.ListenAnyIP(5050);
+        try
+        {
+            kestrel.ListenAnyIP(5051, listenOptions =>
+            {
+                listenOptions.UseHttps(pfxCertPath, "BioMetricHttps2026!");
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"HTTPS endpoint warning: {ex.Message}");
+        }
+    });
+}
 
 
 // ============================================================

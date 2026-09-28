@@ -35,10 +35,19 @@ IHost host = Host.CreateDefaultBuilder(args)
 
         if (string.IsNullOrWhiteSpace(sqlitePath))
         {
-            sqlitePath = Path.Combine(
-                AppContext.BaseDirectory,
-                "data",
-                "biometricpayroll-cache.db");
+            var siblingWebDb = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Web", "data", "biometricpayroll-cache.db"));
+            var siblingDir = Path.GetDirectoryName(siblingWebDb);
+            if (File.Exists(siblingWebDb) || (siblingDir != null && Directory.Exists(siblingDir)))
+            {
+                sqlitePath = siblingWebDb;
+            }
+            else
+            {
+                sqlitePath = Path.Combine(
+                    AppContext.BaseDirectory,
+                    "data",
+                    "biometricpayroll-cache.db");
+            }
         }
 
         var sqliteDirectory = Path.GetDirectoryName(sqlitePath);

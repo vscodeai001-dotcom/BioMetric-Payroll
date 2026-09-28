@@ -2597,12 +2597,19 @@ public sealed class FirebaseRealtimeService
                 _configuration["Firebase:ServiceAccountPath"]
                 ?? Environment.GetEnvironmentVariable("GOOGLE_APPLICATION_CREDENTIALS");
 
-            // Known local development location used for this installation.
-            // It is only used when the explicit path is not configured.
-            if (string.IsNullOrWhiteSpace(credentialsPath) &&
-                File.Exists(@"C:\FirebaseSecrets\firebase-service-account.json"))
+            // If not found at configured path or if no path was provided, check local application directory first,
+            // then fallback to development C:\FirebaseSecrets.
+            if (string.IsNullOrWhiteSpace(credentialsPath) || !File.Exists(credentialsPath))
             {
-                credentialsPath = @"C:\FirebaseSecrets\firebase-service-account.json";
+                var localAppPath = Path.Combine(AppContext.BaseDirectory, "firebase-service-account.json");
+                if (File.Exists(localAppPath))
+                {
+                    credentialsPath = localAppPath;
+                }
+                else if (File.Exists(@"C:\FirebaseSecrets\firebase-service-account.json"))
+                {
+                    credentialsPath = @"C:\FirebaseSecrets\firebase-service-account.json";
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(credentialsPath))

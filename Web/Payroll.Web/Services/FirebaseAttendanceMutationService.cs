@@ -56,10 +56,10 @@ public sealed class FirebaseAttendanceMutationService
 
         var row = new Dictionary<string, object?>
         {
-            ["punchId"] = punch.LogID,
-            ["attendanceId"] = punch.LogID,
+            ["punchId"] = punch.LogID.ToString(CultureInfo.InvariantCulture),
+            ["attendanceId"] = punch.LogID.ToString(CultureInfo.InvariantCulture),
             ["employeeId"] = punch.EmployeeID.Value,
-            ["staffId"] = punch.EmployeeID.Value,
+            ["staffId"] = punch.EmployeeID.Value.ToString(CultureInfo.InvariantCulture),
             ["biometricId"] = punch.BiometricID ?? string.Empty,
             ["timestamp"] = timestamp,
             ["checkInTime"] = timestamp,
