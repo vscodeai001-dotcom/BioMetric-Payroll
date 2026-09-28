@@ -51,7 +51,7 @@ namespace Payroll.Web.Services
             int selectedEmployeeId, string filterStatus, DateTime? startDate, DateTime? endDate)
         {
             await using var dbContext = await _dbFactory.CreateDbContextAsync();
-            var query = dbContext.LeaveRequests.AsQueryable();
+            var query = dbContext.LeaveRequests.Where(lr => lr.EmployeeID > 0).AsQueryable();
 
             if (selectedEmployeeId > 0)
                 query = query.Where(lr => lr.EmployeeID == selectedEmployeeId);
@@ -221,19 +221,22 @@ namespace Payroll.Web.Services
             var affectedDate = req.LeaveDate?.Date;
             var employeeId = req.EmployeeID;
 
+            var firebaseLeaveId = req.FirebaseLeaveId;
+
             var reqCopy = new LeaveRequest
             {
                 EmployeeID = req.EmployeeID,
                 LeaveDate = req.LeaveDate,
                 LeaveType = req.LeaveType,
                 IsHalfDay = req.IsHalfDay,
-                IsApproved = req.IsApproved
+                IsApproved = req.IsApproved,
+                FirebaseLeaveId = req.FirebaseLeaveId
             };
 
             dbContext.LeaveRequests.Remove(req);
             await dbContext.SaveChangesAsync();
 
-            await _firebaseCalendar.DeleteLeaveAsync(requestId);
+            await _firebaseCalendar.DeleteLeaveAsync(requestId, firebaseLeaveId);
 
             // Recalculate after deletion so DailySummary does not keep stale leave status.
             if (affectedDate.HasValue)

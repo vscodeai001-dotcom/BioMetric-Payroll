@@ -58,41 +58,61 @@ class LocationQualityManager @Inject constructor() {
         return speedKmh > 300.0
     }
 
-    // ── Accuracy-weighted position smoother ──────────────────────────────────
+    // ── High-Precision Position Filter & Motion Tracker ─────────────────────
 
     /**
-     * Applies an accuracy-weighted exponential moving average (EMA) to [location]
-     * and returns a *new* Location object whose lat/lon are the smoothed values.
+     * Filters and smooths GPS fixes to deliver a Google-grade real-time experience:
      *
-     * Algorithm:
-     *   weight  = clamp(1 / accuracy, 0.10, 0.90)   ← higher accuracy → larger update step
-     *   smoothed = (1 − weight) × previous + weight × current
+     *  1. Stationary Deadband: If the employee is stopped (speed < 0.6 m/s) and GPS
+     *     wanders within an 8m radius, anchor the coordinate. Eliminates indoor desk
+     *     jitter, multipath reflections, and phantom movement while sitting still.
      *
-     * Effect:
-     *  • A fix with 5m accuracy  → weight ≈ 0.90 → mostly trusts the new reading  (real movement)
-     *  • A fix with 20m accuracy → weight ≈ 0.50 → blends old and new             (moderate trust)
-     *  • A fix with 35m accuracy → weight ≈ 0.29 → pulls slowly toward the fix    (low trust)
+     *  2. Large Movement Reset: If the employee moves > 100m (e.g. driving, riding,
+     *     or resuming tracking at a new site), snap directly to the new fix. No lag,
+     *     no false trailing positions, no slow cross-town dragging.
      *
-     * All other Location fields (speed, bearing, time, etc.) are preserved from
-     * [location] so callers can still read them normally.
+     *  3. Responsive Movement Smoothing: When moving between 8m and 100m, trust the
+     *     new GPS fix with 85% weight (15% previous). This tracks true physical walking
+     *     and driving paths faithfully without artificial 50m teleport-jumps.
      */
     fun smooth(location: Location): Location {
-        // Clamp weight: inverse-accuracy, bounded so we always make some progress.
-        val rawWeight = 1f / location.accuracy.coerceAtLeast(1f)
-        val weight = rawWeight.coerceIn(0.10f, 0.90f)
-
         if (!hasSmoothedPosition) {
             smoothedLat = location.latitude
             smoothedLon = location.longitude
             hasSmoothedPosition = true
+            return Location(location)
+        }
+
+        val tempLoc = Location("smoother_ref")
+        tempLoc.latitude = smoothedLat
+        tempLoc.longitude = smoothedLon
+        val distFromSmoothed = tempLoc.distanceTo(location)
+        val speed = if (location.hasSpeed()) location.speed else 0f
+
+        // A. Stationary Deadband: Ignore micro-jitter (< 8m) when device is stationary.
+        // Prevents map marker from jittering around the employee's desk.
+        if (speed < 0.6f && distFromSmoothed < 8.0f) {
+            val smoothed = Location(location)
+            smoothed.latitude = smoothedLat
+            smoothed.longitude = smoothedLon
+            return smoothed
+        }
+
+        // B. Large displacement (> 100m): Real rapid transit or location jump.
+        // Instantly adopt the real GPS coordinate — zero lag, zero ghosting.
+        if (distFromSmoothed > 100.0f) {
+            smoothedLat = location.latitude
+            smoothedLon = location.longitude
         } else {
+            // C. Active Movement (8m - 100m): Responsive complementary filter.
+            // 85% new reading, 15% previous reading. Tracks turns and movement faithfully.
+            val weight = if (speed > 1.5f) 0.90f else 0.85f
             smoothedLat = (1f - weight) * smoothedLat + weight * location.latitude
             smoothedLon = (1f - weight) * smoothedLon + weight * location.longitude
         }
 
-        // Return a copy with the smoothed coordinates so the original is unchanged.
         val smoothed = Location(location)
-        smoothed.latitude  = smoothedLat
+        smoothed.latitude = smoothedLat
         smoothed.longitude = smoothedLon
         return smoothed
     }

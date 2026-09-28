@@ -465,6 +465,10 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "leaverequests", "Status", "TEXT DEFAULT 'Pending'", ct);
             await EnsureColumnExistsAsync(connection, "leaverequests", "is_half_day", "INTEGER NOT NULL DEFAULT 0", ct);
             await EnsureColumnExistsAsync(connection, "leaverequests", "notes", "TEXT NULL", ct);
+            await EnsureColumnExistsAsync(connection, "leaverequests", "firebase_leave_id", "TEXT NULL", ct);
+            // Unique index on firebase_leave_id — second line of defence against duplicate Android leave submissions.
+            // The sync service checks this column first; the index prevents any race that slips through.
+            await EnsureIndexExistsAsync(connection, "leaverequests", "idx_leaverequests_firebase_id", "firebase_leave_id", unique: true, ct);
 
             // 6. Ensure missing columns on salaryadvances
             await EnsureColumnExistsAsync(connection, "salaryadvances", "advancetype", "TEXT NULL", ct);
@@ -511,6 +515,31 @@ public class AppDbContext
                 alterCmd.CommandText = $"ALTER TABLE {tableName} ADD COLUMN {columnName} {columnDefinition};";
                 await alterCmd.ExecuteNonQueryAsync(ct);
             }
+        }
+        catch { }
+    }
+
+    private static async Task EnsureIndexExistsAsync(
+        System.Data.Common.DbConnection connection,
+        string tableName,
+        string indexName,
+        string columnName,
+        bool unique,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = $"SELECT COUNT(1) FROM sqlite_master WHERE type='index' AND name='{indexName}';";
+            var result = await checkCmd.ExecuteScalarAsync(ct);
+            if (Convert.ToInt64(result) > 0) return;
+
+            await using var createCmd = connection.CreateCommand();
+            var uniqueKeyword = unique ? "UNIQUE " : string.Empty;
+            // SQLite unique indexes ignore NULL values — multiple NULLs are allowed,
+            // which is exactly what we want (existing web-admin rows have NULL firebase_leave_id).
+            createCmd.CommandText = $"CREATE {uniqueKeyword}INDEX IF NOT EXISTS {indexName} ON {tableName} ({columnName});";
+            await createCmd.ExecuteNonQueryAsync(ct);
         }
         catch { }
     }

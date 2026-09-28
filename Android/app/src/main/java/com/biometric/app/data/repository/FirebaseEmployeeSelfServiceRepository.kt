@@ -627,8 +627,24 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun createLeave(leaveDate: String, leaveType: String, isHalfDay: Boolean, notes: String?) {
         requireFeatureAllowed("leave")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
-        val id = UUID.randomUUID().toString()
         val date = LocalDate.parse(leaveDate, dateFormatter).toEpochDay() * 86_400_000L
+
+        // Rapid duplicate debounce: if a leave for this employee+date was pushed within the
+        // last 10 seconds (e.g. from a previous fast tap), skip the new push.
+        runCatching {
+            val snapshot = ownerRef().child("leave_requests").get().await()
+            val now = System.currentTimeMillis()
+            val isDuplicate = snapshot.children.any { s ->
+                val eId = s.child("employeeId").value?.toString()
+                    ?: s.child("staffId").value?.toString()
+                val d = s.child("startDate").value?.toString()?.toLongOrNull()
+                val created = s.child("createdAt").value?.toString()?.toLongOrNull() ?: 0L
+                eId == emp.employeeId && d == date && (now - created) < 10_000L
+            }
+            if (isDuplicate) return
+        }
+
+        val id = UUID.randomUUID().toString()
         firebaseSync.pushLeaveRequest(
             LeaveRequest(
                 id = id,

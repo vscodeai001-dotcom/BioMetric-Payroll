@@ -66,6 +66,7 @@ Environment.SetEnvironmentVariable(
 // Use the platform-provided port through ASPNETCORE_URLS and clear the
 // base image default so Kestrel does not report a conflicting port source.
 var platformPort = Environment.GetEnvironmentVariable("PORT");
+var existingUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
 
 if (!string.IsNullOrWhiteSpace(platformPort))
 {
@@ -74,7 +75,7 @@ if (!string.IsNullOrWhiteSpace(platformPort))
         "ASPNETCORE_URLS",
         $"http://0.0.0.0:{platformPort}");
 }
-else
+else if (string.IsNullOrWhiteSpace(existingUrls))
 {
     // Local Windows Service deployment
     Environment.SetEnvironmentVariable(
@@ -175,6 +176,14 @@ builder.Services.AddHttpClient(
     client =>
     {
         client.Timeout = TimeSpan.FromSeconds(30);
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+        KeepAlivePingDelay = TimeSpan.FromSeconds(30),
+        KeepAlivePingTimeout = TimeSpan.FromSeconds(15),
+        EnableMultipleHttp2Connections = true
     });
 builder.Services.AddSingleton<FirebaseRealtimeService>();
 builder.Services.AddSingleton<FirebaseAttendanceCalendarMutationService>();

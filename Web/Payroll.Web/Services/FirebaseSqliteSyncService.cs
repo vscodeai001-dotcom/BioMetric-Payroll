@@ -163,29 +163,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
     private static readonly (string EntityName, string FirebaseTable)[] ActiveStreamTables = new[]
     {
-        ("CompanySetting", "company_settings"),
-        ("FeatureSettings", "feature_settings"),
         ("AttendancePunch", "attendance_punches"),
         ("AttendanceLog", "attendance"),
-        ("DailySummary", "daily_summaries"),
         ("LeaveRequest", "leave_requests"),
         ("SalaryAdvance", "advance_payments"),
         ("AttendanceRegularization", "regularizations"),
         ("ResignationRequest", "resignation_requests"),
-        ("Employee", "employees"),
-        ("Shop", "shops"),
-        ("ShiftSchedule", "shift_schedules"),
-        ("BonusRecord", "bonus_records"),
-        ("CompanyHoliday", "shop_closed_days"),
-        ("PayrollHistory", "payroll_history"),
+        ("Employee", "employees")
     };
 
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
     {
-        // BANDWIDTH OPTIMIZATION: Stream each operational table individually instead of
+        // Stream only mobile-submitted operational tables individually instead of
         // streaming the entire root owners/{ownerUid}.
-        // Streaming the root node causes Firebase to dump the entire tracking/history
-        // subtree (tens of megabytes of raw GPS breadcrumbs) as an initial SSE snapshot.
         var tasks = ActiveStreamTables.Select(t =>
             RunTableStreamLoopAsync(ownerUid, t.EntityName, t.FirebaseTable, stoppingToken));
 
@@ -268,11 +258,13 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         Func<string, JsonElement?, CancellationToken, Task> handler,
         CancellationToken stoppingToken)
     {
+        var consecutiveErrors = 0;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await _firebase.StreamGlobalChangesAsync(rootNode, handler, stoppingToken);
+                consecutiveErrors = 0;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -280,15 +272,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             }
             catch (Exception ex)
             {
+                consecutiveErrors++;
+                var delaySeconds = Math.Min(30, 3 * consecutiveErrors);
                 if (IsConnectionReset(ex))
                 {
-                    _logger.LogInformation("Firebase stream reconnected after timeout.");
+                    _logger.LogInformation("Firebase stream {RootNode} reconnected after timeout.", rootNode);
                 }
                 else
                 {
-                    _logger.LogWarning(ex, "Firebase {RootNode} realtime stream disconnected. Reconnecting.", rootNode);
+                    _logger.LogWarning(ex, "Firebase {RootNode} realtime stream disconnected. Reconnecting in {Delay}s.", rootNode, delaySeconds);
                 }
-                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
             }
         }
     }
@@ -1850,6 +1844,97 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return changedSession;
         }
 
+        // Specialized handler for LeaveRequest:
+        // Firebase Android leave records use a UUID string as the record key (the "id" field).
+        // SQLite's LeaveRequestID is an EF auto-increment int — the generic handler converts the
+        // UUID to int (which yields 0), then always does a db.FindAsync(0) → not found → inserts a
+        // brand new row on every SSE event, producing 10+ duplicate rows for a single leave request.
+        //
+        // This handler deduplicates by:
+        //   1. FirebaseLeaveId (column added for this purpose) — fast exact match.
+        //   2. Logical key (EmployeeID, LeaveDate) — fallback for records created before this column.
+        //
+        // It also correctly maps Android's string employeeId/staffId fields to the int EmployeeID column,
+        // which fixes the "Unknown" employee name shown in the Leave Management table.
+        if (entityType.ClrType == typeof(LeaveRequest))
+        {
+            // The Firebase record key (UUID) is authoritative — it is also stored in the "id" field.
+            var firebaseLeaveId = GetString(json, "id", "firebaseLeaveId") ?? firebaseKey;
+            if (string.IsNullOrWhiteSpace(firebaseLeaveId))
+                return false;
+
+            // employeeId can arrive as a number or a string (Android sends a string).
+            var empId = GetInt(json, "employeeId", "EmployeeId", "staffId", "StaffId");
+            if (empId <= 0) return false;
+
+            // leaveDate: Android sends startDate as epoch-milliseconds (Long).
+            DateTime? leaveDate = null;
+            var startDateEl = FindJsonValue(json, "startDate") ?? FindJsonValue(json, "leaveDate") ?? FindJsonValue(json, "LeaveDate");
+            if (startDateEl is { } sde)
+            {
+                var converted = ConvertValue(sde, typeof(DateTime));
+                if (converted is DateTime dt) leaveDate = dt.Date;
+            }
+
+            if (!leaveDate.HasValue) return false;
+
+            // 1. Fast path: look up by FirebaseLeaveId.
+            LeaveRequest? existingLeave = await db.LeaveRequests
+                .FirstOrDefaultAsync(lr => lr.FirebaseLeaveId == firebaseLeaveId, ct);
+
+            // 2. Fallback: match by (EmployeeID, LeaveDate) for rows that predate this column.
+            if (existingLeave == null)
+            {
+                existingLeave = await db.LeaveRequests.FirstOrDefaultAsync(
+                    lr => lr.EmployeeID == empId &&
+                          lr.LeaveDate.HasValue &&
+                          lr.LeaveDate.Value.Date == leaveDate.Value, ct);
+            }
+
+            var isNewLeave = existingLeave == null;
+            var targetLeave = existingLeave ?? new LeaveRequest();
+
+            var changedLeave = false;
+
+            void SetLeave<T>(ref T field, T value) where T : IEquatable<T>
+            {
+                if (!EqualityComparer<T>.Default.Equals(field, value)) { field = value; changedLeave = true; }
+            }
+
+            // Stamp the Firebase UUID so we can find this row instantly next time.
+            if (targetLeave.FirebaseLeaveId != firebaseLeaveId) { targetLeave.FirebaseLeaveId = firebaseLeaveId; changedLeave = true; }
+
+            if (targetLeave.EmployeeID != empId) { targetLeave.EmployeeID = empId; changedLeave = true; }
+            if (!targetLeave.LeaveDate.HasValue || targetLeave.LeaveDate.Value.Date != leaveDate.Value)
+            { targetLeave.LeaveDate = leaveDate.Value; changedLeave = true; }
+
+            var leaveType = GetString(json, "leaveType", "LeaveType") ?? "Casual Leave";
+            if (targetLeave.LeaveType != leaveType) { targetLeave.LeaveType = leaveType; changedLeave = true; }
+
+            var isHalfDay = GetBool(json, "isHalfDay", "IsHalfDay");
+            if (targetLeave.IsHalfDay != isHalfDay) { targetLeave.IsHalfDay = isHalfDay; changedLeave = true; }
+
+            var statusStr = GetString(json, "status", "Status") ?? "Pending";
+            var isApproved = statusStr.Equals("Approved", StringComparison.OrdinalIgnoreCase);
+            if (targetLeave.IsApproved != isApproved) { targetLeave.IsApproved = isApproved; changedLeave = true; }
+            if (targetLeave.Status != statusStr) { targetLeave.Status = statusStr; changedLeave = true; }
+
+            var notes = GetString(json, "reason", "notes", "Notes");
+            if (targetLeave.Notes != notes) { targetLeave.Notes = notes; changedLeave = true; }
+
+            var adminNotes = GetString(json, "adminNotes", "AdminNotes", "adminRemarks");
+            if (targetLeave.AdminNotes != adminNotes) { targetLeave.AdminNotes = adminNotes; changedLeave = true; }
+
+            if (!changedLeave) return false;
+
+            if (isNewLeave)
+                db.LeaveRequests.Add(targetLeave);
+            else if (db.Entry(targetLeave).State == EntityState.Unchanged)
+                db.Entry(targetLeave).State = EntityState.Modified;
+
+            return true;
+        }
+
         // Specialized handler for SalaryAdvance:
         // In SQLite, advanceid is an auto-increment integer, while Firebase records can use UUIDs or string keys.
         // Lookups must match either by integer AdvanceID or by logical uniqueness (EmployeeID, Amount, AdvanceDate)
@@ -1858,6 +1943,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         {
             var empId = GetInt(json, "employeeId", "EmployeeId", "staffId");
             if (empId <= 0) return false;
+
 
             var amount = (decimal)GetDouble(json, "amount", "Amount");
             if (amount <= 0m) return false;

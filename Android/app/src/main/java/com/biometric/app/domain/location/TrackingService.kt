@@ -505,7 +505,21 @@ else if (locationUpdatesStarted) {
         handlerThread.start()
         fusedLocationClient.requestLocationUpdates(request, locationCallback, handlerThread.looper)
         locationUpdatesStarted = true
-        
+
+        // Immediate initial GPS acquisition: Ask Play Services for the current position right away
+        // so Admin maps and the dashboard immediately see the employee's current real-time location
+        // without waiting for the first periodic cycle.
+        val cts = com.google.android.gms.tasks.CancellationTokenSource()
+        fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+            .addOnSuccessListener { loc ->
+                if (loc != null && !isManualStopping) {
+                    val ageMs = System.currentTimeMillis() - loc.time
+                    if (ageMs < 90_000L) { // Only use fresh reading (< 90s)
+                        handleLocationUpdate(loc)
+                    }
+                }
+            }
+
         if (wakeLock?.isHeld == false) {
             wakeLock?.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
         }
@@ -534,10 +548,12 @@ else if (locationUpdatesStarted) {
             return
         }
         // Enterprise-grade horizontal accuracy filter.
-        // Reject any fix worse than 35m (normal operation) or 65m (fallback after 60s gap)
-        // to prevent indoor GPS multipath / poor fixes from moving the map marker to wrong positions.
+        // Reject fixes worse than 80m (normal operation) or 150m (fallback after 60s gap).
+        // 35m was too strict for real-world outdoor Android GPS (typical range: 40–100m),
+        // causing valid fixes to be silently dropped and the map marker to appear frozen
+        // at the last accepted position (e.g. the office location from check-in).
         val msSinceLastFix = System.currentTimeMillis() - (lastLocation?.time ?: 0L)
-        val maxAccuracyM = if (msSinceLastFix > 60_000L) 65f else 35f
+        val maxAccuracyM = if (msSinceLastFix > 60_000L) 150f else 80f
         if (location.accuracy > maxAccuracyM) {
             offlineMonitor.record(
                 OfflineTrackingMonitor.DATA_INTEGRITY_WARNING,

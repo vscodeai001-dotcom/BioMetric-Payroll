@@ -13,7 +13,7 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<GpsSessionCleanupHostedService> _logger;
     private readonly IConfiguration _configuration;
-    private DateTime _lastCloudPruneUtc = DateTime.MinValue;
+    private DateTime _lastCloudPruneUtc = DateTime.UtcNow;
 
     public GpsSessionCleanupHostedService(
         IServiceScopeFactory scopeFactory,
@@ -27,6 +27,9 @@ public sealed class GpsSessionCleanupHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Allow app to finish booting before running cleanup
+        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+
         var intervalSeconds = Math.Max(15,
             _configuration.GetValue<int>("GpsSessionCleanup:CheckIntervalSeconds", 60));
 

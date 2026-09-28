@@ -80,6 +80,9 @@ class ApplyLeaveFragment : Fragment() {
             if (isAdded) Toast.makeText(requireContext(), "Please select leave type ⚠️", Toast.LENGTH_SHORT).show()
             return
         }
+        // Disable the button immediately to prevent duplicate submissions if the user
+        // taps rapidly. Each tap previously created a new UUID → new Firebase record → duplicate row.
+        _binding?.btnSubmit?.isEnabled = false
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val daysCount = ((endDate - startDate) / (1000L * 60 * 60 * 24)).toInt() + 1
@@ -88,9 +91,11 @@ class ApplyLeaveFragment : Fragment() {
                     selfService.createLeave(dateStr, type, isHalfDay, notes)
                 }
                 Toast.makeText(requireContext(), "$daysCount days applied successfully! 🌴 💎 ✅", Toast.LENGTH_SHORT).show()
-                parentFragmentManager.popBackStack()
+                activity?.onBackPressedDispatcher?.onBackPressed()
             } catch (e: Exception) {
                 if (isAdded) Toast.makeText(requireContext(), "Submission error: ${e.message ?: "Firebase unavailable"} ⚠️", Toast.LENGTH_SHORT).show()
+                // Re-enable so the user can retry on error.
+                _binding?.btnSubmit?.isEnabled = true
             }
         }
     }

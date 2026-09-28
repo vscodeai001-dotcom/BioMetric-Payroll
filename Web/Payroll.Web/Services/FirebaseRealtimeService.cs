@@ -2495,7 +2495,15 @@ public sealed class FirebaseRealtimeService
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    // In Firebase Realtime Database REST API, an empty or uninitialized node returns HTTP 404.
+                    // This is an expected and benign condition (no records exist yet for this path).
+                    _logger.LogDebug(
+                        "Firebase realtime node not found at {Path} (empty or not yet created).",
+                        path);
+                }
+                else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
                     _logger.LogWarning(
                         "Firebase REST 401 for {Path}. The Firebase OAuth credential was rejected. " +

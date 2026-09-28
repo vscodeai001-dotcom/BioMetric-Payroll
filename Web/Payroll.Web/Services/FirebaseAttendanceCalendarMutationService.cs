@@ -37,7 +37,9 @@ public sealed class FirebaseAttendanceCalendarMutationService
         if (leave.LeaveRequestID <= 0 || leave.EmployeeID <= 0)
             return false;
 
-        var key = leave.LeaveRequestID.ToString(CultureInfo.InvariantCulture);
+        var key = !string.IsNullOrWhiteSpace(leave.FirebaseLeaveId)
+            ? leave.FirebaseLeaveId
+            : leave.LeaveRequestID.ToString(CultureInfo.InvariantCulture);
         var start = ToUnixMilliseconds(leave.LeaveDate);
         var end = ToUnixMilliseconds(leave.EndDate ?? leave.LeaveDate);
         var status = !string.IsNullOrWhiteSpace(leave.Status)
@@ -69,6 +71,7 @@ public sealed class FirebaseAttendanceCalendarMutationService
         {
             ["id"] = leave.LeaveRequestID,
             ["leaveRequestId"] = leave.LeaveRequestID,
+            ["firebaseLeaveId"] = key,
             ["employeeId"] = leave.EmployeeID,
             ["staffId"] = leave.EmployeeID.ToString(CultureInfo.InvariantCulture),
             ["staffName"] = staffName,
@@ -89,18 +92,52 @@ public sealed class FirebaseAttendanceCalendarMutationService
             ["_updatedUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
         };
 
-        return await WriteWithRetryAsync(
+        var ok = await WriteWithRetryAsync(
             token => _firebase.SetOwnerRecordAsync(OwnerUid, "leave_requests", key, row, token),
             "LeaveRequest", "MODIFIED", key, ct);
+
+        // If the Firebase key is a UUID, also clean up any legacy numeric key node to prevent ghost duplicates
+        var numericKey = leave.LeaveRequestID.ToString(CultureInfo.InvariantCulture);
+        if (key != numericKey)
+        {
+            try
+            {
+                await _firebase.DeleteOwnerRecordAsync(OwnerUid, "leave_requests", numericKey, ct);
+            }
+            catch
+            {
+                // Ignore cleanup error
+            }
+        }
+
+        return ok;
     }
 
-    public Task<bool> DeleteLeaveAsync(int leaveRequestId, CancellationToken ct = default)
+    public async Task<bool> DeleteLeaveAsync(int leaveRequestId, string? firebaseLeaveId = null, CancellationToken ct = default)
     {
-        if (leaveRequestId <= 0) return Task.FromResult(false);
-        var key = leaveRequestId.ToString(CultureInfo.InvariantCulture);
-        return DeleteWithRetryAsync(
-            token => _firebase.DeleteOwnerRecordAsync(OwnerUid, "leave_requests", key, token),
-            "LeaveRequest", "DELETED", key, ct);
+        if (leaveRequestId <= 0 && string.IsNullOrWhiteSpace(firebaseLeaveId)) return false;
+
+        var tasks = new List<Task<bool>>();
+        if (!string.IsNullOrWhiteSpace(firebaseLeaveId))
+        {
+            tasks.Add(DeleteWithRetryAsync(
+                token => _firebase.DeleteOwnerRecordAsync(OwnerUid, "leave_requests", firebaseLeaveId, token),
+                "LeaveRequest", "DELETED", firebaseLeaveId, ct));
+        }
+
+        if (leaveRequestId > 0)
+        {
+            var numericKey = leaveRequestId.ToString(CultureInfo.InvariantCulture);
+            if (numericKey != firebaseLeaveId)
+            {
+                tasks.Add(DeleteWithRetryAsync(
+                    token => _firebase.DeleteOwnerRecordAsync(OwnerUid, "leave_requests", numericKey, token),
+                    "LeaveRequest", "DELETED", numericKey, ct));
+            }
+        }
+
+        var results = await Task.WhenAll(tasks);
+        return results.Any(r => r);
     }
 
     public Task<bool> UpsertHolidayAsync(CompanyHoliday holiday, CancellationToken ct = default)

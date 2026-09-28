@@ -28,7 +28,7 @@
 }
 else
 {
-    <AttendanceRefreshListener OnAttendanceChanged="HandleAttendanceRefresh" />
+    <AttendanceRefreshListener OnAttendanceChanged="HandleAttendanceRefresh" OnLeaveChanged="HandleAttendanceRefresh" />
 
     <div class="page-header-container">
         <div class="d-flex align-items-center gap-3">
@@ -95,10 +95,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // Default: Current Month
+        // Default: Show all pending requests without cutting off upcoming months
         var today = DateTime.Now.Date;
-        startDate = new DateTime(today.Year, today.Month, 1);
-        endDate = startDate.Value.AddMonths(1).AddDays(-1);
+        startDate = null;
+        endDate = null;
 
         // Init Form Date
         newLeaveRequest.LeaveDate = today;
@@ -216,6 +216,14 @@ else
     {
         try
         {
+            req.IsApproved = approved;
+            req.Status = approved ? "Approved" : "Pending";
+            if (filterStatus == "Pending" && approved)
+            {
+                leaveRequests?.RemoveAll(r => r.LeaveRequestID == req.LeaveRequestID);
+            }
+            await InvokeAsync(StateHasChanged);
+
             await LeaveService.UpdateLeaveStatusAsync(req.LeaveRequestID, approved);
             toastService.ShowSuccess(approved ? "Approved." : "Approval Revoked.");
             await LoadLeaveAsync();
@@ -223,22 +231,47 @@ else
         catch (Exception ex)
         {
             toastService.ShowError($"Error: {ex.Message}");
+            await LoadLeaveAsync();
         }
     }
 
-    private async Task DenyLeave(LeaveRequest req) => await DeleteLeaveRequest(req);
-    private async Task DeleteLeaveRequest(LeaveRequest req)
+    private async Task DenyLeave(LeaveRequest req)
     {
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to delete/deny this record?")) return;
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to deny (reject) this leave request?")) return;
         try
         {
-            await LeaveService.DeleteLeaveRequestAsync(req.LeaveRequestID);
-            toastService.ShowSuccess("Deleted/Denied.");
+            // Instantly remove from view
+            leaveRequests?.RemoveAll(r => r.LeaveRequestID == req.LeaveRequestID);
+            await InvokeAsync(StateHasChanged);
+
+            await LeaveService.UpdateLeaveStatusAsync(req.LeaveRequestID, false, "Rejected");
+            toastService.ShowSuccess("Leave request denied (rejected).");
             await LoadLeaveAsync();
         }
         catch (Exception ex)
         {
             toastService.ShowError($"Error: {ex.Message}");
+            await LoadLeaveAsync();
+        }
+    }
+
+    private async Task DeleteLeaveRequest(LeaveRequest req)
+    {
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", "Are you sure you want to permanently delete this record?")) return;
+        try
+        {
+            // Instantly remove from view
+            leaveRequests?.RemoveAll(r => r.LeaveRequestID == req.LeaveRequestID);
+            await InvokeAsync(StateHasChanged);
+
+            await LeaveService.DeleteLeaveRequestAsync(req.LeaveRequestID);
+            toastService.ShowSuccess("Deleted.");
+            await LoadLeaveAsync();
+        }
+        catch (Exception ex)
+        {
+            toastService.ShowError($"Error: {ex.Message}");
+            await LoadLeaveAsync();
         }
     }
 }

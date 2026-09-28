@@ -31,6 +31,10 @@
     public EventCallback OnGeoSettingsChanged { get; set; }
 
 
+    [Parameter]
+    public EventCallback OnLeaveChanged { get; set; }
+
+
     // ============================================================
     // SIGNALR JS REFERENCE
     // ============================================================
@@ -239,6 +243,39 @@
         {
             Console.Error.WriteLine(
                 $"GeoSettingsChanged callback failed: {ex}");
+        }
+    }
+
+
+    // ============================================================
+    // LEAVE CHANGED
+    // ============================================================
+
+    [JSInvokable]
+    public async Task LeaveChanged(object? data = null)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            if (OnLeaveChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnLeaveChanged.InvokeAsync());
+            }
+            else if (OnAttendanceChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnAttendanceChanged.InvokeAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"LeaveChanged callback failed: {ex}");
         }
     }
 

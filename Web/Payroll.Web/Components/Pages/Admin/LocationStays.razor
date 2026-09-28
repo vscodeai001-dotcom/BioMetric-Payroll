@@ -346,6 +346,54 @@
         {
             using var client = new System.Net.Http.HttpClient();
             client.DefaultRequestHeaders.UserAgent.ParseAdd("BioMetricPayrollApp/1.0");
+
+            // 1. Try Komoot Photon first for high-resolution village/locality (e.g. Kurumbapet)
+            try
+            {
+                var photonUrl = $"https://photon.komoot.io/reverse?lat={stay.Latitude:F6}&lon={stay.Longitude:F6}";
+                var photonResponse = await client.GetAsync(photonUrl);
+                if (photonResponse.IsSuccessStatusCode)
+                {
+                    var photonJson = await photonResponse.Content.ReadAsStringAsync();
+                    using var pDoc = System.Text.Json.JsonDocument.Parse(photonJson);
+                    if (pDoc.RootElement.TryGetProperty("features", out var features) && features.GetArrayLength() > 0)
+                    {
+                        var props = features[0].GetProperty("properties");
+                        var name = props.TryGetProperty("name", out var n) ? n.GetString() : null;
+                        var street = props.TryGetProperty("street", out var st) ? st.GetString() : null;
+                        var locality = props.TryGetProperty("locality", out var loc) ? loc.GetString() : null;
+                        var district = props.TryGetProperty("district", out var dist) ? dist.GetString() : null;
+                        var suburb = props.TryGetProperty("suburb", out var sub) ? sub.GetString() : null;
+                        var city = props.TryGetProperty("city", out var c) ? c.GetString() : null;
+
+                        var area = locality ?? district ?? suburb;
+                        if (string.IsNullOrEmpty(area) && !string.IsNullOrEmpty(name) && name.Contains(","))
+                        {
+                            var parts = name.Split(',');
+                            if (parts.Length > 1)
+                            {
+                                area = parts[^1].Trim();
+                                name = parts[0].Trim();
+                            }
+                        }
+
+                        var addrParts = new[] { area, street, city }
+                            .Where(s => !string.IsNullOrWhiteSpace(s))
+                            .Distinct()
+                            .ToList();
+
+                        if (addrParts.Count > 0)
+                        {
+                            stay.Address = string.Join(", ", addrParts);
+                            await InvokeAsync(StateHasChanged);
+                            return;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Fallback to Nominatim
             var url = $"https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={stay.Latitude:F6}&lon={stay.Longitude:F6}";
             var response = await client.GetAsync(url);
             if (response.IsSuccessStatusCode)

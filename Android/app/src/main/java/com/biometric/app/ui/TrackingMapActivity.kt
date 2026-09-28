@@ -8,6 +8,8 @@ import android.graphics.Color
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.location.Geocoder
@@ -44,6 +46,7 @@ import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.biometric.app.ui.viewmodel.MainViewModel
 import com.biometric.app.util.PolylineDecoder
 import com.biometric.app.util.MarkerAnimationHelper
+import com.biometric.app.util.LocationClusterHelper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -891,10 +894,13 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.tvMapSync.text =
             "Realtime • ${locations.size} sessions • ${staleCount} stale • ${offlineCount} offline"
 
-        // Collision handling: group by approximate location to apply offset
-        val locationsByCoord = locations.groupBy { 
-            "%.5f:%.5f".format(Locale.US, it.latitude, it.longitude)
-        }
+        // Intelligent co-location spatial clustering and non-overlapping pin fanning
+        val clusterPositions = LocationClusterHelper.computeClusterPositions(
+            locations = locations,
+            officeLat = officeLat,
+            officeLon = officeLon,
+            officeRadiusMeters = officeRadiusMeters
+        )
 
         val currentIds = locations.map { it.employeeId }.toSet()
 
@@ -944,24 +950,15 @@ class TrackingMapActivity : MotionBaseActivity() {
                 return@forEach
             }
 
-            // Preserve the exact GPS coordinate. Only the visual pin fans out
-            // when multiple employees share the same coordinate.
+            // Preserve the exact GPS coordinate. When multiple employees are co-located,
+            // visually fan them out with zero overlap, connecting each pin back to the common center.
             val actualPoint = GeoPoint(loc.latitude, loc.longitude)
-            val coordKey = "%.5f:%.5f".format(Locale.US, loc.latitude, loc.longitude)
-            val group = locationsByCoord[coordKey] ?: emptyList()
-            val point = if (group.size > 1) {
-                val index = group.indexOf(loc)
-                val angle = 2.0 * Math.PI * index / group.size
-                val radius = 0.00008 // visual fan only
-                GeoPoint(
-                    loc.latitude + radius * Math.cos(angle),
-                    loc.longitude + radius * Math.sin(angle)
-                )
-            } else {
-                actualPoint
-            }
+            val clusterInfo = clusterPositions[loc.employeeId]
+            val isClustered = clusterInfo?.isClustered == true
+            val point = clusterInfo?.displayPoint ?: actualPoint
+            val clusterCenter = clusterInfo?.clusterCenter ?: actualPoint
 
-            if (group.size > 1) {
+            if (isClustered) {
                 val connector = collisionConnectors.getOrPut(loc.employeeId) {
                     Polyline(mapView).apply {
                         outlinePaint.color = "#94A3B8".toColorInt()
@@ -970,7 +967,7 @@ class TrackingMapActivity : MotionBaseActivity() {
                         mapView.overlays.add(0, this)
                     }
                 }
-                connector.setPoints(listOf(actualPoint, point))
+                connector.setPoints(listOf(clusterCenter, point))
             } else {
                 collisionConnectors.remove(loc.employeeId)?.let {
                     mapView.overlays.remove(it)
@@ -1008,8 +1005,10 @@ class TrackingMapActivity : MotionBaseActivity() {
 
             val marker = markers.getOrPut(loc.employeeId) {
                 Marker(mapView).apply {
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setAnchor(Marker.ANCHOR_CENTER, 0.35f)
                     title = emp?.name ?: "Staff #${loc.employeeId}"
+                    position = point
+                    rotation = loc.bearing.toFloat()
                     mapView.overlays.add(this)
 
                     setOnMarkerClickListener { clicked, map ->
@@ -1089,9 +1088,11 @@ class TrackingMapActivity : MotionBaseActivity() {
                 loc.employeeId,
                 elapsedMs = gpsElapsedMs
             ) { animatedPoint ->
-                collisionConnectors[loc.employeeId]?.setPoints(
-                    listOf(actualPoint, animatedPoint)
-                )
+                if (isClustered) {
+                    collisionConnectors[loc.employeeId]?.setPoints(
+                        listOf(clusterCenter, animatedPoint)
+                    )
+                }
 
                 // Update road lines synchronously with marker movement
                 runCatching {
@@ -1160,18 +1161,18 @@ class TrackingMapActivity : MotionBaseActivity() {
                 mapView.invalidate()
             }
 
-            val initials = getInitials(emp?.name ?: "E")
+            val initials = getInitials(employeeName)
             val empRole: String = emp?.role?.takeIf { it.isNotBlank() } ?: "Staff"
             if (useSpeedBasedMarkers) {
                 val speedKmh = loc.speedMps * 3.6
-                val cacheKey = "speed_${getSpeedTier(speedKmh)}_${withinCurrentRadius}_$status"
+                val cacheKey = "${loc.employeeId}_${employeeName}_speed_${getSpeedTier(speedKmh)}_${withinCurrentRadius}_$status"
                 marker.icon = iconCache.getOrPut(cacheKey) {
-                    createSpeedMarkerIcon(speedKmh, withinCurrentRadius, status)
+                    createSpeedMarkerIcon(speedKmh, employeeName, withinCurrentRadius, status)
                 }
             } else {
-                val cacheKey = "${initials}_${withinCurrentRadius}_$status"
+                val cacheKey = "${loc.employeeId}_${employeeName}_${initials}_${withinCurrentRadius}_$status"
                 marker.icon = iconCache.getOrPut(cacheKey) {
-                    createPremiumMarkerIcon(initials, withinCurrentRadius, status)
+                    createPremiumMarkerIcon(initials, employeeName, withinCurrentRadius, status)
                 }
             }
 
@@ -1474,75 +1475,201 @@ class TrackingMapActivity : MotionBaseActivity() {
         else           -> "☄️"
     }
 
-    /** Builds a circular emoji marker bitmap for speed-based display. */
-    private fun createSpeedMarkerIcon(speedKmh: Double, within: Boolean, status: String): Drawable {
-        val color = if (within) "#3B82F6".toColorInt() else "#EF4444".toColorInt()
-        val size = 120
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    /** Builds a composite marker bitmap with speed-based emoji and employee name pill. */
+    private fun createSpeedMarkerIcon(
+        speedKmh: Double,
+        employeeName: String,
+        within: Boolean,
+        status: String
+    ): Drawable {
+        val color = if (within) "#2563EB".toColorInt() else "#DC2626".toColorInt()
+        val displayName = employeeName.trim().split(" ").firstOrNull()?.take(12) ?: employeeName.take(12)
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = Color.WHITE
+            textSize = 26f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val textWidth = textPaint.measureText(displayName)
+        val pillPaddingH = 20f
+        val pillWidth = (textWidth + pillPaddingH * 2f).coerceAtLeast(80f)
+        val pillHeight = 36f
+
+        val bulbDiameter = 82f
+        val bulbRadius = bulbDiameter / 2f
+
+        val totalWidth = maxOf(bulbDiameter, pillWidth) + 16f
+        val totalHeight = bulbDiameter + pillHeight + 8f
+        val cx = totalWidth / 2f
+
+        val bitmap = Bitmap.createBitmap(totalWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        // Circle background
+        // Drop shadow for top bulb
+        paint.color = Color.parseColor("#35000000")
+        canvas.drawCircle(cx, bulbRadius + 4f, bulbRadius, paint)
+
+        // Top bulb circle background
         paint.color = color
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(cx, bulbRadius + 2f, bulbRadius - 2f, paint)
+
+        // White border around bulb
         paint.color = Color.WHITE
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 4f
-        canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paint)
+        paint.strokeWidth = 3.5f
+        canvas.drawCircle(cx, bulbRadius + 2f, bulbRadius - 2f, paint)
         paint.style = Paint.Style.FILL
 
-        // Speed emoji
-        paint.textSize = 48f
+        // Speed emoji inside bulb
+        paint.textSize = 40f
         paint.textAlign = Paint.Align.CENTER
         val emoji = getSpeedEmoji(speedKmh)
         val fm = paint.fontMetrics
-        val textY = size / 2f - (fm.ascent + fm.descent) / 2f
-        canvas.drawText(emoji, size / 2f, textY, paint)
+        val emojiY = (bulbRadius + 2f) - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(emoji, cx, emojiY, paint)
 
-        // Status dot
+        // Status dot at top-right
         val statusColor = when (status) {
             "Live" -> "#22C55E".toColorInt()
             "Stale" -> "#F59E0B".toColorInt()
             else -> "#94A3B8".toColorInt()
         }
+        val dotX = cx + bulbRadius - 10f
+        val dotY = 14f
         paint.color = Color.WHITE
-        canvas.drawCircle(size - 18f, 18f, 12f, paint)
+        canvas.drawCircle(dotX, dotY, 11f, paint)
         paint.color = statusColor
-        canvas.drawCircle(size - 18f, 18f, 8f, paint)
+        canvas.drawCircle(dotX, dotY, 7.5f, paint)
+
+        // Bottom Name Pill
+        val pillTop = bulbDiameter + 2f
+        val pillBottom = pillTop + pillHeight
+        val pillLeft = cx - pillWidth / 2f
+        val pillRight = cx + pillWidth / 2f
+        val pillRect = RectF(pillLeft, pillTop, pillRight, pillBottom)
+
+        // Shadow for name pill
+        paint.color = Color.parseColor("#35000000")
+        canvas.drawRoundRect(RectF(pillLeft, pillTop + 2f, pillRight, pillBottom + 2f), pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Pill background: Dark Slate
+        paint.color = Color.parseColor("#0F172A")
+        paint.style = Paint.Style.FILL
+        canvas.drawRoundRect(pillRect, pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Pill border
+        paint.color = color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f
+        canvas.drawRoundRect(pillRect, pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Employee Name text
+        val textFm = textPaint.fontMetrics
+        val textY = pillRect.centerY() - (textFm.ascent + textFm.descent) / 2f
+        canvas.drawText(displayName, cx, textY, textPaint)
 
         return BitmapDrawable(resources, bitmap)
     }
 
-    private fun createPremiumMarkerIcon(initials: String, within: Boolean, status: String): Drawable {
-        val color = if (within) "#3B82F6".toColorInt() else "#EF4444".toColorInt()
-        val bitmap = Bitmap.createBitmap(100, 130, Bitmap.Config.ARGB_8888)
+    private fun createPremiumMarkerIcon(
+        initials: String,
+        employeeName: String,
+        within: Boolean,
+        status: String
+    ): Drawable {
+        val color = if (within) "#2563EB".toColorInt() else "#DC2626".toColorInt()
+        val displayName = employeeName.trim().split(" ").firstOrNull()?.take(12) ?: employeeName.take(12)
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = Color.WHITE
+            textSize = 26f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val textWidth = textPaint.measureText(displayName)
+        val pillPaddingH = 20f
+        val pillWidth = (textWidth + pillPaddingH * 2f).coerceAtLeast(80f)
+        val pillHeight = 36f
+
+        val bulbDiameter = 82f
+        val bulbRadius = bulbDiameter / 2f
+
+        val totalWidth = maxOf(bulbDiameter, pillWidth) + 16f
+        val totalHeight = bulbDiameter + pillHeight + 8f
+        val cx = totalWidth / 2f
+
+        val bitmap = Bitmap.createBitmap(totalWidth.toInt(), totalHeight.toInt(), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        // Drop shadow for top bulb
+        paint.color = Color.parseColor("#35000000")
+        canvas.drawCircle(cx, bulbRadius + 4f, bulbRadius, paint)
+
+        // Top bulb circle background
         paint.color = color
-        val path = Path()
-        path.moveTo(50f, 130f)
-        path.cubicTo(100f, 80f, 100f, 10f, 50f, 10f)
-        path.cubicTo(0f, 10f, 0f, 80f, 50f, 130f)
-        canvas.drawPath(path, paint)
+        paint.style = Paint.Style.FILL
+        canvas.drawCircle(cx, bulbRadius + 2f, bulbRadius - 2f, paint)
+
+        // White border around bulb
         paint.color = Color.WHITE
-        canvas.drawCircle(50f, 55f, 35f, paint)
-        paint.color = color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3.5f
+        canvas.drawCircle(cx, bulbRadius + 2f, bulbRadius - 2f, paint)
+        paint.style = Paint.Style.FILL
+
+        // Initials inside bulb
+        paint.color = Color.WHITE
         paint.textSize = 32f
+        paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         paint.textAlign = Paint.Align.CENTER
-        paint.isFakeBoldText = true
-        canvas.drawText(initials, 50f, 65f, paint)
-        
-        // Status Dot
-        val statusColor = when(status) {
+        val fm = paint.fontMetrics
+        val textCenterY = (bulbRadius + 2f) - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(initials.take(2).uppercase(), cx, textCenterY, paint)
+
+        // Status dot at top-right
+        val statusColor = when (status) {
             "Live" -> "#22C55E".toColorInt()
             "Stale" -> "#F59E0B".toColorInt()
             else -> "#94A3B8".toColorInt()
         }
+        val dotX = cx + bulbRadius - 10f
+        val dotY = 14f
         paint.color = Color.WHITE
-        canvas.drawCircle(85f, 25f, 12f, paint)
+        canvas.drawCircle(dotX, dotY, 11f, paint)
         paint.color = statusColor
-        canvas.drawCircle(85f, 25f, 8f, paint)
-        
+        canvas.drawCircle(dotX, dotY, 7.5f, paint)
+
+        // Bottom Name Pill
+        val pillTop = bulbDiameter + 2f
+        val pillBottom = pillTop + pillHeight
+        val pillLeft = cx - pillWidth / 2f
+        val pillRight = cx + pillWidth / 2f
+        val pillRect = RectF(pillLeft, pillTop, pillRight, pillBottom)
+
+        // Shadow for name pill
+        paint.color = Color.parseColor("#35000000")
+        canvas.drawRoundRect(RectF(pillLeft, pillTop + 2f, pillRight, pillBottom + 2f), pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Pill background: Dark Slate
+        paint.color = Color.parseColor("#0F172A")
+        paint.style = Paint.Style.FILL
+        canvas.drawRoundRect(pillRect, pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Pill border
+        paint.color = color
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2.5f
+        canvas.drawRoundRect(pillRect, pillHeight / 2f, pillHeight / 2f, paint)
+
+        // Employee Name text
+        val textFm = textPaint.fontMetrics
+        val textY = pillRect.centerY() - (textFm.ascent + textFm.descent) / 2f
+        canvas.drawText(displayName, cx, textY, textPaint)
+
         return BitmapDrawable(resources, bitmap)
     }
 

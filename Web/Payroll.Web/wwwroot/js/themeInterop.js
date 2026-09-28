@@ -1673,8 +1673,20 @@ window.loadPayrollLeaflet =
 // write anything to the database.
 // ============================================================
 
-window.payrollGeoAnimationState =
-    window.payrollGeoAnimationState || {};
+window.payrollJourneyState = window.payrollJourneyState || {};
+
+window.payrollHaversineMeters = function (a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+    const v = [Number(a[0]), Number(a[1]), Number(b[0]), Number(b[1])];
+    if (!v.every(Number.isFinite)) return 0;
+    const R = 6371000;
+    const dLat = (v[2] - v[0]) * Math.PI / 180;
+    const dLon = (v[3] - v[1]) * Math.PI / 180;
+    const p1 = v[0] * Math.PI / 180;
+    const p2 = v[2] * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+};
 
 window.payrollSmoothMoveMarker =
     function (marker, key, target, durationMs, onFrame) {
@@ -1707,8 +1719,21 @@ window.payrollSmoothMoveMarker =
             !Number.isFinite(start[0]) ||
             !Number.isFinite(start[1]) ||
             !Number.isFinite(end[0]) ||
-            !Number.isFinite(end[1])
+            !Number.isFinite(end[1]) ||
+            (start[0] === 0 && start[1] === 0)
         ) {
+            marker.setLatLng(end);
+            if (typeof onFrame === 'function') {
+                onFrame(end);
+            }
+            return;
+        }
+
+        // LARGE-JUMP SNAP: If the marker needs to move > 300 meters (e.g. employee traveled in
+        // vehicle, or session reconnected after gap), snap directly to the destination.
+        // Never slowly crawl across 5 km of town through lakes and buildings.
+        const jumpDistanceMeters = window.payrollHaversineMeters(start, end);
+        if (jumpDistanceMeters > 300) {
             marker.setLatLng(end);
             if (typeof onFrame === 'function') {
                 onFrame(end);
@@ -1822,20 +1847,7 @@ window.payrollCancelGeoAnimation =
 // production/self-hosted routing service.
 
 window.payrollRoutingServiceUrl = window.payrollRoutingServiceUrl || 'https://router.project-osrm.org';
-window.payrollJourneyState = window.payrollJourneyState || {};
 
-window.payrollHaversineMeters = function (a, b) {
-    if (!Array.isArray(a) || !Array.isArray(b)) return 0;
-    const v = [Number(a[0]), Number(a[1]), Number(b[0]), Number(b[1])];
-    if (!v.every(Number.isFinite)) return 0;
-    const R = 6371000;
-    const dLat = (v[2] - v[0]) * Math.PI / 180;
-    const dLon = (v[3] - v[1]) * Math.PI / 180;
-    const p1 = v[0] * Math.PI / 180;
-    const p2 = v[2] * Math.PI / 180;
-    const h = Math.sin(dLat / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-};
 
 window.payrollFormatRouteDistance = function (meters) {
     const m = Number(meters) || 0;
@@ -2112,18 +2124,73 @@ window.payrollReverseGeocodeLocation = async function (lat, lon) {
     if (window.__payrollReverseGeocodeCache[key]) {
         return window.__payrollReverseGeocodeCache[key];
     }
+
+    // 1. Try Komoot Photon first for high-resolution local villages/suburbs/POIs (e.g. Kurumbapet)
+    try {
+        const photonUrl = 'https://photon.komoot.io/reverse?lat=' + encodeURIComponent(nLat) + '&lon=' + encodeURIComponent(nLon);
+        const pRes = await fetch(photonUrl, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+        if (pRes.ok) {
+            const pData = await pRes.json();
+            const feature = pData?.features?.[0];
+            const p = feature?.properties;
+            if (p) {
+                let locality = p.locality || p.district || p.suburb || '';
+                let placeName = String(p.name || '').trim();
+
+                // If POI name contains comma (e.g. "Sub Centre, Kurumbapet")
+                if (placeName.includes(',')) {
+                    const subParts = placeName.split(',').map(s => s.trim()).filter(Boolean);
+                    if (subParts.length >= 2) {
+                        const candidateLocality = subParts[subParts.length - 1];
+                        if (!locality && candidateLocality) {
+                            locality = candidateLocality;
+                            placeName = subParts[0];
+                        }
+                    }
+                } else if (!locality && placeName && !/road|street|nagar|colony|lane|avenue|salai/i.test(placeName)) {
+                    locality = placeName;
+                    placeName = '';
+                }
+
+                const street = p.street || (p.osm_key === 'highway' ? p.name : '');
+                const city = p.city || p.town || p.county || '';
+
+                const parts = [
+                    locality,
+                    street && street !== locality ? street : null,
+                    city && city !== locality ? city : null
+                ].filter(Boolean);
+
+                if (!locality && placeName && !parts.includes(placeName)) {
+                    parts.unshift(placeName);
+                }
+
+                const unique = [...new Set(parts.map(String).map(s => s.trim()))].filter(Boolean);
+                if (unique.length) {
+                    const addr = unique.join(', ');
+                    window.__payrollReverseGeocodeCache[key] = addr;
+                    return addr;
+                }
+            }
+        }
+    } catch (_) { }
+
     const renderAddress = function (data) {
         const a = data?.address || {};
         const admin = data?.localityInfo?.administrative || [];
+        const road = a.road || a.pedestrian || a.street || a.highway || a.residential || '';
+        const locality = a.suburb || a.quarter || a.neighbourhood || a.village || a.hamlet || data?.locality || admin.find?.(x => /taluk|district|subdivision/i.test(x?.description || ''))?.name || '';
+        const city = a.city || a.town || a.county || a.state_district || '';
         const parts = [
-            a.suburb || a.quarter || a.neighbourhood || a.village || admin.find?.(x => /taluk|district|subdivision/i.test(x?.description || ''))?.name || data?.locality,
-            a.city || a.town || a.county || a.state_district,
-            a.state || data?.principalSubdivision
+            road,
+            locality && locality !== road ? locality : null,
+            city && city !== locality && city !== road ? city : null
         ].filter(Boolean);
         const unique = [...new Set(parts.map(String).map(s => s.trim()))].filter(Boolean);
         return unique.length ? unique.join(', ') : (data?.display_name || '');
     };
 
+    // 2. Fallback to OpenStreetMap Nominatim
     try {
         const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(nLat) + '&lon=' + encodeURIComponent(nLon) + '&zoom=18&addressdetails=1';
         const res = await fetch(reverseUrl, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
@@ -2137,6 +2204,7 @@ window.payrollReverseGeocodeLocation = async function (lat, lon) {
         }
     } catch (_) { }
 
+    // 3. Fallback to BigDataCloud
     try {
         const fallbackUrl = 'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + encodeURIComponent(nLat) + '&longitude=' + encodeURIComponent(nLon) + '&localityLanguage=en';
         const res = await fetch(fallbackUrl, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
@@ -2153,6 +2221,47 @@ window.payrollReverseGeocodeLocation = async function (lat, lon) {
     const fallbackCoord = nLat.toFixed(5) + ', ' + nLon.toFixed(5);
     window.__payrollReverseGeocodeCache[key] = fallbackCoord;
     return fallbackCoord;
+};
+
+window.payrollMakeAdminMarkerTooltipHtml = function (metaInitials, safeDisplayName, rangeClass, rangeLabel, safeRole, speedEmoji, speedLabel, address) {
+    const safeAddress = address ? (window.escapeAdminHtml ? window.escapeAdminHtml(address) : address) : '';
+    const addressBlock = safeAddress
+        ? '<div style="font-size:11px;color:#cbd5e1;margin-top:5px;line-height:1.3;display:flex;align-items:flex-start;gap:4px;border-top:1px solid rgba(255,255,255,0.12);padding-top:4px;">' +
+          '<span>📍</span> <span>' + safeAddress + '</span>' +
+          '</div>'
+        : '';
+
+    return '<div class="admin-live-hover-card" style="min-width:170px;max-width:270px;">' +
+           '<div class="admin-live-hover-title">' +
+           '<span class="hover-avatar">' + (metaInitials || '?').toUpperCase() + '</span>' +
+           '<strong>' + safeDisplayName + '</strong>' +
+           '<span class="hover-state ' + rangeClass + '">' + rangeLabel + '</span>' +
+           '</div>' +
+           '<div style="font-size:11px;color:#b0bec5;margin-top:4px;">' +
+           '🏷️ ' + safeRole + '&nbsp;&nbsp;' + speedEmoji + ' ' + speedLabel +
+           '</div>' +
+           addressBlock +
+           '</div>';
+};
+
+window.payrollFetchMarkerAddress = function (marker, lat, lng, onUpdate) {
+    if (!marker || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const moved = marker._lastGeocodedPos
+        ? (window.payrollHaversineMeters ? window.payrollHaversineMeters(marker._lastGeocodedPos, [lat, lng]) : 999)
+        : Infinity;
+    if (marker._currentAddress && moved < 40) {
+        if (typeof onUpdate === 'function') onUpdate(marker._currentAddress);
+        return;
+    }
+    marker._lastGeocodedPos = [lat, lng];
+    if (typeof window.payrollReverseGeocodeLocation === 'function') {
+        window.payrollReverseGeocodeLocation(lat, lng).then(function (addr) {
+            if (addr) {
+                marker._currentAddress = addr;
+                if (typeof onUpdate === 'function') onUpdate(addr);
+            }
+        }).catch(function () { });
+    }
 };
 
 window.payrollGetNextRoadName = function (route) {
@@ -3558,6 +3667,25 @@ window.ensurePayrollDarkOsmTiles = function () {
 
 window.ensurePayrollDarkOsmTiles();
 
+window.ensurePayrollStayPinStyles = function () {
+    if (document.getElementById('payroll-stay-pin-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'payroll-stay-pin-style';
+    style.textContent =
+        '@keyframes payrollPulseStay {' +
+        '0% { transform: scale(0.85); opacity: 0.85; }' +
+        '50% { transform: scale(1.4); opacity: 0.25; }' +
+        '100% { transform: scale(1.75); opacity: 0; }' +
+        '}' +
+        '.payroll-stay-hub-pin-icon { background: transparent !important; border: none !important; }' +
+        '.payroll-stay-hub-marker { display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }' +
+        '.payroll-stay-hub-marker:hover { transform: scale(1.1); }';
+    document.head.appendChild(style);
+};
+
+window.ensurePayrollStayPinStyles();
+
 // ============================================================
 // ADMIN LIVE STAFF MAP
 // ============================================================
@@ -3572,8 +3700,6 @@ window.adminLiveMaps = {};
 window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selectedId) {
     const items = [];
     const byId = {};
-    // REQUIREMENT: Always allow collision offsets so multiple employees at
-    // the same location are visible, regardless of selection.
     const useCollisionOffsets = true;
 
     (Array.isArray(liveStaff) ? liveStaff : [])
@@ -3584,16 +3710,30 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
             const lat = Number(x.latitude);
             const lng = Number(x.longitude);
             if (!Number.isFinite(employeeId) || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
-            const item = { employeeId, lat, lng, offsetX: 0, offsetY: 0 };
+            const speedMps = Number(x.speedMps ?? x.SpeedMps ?? 0);
+            const isWithin = Boolean(x.isWithinAllowedRadius ?? x.IsWithinAllowedRadius);
+            const rawName = String(x.name || ('Staff #' + employeeId)).trim();
+            const item = {
+                employeeId: employeeId,
+                name: rawName,
+                lat: lat,
+                lng: lng,
+                speedMps: speedMps,
+                isWithinAllowedRadius: isWithin,
+                offsetX: 0,
+                offsetY: 0,
+                centerLat: lat,
+                centerLng: lng,
+                isClustered: false
+            };
             items.push(item);
             byId[employeeId] = item;
         });
 
+    byId._clusters = [];
     if (!useCollisionOffsets || items.length < 2) return byId;
 
-    // Group staff whose map markers would visually collide.
-    // REQUIREMENT: Increase collision threshold for more distinct markers.
-    const collisionMeters = 18;
+    // Union-find spatial clustering
     const parent = items.map(function (_, i) { return i; });
     function find(i) {
         while (parent[i] !== i) {
@@ -3613,7 +3753,17 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
                 [items[i].lat, items[i].lng],
                 [items[j].lat, items[j].lng]
             );
-            if (d <= collisionMeters) union(i, j);
+            const bothInOffice = items[i].isWithinAllowedRadius && items[j].isWithinAllowedRadius;
+            const bothStationary = (items[i].speedMps <= 1.0) && (items[j].speedMps <= 1.0);
+
+            let threshold = 18; // Moving collision (e.g. in same vehicle)
+            if (bothInOffice) {
+                threshold = 120; // Both verified inside company office
+            } else if (bothStationary) {
+                threshold = 95; // Stationary at same premises/shop/room (handles indoor GPS jitter)
+            }
+
+            if (d <= threshold) union(i, j);
         }
     }
 
@@ -3624,31 +3774,159 @@ window.payrollBuildAdminMarkerDisplayPositions = function (map, liveStaff, selec
         groups[root].push(item);
     });
 
+    const activeClusters = [];
     Object.keys(groups).forEach(function (root) {
         const group = groups[root];
         if (group.length < 2) return;
 
         // Stable employee-ID ordering prevents markers from swapping places.
         group.sort(function (a, b) { return a.employeeId - b.employeeId; });
-        const center = [group[0].lat, group[0].lng];
+
+        // Calculate centroid of the cluster
+        const avgLat = group.reduce(function (sum, it) { return sum + it.lat; }, 0) / group.length;
+        const avgLng = group.reduce(function (sum, it) { return sum + it.lng; }, 0) / group.length;
+        const center = [avgLat, avgLng];
         const centerPoint = map.latLngToLayerPoint(center);
         const count = group.length;
-        // REQUIREMENT: More pronounced fanning for clear visibility.
-        const radius = count <= 2 ? 42 : count <= 4 ? 48 : count <= 7 ? 54 : 60;
+        // Non-overlapping fanning radius in pixels
+        const radius = count <= 2 ? 48 : count <= 4 ? 56 : count <= 7 ? 64 : 74;
+
+        const clusterKey = 'stay_hub_' + group.map(function (it) { return it.employeeId; }).join('_');
+        const staffNames = group.map(function (it) { return it.name; });
+
+        activeClusters.push({
+            key: clusterKey,
+            centerLat: avgLat,
+            centerLng: avgLng,
+            count: count,
+            staffNames: staffNames,
+            employeeIds: group.map(function (it) { return it.employeeId; })
+        });
 
         group.forEach(function (item, index) {
-            const angle = (-Math.PI / 2) + (index * (Math.PI * 2 / count));
-            const point = L.point(
-                centerPoint.x + Math.cos(angle) * radius,
-                centerPoint.y + Math.sin(angle) * radius
-            );
+            let point;
+            if (count === 2) {
+                // Symmetrical horizontal side-by-side placement for 2 employees
+                const sign = index === 0 ? -1 : 1;
+                point = L.point(
+                    centerPoint.x + sign * radius,
+                    centerPoint.y
+                );
+            } else {
+                const angle = (-Math.PI / 2) + (index * (Math.PI * 2 / count));
+                point = L.point(
+                    centerPoint.x + Math.cos(angle) * radius,
+                    centerPoint.y + Math.sin(angle) * radius
+                );
+            }
             const display = map.layerPointToLatLng(point);
             item.offsetX = display.lng - item.lng;
             item.offsetY = display.lat - item.lat;
+            item.centerLat = avgLat;
+            item.centerLng = avgLng;
+            item.isClustered = true;
+            item.clusterKey = clusterKey;
         });
     });
 
+    byId._clusters = activeClusters;
     return byId;
+};
+
+window.payrollUpdateAdminStayHubMarkers = function (state, activeClusters) {
+    if (!state || !state.map) return;
+    window.ensurePayrollStayPinStyles?.();
+    state.stayHubMarkers = state.stayHubMarkers || {};
+    const clusters = Array.isArray(activeClusters) ? activeClusters : [];
+    const activeKeys = new Set(clusters.map(function (c) { return c.key; }));
+
+    // 1. Remove stale stay hub markers that are no longer clustered
+    Object.keys(state.stayHubMarkers).forEach(function (key) {
+        if (!activeKeys.has(key)) {
+            try {
+                state.map.removeLayer(state.stayHubMarkers[key]);
+            } catch (_) { }
+            delete state.stayHubMarkers[key];
+        }
+    });
+
+    // 2. Add or update active stay hub markers at the exact stayed coordinate
+    clusters.forEach(function (c) {
+        const pos = [c.centerLat, c.centerLng];
+        const namesStr = c.staffNames.join(', ');
+        const hubHtml =
+            '<div class="payroll-stay-hub-marker" style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;">' +
+            '<div style="position:absolute;top:-4px;width:38px;height:38px;border-radius:50%;background:rgba(37,99,235,0.28);animation:payrollPulseStay 2s infinite ease-out;pointer-events:none;"></div>' +
+            '<div style="width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#2563eb);border:2px solid #ffffff;box-shadow:0 3px 10px rgba(0,0,0,0.38);display:flex;align-items:center;justify-content:center;color:#ffffff;font-size:14px;font-weight:700;z-index:2;">' +
+            '📍' +
+            '</div>' +
+            '<div style="margin-top:2px;background:#0f172a;color:#ffffff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,0.35);white-space:nowrap;letter-spacing:0.3px;border:1px solid rgba(255,255,255,0.25);z-index:2;">' +
+            'Stay Point (' + c.count + ')' +
+            '</div>' +
+            '</div>';
+
+        const hubIcon = L.divIcon({
+            className: 'payroll-stay-hub-pin-icon',
+            html: hubHtml,
+            iconSize: [80, 52],
+            iconAnchor: [40, 15]
+        });
+
+        const buildTooltipHtml = function (address) {
+            const safeAddr = address ? (window.payrollEscapeHtml ? window.payrollEscapeHtml(address) : address) : '';
+            return '<div class="admin-live-hover-card" style="min-width:185px;max-width:280px;">' +
+                '<div class="admin-live-hover-title">' +
+                '<span class="hover-avatar" style="background:#2563eb;color:#ffffff;">📍</span>' +
+                '<strong>Shared Stay Location</strong>' +
+                '<span class="hover-state within" style="background:rgba(37,99,235,0.15);color:#2563eb;border-color:rgba(37,99,235,0.3);font-size:10px;">' + c.count + ' Staff</span>' +
+                '</div>' +
+                '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">' +
+                '👥 <strong>' + (window.payrollEscapeHtml ? window.payrollEscapeHtml(namesStr) : namesStr) + '</strong>' +
+                '</div>' +
+                '<div style="font-size:11px;color:#cbd5e1;margin-top:5px;line-height:1.3;display:flex;align-items:flex-start;gap:4px;border-top:1px solid rgba(255,255,255,0.12);padding-top:4px;">' +
+                '<span>📍</span> <span>' + (safeAddr || 'Resolving stay address...') + '</span>' +
+                '</div>' +
+                '</div>';
+        };
+
+        if (!state.stayHubMarkers[c.key]) {
+            const marker = L.marker(pos, {
+                icon: hubIcon,
+                zIndexOffset: 1500,
+                riseOnHover: true
+            }).addTo(state.map);
+
+            marker.bindTooltip(buildTooltipHtml(''), {
+                direction: 'top',
+                offset: [0, -18],
+                opacity: 0.98,
+                className: 'payroll-admin-hover-tooltip'
+            });
+
+            marker.on('click', function (e) {
+                if (e?.originalEvent) e.originalEvent._stoppedByMarker = true;
+                marker.openTooltip();
+            });
+
+            if (typeof window.payrollReverseGeocodeLocation === 'function') {
+                window.payrollReverseGeocodeLocation(c.centerLat, c.centerLng).then(function (addr) {
+                    if (addr && marker._map) {
+                        marker._stayAddress = addr;
+                        marker.setTooltipContent(buildTooltipHtml(addr));
+                    }
+                }).catch(function () { });
+            }
+
+            state.stayHubMarkers[c.key] = marker;
+        } else {
+            const existingMarker = state.stayHubMarkers[c.key];
+            existingMarker.setLatLng(pos);
+            existingMarker.setIcon(hubIcon);
+            if (existingMarker._stayAddress) {
+                existingMarker.setTooltipContent(buildTooltipHtml(existingMarker._stayAddress));
+            }
+        }
+    });
 };
 
 window.ensureAdminLiveMapLayout = function (mapId) {
@@ -3932,7 +4210,9 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             state.liveData[employeeId] = {
                 employeeId: employeeId,
                 latitude: latitude,
-                longitude: longitude
+                longitude: longitude,
+                speedMps: Number(data.SpeedMps ?? data.speedMps ?? marker._speedMps) || 0,
+                isWithinAllowedRadius: realtimeWithin
             };
 
             const office = state.office;
@@ -3977,7 +4257,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 marker._adminVisualKey = visualKey;
             }
 
-            // Update tooltip content in realtime
+            // Update tooltip content in realtime with live address
             try {
                 const safeRole = window.escapeAdminHtml ? window.escapeAdminHtml(String(marker._role || 'Staff')) : 'Staff';
                 const safeDisplayName = window.escapeAdminHtml ? window.escapeAdminHtml(metaName) : metaName;
@@ -3986,21 +4266,41 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 const rangeClass = realtimeWithin ? 'within' : 'outside';
                 const rangeLabel = realtimeWithin ? '✅ In range' : '🔴 Outside';
 
-                const hoverHtml =
-                    '<div class="admin-live-hover-card" style="min-width:160px">' +
-                    '<div class="admin-live-hover-title">' +
-                    '<span class="hover-avatar">' + (metaInitials || '?').toUpperCase() + '</span>' +
-                    '<strong>' + safeDisplayName + '</strong>' +
-                    '<span class="hover-state ' + rangeClass + '">' + rangeLabel + '</span>' +
-                    '</div>' +
-                    '<div style="font-size:11px;color:#b0bec5;margin-top:4px;">' +
-                    '🏷️ ' + safeRole + '&nbsp;&nbsp;' + speedEmoji + ' ' + speedLabel +
-                    '</div>' +
-                    '</div>';
+                const hoverHtml = window.payrollMakeAdminMarkerTooltipHtml(
+                    metaInitials,
+                    safeDisplayName,
+                    rangeClass,
+                    rangeLabel,
+                    safeRole,
+                    speedEmoji,
+                    speedLabel,
+                    marker._currentAddress
+                );
 
                 if (marker.getTooltip()) {
                     marker.setTooltipContent(hoverHtml);
                 }
+
+                // Asynchronously resolve and update location address/name
+                if (typeof window.payrollFetchMarkerAddress === 'function') {
+                    window.payrollFetchMarkerAddress(marker, latitude, longitude, function (addr) {
+                        try {
+                            if (marker.getTooltip()) {
+                                marker.setTooltipContent(window.payrollMakeAdminMarkerTooltipHtml(
+                                    metaInitials,
+                                    safeDisplayName,
+                                    rangeClass,
+                                    rangeLabel,
+                                    safeRole,
+                                    speedEmoji,
+                                    speedLabel,
+                                    addr
+                                ));
+                            }
+                        } catch { }
+                    });
+                }
+
                 marker._speedMps = metaSpeedMps;
             } catch { }
 
@@ -4017,6 +4317,10 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                         collisionStaff,
                         state.lastSelectedId || 0)
                     : {};
+
+            if (typeof window.payrollUpdateAdminStayHubMarkers === 'function') {
+                window.payrollUpdateAdminStayHubMarkers(state, displayItems._clusters);
+            }
 
             const displayItem =
                 displayItems[employeeId];
@@ -4070,11 +4374,29 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                     duration,
                     function (animatedPosition) {
                         try {
-                            if (state.collisionConnectors?.[employeeId]) {
-                                state.collisionConnectors[employeeId].setLatLngs([
-                                    target,
-                                    animatedPosition
-                                ]);
+                            if (displayItem?.isClustered) {
+                                const connectorOrigin = [displayItem.centerLat, displayItem.centerLng];
+                                if (!state.collisionConnectors?.[employeeId]) {
+                                    state.collisionConnectors = state.collisionConnectors || {};
+                                    state.collisionConnectors[employeeId] = L.polyline(
+                                        [connectorOrigin, animatedPosition],
+                                        {
+                                            color: marker._adminVisualKey?.startsWith('within') ? '#198754' : '#dc3545',
+                                            weight: 2,
+                                            opacity: .72,
+                                            dashArray: '3,4',
+                                            lineCap: 'round'
+                                        }
+                                    ).addTo(state.map);
+                                } else {
+                                    state.collisionConnectors[employeeId].setLatLngs([
+                                        connectorOrigin,
+                                        animatedPosition
+                                    ]);
+                                }
+                            } else if (state.collisionConnectors?.[employeeId]) {
+                                try { state.map.removeLayer(state.collisionConnectors[employeeId]); } catch { }
+                                delete state.collisionConnectors[employeeId];
                             }
 
                             if (state.journeyLabels?.[employeeId]) {
@@ -4329,7 +4651,9 @@ window.updateAdminLiveStaffMap =
                         existingStateForCollision.liveData[id] = {
                             employeeId: id,
                             latitude: lat,
-                            longitude: lng
+                            longitude: lng,
+                            speedMps: Number(x.speedMps ?? x.SpeedMps ?? 0),
+                            isWithinAllowedRadius: Boolean(x.isWithinAllowedRadius ?? x.IsWithinAllowedRadius)
                         };
                     }
                 });
@@ -4451,6 +4775,7 @@ window.updateAdminLiveStaffMap =
                     labels: {},
                     journeyLabels: {},
                     collisionConnectors: {},
+                    stayHubMarkers: {},
                     lastOfficeRadius: 0,
                     historyRoute: null,
                     historyMarkers: [],
@@ -4629,6 +4954,10 @@ window.updateAdminLiveStaffMap =
                     visibleStaff,
                     selectedId
                 );
+
+            if (typeof window.payrollUpdateAdminStayHubMarkers === 'function') {
+                window.payrollUpdateAdminStayHubMarkers(state, markerDisplayPositions._clusters);
+            }
 
             visibleStaff.forEach(
                 function (x) {
@@ -4866,8 +5195,11 @@ window.updateAdminLiveStaffMap =
                             function (animatedPosition) {
                                 try {
                                     if (state.collisionConnectors[employeeId]) {
+                                        const connectorOrigin = (displayItem && Number.isFinite(displayItem.centerLat) && displayItem.isClustered)
+                                            ? [displayItem.centerLat, displayItem.centerLng]
+                                            : position;
                                         state.collisionConnectors[employeeId].setLatLngs([
-                                            position,
+                                            connectorOrigin,
                                             animatedPosition
                                         ]);
                                     }
@@ -4996,9 +5328,12 @@ window.updateAdminLiveStaffMap =
                     }
 
                     if (hasCollisionOffset) {
+                        const connectorOrigin = (displayItem && Number.isFinite(displayItem.centerLat) && displayItem.isClustered)
+                            ? [displayItem.centerLat, displayItem.centerLng]
+                            : position;
                         if (!state.collisionConnectors[employeeId]) {
                             state.collisionConnectors[employeeId] = L.polyline(
-                                [position, displayPosition],
+                                [connectorOrigin, displayPosition],
                                 {
                                     color: markerColor,
                                     weight: 2,
@@ -5010,7 +5345,7 @@ window.updateAdminLiveStaffMap =
                         }
                         else {
                             state.collisionConnectors[employeeId].setLatLngs([
-                                position,
+                                connectorOrigin,
                                 displayPosition
                             ]);
                             state.collisionConnectors[employeeId].setStyle({
@@ -5089,17 +5424,16 @@ window.updateAdminLiveStaffMap =
                         const rangeClass = withinRange ? 'within' : 'outside';
                         const rangeLabel = withinRange ? '✅ In range' : '🔴 Outside';
 
-                        const hoverHtml =
-                            '<div class="admin-live-hover-card" style="min-width:160px">' +
-                            '<div class="admin-live-hover-title">' +
-                            '<span class="hover-avatar">' + (initials || '?').toUpperCase() + '</span>' +
-                            '<strong>' + safeDisplayName + '</strong>' +
-                            '<span class="hover-state ' + rangeClass + '">' + rangeLabel + '</span>' +
-                            '</div>' +
-                            '<div style="font-size:11px;color:#b0bec5;margin-top:4px;">' +
-                            '🏷️ ' + safeRole + '&nbsp;&nbsp;' + speedEmoji + ' ' + speedLabel +
-                            '</div>' +
-                            '</div>';
+                        const hoverHtml = window.payrollMakeAdminMarkerTooltipHtml(
+                            initials,
+                            safeDisplayName,
+                            rangeClass,
+                            rangeLabel,
+                            safeRole,
+                            speedEmoji,
+                            speedLabel,
+                            state.markers[employeeId]._currentAddress
+                        );
 
                         const currentTooltip = state.markers[employeeId].getTooltip();
                         if (currentTooltip) {
@@ -5111,6 +5445,26 @@ window.updateAdminLiveStaffMap =
                                 offset: [0, -12],
                                 sticky: false,
                                 className: 'admin-live-hover-tooltip'
+                            });
+                        }
+
+                        // Asynchronously resolve and update location address/name
+                        if (typeof window.payrollFetchMarkerAddress === 'function') {
+                            window.payrollFetchMarkerAddress(state.markers[employeeId], lat, lng, function (addr) {
+                                try {
+                                    if (state.markers[employeeId]?.getTooltip()) {
+                                        state.markers[employeeId].setTooltipContent(window.payrollMakeAdminMarkerTooltipHtml(
+                                            initials,
+                                            safeDisplayName,
+                                            rangeClass,
+                                            rangeLabel,
+                                            safeRole,
+                                            speedEmoji,
+                                            speedLabel,
+                                            addr
+                                        ));
+                                    }
+                                } catch { }
                             });
                         }
 
@@ -5821,22 +6175,6 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
             if (addresses.length && key !== state.selectedRailAddressKey && Number.isFinite(lat) && Number.isFinite(lon)) {
                 state.selectedRailAddressKey = key;
                 if (!cached) paintAddress('Resolving current address...', lat.toFixed(6) + ' · ' + lon.toFixed(6));
-                const reverseUrl = 'https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=' + encodeURIComponent(lat) + '&lon=' + encodeURIComponent(lon) + '&zoom=18&addressdetails=1';
-                const fallbackUrl = 'https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=' + encodeURIComponent(lat) + '&longitude=' + encodeURIComponent(lon) + '&localityLanguage=en';
-                const renderAddress = function (data) {
-                    const a = data?.address || {};
-                    const admin = data?.localityInfo?.administrative || [];
-                    const parts = [
-                        a.road || data?.locality || data?.localityInfo?.informative?.find?.(x => x?.description === 'road')?.name,
-                        a.neighbourhood || a.suburb || admin.find?.(x => /district|county/i.test(x?.description || ''))?.name,
-                        a.city || a.town || a.village || data?.city || data?.locality,
-                        a.state_district,
-                        a.state || data?.principalSubdivision,
-                        a.postcode || data?.postcode,
-                        data?.countryName || a.country
-                    ].filter(Boolean);
-                    return [...new Set(parts.map(String))].join(', ');
-                };
                 const applyAddress = function (text, displayName) {
                     if (state.selectedRailElement !== rail || state.selectedRailAddressKey !== key) return;
                     const finalText = text || displayName || '';
@@ -5849,15 +6187,16 @@ window.ensureAdminSelectedEmployeeRail = function (mapId, selectedId) {
                     cache[employeeId] = finalText;
                     paintAddress(finalText, displayName || (lat.toFixed(6) + ' · ' + lon.toFixed(6)));
                 };
-                fetch(reverseUrl, { headers: { 'Accept': 'application/json' } })
-                    .then(r => r.ok ? r.json() : Promise.reject(new Error('primary reverse geocoder failed')))
-                    .then(data => applyAddress(renderAddress(data), data?.display_name))
-                    .catch(() => fetch(fallbackUrl, { headers: { 'Accept': 'application/json' } }))
-                    .then(r => r ? (r.ok ? r.json() : Promise.reject(new Error('fallback reverse geocoder failed'))) : null)
-                    .then(data => {
-                        if (data) applyAddress(renderAddress(data), data?.localityInfo ? [data.locality, data.principalSubdivision, data.countryName].filter(Boolean).join(', ') : null);
-                    })
-                    .catch(() => applyAddress('', ''));
+
+                if (typeof window.payrollReverseGeocodeLocation === 'function') {
+                    window.payrollReverseGeocodeLocation(lat, lon).then(function (addr) {
+                        applyAddress(addr, addr);
+                    }).catch(function () {
+                        applyAddress('', '');
+                    });
+                } else {
+                    applyAddress('', '');
+                }
             }
         }
 
@@ -6683,6 +7022,13 @@ window.destroyAdminLiveStaffMap =
                 window.payrollCancelGeoAnimation?.(
                     'admin:' + mapId + ':' + employeeId);
             });
+        }
+
+        if (state?.stayHubMarkers) {
+            Object.values(state.stayHubMarkers).forEach(function (m) {
+                try { state.map.removeLayer(m); } catch (_) { }
+            });
+            state.stayHubMarkers = {};
         }
 
         if (!state) return;
