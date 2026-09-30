@@ -12,6 +12,7 @@ namespace Payroll.Web.Services;
 public sealed class FirebaseSqliteSyncService : BackgroundService
 {
     private static IReadOnlyDictionary<string, string> Tables => FirebaseSsotSchema.Tables;
+    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly FirebaseRealtimeService _firebase;
@@ -169,7 +170,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         ("SalaryAdvance", "advance_payments"),
         ("AttendanceRegularization", "regularizations"),
         ("ResignationRequest", "resignation_requests"),
-        ("Employee", "employees")
+        ("Employee", "employees"),
+        ("CompanySetting", "company_settings"),
+        ("FeatureSettings", "feature_settings")
     };
 
     private async Task RunOwnerStreamLoopAsync(string ownerUid, CancellationToken stoppingToken)
@@ -223,7 +226,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 {
                     // BANDWIDTH OPTIMIZATION: Apply the single updated record from eventData directly.
                     // Never call SyncTableAsync (which issues an HTTP GET to download the entire table).
-                    changed = await UpsertSingleFirebaseRecordAsync(entityName, recordKey, eventData.Value, ct);
+                    changed = await UpsertSingleFirebaseRecordAsync(entityName, recordKey, eventData.Value, ownerUid, ct);
                 }
                 else
                 {
@@ -243,11 +246,21 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                         var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
                         var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
                         var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
-                        await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius);
+                        var speed = GetBool(settings.Value, "useSpeedBasedMarkers", "use_speed_based_markers", "UseSpeedBasedMarkers");
+                        await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius, speed);
 
                         using var scope = _scopeFactory.CreateScope();
                         await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
                     }
+                }
+                else if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
+                {
+                    await _refreshService.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
+                }
+                else if (entityName.Equals("AttendanceLog", StringComparison.Ordinal) ||
+                         entityName.Equals("AttendancePunch", StringComparison.Ordinal))
+                {
+                    await _refreshService.NotifyGlobalRefreshAsync("PUNCH_SYNCED");
                 }
             }
         }, stoppingToken);
@@ -1379,10 +1392,27 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         string entityName,
         string firebaseKey,
         JsonElement recordJson,
+        string ownerUid,
         CancellationToken ct)
     {
         try
         {
+            if (entityName.Equals("CompanySetting", StringComparison.Ordinal) ||
+                entityName.Equals("FeatureSettings", StringComparison.Ordinal))
+            {
+                var wrapped = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                {
+                    [firebaseKey] = recordJson
+                };
+                var wrappedJson = JsonSerializer.SerializeToElement(wrapped);
+                return await UpsertTableAsync(entityName, wrappedJson, ownerUid, ct);
+            }
+
+            if (entityName.Equals("AttendancePunch", StringComparison.Ordinal))
+            {
+                entityName = "AttendanceLog";
+            }
+
             await using var scope = _scopeFactory.CreateAsyncScope();
             var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -1424,6 +1454,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
      string ownerUid,
      CancellationToken ct)
     {
+        if (entityName.Equals("AttendancePunch", StringComparison.Ordinal))
+        {
+            entityName = "AttendanceLog";
+        }
         // LeaveRequest requires special handling because its shared EF model
         // uses an identity/ValueGeneratedOnAdd key while Firebase owns the
         // actual record ID.
@@ -1537,17 +1571,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // Prevent tenant_2 or any other company from overwriting SettingID = 1 in SQLite!
         if (entityName.Equals("CompanySetting", StringComparison.Ordinal))
         {
-            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct);
-            var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : (string.Equals(ownerUid, TenantContextService.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ? 1 : 0);
-            if (targetSettingId <= 0)
-            {
-                var maxId = await tableDb.CompanySettings.MaxAsync(c => (int?)c.SettingID, ct) ?? 0;
-                targetSettingId = maxId + 1;
-                if (tenant != null)
-                {
-                    tenant.CompanySettingId = targetSettingId;
-                }
-            }
+            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct)
+                ?? await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.IsActive, ct)
+                ?? await tableDb.CompanyTenants.FirstOrDefaultAsync(ct);
+            var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : 1;
 
             var existingSetting = await tableDb.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId, ct);
             if (existingSetting == null)
@@ -1583,6 +1610,26 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 if (late >= 0) existingSetting.LateGraceMinutes = late;
                 var endGrace = GetInt(child.Value, "endTimeGraceMinutes", "EndTimeGraceMinutes");
                 if (endGrace >= 0) existingSetting.EndTimeGraceMinutes = endGrace;
+                var backup = GetInt(child.Value, "autoBackupIntervalHours", "AutoBackupIntervalHours");
+                if (backup > 0) existingSetting.AutoBackupIntervalHours = backup;
+                var dwell = GetInt(child.Value, "stayDwellMinutes", "StayDwellMinutes");
+                if (dwell > 0) existingSetting.StayDwellMinutes = dwell;
+                var cluster = GetInt(child.Value, "stayClusterRadiusMeters", "StayClusterRadiusMeters");
+                if (cluster > 0) existingSetting.StayClusterRadiusMeters = cluster;
+                var speed = GetBool(child.Value, "useSpeedBasedMarkers", "use_speed_based_markers", "UseSpeedBasedMarkers");
+                existingSetting.UseSpeedBasedMarkers = speed;
+                var emailNotif = GetBool(child.Value, "enableEmailNotifications", "EnableEmailNotifications");
+                existingSetting.EnableEmailNotifications = emailNotif;
+                var host = GetString(child.Value, "smtpHost", "SmtpHost");
+                if (host != null) existingSetting.SmtpHost = host;
+                var port = GetInt(child.Value, "smtpPort", "SmtpPort");
+                if (port > 0) existingSetting.SmtpPort = port;
+                var fromEmail = GetString(child.Value, "smtpFromEmail", "SmtpFromEmail");
+                if (fromEmail != null) existingSetting.SmtpFromEmail = fromEmail;
+                var user = GetString(child.Value, "smtpUser", "SmtpUser");
+                if (user != null) existingSetting.SmtpUser = user;
+                var pass = GetString(child.Value, "smtpPass", "SmtpPass");
+                if (pass != null) existingSetting.SmtpPass = pass;
                 break;
             }
 
@@ -1594,17 +1641,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // Strict Multi-Tenant Isolation for FeatureSettings:
         if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
         {
-            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct);
-            var targetFeatureId = tenant?.FeatureSettingsId > 0 ? tenant.FeatureSettingsId : (string.Equals(ownerUid, TenantContextService.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ? 1 : 0);
-            if (targetFeatureId <= 0)
-            {
-                var maxId = await tableDb.FeatureSettings.MaxAsync(f => (int?)f.Id, ct) ?? 0;
-                targetFeatureId = maxId + 1;
-                if (tenant != null)
-                {
-                    tenant.FeatureSettingsId = targetFeatureId;
-                }
-            }
+            var tenant = await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == ownerUid, ct)
+                ?? await tableDb.CompanyTenants.FirstOrDefaultAsync(t => t.IsActive, ct)
+                ?? await tableDb.CompanyTenants.FirstOrDefaultAsync(ct);
+            var targetFeatureId = tenant?.FeatureSettingsId > 0 ? tenant.FeatureSettingsId : 1;
 
             var existingFeature = await tableDb.FeatureSettings.FirstOrDefaultAsync(f => f.Id == targetFeatureId, ct);
             if (existingFeature == null)
@@ -1620,6 +1660,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 existingFeature.EnablePayroll = GetBool(child.Value, "enablePayroll", "EnablePayroll");
                 existingFeature.EnableGeoFencing = GetBool(child.Value, "enableGeoFencing", "EnableGeoFencing");
                 existingFeature.EnableDualAttendance = GetBool(child.Value, "enableDualAttendance", "EnableDualAttendance");
+                existingFeature.EnableAutomaticGeofencePunching = GetBool(child.Value, "enableAutomaticGeofencePunching", "enable_automatic_geofence_punching", "EnableAutomaticGeofencePunching");
                 existingFeature.EnableSalaryAdvance = GetBool(child.Value, "enableSalaryAdvance", "EnableSalaryAdvance");
                 existingFeature.EnableBonusManagement = GetBool(child.Value, "enableBonusManagement", "EnableBonusManagement");
                 existingFeature.EnableLeaveManagement = GetBool(child.Value, "enableLeaveManagement", "EnableLeaveManagement");
@@ -1629,11 +1670,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 existingFeature.EnableResignationModule = GetBool(child.Value, "enableResignationModule", "EnableResignationModule");
                 existingFeature.EnableFlexibleBenefits = GetBool(child.Value, "enableFlexibleBenefits", "EnableFlexibleBenefits");
                 existingFeature.EnableCompanyReports = GetBool(child.Value, "enableCompanyReports", "EnableCompanyReports");
+                existingFeature.EnableEmailNotifications = GetBool(child.Value, "enableEmailNotifications", "EnableEmailNotifications");
                 existingFeature.AdminCanViewDashboard = GetBool(child.Value, "adminCanViewDashboard", "AdminCanViewDashboard");
                 existingFeature.AdminCanManageEmployees = GetBool(child.Value, "adminCanManageEmployees", "AdminCanManageEmployees");
                 existingFeature.AdminCanViewAttendance = GetBool(child.Value, "adminCanViewAttendance", "AdminCanViewAttendance");
                 existingFeature.AdminCanRunPayroll = GetBool(child.Value, "adminCanRunPayroll", "AdminCanRunPayroll");
                 existingFeature.AdminCanEditSettings = GetBool(child.Value, "adminCanEditSettings", "AdminCanEditSettings");
+                existingFeature.AdminCanManageShifts = GetBool(child.Value, "adminCanManageShifts", "AdminCanManageShifts");
+                existingFeature.AdminCanManagePunchApprovals = GetBool(child.Value, "adminCanManagePunchApprovals", "AdminCanManagePunchApprovals");
+                existingFeature.AdminCanViewReports = GetBool(child.Value, "adminCanViewReports", "AdminCanViewReports");
+                existingFeature.AdminCanManageEmployeePermissions = GetBool(child.Value, "adminCanManageEmployeePermissions", "AdminCanManageEmployeePermissions");
+                existingFeature.AdminCanManageFeatureToggles = GetBool(child.Value, "adminCanManageFeatureToggles", "AdminCanManageFeatureToggles");
                 break;
             }
 
@@ -1844,6 +1891,142 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return changedSession;
         }
 
+        // Specialized handler for AttendanceLog (and AttendancePunch):
+        // In SQLite, logid is an auto-increment integer, while Firebase Android records use string keys (e.g. "AUTO_3_1790696351000" or UUIDs).
+        // The generic handler fails to convert string keys to int, causing all punches from Android to be dropped.
+        // This handler parses timestamps, normalizes punch types, matches existing punches by LogID or logical window (EmployeeID + LogType + PunchTime +/- 60s),
+        // and inserts new punches or updates existing ones.
+        if (entityType.ClrType == typeof(AttendanceLog))
+        {
+            var empId = GetInt(json, "employeeId", "EmployeeId", "staffId", "StaffId");
+            if (empId <= 0) return false;
+
+            DateTime punchTime = DateTime.MinValue;
+            var timeEl = FindJsonValue(json, "punchTime")
+                ?? FindJsonValue(json, "timestamp")
+                ?? FindJsonValue(json, "checkInTime")
+                ?? FindJsonValue(json, "createdAt")
+                ?? FindJsonValue(json, "PunchTime");
+
+            if (timeEl is { } te)
+            {
+                if (te.ValueKind == JsonValueKind.Number && te.TryGetInt64(out var epochMs) && epochMs > 0)
+                {
+                    punchTime = TimeZoneInfo.ConvertTimeFromUtc(
+                        DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime,
+                        IndiaTimeZone);
+                }
+                else if (ConvertValue(te, typeof(DateTime)) is DateTime dt && dt > DateTime.MinValue)
+                {
+                    punchTime = dt;
+                }
+            }
+
+            if (punchTime == DateTime.MinValue) return false;
+
+            var rawType = GetString(json, "type", "logType", "LogType", "note") ?? "IN";
+            var logType = "IN";
+            if (rawType.Equals("OUT", StringComparison.OrdinalIgnoreCase) ||
+                rawType.Equals("CheckOut", StringComparison.OrdinalIgnoreCase))
+            {
+                logType = "OUT";
+            }
+
+            var deviceId = GetString(json, "deviceId", "DeviceID", "source") ?? "Mobile";
+            var biometricId = GetString(json, "biometricId", "BiometricID") ?? string.Empty;
+            var isApproved = GetBool(json, "isApproved", "IsApproved") ||
+                string.Equals(GetString(json, "status", "Status"), "APPROVED", StringComparison.OrdinalIgnoreCase);
+            var lat = GetDouble(json, "latitude", "Latitude");
+            var lon = GetDouble(json, "longitude", "Longitude");
+
+            AttendanceLog? existingLog = null;
+
+            // Extract the Firebase punch key (e.g. "AUTO_3_1790696351000" or a UUID)
+            // from the json punchId/attendanceId field, falling back to the firebaseKey.
+            var firebasePunchId = GetString(json, "punchId", "attendanceId") ?? firebaseKey;
+
+            // 0. Match by BiometricID == Firebase punch key — fastest dedup, works across
+            //    both attendance_punches and attendance stream events for the same punch.
+            if (!string.IsNullOrEmpty(firebasePunchId))
+            {
+                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
+                    l.BiometricID == firebasePunchId && l.EmployeeID == empId, ct)
+                    ?? db.ChangeTracker.Entries<AttendanceLog>()
+                        .Select(e => e.Entity)
+                        .FirstOrDefault(l => l.BiometricID == firebasePunchId && l.EmployeeID == empId);
+            }
+
+            // 1. Try matching by integer LogID if key or json contains an integer id
+            var idEl = FindJsonValue(json, "logId") ?? FindJsonValue(json, "LogID") ?? FindJsonValue(json, "punchId") ?? FindJsonValue(json, "attendanceId");
+            var idStr = idEl?.GetString() ?? idEl?.ToString() ?? (firebaseKey.Contains('/') ? firebaseKey.Split('/')[^1] : firebaseKey);
+            int parsedLogId = 0;
+            if (existingLog == null && int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedLogId) && parsedLogId > 0)
+            {
+                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == parsedLogId, ct)
+                    ?? db.ChangeTracker.Entries<AttendanceLog>()
+                        .Select(e => e.Entity)
+                        .FirstOrDefault(l => l.LogID == parsedLogId);
+            }
+
+            // 2. If not found by ID, match by logical window (same employee, same punch type, within +/- 60 seconds)
+            if (existingLog == null)
+            {
+                var windowStart = punchTime.AddSeconds(-60);
+                var windowEnd = punchTime.AddSeconds(60);
+                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
+                    l.EmployeeID == empId &&
+                    l.LogType == logType &&
+                    l.PunchTime >= windowStart &&
+                    l.PunchTime <= windowEnd, ct)
+                    ?? db.ChangeTracker.Entries<AttendanceLog>()
+                        .Select(e => e.Entity)
+                        .FirstOrDefault(l =>
+                            l.EmployeeID == empId &&
+                            l.LogType == logType &&
+                            l.PunchTime >= windowStart &&
+                            l.PunchTime <= windowEnd);
+            }
+
+            var isNew = existingLog == null;
+            // Use the Firebase punch key as BiometricID when biometricId is empty (Android punches).
+            // This allows step-0 deduplication to match both attendance_punches and attendance
+            // stream events for the same punch key.
+            var effectiveBiometricId = !string.IsNullOrEmpty(biometricId) ? biometricId
+                : !string.IsNullOrEmpty(firebasePunchId) ? firebasePunchId
+                : string.Empty;
+            var targetLog = existingLog ?? new AttendanceLog
+            {
+                EmployeeID = empId,
+                PunchTime = punchTime,
+                LogType = logType,
+                BiometricID = effectiveBiometricId,
+                DeviceID = deviceId,
+                IsApproved = isApproved,
+                Latitude = lat != 0 ? lat : null,
+                Longitude = lon != 0 ? lon : null
+            };
+
+            var changedLog = false;
+            if (targetLog.EmployeeID != empId) { targetLog.EmployeeID = empId; changedLog = true; }
+            if (targetLog.LogType != logType) { targetLog.LogType = logType; changedLog = true; }
+            if (targetLog.IsApproved != isApproved) { targetLog.IsApproved = isApproved; changedLog = true; }
+            if (lat != 0 && targetLog.Latitude != lat) { targetLog.Latitude = lat; changedLog = true; }
+            if (lon != 0 && targetLog.Longitude != lon) { targetLog.Longitude = lon; changedLog = true; }
+
+            if (isNew)
+            {
+                if (parsedLogId > 0) targetLog.LogID = parsedLogId;
+                db.AttendanceLogs.Add(targetLog);
+                return true;
+            }
+            else if (changedLog && db.Entry(targetLog).State == EntityState.Unchanged)
+            {
+                db.Entry(targetLog).State = EntityState.Modified;
+            }
+
+            return changedLog;
+        }
+
         // Specialized handler for LeaveRequest:
         // Firebase Android leave records use a UUID string as the record key (the "id" field).
         // SQLite's LeaveRequestID is an EF auto-increment int — the generic handler converts the
@@ -1895,11 +2078,6 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             var targetLeave = existingLeave ?? new LeaveRequest();
 
             var changedLeave = false;
-
-            void SetLeave<T>(ref T field, T value) where T : IEquatable<T>
-            {
-                if (!EqualityComparer<T>.Default.Equals(field, value)) { field = value; changedLeave = true; }
-            }
 
             // Stamp the Firebase UUID so we can find this row instantly next time.
             if (targetLeave.FirebaseLeaveId != firebaseLeaveId) { targetLeave.FirebaseLeaveId = firebaseLeaveId; changedLeave = true; }

@@ -16,6 +16,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject Payroll.Web.Services.AttendanceRefreshService AttendanceRefresh
 @inject Payroll.Web.Services.ITenantContextService TenantContext
+@inject Payroll.Web.Services.FirebaseRealtimeService FirebaseRealtime
 
 <PageTitle>Feature & Permission Manager</PageTitle>
 
@@ -1009,6 +1010,46 @@ else
 
             dbContext.FeatureSettings.Update(settings);
             await dbContext.SaveChangesAsync();
+
+            if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId))
+            {
+                try
+                {
+                    var featureMap = new Dictionary<string, object?>
+                    {
+                        ["enablePayroll"] = settings.EnablePayroll,
+                        ["enableGeoFencing"] = settings.EnableGeoFencing,
+                        ["enableDualAttendance"] = settings.EnableDualAttendance,
+                        ["enableAutomaticGeofencePunching"] = settings.EnableAutomaticGeofencePunching,
+                        ["enableSalaryAdvance"] = settings.EnableSalaryAdvance,
+                        ["enableBonusManagement"] = settings.EnableBonusManagement,
+                        ["enableLeaveManagement"] = settings.EnableLeaveManagement,
+                        ["enableShiftScheduling"] = settings.EnableShiftScheduling,
+                        ["enablePunchCorrection"] = settings.EnablePunchCorrection,
+                        ["enableTaxDeclarations"] = settings.EnableTaxDeclarations,
+                        ["enableResignationModule"] = settings.EnableResignationModule,
+                        ["enableFlexibleBenefits"] = settings.EnableFlexibleBenefits,
+                        ["enableCompanyReports"] = settings.EnableCompanyReports,
+                        ["enableEmailNotifications"] = settings.EnableEmailNotifications,
+                        ["adminCanViewDashboard"] = settings.AdminCanViewDashboard,
+                        ["adminCanManageEmployees"] = settings.AdminCanManageEmployees,
+                        ["adminCanViewAttendance"] = settings.AdminCanViewAttendance,
+                        ["adminCanRunPayroll"] = settings.AdminCanRunPayroll,
+                        ["adminCanEditSettings"] = settings.AdminCanEditSettings,
+                        ["adminCanManageShifts"] = settings.AdminCanManageShifts,
+                        ["adminCanManagePunchApprovals"] = settings.AdminCanManagePunchApprovals,
+                        ["adminCanViewReports"] = settings.AdminCanViewReports,
+                        ["adminCanManageEmployeePermissions"] = settings.AdminCanManageEmployeePermissions,
+                        ["adminCanManageFeatureToggles"] = settings.AdminCanManageFeatureToggles
+                    };
+                    await FirebaseRealtime.SetAsync($"owners/{activeTenant.TenantId}/feature_settings/1", featureMap, default);
+                }
+                catch (Exception fbEx)
+                {
+                    _logger.LogWarning(fbEx, "Could not mirror feature settings to Firebase for {TenantId}", activeTenant.TenantId);
+                }
+            }
+
             await AttendanceRefresh.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
             toastService.ShowSuccess($"Feature settings saved for {activeTenant?.CompanyName ?? "Company"}!");
         }

@@ -214,7 +214,7 @@ class FirebaseRoomHydrator @Inject constructor(
             }
         }
         // Small master & transactional request tables need explicit initial hydration & reconciliation
-        if (query == null && table in setOf("shops", "employees", "shop_closed_days", "leave_requests", "regularizations", "resignation_requests", "advance_payments", "shift_schedules")) {
+        if (query == null && table in setOf("shops", "employees", "shop_closed_days", "leave_requests", "regularizations", "resignation_requests", "advance_payments", "shift_schedules", "company_settings", "feature_settings")) {
             (targetQuery as? DatabaseReference)?.addListenerForSingleValueEvent(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     scope.launch {

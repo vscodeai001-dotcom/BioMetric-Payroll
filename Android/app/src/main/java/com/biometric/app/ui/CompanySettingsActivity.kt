@@ -222,6 +222,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
         }
     }
 
+    private var companySettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var companySettingsListener: ValueEventListener? = null
+
     private fun loadInitialData() {
         binding.loadingOverlay.visibility = View.VISIBLE
 
@@ -237,26 +240,19 @@ class CompanySettingsActivity : MotionBaseActivity() {
             populateUi()
             binding.loadingOverlay.visibility = View.GONE
 
-            // Sync latest company and admin details from Firebase
+            // Sync latest company and admin details from Firebase in real-time
             val owner = firebaseSync.getOwnerRef()
             if (owner != null) {
-                owner.child("company_settings").child("1").addListenerForSingleValueEvent(object : ValueEventListener {
+                val ref = owner.child("company_settings").child("1")
+                val listener = object : ValueEventListener {
                     override fun onDataChange(snapshot: DataSnapshot) {
-                        if (snapshot.exists()) {
-                            snapshot.child("companyName").getValue(String::class.java)?.let {
-                                if (binding.etGenCompanyName.text.isNullOrBlank()) binding.etGenCompanyName.setText(it)
-                            }
-                            snapshot.child("autoBackupIntervalHours").getValue(Int::class.java)?.let { hours ->
-                                if (hours > 0) {
-                                    localCompany.autoBackupIntervalHours = hours
-                                    val backupItem = backupIntervalLabels.find { it.second == hours } ?: backupIntervalLabels.find { it.second == 24 }
-                                    backupItem?.let { binding.spinnerBackupInterval.setText(it.first, false) }
-                                }
-                            }
-                        }
+                        hydrateFromFirebase(snapshot)
                     }
                     override fun onCancelled(error: DatabaseError) {}
-                })
+                }
+                ref.addValueEventListener(listener)
+                companySettingsRef = ref
+                companySettingsListener = listener
 
                 // Load Admin Details from Owner specific child keys (Never query root owner node to prevent OOM)
                 owner.child("adminEmail").addListenerForSingleValueEvent(object : ValueEventListener {
@@ -282,6 +278,60 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 })
             }
         }
+    }
+
+    private fun hydrateFromFirebase(snapshot: DataSnapshot) {
+        if (!snapshot.exists()) return
+
+        fun s(k: String): String? = snapshot.child(k).getValue(String::class.java)
+        fun i(k: String): Int? = snapshot.child(k).getValue(Int::class.java)
+            ?: s(k)?.toIntOrNull()
+        fun d(k: String): Double? = snapshot.child(k).getValue(Double::class.java)
+            ?: s(k)?.toDoubleOrNull()
+        fun b(k: String): Boolean? = snapshot.child(k).getValue(Boolean::class.java)
+            ?: s(k)?.toBooleanStrictOrNull()
+
+        s("companyName")?.let { if (it.isNotBlank()) localCompany.companyName = it }
+        s("addressLine1")?.let { localCompany.addressLine1 = it }
+        s("cityStatePincode")?.let { localCompany.cityStatePincode = it }
+        s("salaryCalculationMethod")?.let { localCompany.salaryCalculationMethod = it }
+        i("workDayCutoffHour")?.let { localCompany.workDayCutoffHour = it }
+        i("lateGraceMinutes")?.let { localCompany.lateGraceMinutes = it }
+        i("endTimeGraceMinutes")?.let { localCompany.endTimeGraceMinutes = it }
+        d("officeLatitude")?.let { if (it != 0.0) localCompany.officeLatitude = it }
+        d("officeLongitude")?.let { if (it != 0.0) localCompany.officeLongitude = it }
+        i("geoRadiusMeters")?.let { if (it > 0) localCompany.geoRadiusMeters = it }
+        i("autoBackupIntervalHours")?.let { if (it > 0) localCompany.autoBackupIntervalHours = it }
+        i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
+        i("stayClusterRadiusMeters")?.let { if (it > 0) localCompany.stayClusterRadiusMeters = it }
+        (b("useSpeedBasedMarkers") ?: b("use_speed_based_markers"))?.let { localCompany.useSpeedBasedMarkers = it }
+
+        // Email Configuration (SSOT real-time sync with Web)
+        b("enableEmailNotifications")?.let { localCompany.enableEmailNotifications = it }
+        s("smtpHost")?.let { localCompany.smtpHost = it }
+        i("smtpPort")?.let { if (it > 0) localCompany.smtpPort = it }
+        s("smtpFromEmail")?.let { localCompany.smtpFromEmail = it }
+        s("smtpUser")?.let { localCompany.smtpUser = it }
+        s("smtpPass")?.let { localCompany.smtpPass = it }
+
+        // Statutory & Leave Rules
+        b("enablePfEsiSystem")?.let { localCompany.enablePfEsiSystem = it }
+        d("esiWageLimit")?.let { localCompany.esiWageLimit = it }
+        d("basicSalaryPercentage")?.let { localCompany.basicSalaryPercentage = it }
+        d("employeePfPercentage")?.let { localCompany.employeePfPercentage = it }
+        d("employeeEsiPercentage")?.let { localCompany.employeeEsiPercentage = it }
+        d("employerPfPercentage")?.let { localCompany.employerPfPercentage = it }
+        d("employerEsiPercentage")?.let { localCompany.employerEsiPercentage = it }
+        b("enableProfessionalTax")?.let { localCompany.enableProfessionalTax = it }
+        b("enableShiftAllowance")?.let { localCompany.enableShiftAllowance = it }
+        b("enableLeaveAccrual")?.let { localCompany.enableLeaveAccrual = it }
+        d("leaveAccrualRate")?.let { localCompany.leaveAccrualRate = it }
+        b("enableSandwichRule")?.let { localCompany.enableSandwichRule = it }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            localSettingsDao.upsertCompanySettings(localCompany)
+        }
+        populateUi()
     }
 
     private fun populateUi() {
@@ -607,6 +657,13 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 binding.loadingOverlay.visibility = View.GONE
                 Toast.makeText(this@CompanySettingsActivity, "Deletion failed: ${ex.message}", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        companySettingsListener?.let { l ->
+            companySettingsRef?.removeEventListener(l)
         }
     }
 }

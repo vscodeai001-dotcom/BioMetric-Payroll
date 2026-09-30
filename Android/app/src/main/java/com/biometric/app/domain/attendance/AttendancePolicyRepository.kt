@@ -1,6 +1,8 @@
 package com.biometric.app.domain.attendance
 
+import android.util.Log
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalSettingsDao
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
@@ -19,11 +21,20 @@ import javax.inject.Singleton
  * This class only resolves configuration. It deliberately does not calculate
  * payroll or attendance outcomes. Automatic geofence punch reconciliation stays
  * on the existing Web compatibility/attendance engine.
+ *
+ * Standalone reliability: when the Firebase owner UID is not yet available
+ * (cold-start / session not yet hydrated), the local Room cache is used instead
+ * of emitting an all-false policy and closing the flow permanently.
  */
 @Singleton
 class AttendancePolicyRepository @Inject constructor(
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val localSettingsDao: LocalSettingsDao
 ) {
+    companion object {
+        private const val TAG = "AttendancePolicyRepo"
+    }
+
     data class Policy(
         val geoFencingEnabled: Boolean = true,
         val dualAttendanceEnabled: Boolean = false,
@@ -49,11 +60,40 @@ class AttendancePolicyRepository @Inject constructor(
             .reference.child("owners").child(owner)
     }
 
+    /**
+     * Read the current policy from local Room cache (synchronous offline source).
+     * Returns a sensible default (geo-fencing enabled, auto-punch disabled) when
+     * Room has no cached records yet.
+     */
+    suspend fun readFromLocal(): Policy {
+        val company = runCatching { localSettingsDao.getCompanySettings() }.getOrNull()
+        val feature = runCatching { localSettingsDao.getFeatureSettings() }.getOrNull()
+        return Policy(
+            geoFencingEnabled = feature?.enableGeoFencing ?: true,
+            dualAttendanceEnabled = feature?.enableDualAttendance ?: false,
+            automaticGeofencePunchingEnabled = feature?.enableAutomaticGeofencePunching ?: false,
+            officeLatitude = company?.officeLatitude ?: 0.0,
+            officeLongitude = company?.officeLongitude ?: 0.0,
+            geoRadiusMeters = company?.geoRadiusMeters ?: 0
+        ).normalized()
+    }
+
     fun observe(): Flow<Policy> = callbackFlow {
         val owner = ownerRef()
         if (owner == null) {
-            trySend(Policy())
-            close()
+            // Firebase owner UID not yet available (cold-start / session not ready).
+            // Emit the Room-cached policy immediately so geofence auto-punch works
+            // standalone without needing a Firebase session.
+            // IMPORTANT: Never call close() here — the flow MUST stay open so
+            // GeofenceAutoPunchCoordinator's stateIn(Eagerly) does not terminate
+            // the channel permanently.
+            val localPolicy = runCatching { readFromLocal() }.getOrDefault(Policy())
+            Log.d(TAG, "ownerRef null — emitting Room-cached policy: " +
+                "geoFence=${localPolicy.geoFencingEnabled}, " +
+                "autoPunch=${localPolicy.automaticGeofencePunchingEnabled}, " +
+                "radius=${localPolicy.geoRadiusMeters}")
+            trySend(localPolicy)
+            awaitClose()
             return@callbackFlow
         }
 
@@ -93,10 +133,15 @@ class AttendancePolicyRepository @Inject constructor(
     }.distinctUntilChanged()
 
     suspend fun read(): Policy {
-        val owner = ownerRef() ?: return Policy()
-        val feature = owner.child("feature_settings").child("1").get().await()
-        val company = owner.child("company_settings").child("1").get().await()
-        return buildPolicy(feature, company).normalized()
+        val owner = ownerRef() ?: return readFromLocal()
+        return runCatching {
+            val feature = owner.child("feature_settings").child("1").get().await()
+            val company = owner.child("company_settings").child("1").get().await()
+            buildPolicy(feature, company).normalized()
+        }.getOrElse {
+            Log.w(TAG, "Firebase read failed, falling back to Room cache", it)
+            readFromLocal()
+        }
     }
 
     private fun buildPolicy(feature: DataSnapshot?, company: DataSnapshot?): Policy {

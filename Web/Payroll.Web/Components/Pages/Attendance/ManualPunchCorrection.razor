@@ -340,6 +340,13 @@ else
                 .Select(leave => $"{leave.EmployeeID}_{leave.LeaveDate!.Value.Date:yyyyMMdd}")
                 .ToHashSet(StringComparer.Ordinal);
 
+            var holidayDates = (await dbContext.CompanyHolidays
+                .AsNoTracking()
+                .Where(h => h.HolidayDate >= DateOnly.FromDateTime(queryStartDate) && h.HolidayDate <= DateOnly.FromDateTime(queryEndDate))
+                .Select(h => h.HolidayDate)
+                .ToListAsync())
+                .ToHashSet();
+
             // 3. Get employees to check for missing/odd punches.
             var targetEmployees = selectedEmployeeId > 0
                 ? employeeList?.Where(e => e.EmployeeID == selectedEmployeeId).ToList()
@@ -352,13 +359,19 @@ else
             // 4. Iterate dates and employees to find genuine punch issues.
             for (var day = queryStartDate; day <= queryEndDate; day = day.AddDays(1))
             {
-                if (day.DayOfWeek == DayOfWeek.Sunday) continue; // Existing behavior preserved.
+                var dayDateOnly = DateOnly.FromDateTime(day);
+                var isHoliday = holidayDates.Contains(dayDateOnly);
 
                 foreach (var emp in targetEmployees)
                 {
                     // Skip if not employed on this date.
                     if (emp.HireDate.HasValue && day < emp.HireDate.Value.ToDateTime(TimeOnly.MinValue)) continue;
                     if (emp.TerminationDate.HasValue && day > emp.TerminationDate.Value.ToDateTime(TimeOnly.MaxValue)) continue;
+
+                    // Weekly off check based on this specific employee's configured record (default to Sunday if unset)
+                    bool isWeeklyOff = emp.CompOffDayOfWeek.HasValue
+                        ? day.DayOfWeek == emp.CompOffDayOfWeek.Value
+                        : day.DayOfWeek == DayOfWeek.Sunday;
 
                     // IMPORTANT: An approved full-day leave is a valid attendance
                     // state, not a missing-punch problem.
@@ -371,8 +384,13 @@ else
                         .OrderBy(l => l.PunchTime)
                         .ToList();
 
+                    // If it is the employee's weekly off or a company holiday, having 0 punches is normal (not a missing punch issue)
+                    if ((isWeeklyOff || isHoliday) && punches.Count == 0)
+                        continue;
+
                     // Existing correction rules preserved:
                     // 0 punches = missing all punches
+                    // odd punches = incomplete/mismatch
                     // odd punches = incomplete/mismatch
                     if (punches.Count == 0 || punches.Count % 2 != 0)
                     {

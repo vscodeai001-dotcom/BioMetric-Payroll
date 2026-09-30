@@ -921,35 +921,40 @@ public class GeoLocationService
 
             if (isContinuous)
             {
-                // In continuous shift mode (or overnight shift), check the most recent punch within the last 24 hours
+                // In continuous shift mode (or overnight shift), check the most recent punch within the last 24 hours.
+                // Use IsInType/IsOutType so aliases like "Punch", "CheckIn", "AUTO_IN" are recognised.
                 var windowStart = punchTime.AddHours(-24);
                 var recentPunches = await db.AttendanceLogs
                     .AsNoTracking()
                     .Where(x => x.EmployeeID == employeeId &&
                                 x.PunchTime >= windowStart &&
-                                x.PunchTime <= punchTime &&
-                                (x.LogType == "IN" || x.LogType == "OUT"))
+                                x.PunchTime <= punchTime)
                     .OrderByDescending(x => x.PunchTime)
                     .ThenByDescending(x => x.LogID)
-                    .Take(1)
                     .ToListAsync();
 
-                if (recentPunches.Count > 0)
+                // Filter to canonical IN/OUT after EF materialises results (IsInType is not translatable to SQL)
+                var recentValid = recentPunches
+                    .Where(x => IsInType(x.LogType) || IsOutType(x.LogType))
+                    .Take(1)
+                    .ToList();
+
+                if (recentValid.Count > 0)
                 {
-                    attendanceCurrentlyOpen = string.Equals(recentPunches[0].LogType, "IN", StringComparison.OrdinalIgnoreCase);
+                    attendanceCurrentlyOpen = IsInType(recentValid[0].LogType);
                 }
             }
             else
             {
-                // Standard Single Day Shift mode: check punches belonging to today's business day
+                // Standard Single Day Shift mode: check punches belonging to today's business day.
+                // Use IsInType/IsOutType so aliases like "Punch", "CheckIn", "AUTO_IN" are recognised.
                 var validPunches = todaysPunches
-                    .Where(p => string.Equals(p.LogType, "IN", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(p.LogType, "OUT", StringComparison.OrdinalIgnoreCase))
+                    .Where(p => IsInType(p.LogType) || IsOutType(p.LogType))
                     .ToList();
 
                 if (validPunches.Count > 0)
                 {
-                    attendanceCurrentlyOpen = string.Equals(validPunches.Last().LogType, "IN", StringComparison.OrdinalIgnoreCase);
+                    attendanceCurrentlyOpen = IsInType(validPunches.Last().LogType);
                 }
             }
             // If this is an INSIDE -> INSIDE fix (neither transition nor initial inside):
@@ -1004,6 +1009,34 @@ public class GeoLocationService
 
                 await transaction.CommitAsync();
                 return true;
+            }
+
+            // 5-minute IN guard: cross-device safety net.
+            // If an IN punch (any LogType alias) was created within the last 5 minutes,
+            // skip creating another IN even if the parity check above passed
+            // (can happen when Android auto-punch fires concurrently and its "IN" type
+            // was not yet normalised at parity-check time).
+            if (currentLocationState) // i.e. generating an IN punch
+            {
+                var recentInPunch = todaysPunches
+                    .Where(p => IsInType(p.LogType))
+                    .Where(p => Math.Abs((p.PunchTime - punchTime).TotalSeconds) <= 300) // 5 minutes
+                    .OrderByDescending(p => p.PunchTime)
+                    .FirstOrDefault();
+
+                if (recentInPunch != null)
+                {
+                    _logger.LogInformation(
+                        "Automatic geofence IN skipped — an IN punch already exists within 5 minutes. " +
+                        "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
+                        employeeId,
+                        recentInPunch.LogID,
+                        recentInPunch.DeviceID,
+                        recentInPunch.PunchTime);
+
+                    await transaction.CommitAsync();
+                    return true;
+                }
             }
 
             var log = new AttendanceLog
@@ -1167,6 +1200,35 @@ public class GeoLocationService
             device.StartsWith("ZKTeco_", StringComparison.OrdinalIgnoreCase) ||
             device.Equals("MobileWeb", StringComparison.OrdinalIgnoreCase) ||
             device.Equals("Android", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="logType"/> represents any form of check-IN punch.
+    /// Covers all aliases used by Web, Android, biometric machine, and Firebase sync:
+    /// "IN", "CHECKIN", "CHECK_IN", "Punch" (Web manual default), and "AUTO_IN" prefixed.
+    /// </summary>
+    private static bool IsInType(string? logType)
+    {
+        if (string.IsNullOrWhiteSpace(logType)) return false;
+        var t = logType.Trim();
+        return string.Equals(t, "IN", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "CHECKIN", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "CHECK_IN", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "Punch", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("AUTO_IN", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns true when <paramref name="logType"/> represents any form of check-OUT punch.
+    /// </summary>
+    private static bool IsOutType(string? logType)
+    {
+        if (string.IsNullOrWhiteSpace(logType)) return false;
+        var t = logType.Trim();
+        return string.Equals(t, "OUT", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "CHECKOUT", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(t, "CHECK_OUT", StringComparison.OrdinalIgnoreCase)
+            || t.StartsWith("AUTO_OUT", StringComparison.OrdinalIgnoreCase);
     }
 
     private static Task AcquireAttendanceAdvisoryLockAsync(

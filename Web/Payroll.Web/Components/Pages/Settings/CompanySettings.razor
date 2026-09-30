@@ -479,7 +479,13 @@ else
                         ["stayDwellMinutes"] = settings.StayDwellMinutes,
                         ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters,
                         ["useSpeedBasedMarkers"] = settings.UseSpeedBasedMarkers,
-                        ["use_speed_based_markers"] = settings.UseSpeedBasedMarkers
+                        ["use_speed_based_markers"] = settings.UseSpeedBasedMarkers,
+                        ["enableEmailNotifications"] = settings.EnableEmailNotifications,
+                        ["smtpHost"] = settings.SmtpHost,
+                        ["smtpPort"] = settings.SmtpPort,
+                        ["smtpFromEmail"] = settings.SmtpFromEmail,
+                        ["smtpUser"] = settings.SmtpUser,
+                        ["smtpPass"] = settings.SmtpPass
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                 }
