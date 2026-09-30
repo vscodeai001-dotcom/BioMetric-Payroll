@@ -145,28 +145,31 @@ class AdminManualPunchCorrectionActivity : MotionBaseActivity() {
             
             val tempCal = startDate.clone() as Calendar
             while (tempCal.timeInMillis <= endDate.timeInMillis) {
-                // Rule: Skip Sundays (or use company settings if available)
-                if (tempCal[Calendar.DAY_OF_WEEK] != Calendar.SUNDAY) {
-                    val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(tempCal.time)
-                    val displayDate = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(tempCal.time)
-                    val dayStart = DateRangeUtil.getStartOfDay(tempCal.timeInMillis)
-                    val dayEnd = DateRangeUtil.getEndOfDay(tempCal.timeInMillis)
-                    
-                    targetEmployees.forEach { emp ->
-                        val dayPunches = allPunches.filter { it.staffId == emp.employeeId && it.timestamp in dayStart..dayEnd }
-                            .sortedBy { it.timestamp }
-                        
-                        // Rule: Missing or Incomplete (Odd count)
-                        if (dayPunches.isEmpty() || dayPunches.size % 2 != 0) {
-                            Log.i("PunchCorrection", "Issue for ${emp.name} on $dateStr (Count: ${dayPunches.size})")
-                            newProblems.add(ProblemDayInfo(
-                                employee = emp,
-                                date = tempCal.timeInMillis,
-                                dateStr = dateStr,
-                                displayDate = displayDate,
-                                punches = dayPunches.toMutableList()
-                            ))
-                        }
+                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(tempCal.time)
+                val displayDate = SimpleDateFormat("EEEE, dd MMMM yyyy", Locale.getDefault()).format(tempCal.time)
+                val dayStart = DateRangeUtil.getStartOfDay(tempCal.timeInMillis)
+                val dayEnd = DateRangeUtil.getEndOfDay(tempCal.timeInMillis)
+                val dayOfWeek = tempCal[Calendar.DAY_OF_WEEK] // 1=Sun, 2=Mon...7=Sat
+
+                targetEmployees.forEach { emp ->
+                    // Rule: Skip employee's configured weekoff day (defaults to Sunday if unset).
+                    // Mirrors Web ManualPunchCorrection.razor line 372-374 logic exactly.
+                    val empWeekOffDay = emp.compOffDayOfWeek ?: Calendar.SUNDAY
+                    if (dayOfWeek == empWeekOffDay) return@forEach
+
+                    val dayPunches = allPunches.filter { it.staffId == emp.employeeId && it.timestamp in dayStart..dayEnd }
+                        .sortedBy { it.timestamp }
+
+                    // Rule: Missing or Incomplete (Odd count)
+                    if (dayPunches.isEmpty() || dayPunches.size % 2 != 0) {
+                        Log.i("PunchCorrection", "Issue for ${emp.name} on $dateStr (Count: ${dayPunches.size})")
+                        newProblems.add(ProblemDayInfo(
+                            employee = emp,
+                            date = tempCal.timeInMillis,
+                            dateStr = dateStr,
+                            displayDate = displayDate,
+                            punches = dayPunches.toMutableList()
+                        ))
                     }
                 }
                 tempCal.add(Calendar.DAY_OF_YEAR, 1)

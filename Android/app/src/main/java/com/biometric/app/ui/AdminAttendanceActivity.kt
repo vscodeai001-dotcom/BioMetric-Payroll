@@ -115,8 +115,11 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 )
             }
         }
+        adapter.setHasStableIds(true)
         binding.rvAttendance.layoutManager = LinearLayoutManager(this)
         binding.rvAttendance.adapter = adapter
+        binding.rvAttendance.setItemViewCacheSize(20)
+        binding.rvAttendance.recycledViewPool.setMaxRecycledViews(0, 20)
     }
 
     private fun setupStatusFilterChips() {
@@ -185,19 +188,49 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         }
     }
 
+    private var renderJob: kotlinx.coroutines.Job? = null
+
     private fun render() {
         if (!::adapter.isInitialized) return
+        // Debounce: cancel any pending render within 80ms and re-schedule.
+        // This merges multiple rapid Flow emissions (employees, punches, summaries) into
+        // a single render pass, preventing main-thread overload on startup/wipe.
+        renderJob?.cancel()
+        renderJob = lifecycleScope.launch {
+            kotlinx.coroutines.delay(80)
+            doRender()
+        }
+    }
+
+    private suspend fun doRender() {
         binding.progress.isVisible = false
 
         val f = isoDateFormat.format(fromCalendar.time)
         val t = isoDateFormat.format(toCalendar.time)
 
+        // Snapshot all StateFlow data on Main, then crunch off Main
         val employees = sharedViewModel.allEmployees.value.associateBy { it.employeeId.toIntOrNull() ?: -1 }
         val summariesInRange = sharedViewModel.allDailySummaries.value.filter {
             it.shiftDate in f..t && (employeeFilterId == null || it.employeeId == employeeFilterId)
         }
         val allPunches = sharedViewModel.allAttendancePunches.value
         val allAttendance = sharedViewModel.allAttendance.value
+
+        // ─── Heavy computation on background thread ───────────────────────────
+        data class RenderResult(
+            val filteredRows: List<AdminAttendanceRow>,
+            val employeesProcessed: Int,
+            val scheduledMs: Long,
+            val workedHours: Double,
+            val otMs: Long,
+            val penaltyMs: Long,
+            val latenessMs: Long,
+            val breakPenaltyMs: Long,
+            val isEmpty: Boolean,
+            val summaryText: String
+        )
+
+        val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
 
         // Map existing summary row objects
         val allRows = summariesInRange.map { s ->
@@ -253,13 +286,25 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 "⏰ Shift: Flexible / Unscheduled"
             }
 
+            // FIX: If daily_summaries still shows "Present" but actual punches are gone (post-wipe
+            // stale data scenario), override the status so UI matches reality.
+            val effectiveStatus = when {
+                resolvedPunches.isNotEmpty() -> s.status.ifBlank { "Present" }
+                s.status.equals("Weekly Off", ignoreCase = true) ||
+                s.status.equals("WeeklyOff", ignoreCase = true) ||
+                s.status.equals("Week Off", ignoreCase = true) -> s.status
+                s.status.equals("Holiday", ignoreCase = true) -> s.status
+                s.status.equals("Leave", ignoreCase = true) -> s.status
+                else -> "Absent" // no punches → absent (overrides stale "Present")
+            }
+
             AdminAttendanceRow(
                 employeeID = s.employeeId,
                 employeeName = emp?.name ?: "Employee #${s.employeeId}",
                 date = s.shiftDate,
                 formattedDate = formattedDate,
-                status = s.status.ifBlank { "Absent" },
-                workedHours = s.earnedStandardHours,
+                status = effectiveStatus,
+                workedHours = if (resolvedPunches.isEmpty()) 0.0 else s.earnedStandardHours,
                 overtimeMinutes = s.totalOvertimeMs / 60000.0,
                 penaltyMinutes = s.totalPenaltyMs / 60000.0,
                 latenessMinutes = s.totalLatenessMs / 60000.0,
@@ -413,14 +458,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }
         val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
 
-        binding.tvScheduled.text = formatDurationMs(scheduledMs)
-        binding.tvWorked.text = formatWorkedHours(workedHours)
-        binding.tvOvertime.text = formatDurationMs(otMs)
-        binding.tvPenalty.text = formatDurationMs(penaltyMs)
-        binding.tvLateness.text = formatDurationMs(latenessMs)
-        binding.tvBreakPenalty.text = formatDurationMs(breakPenaltyMs)
-
-        binding.tvSummary.text = if (combinedRows.isEmpty()) {
+        val summaryText = if (combinedRows.isEmpty()) {
             "No attendance logs recorded for selected period"
         } else {
             "👥 $employeesProcessed employees • ⏱️ Worked ${formatWorkedHours(workedHours)} • 📅 Scheduled ${formatDurationMs(scheduledMs)}"
@@ -435,10 +473,23 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             else -> combinedRows
         }.sortedWith(compareByDescending<AdminAttendanceRow> { it.date }.thenBy { it.employeeName })
 
-        adapter.submit(filteredRows)
-        binding.llEmptyState.isVisible = filteredRows.isEmpty()
-        binding.rvAttendance.isVisible = filteredRows.isNotEmpty()
+        RenderResult(filteredRows, employeesProcessed, scheduledMs, workedHours, otMs, penaltyMs, latenessMs, breakPenaltyMs, filteredRows.isEmpty(), summaryText)
+        } // end withContext(Default)
+
+        // ─── UI updates on Main thread only ────────────────────────────────────
+        binding.tvScheduled.text = formatDurationMs(result.scheduledMs)
+        binding.tvWorked.text = formatWorkedHours(result.workedHours)
+        binding.tvOvertime.text = formatDurationMs(result.otMs)
+        binding.tvPenalty.text = formatDurationMs(result.penaltyMs)
+        binding.tvLateness.text = formatDurationMs(result.latenessMs)
+        binding.tvBreakPenalty.text = formatDurationMs(result.breakPenaltyMs)
+        binding.tvSummary.text = result.summaryText
+
+        adapter.submit(result.filteredRows)
+        binding.llEmptyState.isVisible = result.isEmpty
+        binding.rvAttendance.isVisible = !result.isEmpty
     }
+
 
     private fun formatDurationMs(ms: Long): String {
         val totalMinutes = ms / 60000
@@ -490,9 +541,21 @@ class AdminAttendanceActivity : MotionBaseActivity() {
         private val data = mutableListOf<AdminAttendanceRow>()
 
         fun submit(rows: List<AdminAttendanceRow>) {
+            val oldData = data.toList()
+            val newData = rows.toList()
+            val diffResult = androidx.recyclerview.widget.DiffUtil.calculateDiff(object : androidx.recyclerview.widget.DiffUtil.Callback() {
+                override fun getOldListSize() = oldData.size
+                override fun getNewListSize() = newData.size
+                override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                    val o = oldData[oldItemPosition]; val n = newData[newItemPosition]
+                    return o.employeeID == n.employeeID && o.date == n.date
+                }
+                override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int) =
+                    oldData[oldItemPosition] == newData[newItemPosition]
+            })
             data.clear()
-            data.addAll(rows)
-            notifyDataSetChanged()
+            data.addAll(newData)
+            diffResult.dispatchUpdatesTo(this)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -506,6 +569,11 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
         override fun onBindViewHolder(holder: Holder, position: Int) {
             holder.bind(data[position])
+        }
+
+        override fun getItemId(position: Int): Long {
+            val row = data[position]
+            return (row.employeeID.toLong() shl 32) or (row.date.hashCode().toLong() and 0xFFFFFFFFL)
         }
 
         override fun getItemCount() = data.size
