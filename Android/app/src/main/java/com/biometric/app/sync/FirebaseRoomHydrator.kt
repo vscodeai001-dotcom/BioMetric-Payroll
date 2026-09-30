@@ -22,6 +22,7 @@ import com.biometric.app.data.dao.LocalShopDao
 import com.biometric.app.data.MobileSessionStore
 import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.dao.LocalTaxDeclarationDao
+import com.biometric.app.data.AppDatabase
 import com.biometric.app.data.entity.*
 import com.google.firebase.database.*
 import com.google.gson.Gson
@@ -44,6 +45,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class FirebaseRoomHydrator @Inject constructor(
+    private val appDatabase: AppDatabase,
     private val firebaseSync: FirebaseSyncManager,
     private val shopDao: LocalShopDao,
     private val sessionStore: MobileSessionStore,
@@ -161,6 +163,80 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             observeValue("feature_settings", existing = { emptyList() }, onDelete = { }) { 
                 if (it.key == "1") settingsDao.upsertFeatureSettings(it.toLocalFeatureSettings())
+            }
+
+            observeWipeEvents()
+        }
+    }
+
+    @Volatile private var lastProcessedWipeTimestamp: Long = System.currentTimeMillis() - 10_000L
+
+    private fun observeWipeEvents() {
+        val ownerRef = firebaseSync.getOwnerRef() ?: return
+        val wipeRef = ownerRef.child("system_events").child("wipe")
+        wipeRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (!snapshot.exists()) return
+                val timestamp = snapshot.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
+                val wipeType = snapshot.child("wipeType").value?.toString()?.uppercase() ?: "PARTIAL"
+                if (timestamp > lastProcessedWipeTimestamp) {
+                    lastProcessedWipeTimestamp = timestamp
+                    Log.i("FirebaseRoomHydrator", "Real-time WIPE event received from cloud: type=$wipeType, ts=$timestamp")
+                    scope.launch {
+                        handleRealtimeWipe(isFull = (wipeType == "FULL"))
+                    }
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.w("FirebaseRoomHydrator", "Wipe event listener cancelled: ${error.message}")
+            }
+        })
+    }
+
+    private suspend fun handleRealtimeWipe(isFull: Boolean) {
+        withContext(Dispatchers.IO) {
+            writeMutex.withLock {
+                try {
+                    val db = appDatabase.openHelper.writableDatabase
+                    val operationalTables = listOf(
+                        "local_attendance",
+                        "local_attendance_punches",
+                        "daily_summaries",
+                        "payroll_history",
+                        "local_advance_payments",
+                        "local_bonus_records",
+                        "local_leave_requests",
+                        "local_resignation_requests",
+                        "local_regularization_requests",
+                        "shift_schedules",
+                        "local_tax_declarations",
+                        "local_fbp_declarations",
+                        "local_fbp_components",
+                        "local_salary_snapshots",
+                        "local_audit_logs",
+                        "offline_tracking_events"
+                    )
+                    for (t in operationalTables) {
+                        try { db.execSQL("DELETE FROM $t") } catch (e: Exception) { }
+                    }
+
+                    if (isFull) {
+                        val masterTables = listOf(
+                            "local_employees",
+                            "local_employee_history",
+                            "local_shops",
+                            "local_shop_closed_days"
+                        )
+                        for (t in masterTables) {
+                            try { db.execSQL("DELETE FROM $t") } catch (e: Exception) { }
+                        }
+                    }
+
+                    Log.i("FirebaseRoomHydrator", "Local database cleared in response to remote wipe event (isFull=$isFull)")
+                } catch (e: Exception) {
+                    Log.e("FirebaseRoomHydrator", "Failed to clear local Room on wipe event", e)
+                }
             }
         }
     }
@@ -600,7 +676,7 @@ class FirebaseRoomHydrator @Inject constructor(
         enableSandwichRule = b("enableSandwichRule"),
         enableLeaveManagement = b("enableLeaveManagement"),
         enableTdsDeduction = b("enableTdsDeduction"),
-        autoBackupIntervalHours = i("autoBackupIntervalHours").takeIf { it > 0 } ?: 24,
+        autoBackupIntervalHours = i("autoBackupIntervalHours").takeIf { it >= 0 } ?: 24,
         stayDwellMinutes = i("stayDwellMinutes").takeIf { it > 0 } ?: 10,
         stayClusterRadiusMeters = i("stayClusterRadiusMeters").takeIf { it > 0 } ?: 50,
         useSpeedBasedMarkers = b("useSpeedBasedMarkers") || b("use_speed_based_markers"),

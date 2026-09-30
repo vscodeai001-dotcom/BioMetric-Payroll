@@ -204,9 +204,11 @@ public sealed class DatabaseBackupRestoreService
             var sanitized = Path.GetFileName(fileName);
             var dbPath = Path.Combine(backupDir, sanitized);
             var metaPath = Path.ChangeExtension(dbPath, ".json");
+            var zipPath = Path.ChangeExtension(dbPath, ".zip");
 
             if (File.Exists(dbPath)) File.Delete(dbPath);
             if (File.Exists(metaPath)) File.Delete(metaPath);
+            if (File.Exists(zipPath)) File.Delete(zipPath);
 
             _logger.LogInformation("Deleted backup {FileName}", sanitized);
             return Task.FromResult(true);
@@ -315,6 +317,22 @@ public sealed class DatabaseBackupRestoreService
             // 4. Invalidate global caches
             await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
 
+            // 5. Broadcast real-time wipe event to Firebase for all Android clients & other Web sessions
+            try
+            {
+                await _firebase.SetOwnerRecordAsync(targetTenantId, "system_events", "wipe", new
+                {
+                    wipeType = "PARTIAL",
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    tenantId = targetTenantId,
+                    source = "WebAdmin"
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast partial wipe event to Firebase.");
+            }
+
             return new WipeResult
             {
                 Success = firebaseOk,
@@ -366,6 +384,22 @@ public sealed class DatabaseBackupRestoreService
             // 4. Invalidate global caches
             await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
 
+            // 5. Broadcast real-time wipe event to Firebase for all Android clients & other Web sessions
+            try
+            {
+                await _firebase.SetOwnerRecordAsync(targetTenantId, "system_events", "wipe", new
+                {
+                    wipeType = "FULL",
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                    tenantId = targetTenantId,
+                    source = "WebAdmin"
+                }, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast full wipe event to Firebase.");
+            }
+
             return new WipeResult
             {
                 Success = firebaseOk,
@@ -385,7 +419,7 @@ public sealed class DatabaseBackupRestoreService
         }
     }
 
-    private async Task WipeLocalOperationalDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
+    public async Task WipeLocalOperationalDataForTenantAsync(string tenantId, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var isSqlite = db.Database.IsSqlite();
@@ -585,7 +619,7 @@ public sealed class DatabaseBackupRestoreService
         }
     }
 
-    private async Task WipeLocalAllDataForTenantAsync(string tenantId, CancellationToken cancellationToken)
+    public async Task WipeLocalAllDataForTenantAsync(string tenantId, CancellationToken cancellationToken = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var isSqlite = db.Database.IsSqlite();
@@ -643,15 +677,16 @@ public sealed class DatabaseBackupRestoreService
     }
 
     /// <summary>
-    /// Keeps the last keepCount hourly auto-backups, deleting older ones.
+    /// Keeps the last keepCount auto-backups, deleting older ones.
     /// </summary>
-    public async Task PruneOldAutoBackupsAsync(int keepCount = 48, CancellationToken cancellationToken = default)
+    public async Task PruneOldAutoBackupsAsync(int keepCount = 14, CancellationToken cancellationToken = default)
     {
         try
         {
             var backups = await GetBackupsAsync(cancellationToken);
             var autoBackups = backups
-                .Where(x => x.TriggerType.Equals("HourlyAuto", StringComparison.OrdinalIgnoreCase))
+                .Where(x => x.TriggerType.Contains("auto", StringComparison.OrdinalIgnoreCase) ||
+                            x.FileName.Contains("auto", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(x => x.CreatedAtUtc)
                 .Skip(keepCount)
                 .ToList();
@@ -659,6 +694,19 @@ public sealed class DatabaseBackupRestoreService
             foreach (var old in autoBackups)
             {
                 await DeleteBackupAsync(old.FileName);
+            }
+
+            // Also prune old company_backup_*.json
+            var backupDir = GetBackupDirectory();
+            var companyBackupFiles = Directory.GetFiles(backupDir, "company_backup_*.json")
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.CreationTimeUtc)
+                .Skip(keepCount)
+                .ToList();
+
+            foreach (var oldJson in companyBackupFiles)
+            {
+                try { oldJson.Delete(); } catch { }
             }
         }
         catch (Exception ex)

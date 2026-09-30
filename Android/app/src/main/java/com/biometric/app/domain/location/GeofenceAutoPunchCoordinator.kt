@@ -18,6 +18,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -53,6 +56,7 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     private val evalMutex = Mutex()
     private var lastEvaluatedInside: Boolean? = null
     private var lastPunchTimeMs: Long = 0L
+    private var lastLocation: Location? = null
 
     /**
      * Track last known radius to detect admin geofence radius changes.
@@ -80,6 +84,25 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 started = SharingStarted.Eagerly,
                 initialValue = null
             )
+
+    init {
+        policyScope.launch {
+            cachedPolicy.collect { policy ->
+                val p = policy?.normalized()
+                if (p != null && p.geoRadiusMeters > 0 && p.officeLatitude != 0.0) {
+                    val currentRadius = p.geoRadiusMeters
+                    if (lastKnownRadiusMeters != 0 && lastKnownRadiusMeters != currentRadius) {
+                        Log.i(TAG, "Policy radius changed ($lastKnownRadiusMeters -> $currentRadius m). Triggering immediate re-evaluation.")
+                        evalMutex.withLock { lastEvaluatedInside = null }
+                        lastKnownRadiusMeters = currentRadius
+                        lastLocation?.let { loc ->
+                            evaluateAutoPunch(loc)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     companion object {
         private const val TAG = "GeofenceAutoPunch"
@@ -116,6 +139,7 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     suspend fun evaluateAutoPunch(location: Location) {
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return
+        lastLocation = location
 
         // Resolve policy — prefer the hot StateFlow cache; fall back to Room if the
         // cached value is still null (race between Eagerly stateIn and cold-start)
@@ -175,25 +199,6 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
         val isInside = distanceMeters <= policy.geoRadiusMeters
 
         evalMutex.withLock {
-            val prevInside = lastEvaluatedInside
-            val isTransition = prevInside != null && prevInside != isInside
-            val isInitialInside = prevInside == null && isInside
-
-            // OUTSIDE -> OUTSIDE is an immediate no-op
-            if (!isTransition && !isInitialInside && !isInside) {
-                lastEvaluatedInside = false
-                return
-            }
-
-            // -----------------------------------------------------------------------
-            // Load existing punches for today from BOTH Room tables.
-            //
-            // attendance_punches — individual raw punch records (primary SSOT)
-            // attendance         — session records (checkInTime / checkOutTime)
-            //
-            // Combining both prevents a false "no open session" diagnosis when a
-            // punch originated on Web or machine and was only written to one table.
-            // -----------------------------------------------------------------------
             val staffIdStr = employeeId.toString()
 
             // 1. Raw punches from attendance_punches
@@ -221,23 +226,6 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                     (lastSession.checkOutTime == null || lastSession.checkOutTime == 0L)
                 }
                 else -> false
-            }
-
-            // INSIDE -> INSIDE rollover:
-            // If employee stayed inside across midnight (12:00 AM) into a new calendar day,
-            // today's business day has ZERO punches recorded.
-            // If today already has punches, INSIDE -> INSIDE is a no-op.
-            if (!isTransition && !isInitialInside) {
-                if (todaysPunches.isNotEmpty() || todaySessions.isNotEmpty()) {
-                    lastEvaluatedInside = true
-                    return
-                }
-            }
-
-            // Initial OUT fix never creates an OUT punch
-            if (!isInside && prevInside == null) {
-                lastEvaluatedInside = false
-                return
             }
 
             // Parity check: geofence state must not match current attendance state
@@ -320,6 +308,106 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             lastEvaluatedInside = isInside
             lastPunchTimeMs = nowMs
             Log.i(TAG, "Automatic geofence $punchType punch recorded for employee $staffIdStr (dist: ${distanceMeters.toInt()}m)")
+        }
+    }
+
+    /**
+     * Admin Rebaseline: When admin changes geofence radius/coordinates on Android,
+     * immediately evaluates all active employee live locations from Firebase SSOT.
+     * If an employee is now outside the new radius and currently has an open IN punch,
+     * an automatic OUT punch is recorded directly to Firebase and Room.
+     * Guarantees 100% standalone reliability without needing Web admin to be logged in.
+     */
+    suspend fun rebaselineAllActiveEmployees(officeLat: Double, officeLon: Double, radiusMeters: Int) {
+        if (radiusMeters <= 0 || officeLat == 0.0 || officeLon == 0.0) return
+        val owner = firebaseSync.getOwnerRef() ?: return
+        val nowMs = System.currentTimeMillis()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = istTimeZone }
+        val todayStr = sdf.format(Date(nowMs))
+
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val liveSnap = owner.child("tracking").child("live").get().await()
+                if (!liveSnap.exists()) return@runCatching
+
+                for (child in liveSnap.children) {
+                    val empId = child.child("EmployeeId").value?.toString()?.toIntOrNull()
+                        ?: child.child("employeeId").value?.toString()?.toIntOrNull()
+                        ?: child.key?.toIntOrNull()
+                        ?: continue
+                    val lat = child.child("Latitude").value?.toString()?.toDoubleOrNull()
+                        ?: child.child("latitude").value?.toString()?.toDoubleOrNull()
+                        ?: continue
+                    val lon = child.child("Longitude").value?.toString()?.toDoubleOrNull()
+                        ?: child.child("longitude").value?.toString()?.toDoubleOrNull()
+                        ?: continue
+
+                    val results = FloatArray(1)
+                    Location.distanceBetween(lat, lon, officeLat, officeLon, results)
+                    val distanceMeters = results[0]
+                    val isInside = distanceMeters <= radiusMeters
+
+                    if (!isInside) {
+                        val staffIdStr = empId.toString()
+                        val punchesSnap = owner.child("attendance_punches")
+                            .orderByChild("staffId").equalTo(staffIdStr).get().await()
+
+                        var lastPunchType: String? = null
+                        var lastPunchTime: Long = 0L
+                        if (punchesSnap.exists()) {
+                            for (p in punchesSnap.children) {
+                                val pDate = p.child("date").value?.toString() ?: ""
+                                val pTime = p.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
+                                if (pDate == todayStr || (pTime > 0 && sdf.format(Date(pTime)) == todayStr)) {
+                                    if (pTime >= lastPunchTime) {
+                                        lastPunchTime = pTime
+                                        lastPunchType = p.child("type").value?.toString()
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isCheckInType(lastPunchType)) {
+                            if (nowMs - lastPunchTime < 30_000L) continue
+
+                            val punchId = "AUTO_${empId}_${nowMs}"
+                            val punch = AttendancePunch(
+                                punchId = punchId,
+                                staffId = staffIdStr,
+                                date = todayStr,
+                                type = "OUT",
+                                timestamp = nowMs,
+                                latitude = lat,
+                                longitude = lon,
+                                accuracy = 10f,
+                                distanceFromGeofence = distanceMeters.toDouble(),
+                                deviceId = "AdminGeofenceRebaseline",
+                                source = "GEOFENCE_AUTO",
+                                status = "APPROVED"
+                            )
+                            val local = LocalAttendancePunch(
+                                punchId = punchId,
+                                staffId = staffIdStr,
+                                date = todayStr,
+                                type = "OUT",
+                                timestamp = nowMs,
+                                latitude = lat,
+                                longitude = lon,
+                                accuracy = 10f,
+                                source = "GEOFENCE_AUTO",
+                                status = "APPROVED",
+                                syncState = 0,
+                                lastModified = nowMs
+                            )
+                            localAttendancePunchDao.upsert(local)
+                            firebaseSync.pushAttendancePunch(punch)
+                            Log.i(TAG, "Rebaseline: Created auto OUT punch for employee $empId (dist: ${distanceMeters.toInt()}m > $radiusMeters m)")
+                        }
+                    }
+                }
+            }.onFailure {
+                Log.w(TAG, "Rebaseline active employees failed: ${it.message}", it)
+            }
         }
     }
 }

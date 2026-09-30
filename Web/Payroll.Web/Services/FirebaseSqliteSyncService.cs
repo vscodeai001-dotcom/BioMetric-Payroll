@@ -20,6 +20,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private readonly ILogger<FirebaseSqliteSyncService> _logger;
     private readonly FirebaseSyncWriteScope _firebaseSyncWriteScope;
     private readonly AttendanceRefreshService _refreshService;
+    private readonly long _serviceStartTimeEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    private long _lastProcessedWipeEpochMs = 0;
 
     public FirebaseSqliteSyncService(
         IServiceScopeFactory scopeFactory,
@@ -41,7 +43,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     {
         await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
 
-        var activeTenants = new System.Collections.Concurrent.ConcurrentDictionary<string, (Task OwnerTask, Task TrackingTask)>(StringComparer.OrdinalIgnoreCase);
+        var activeTenants = new System.Collections.Concurrent.ConcurrentDictionary<string, (Task OwnerTask, Task TrackingTask, Task WipeTask)>(StringComparer.OrdinalIgnoreCase);
 
         async Task StartTenantSyncAsync(string tenantId)
         {
@@ -78,8 +80,10 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 var ownerTask = RunOwnerStreamLoopAsync(tenantId, stoppingToken);
                 var trackingTask = RunGlobalStreamLoopAsync($"owners/{tenantId}/tracking/live", async (path, data, ct) =>
                     await ProcessFirebaseTrackingEventAsync(path, data, ct), stoppingToken);
+                var wipeTask = RunGlobalStreamLoopAsync($"owners/{tenantId}/system_events/wipe", async (path, data, ct) =>
+                    await ProcessFirebaseWipeEventAsync(tenantId, data, ct), stoppingToken);
 
-                activeTenants[tenantId] = (ownerTask, trackingTask);
+                activeTenants[tenantId] = (ownerTask, trackingTask, wipeTask);
             }
             catch (Exception ex)
             {
@@ -925,6 +929,67 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             : null;
     }
 
+    private static long GetLong(JsonElement element, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            if (!element.TryGetProperty(name, out var value)) continue;
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var l)) return l;
+            if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out l)) return l;
+        }
+        return 0L;
+    }
+
+    private async Task ProcessFirebaseWipeEventAsync(
+        string tenantId,
+        JsonElement? data,
+        CancellationToken ct)
+    {
+        if (!data.HasValue || data.Value.ValueKind != JsonValueKind.Object)
+            return;
+
+        var wipeType = GetString(data.Value, "wipeType", "wipe_type", "type");
+        var source = GetString(data.Value, "source") ?? "Remote";
+        var timestamp = GetLong(data.Value, "timestamp");
+
+        if (timestamp > 0 && timestamp < _serviceStartTimeEpochMs)
+            return;
+
+        if (timestamp > 0 && timestamp <= _lastProcessedWipeEpochMs)
+            return;
+
+        _lastProcessedWipeEpochMs = timestamp;
+
+        _logger.LogInformation(
+            "Processing real-time wipe event from {Source} for tenant {TenantId}: Type={WipeType}",
+            source, tenantId, wipeType);
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var backupService = scope.ServiceProvider.GetRequiredService<DatabaseBackupRestoreService>();
+
+            if (string.Equals(wipeType, "FULL", StringComparison.OrdinalIgnoreCase))
+            {
+                await backupService.WipeLocalAllDataForTenantAsync(tenantId, ct);
+            }
+            else
+            {
+                await backupService.WipeLocalOperationalDataForTenantAsync(tenantId, ct);
+            }
+
+            await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{tenantId}");
+            await _refreshService.NotifyApplicationDataChangedAsync(new[]
+            {
+                "AttendancePunch", "AttendanceLog", "LeaveRequest", "SalaryAdvance", "Employee"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process remote wipe event for tenant {TenantId}", tenantId);
+        }
+    }
+
     private async Task ProcessFirebaseMobileAuthEventAsync(
         string relativePath,
         JsonElement? eventData,
@@ -1611,7 +1676,12 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 var endGrace = GetInt(child.Value, "endTimeGraceMinutes", "EndTimeGraceMinutes");
                 if (endGrace >= 0) existingSetting.EndTimeGraceMinutes = endGrace;
                 var backup = GetInt(child.Value, "autoBackupIntervalHours", "AutoBackupIntervalHours");
-                if (backup > 0) existingSetting.AutoBackupIntervalHours = backup;
+                if (child.Value.TryGetProperty("autoBackupIntervalHours", out _) || child.Value.TryGetProperty("AutoBackupIntervalHours", out _))
+                {
+                    existingSetting.AutoBackupIntervalHours = backup;
+                }
+                var pageTrans = GetString(child.Value, "pageTransitionEffect", "page_transition_effect", "PageTransitionEffect");
+                if (!string.IsNullOrWhiteSpace(pageTrans)) existingSetting.PageTransitionEffect = pageTrans;
                 var dwell = GetInt(child.Value, "stayDwellMinutes", "StayDwellMinutes");
                 if (dwell > 0) existingSetting.StayDwellMinutes = dwell;
                 var cluster = GetInt(child.Value, "stayClusterRadiusMeters", "StayClusterRadiusMeters");

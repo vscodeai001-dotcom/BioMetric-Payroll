@@ -854,6 +854,18 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                             android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
                         }
                     }
+
+                    // Broadcast real-time wipe event to all other Android clients and Web
+                    try {
+                        root.child("system_events").child("wipe").setValue(mapOf(
+                            "wipeType" to "PARTIAL",
+                            "timestamp" to System.currentTimeMillis(),
+                            "tenantId" to activeTenantId,
+                            "source" to "AndroidAdmin"
+                        )).await()
+                    } catch (e: Exception) {
+                        android.util.Log.w("FeatureToggleManager", "Could not publish wipe event: ${e.message}")
+                    }
                 }
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Operational data wiped for $activeCompanyName! (Settings & Employees preserved)", Toast.LENGTH_LONG).show()
@@ -967,6 +979,18 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         } catch (e: Exception) {
                             android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
                         }
+                    }
+
+                    // Broadcast real-time full wipe event to all other Android clients and Web
+                    try {
+                        root.child("system_events").child("wipe").setValue(mapOf(
+                            "wipeType" to "FULL",
+                            "timestamp" to System.currentTimeMillis(),
+                            "tenantId" to activeTenantId,
+                            "source" to "AndroidAdmin"
+                        )).await()
+                    } catch (e: Exception) {
+                        android.util.Log.w("FeatureToggleManager", "Could not publish full wipe event: ${e.message}")
                     }
                 }
 

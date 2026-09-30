@@ -518,7 +518,8 @@ else
                         ["smtpPort"] = settings.SmtpPort,
                         ["smtpFromEmail"] = settings.SmtpFromEmail,
                         ["smtpUser"] = settings.SmtpUser,
-                        ["smtpPass"] = settings.SmtpPass
+                        ["smtpPass"] = settings.SmtpPass,
+                        ["pageTransitionEffect"] = settings.PageTransitionEffect
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                 }

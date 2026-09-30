@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import com.biometric.app.domain.location.GeofenceAutoPunchCoordinator
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -38,6 +39,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var trackingConfiguration: TrackingConfigurationRepository
     @Inject lateinit var sharedViewModel: SharedViewModel
+    @Inject lateinit var autoPunchCoordinator: GeofenceAutoPunchCoordinator
 
     private var localCompany = LocalCompanySettings()
     private var trackingIntervalSeconds = 30
@@ -57,12 +59,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
     )
 
     private val backupIntervalLabels = listOf(
+        "No Backup (Disabled)" to 0,
         "1 hour" to 1,
-        "6 hours" to 6,
-        "12 hours" to 12,
         "24 hours (1 Day)" to 24,
-        "48 hours (2 Days)" to 48,
-        "168 hours (7 Days)" to 168
+        "1 week (7 Days)" to 168,
+        "1 month (30 Days)" to 720
     )
 
     private val stayDwellLabels = listOf(
@@ -186,18 +187,16 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
         binding.btnGenOpenMaps.setOnClickListener {
             HapticUtil.vibrateClick(it)
-            val lat = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: 0.0
-            val lng = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: 0.0
-            val uri = if (lat != 0.0 || lng != 0.0) {
-                Uri.parse("geo:$lat,$lng?q=$lat,$lng(Office)")
-            } else {
-                Uri.parse("https://www.google.com/maps")
-            }
-            runCatching {
-                startActivity(Intent(Intent.ACTION_VIEW, uri))
-            }.onFailure {
-                Toast.makeText(this, "Unable to launch map browser", Toast.LENGTH_SHORT).show()
-            }
+            val options = arrayOf("📍 Use Current GPS & Auto-Fill Address", "🗺️ Open in Google Maps")
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("Office Location & Geofence")
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> fetchCurrentLocationAndAddress()
+                        1 -> launchMapsBrowser()
+                    }
+                }
+                .show()
         }
 
         binding.swPfEsiSystem.setOnCheckedChangeListener { _, isChecked ->
@@ -213,6 +212,88 @@ class CompanySettingsActivity : MotionBaseActivity() {
             showDeleteCompanyDialog()
         }
     }
+
+    private fun launchMapsBrowser() {
+        val lat = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: 0.0
+        val lng = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: 0.0
+        val uri = if (lat != 0.0 || lng != 0.0) {
+            Uri.parse("geo:$lat,$lng?q=$lat,$lng(Office)")
+        } else {
+            Uri.parse("https://www.google.com/maps")
+        }
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }.onFailure {
+            Toast.makeText(this, "Unable to launch map browser", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun fetchCurrentLocationAndAddress() {
+        val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
+                1001
+            )
+            return
+        }
+
+        val fusedClient = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this)
+        fusedClient.lastLocation.addOnSuccessListener { loc ->
+            if (loc != null) {
+                binding.etGenLatitude.setText(loc.latitude.toString())
+                binding.etGenLongitude.setText(loc.longitude.toString())
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        if (android.location.Geocoder.isPresent()) {
+                            val geocoder = android.location.Geocoder(this@CompanySettingsActivity, java.util.Locale.getDefault())
+                            @Suppress("DEPRECATION")
+                            val addresses = geocoder.getFromLocation(loc.latitude, loc.longitude, 1)
+                            if (!addresses.isNullOrEmpty()) {
+                                val addr = addresses[0]
+                                val line1 = addr.thoroughfare ?: addr.subLocality ?: addr.featureName ?: ""
+                                val city = addr.locality ?: addr.subAdminArea ?: ""
+                                val state = addr.adminArea ?: ""
+                                val pin = addr.postalCode ?: ""
+                                val cityStatePin = buildString {
+                                    if (city.isNotBlank()) append(city)
+                                    if (state.isNotBlank()) {
+                                        if (isNotEmpty()) append(", ")
+                                        append(state)
+                                    }
+                                    if (pin.isNotBlank()) {
+                                        if (isNotEmpty()) append(" - ")
+                                        append(pin)
+                                    }
+                                }
+                                withContext(Dispatchers.Main) {
+                                    if (line1.isNotBlank()) binding.etGenAddressLine1.setText(line1)
+                                    if (cityStatePin.isNotBlank()) binding.etGenCityStatePincode.setText(cityStatePin)
+                                    Toast.makeText(this@CompanySettingsActivity, "Location and address captured!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@CompanySettingsActivity, "GPS coordinates captured!", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } else {
+                Toast.makeText(this, "Could not acquire GPS fix. Please ensure device location is enabled.", Toast.LENGTH_SHORT).show()
+            }
+        }.addOnFailureListener {
+            Toast.makeText(this, "Failed to get location: ${it.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
 
     private fun observeProfile() {
         lifecycleScope.launch {
@@ -316,7 +397,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         d("officeLatitude")?.let { if (it != 0.0) localCompany.officeLatitude = it }
         d("officeLongitude")?.let { if (it != 0.0) localCompany.officeLongitude = it }
         i("geoRadiusMeters")?.let { if (it > 0) localCompany.geoRadiusMeters = it }
-        i("autoBackupIntervalHours")?.let { if (it > 0) localCompany.autoBackupIntervalHours = it }
+        i("autoBackupIntervalHours")?.let { localCompany.autoBackupIntervalHours = it }
         i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
         i("stayClusterRadiusMeters")?.let { if (it > 0) localCompany.stayClusterRadiusMeters = it }
         (b("useSpeedBasedMarkers") ?: b("use_speed_based_markers"))?.let { localCompany.useSpeedBasedMarkers = it }
@@ -372,7 +453,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
         // Auto-Backup Interval (Default 24)
         val backupIntervalItem = backupIntervalLabels.find { it.second == localCompany.autoBackupIntervalHours }
-            ?: backupIntervalLabels.find { it.second == 24 } ?: backupIntervalLabels[3]
+            ?: backupIntervalLabels.find { it.second == 24 } ?: backupIntervalLabels[2]
         binding.spinnerBackupInterval.setText(backupIntervalItem.first, false)
 
         // Location Stay Minimum Dwell Time (Default 10)
@@ -595,6 +676,13 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "use_speed_based_markers" to localCompany.useSpeedBasedMarkers
                         )
                         owner.child("company_settings").child("1").setValue(companyPayload).await()
+
+                        // Rebaseline all active employees against new radius/office coordinates immediately
+                        autoPunchCoordinator.rebaselineAllActiveEmployees(
+                            localCompany.officeLatitude,
+                            localCompany.officeLongitude,
+                            localCompany.geoRadiusMeters
+                        )
 
                         // Sync Admin Credentials to owner root node
                         val adminUpdates = mutableMapOf<String, Any>()

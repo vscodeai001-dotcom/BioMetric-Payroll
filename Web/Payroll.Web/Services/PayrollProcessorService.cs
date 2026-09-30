@@ -300,8 +300,10 @@ namespace Payroll.Web.Services
                         EarnedStandardHours = (decimal)totalEarnedTime.TotalHours,
                         EarnedPay = earnedPay,
                         OvertimeDuration = totalOvertime,
+                        TotalOvertimeDuration = totalOvertime,
                         OvertimePay = overtimePay,
                         PenaltyDuration = totalPenalty,
+                        TotalPenaltyDuration = totalPenalty,
                         PenaltyDeduction = penaltyDeduction,
                         AdvanceDeduction = advanceDeduction,
                         Bonus = unpaidBonusTotal,
@@ -415,8 +417,8 @@ namespace Payroll.Web.Services
 
                         AbsentDays = row.AbsentDays,
                         ManualLeaveDays = row.LeaveDays,
-                        TotalPenaltyDuration = row.TotalPenaltyDuration,
-                        TotalOvertimeDuration = row.TotalOvertimeDuration
+                        TotalPenaltyDuration = row.TotalPenaltyDuration != TimeSpan.Zero ? row.TotalPenaltyDuration : row.PenaltyDuration,
+                        TotalOvertimeDuration = row.TotalOvertimeDuration != TimeSpan.Zero ? row.TotalOvertimeDuration : row.OvertimeDuration
                     };
                     historyEntries.Add((history, row));
                 }

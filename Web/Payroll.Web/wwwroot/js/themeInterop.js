@@ -8421,3 +8421,330 @@ window.clearTenantCookie = function () {
     } catch (e) { }
 };
 
+// ============================================================
+// OFFICE GEOFENCE & LOCATION PICKER (LEAFLET + NOMINATIM)
+// ============================================================
+window.payrollGeofencePicker = {
+    map: null,
+    marker: null,
+    circle: null,
+    dotNetHelper: null,
+
+    init: async function (containerId, initialLat, initialLng, radiusMeters, dotNetHelper) {
+        this.dotNetHelper = dotNetHelper;
+        await window.loadPayrollLeaflet();
+        if (!window.L) return;
+
+        const el = document.getElementById(containerId);
+        if (!el) return;
+
+        if (this.map) {
+            try { this.map.remove(); } catch (e) { }
+            this.map = null;
+            this.marker = null;
+            this.circle = null;
+        }
+
+        const validLat = Number.isFinite(initialLat) && initialLat !== 0;
+        const validLng = Number.isFinite(initialLng) && initialLng !== 0;
+        const lat = validLat ? initialLat : 12.9716;
+        const lng = validLng ? initialLng : 80.2437;
+        const rad = Number.isFinite(radiusMeters) && radiusMeters > 0 ? radiusMeters : 100;
+
+        this.map = L.map(containerId, {
+            center: [lat, lng],
+            zoom: validLat && validLng ? 16 : 13,
+            zoomControl: true
+        });
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19
+        }).addTo(this.map);
+
+        const officeIcon = L.divIcon({
+            className: 'office-geofence-picker-pin',
+            html: '<div style="background-color: #dc3545; width: 34px; height: 34px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.35); border: 2px solid white; cursor: grab;"><span style="transform: rotate(45deg); font-size: 16px;">📍</span></div>',
+            iconSize: [34, 34],
+            iconAnchor: [17, 34],
+            popupAnchor: [0, -34]
+        });
+
+        this.marker = L.marker([lat, lng], {
+            draggable: true,
+            icon: officeIcon
+        }).addTo(this.map);
+
+        this.circle = L.circle([lat, lng], {
+            radius: rad,
+            color: '#198754',
+            fillColor: '#198754',
+            fillOpacity: 0.18,
+            weight: 2
+        }).addTo(this.map);
+
+        const self = this;
+
+        this.marker.on('drag', function (e) {
+            const pos = e.target.getLatLng();
+            self.circle.setLatLng(pos);
+        });
+
+        this.marker.on('dragend', function (e) {
+            const pos = e.target.getLatLng();
+            self.circle.setLatLng(pos);
+            self.reverseGeocode(pos.lat, pos.lng);
+        });
+
+        this.map.on('click', function (e) {
+            const pos = e.latlng;
+            self.marker.setLatLng(pos);
+            self.circle.setLatLng(pos);
+            self.reverseGeocode(pos.lat, pos.lng);
+        });
+
+        setTimeout(function () {
+            if (self.map) {
+                self.map.invalidateSize();
+                self.map.setView([lat, lng], validLat && validLng ? 16 : 13);
+            }
+        }, 250);
+
+        if (validLat && validLng) {
+            this.reverseGeocode(lat, lng);
+        }
+    },
+
+    setRadius: function (radiusMeters) {
+        if (this.circle && Number.isFinite(radiusMeters) && radiusMeters > 0) {
+            this.circle.setRadius(radiusMeters);
+        }
+    },
+
+    useCurrentLocation: function () {
+        const self = this;
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported by your browser.");
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            function (position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                if (self.map && self.marker && self.circle) {
+                    self.marker.setLatLng([lat, lng]);
+                    self.circle.setLatLng([lat, lng]);
+                    self.map.setView([lat, lng], 17);
+                    self.reverseGeocode(lat, lng);
+                }
+            },
+            function (err) {
+                console.warn("Geolocation failed", err);
+                alert("Could not fetch current GPS location: " + (err.message || "Permission denied"));
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+    },
+
+    searchLocation: async function (query) {
+        if (!query || !query.trim()) return;
+        const self = this;
+        try {
+            const resp = await fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(query.trim()) + '&addressdetails=1&limit=1', {
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data && data.length > 0) {
+                const first = data[0];
+                const lat = parseFloat(first.lat);
+                const lng = parseFloat(first.lon);
+                if (self.map && self.marker && self.circle) {
+                    self.marker.setLatLng([lat, lng]);
+                    self.circle.setLatLng([lat, lng]);
+                    self.map.setView([lat, lng], 17);
+                    self.processAddressData(lat, lng, first);
+                }
+            } else {
+                alert("Location not found. Try searching with a landmark, area or city name.");
+            }
+        } catch (e) {
+            console.error("Location search failed", e);
+        }
+    },
+
+    reverseGeocode: async function (lat, lng) {
+        const self = this;
+        try {
+            const resp = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&addressdetails=1', {
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!resp.ok) {
+                if (self.dotNetHelper) {
+                    self.dotNetHelper.invokeMethodAsync('OnLocationPinned', lat, lng, '', '');
+                }
+                return;
+            }
+            const data = await resp.json();
+            self.processAddressData(lat, lng, data);
+        } catch (e) {
+            console.warn("Reverse geocode failed", e);
+            if (self.dotNetHelper) {
+                self.dotNetHelper.invokeMethodAsync('OnLocationPinned', lat, lng, '', '');
+            }
+        }
+    },
+
+    processAddressData: function (lat, lng, data) {
+        if (!this.dotNetHelper) return;
+        const a = (data && data.address) ? data.address : {};
+
+        const lineParts = [];
+        const premises = a.building || a.house_name || a.office || a.amenity || a.commercial || a.industrial || '';
+        const houseNum = a.house_number || '';
+        const road = a.road || a.pedestrian || a.street || a.residential || a.suburb || a.neighbourhood || '';
+
+        if (premises) lineParts.push(premises);
+        if (houseNum && road) {
+            lineParts.push(houseNum + ' ' + road);
+        } else if (road) {
+            lineParts.push(road);
+        } else if (houseNum) {
+            lineParts.push(houseNum);
+        }
+
+        let addressLine1 = lineParts.join(', ');
+        if (!addressLine1 && data.display_name) {
+            const segs = data.display_name.split(',');
+            addressLine1 = (segs.length > 0 ? segs[0].trim() : '');
+        }
+
+        const city = a.city || a.town || a.village || a.suburb || a.municipality || a.county || a.state_district || '';
+        const state = a.state || a.region || '';
+        const pincode = a.postcode || '';
+
+        const cityStateParts = [];
+        if (city) cityStateParts.push(city);
+        if (state) cityStateParts.push(state);
+
+        let cityStateStr = cityStateParts.join(', ');
+        let cityStatePincode = cityStateStr;
+        if (pincode) {
+            cityStatePincode = cityStateStr ? (cityStateStr + ' - ' + pincode) : pincode;
+        }
+
+        this.dotNetHelper.invokeMethodAsync('OnLocationPinned', lat, lng, addressLine1, cityStatePincode);
+    },
+
+    destroy: function () {
+        if (this.map) {
+            try { this.map.remove(); } catch (e) { }
+            this.map = null;
+            this.marker = null;
+            this.circle = null;
+        }
+        this.dotNetHelper = null;
+    }
+};
+
+// ============================================================
+// ULTRA-FAST NAVIGATION LOADER & PROGRESS BAR
+// ============================================================
+(function () {
+    let progressTimer = null;
+    let finishTimer = null;
+    let currentProgress = 0;
+
+    function getProgressBar() {
+        return document.getElementById('payroll-top-progress-bar');
+    }
+
+    function getHeaderLoadingIndicator() {
+        return document.getElementById('payroll-header-loading-indicator');
+    }
+
+    window.startNavigationProgress = function () {
+        clearTimeout(finishTimer);
+        clearInterval(progressTimer);
+
+        const bar = getProgressBar();
+        const headerPill = getHeaderLoadingIndicator();
+        const content = document.querySelector('.page-transition-wrapper');
+
+        try {
+            const currentTitle = document.title ? document.title.replace(/^⏳\s*(Loading\.\.\.\s*\|\s*)?/, '') : 'BioMetric+Payroll';
+            document.title = '⏳ Loading... | ' + currentTitle;
+        } catch (_) { }
+
+        if (headerPill) {
+            headerPill.classList.remove('d-none');
+            headerPill.classList.add('d-inline-flex');
+        }
+
+        if (content) {
+            content.classList.add('is-navigating');
+        }
+
+        if (bar) {
+            bar.classList.remove('finishing');
+            bar.classList.add('active');
+            currentProgress = 25;
+            bar.style.width = currentProgress + '%';
+
+            progressTimer = setInterval(function () {
+                if (currentProgress < 85) {
+                    currentProgress += Math.random() * 12 + 6;
+                    if (currentProgress > 85) currentProgress = 85;
+                    bar.style.width = currentProgress + '%';
+                }
+            }, 90);
+        }
+    };
+
+    window.finishNavigationProgress = function () {
+        clearInterval(progressTimer);
+
+        const bar = getProgressBar();
+        const headerPill = getHeaderLoadingIndicator();
+        const content = document.querySelector('.page-transition-wrapper');
+
+        if (content) {
+            content.classList.remove('is-navigating');
+        }
+
+        if (headerPill) {
+            headerPill.classList.remove('d-inline-flex');
+            headerPill.classList.add('d-none');
+        }
+
+        if (bar) {
+            currentProgress = 100;
+            bar.style.width = '100%';
+            bar.classList.add('finishing');
+
+            finishTimer = setTimeout(function () {
+                bar.classList.remove('active', 'finishing');
+                bar.style.width = '0%';
+                currentProgress = 0;
+            }, 280);
+        }
+    };
+
+    document.addEventListener('click', function (e) {
+        const link = e.target.closest('a');
+        if (!link) return;
+
+        const href = link.getAttribute('href');
+        const target = link.getAttribute('target');
+
+        if (href && !href.startsWith('http') && !href.startsWith('javascript:') && !href.startsWith('#') && target !== '_blank') {
+            link.classList.add('nav-clicking');
+            setTimeout(function () { link.classList.remove('nav-clicking'); }, 300);
+            window.startNavigationProgress();
+        }
+    }, true);
+})();
+
+
+

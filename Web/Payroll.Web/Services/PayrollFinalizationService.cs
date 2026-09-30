@@ -147,7 +147,9 @@ public sealed class PayrollFinalizationService
                 D(x.PenaltyDeduction), D(x.AdvanceDeduction), D(x.Bonus), D(x.NetPayable),
                 x.LeaveDays.ToString(CultureInfo.InvariantCulture),
                 x.AbsentDays.ToString(CultureInfo.InvariantCulture),
-                Ms(x.PenaltyDuration), Ms(x.OvertimeDuration), D(x.HourlyRate),
+                Ms(x.TotalPenaltyDuration != TimeSpan.Zero ? x.TotalPenaltyDuration : x.PenaltyDuration),
+                Ms(x.TotalOvertimeDuration != TimeSpan.Zero ? x.TotalOvertimeDuration : x.OvertimeDuration),
+                D(x.HourlyRate),
                 D(x.BasicSalary), D(x.PfDeduction), D(x.EsiDeduction),
                 D(x.EmployerPfContribution), D(x.EmployerEsiContribution), D(x.PtDeduction),
                 D(x.TdsDeduction), D(x.TotalShiftAllowance)

@@ -121,5 +121,9 @@ namespace Payroll.Shared.Data
         // --- MAP MARKER DISPLAY MODE ---
         [Column("use_speed_based_markers")]
         public bool UseSpeedBasedMarkers { get; set; } = false;
+
+        // --- WEB PAGE NAVIGATION TRANSITION EFFECT ---
+        [Column("page_transition_effect")]
+        public string PageTransitionEffect { get; set; } = "Fade"; // "Fade", "SlideLeft", "SlideUp", "Zoom", "Flip", "None"
     }
 }

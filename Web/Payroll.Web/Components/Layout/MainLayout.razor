@@ -17,6 +17,7 @@
 @inject IAppModeService AppMode
 
 <div class="page">
+    <div id="payroll-top-progress-bar" class="payroll-top-progress-bar"></div>
     <div class="sidebar">
         <CascadingValue Value="settings" Name="Settings">
             <CascadingValue Value="userIsSuperAdmin" Name="IsSuperAdmin">
@@ -44,6 +45,10 @@
                             <span class="fw-bold">Offline Standalone</span>
                         </span>
                     }
+                    <div id="payroll-header-loading-indicator" class="header-nav-loading-pill d-none align-items-center gap-1.5 px-2.5 py-1 rounded-pill shadow-sm">
+                        <span class="spinner-border spinner-border-sm text-primary" style="width: 0.82rem; height: 0.82rem; border-width: 0.15em;" role="status"></span>
+                        <span class="small fw-bold text-primary" style="font-size: 0.76rem;">Loading...</span>
+                    </div>
                 </div>
 
                 <div class="auth-section d-flex align-items-center gap-2">
@@ -153,11 +158,13 @@
         </AuthorizeView>
 
         @* ============================================================
-           MAIN PAGE CONTENT
+           MAIN PAGE CONTENT (WITH USER-CONFIGURED TRANSITIONS)
            ============================================================ *@
 
         <article class="content">
-            @Body
+            <div @key="pageTransitionKey" class="page-transition-wrapper @GetTransitionClass()">
+                @Body
+            </div>
         </article>
 
         <BlazoredToasts Position="ToastPosition.BottomRight"
@@ -225,6 +232,8 @@
 @code {
     private bool isOfflineMode;
     private FeatureSettings? settings;
+    private CompanySetting? companySetting;
+    private string pageTransitionKey = Guid.NewGuid().ToString();
     private NavMenu? navMenuRef;
     private bool userIsSuperAdmin;
     private CompanyTenant? activeTenant;
@@ -234,6 +243,20 @@
     private int employeeId;
     private string? themeUserId;
     private string? persistedTheme;
+
+    private string GetTransitionClass()
+    {
+        var effect = companySetting?.PageTransitionEffect?.ToLowerInvariant() ?? "fade";
+        return effect switch
+        {
+            "slideleft" or "slide" => "page-transition-slideleft",
+            "slideup" => "page-transition-slideup",
+            "zoom" => "page-transition-zoom",
+            "flip" => "page-transition-flip",
+            "none" => "page-transition-none",
+            _ => "page-transition-fade"
+        };
+    }
 
     private void OpenCompanySwitcherModal() => showCompanySwitcherModal = true;
     private void CloseCompanySwitcherModal() => showCompanySwitcherModal = false;
@@ -326,6 +349,12 @@
     protected override async Task OnAfterRenderAsync(
         bool firstRender)
     {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("finishNavigationProgress");
+        }
+        catch { }
+
         if (!firstRender)
             return;
 
@@ -513,11 +542,15 @@
     {
         try
         {
+            pageTransitionKey = Guid.NewGuid().ToString();
             await InvokeAsync(async () =>
             {
                 await JSRuntime.InvokeVoidAsync(
                     "payrollDocumentTitle",
                     e.Location);
+                await JSRuntime.InvokeVoidAsync(
+                    "finishNavigationProgress");
+                StateHasChanged();
             });
         }
         catch (Exception ex)
@@ -543,6 +576,7 @@
         {
             settings = await TenantContext.GetActiveFeatureSettingsAsync();
             geoTrackingEnabled = settings.EnableGeoFencing;
+            companySetting = await TenantContext.GetActiveCompanySettingAsync();
         }
         catch (Exception ex)
         {

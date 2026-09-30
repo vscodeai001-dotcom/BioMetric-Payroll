@@ -459,6 +459,7 @@ public class AppDbContext
             await EnsureColumnExistsAsync(connection, "CompanySettings", "stay_dwell_minutes", "INTEGER NOT NULL DEFAULT 10", ct);
             await EnsureColumnExistsAsync(connection, "CompanySettings", "stay_cluster_radius_meters", "INTEGER NOT NULL DEFAULT 50", ct);
             await EnsureColumnExistsAsync(connection, "CompanySettings", "use_speed_based_markers", "INTEGER NOT NULL DEFAULT 0", ct);
+            await EnsureColumnExistsAsync(connection, "CompanySettings", "page_transition_effect", "TEXT DEFAULT 'Fade'", ct);
 
             // 5. Ensure missing columns on leaverequests
             await EnsureColumnExistsAsync(connection, "leaverequests", "AdminNotes", "TEXT NULL", ct);
