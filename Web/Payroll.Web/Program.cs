@@ -175,6 +175,50 @@ builder.Host.UseWindowsService();
 
 
 // ============================================================
+// DATA PROTECTION (Must precede Authentication, Identity & Antiforgery)
+// ============================================================
+
+// Configure Data Protection key storage. Prefer an application-local folder
+// inside the content root so keys persist across restarts in typical
+// hosting environments. Allow overriding via DATA_PROTECTION_PATH env var
+// for distributed setups (shared volume, etc.).
+var dataProtectionPath =
+    Environment.GetEnvironmentVariable("DATA_PROTECTION_PATH");
+
+if (string.IsNullOrWhiteSpace(dataProtectionPath))
+{
+    // container deployments commonly mount their persistent disk at
+    // /data. Prefer it when available so authentication/DataProtection keys
+    // survive an application process/container restart. Local development
+    // continues to use the project-local directory.
+    dataProtectionPath =
+        builder.Environment.IsProduction() && Directory.Exists("/data")
+            ? "/data/dataprotection"
+            : Path.Combine(builder.Environment.ContentRootPath, "dataprotection");
+}
+
+try
+{
+    // Ensure the directory exists and is writable
+    if (!Directory.Exists(dataProtectionPath))
+    {
+        Directory.CreateDirectory(dataProtectionPath);
+    }
+
+    builder.Services.AddDataProtection()
+        .SetApplicationName("BioMetricPayroll")
+        .SetDefaultKeyLifetime(TimeSpan.FromDays(365))
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
+}
+catch (Exception dpEx)
+{
+    // If persisting to file system fails fall back to default in-memory keys
+    // but log the error so operators can fix permissions or volume mounts.
+    Console.WriteLine($"Data Protection key storage configuration failed. Using default in-memory storage. Path: {dataProtectionPath}. Error: {dpEx.Message}");
+}
+
+
+// ============================================================
 // SIGNALR
 // ============================================================
 
@@ -615,67 +659,12 @@ builder.Services.AddScoped<
     EmployeeSingleSessionSignInManager>();
 
 
-// ============================================================
-// DATA PROTECTION
-// ============================================================
-//
-// IMPORTANT FOR PRODUCTION / CONTAINERS:
-//
-// ASP.NET Core Data Protection is used for:
-// - Authentication cookies
-// - Protected claims
-// - CSRF tokens
-// - Session data
-//
-// On container restart, ephemeral keys cause authentication failures.
-//
-// CONFIGURATION:
-// 1. Key storage: Persistent file system (e.g., /data volume)
-// 2. Key encryption: Environment variable (optional)
-//
-// For Docker/hosting platform:
-// - Mount a persistent volume at /data/dataprotection
-// - Container automatically uses this for keys
-// - Keys survive container restarts
-//
 
-// Configure Data Protection key storage. Prefer an application-local folder
-// inside the content root so keys persist across restarts in typical
-// hosting environments. Allow overriding via DATA_PROTECTION_PATH env var
-// for distributed setups (shared volume, etc.).
-var dataProtectionPath =
-    Environment.GetEnvironmentVariable("DATA_PROTECTION_PATH");
 
-if (string.IsNullOrWhiteSpace(dataProtectionPath))
-{
-    // container deployments commonly mount their persistent disk at
-    // /data. Prefer it when available so authentication/DataProtection keys
-    // survive an application process/container restart. Local development
-    // continues to use the project-local directory.
-    dataProtectionPath =
-        builder.Environment.IsProduction() && Directory.Exists("/data")
-            ? "/data/dataprotection"
-            : Path.Combine(builder.Environment.ContentRootPath, "dataprotection");
-}
 
-try
-{
-    // Ensure the directory exists and is writable
-    if (!Directory.Exists(dataProtectionPath))
-    {
-        Directory.CreateDirectory(dataProtectionPath);
-    }
 
-    builder.Services.AddDataProtection()
-        .SetApplicationName("BioMetricPayroll")
-        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath));
-}
-catch (Exception dpEx)
-{
-    // If persisting to file system fails fall back to default in-memory keys
-    // but log the error so operators can fix permissions or volume mounts.
-    Console.WriteLine($"Data Protection key storage configuration failed. Using default in-memory storage. Path: {dataProtectionPath}. Error: {dpEx.Message}");
-}
+
+
 
 
 // ============================================================

@@ -250,18 +250,21 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             // -------------------------------------------------------------------
             // 5-minute IN guard — prevent a second IN punch within 5 minutes of
             // any existing IN, regardless of which device created it.
-            // This is the cross-device dual-IN fence:
-            //   Web creates IN → Android sees state as open (parity check above
-            //   normally catches this), but if types differed (e.g. "Punch" vs "IN"),
-            //   we still block here.
+            //
+            // Uses BOTH Room-persisted punches AND the in-memory lastPunchTimeMs
+            // to handle the race where Room hasn't committed the first punch yet
+            // when a second GPS fix arrives (e.g. 11:33 → 11:34 scenario).
             // -------------------------------------------------------------------
             if (isInside) {
-                val lastInTime = todaysPunches
+                val lastInTimeRoom = todaysPunches
                     .filter { isCheckInType(it.type) }
                     .maxOfOrNull { it.timestamp }
                     ?: todaySessions
                         .maxOfOrNull { it.checkInTime }
                         ?: 0L
+                // In-memory guard: lastPunchTimeMs is set immediately on punch,
+                // before Room async write completes.
+                val lastInTime = maxOf(lastInTimeRoom, lastPunchTimeMs)
                 if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_IN_GUARD_MS) {
                     Log.d(TAG, "Dual-IN guard: last IN was ${(nowMs - lastInTime) / 1000}s ago (< 5 min), skipping auto IN for employee $staffIdStr")
                     lastEvaluatedInside = true

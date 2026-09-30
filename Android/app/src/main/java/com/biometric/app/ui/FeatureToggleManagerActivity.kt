@@ -294,6 +294,11 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        loadSettings()
+    }
+
     private fun loadSettings() {
         lifecycleScope.launch {
             val company = withContext(Dispatchers.IO) {

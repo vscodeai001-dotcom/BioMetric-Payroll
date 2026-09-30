@@ -110,37 +110,70 @@ else
             </div>
 
             <div class="@(activeTab == "admin" ? "" : "d-none")">
-                <h6 class="text-primary border-bottom pb-2 mb-3">👑 Administrator Credentials</h6>
-                <p class="text-muted small mb-3">SuperAdmin / Company Admin login details to manage staff, run payroll, and configure policies.</p>
-                <div class="row g-3">
-                    <div class="col-12 col-md-6">
-                        <label class="form-label fw-bold small">Admin Email Address <span class="text-danger">*</span></label>
-                        <input type="email" class="form-control rounded-3" placeholder="admin@company.com" @bind="adminEmail" />
-                        <div class="form-text small">Used for application sign-in</div>
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label fw-bold small">Admin Full Name</label>
-                        <input type="text" class="form-control rounded-3" placeholder="e.g. Administrator" @bind="adminName" />
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label fw-bold small">New Password (Leave blank to keep existing)</label>
-                        <input type="password" class="form-control rounded-3" placeholder="••••••••" @bind="adminPassword" />
-                        <div class="form-text small">Min 6 characters if changing</div>
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label fw-bold small">Confirm New Password</label>
-                        <input type="password" class="form-control rounded-3" placeholder="••••••••" @bind="adminPasswordConfirm" />
-                    </div>
-                    <div class="col-12 col-md-6">
-                        <label class="form-label fw-bold small">Admin Contact Phone</label>
-                        <input type="tel" class="form-control rounded-3" placeholder="+91 98765 43210" @bind="adminPhone" />
-                    </div>
-                    <div class="col-12">
-                        <div class="p-3 bg-light rounded-3 border">
-                            <div class="d-flex align-items-center gap-2 text-muted small">
-                                <i class="bi bi-shield-lock-fill text-primary fs-5"></i>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <div class="card border rounded-4 shadow-sm h-100">
+                            <div class="card-header bg-transparent border-bottom py-3 px-4 d-flex align-items-center justify-content-between">
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="fs-5">👤</span>
+                                    <h6 class="mb-0 fw-bold text-primary">Administrator Profile</h6>
+                                </div>
+                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1 rounded-pill small">Account</span>
+                            </div>
+                            <div class="card-body p-4 d-flex flex-column gap-3">
                                 <div>
-                                    <strong>Security Notice:</strong> The Admin account has root permissions to manage staff rosters, run payroll formulas, and adjust attendance policies.
+                                    <label class="form-label small fw-bold text-secondary">
+                                        <i class="bi bi-envelope-at me-1 text-primary"></i> Admin Email Address <span class="text-danger">*</span>
+                                    </label>
+                                    <input type="email" class="form-control rounded-3" placeholder="admin@company.com" @bind="adminEmail" />
+                                    <div class="form-text small text-muted">Primary sign-in email for company management.</div>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-bold text-secondary">
+                                        <i class="bi bi-person me-1 text-primary"></i> Admin Full Name
+                                    </label>
+                                    <input type="text" class="form-control rounded-3" placeholder="e.g. Administrator" @bind="adminName" />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-bold text-secondary">
+                                        <i class="bi bi-telephone me-1 text-primary"></i> Admin Contact Phone
+                                    </label>
+                                    <input type="tel" class="form-control rounded-3" placeholder="+91 98765 43210" @bind="adminPhone" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="card border rounded-4 shadow-sm h-100">
+                            <div class="card-header bg-transparent border-bottom py-3 px-4 d-flex align-items-center justify-content-between">
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="fs-5">🔐</span>
+                                    <h6 class="mb-0 fw-bold text-warning">Security &amp; Password</h6>
+                                </div>
+                                <span class="badge bg-warning-subtle text-warning border border-warning-subtle px-2 py-1 rounded-pill small">Credentials</span>
+                            </div>
+                            <div class="card-body p-4 d-flex flex-column gap-3">
+                                <div>
+                                    <label class="form-label small fw-bold text-secondary">
+                                        <i class="bi bi-key me-1 text-warning"></i> New Password
+                                    </label>
+                                    <input type="password" class="form-control rounded-3" placeholder="•••••••• (Leave blank to keep existing)" @bind="adminPassword" />
+                                    <div class="form-text small text-muted">Minimum 6 characters if updating.</div>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-bold text-secondary">
+                                        <i class="bi bi-check2-circle me-1 text-warning"></i> Confirm New Password
+                                    </label>
+                                    <input type="password" class="form-control rounded-3" placeholder="••••••••" @bind="adminPasswordConfirm" />
+                                </div>
+                                <div class="p-3 bg-body-tertiary rounded-3 border mt-auto">
+                                    <div class="d-flex align-items-center gap-2 text-muted small">
+                                        <i class="bi bi-shield-lock-fill text-primary fs-5"></i>
+                                        <div>
+                                            <strong>Security Notice:</strong> The Admin account has root authority to manage staff rosters, run payroll formulas, and adjust attendance policies.
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

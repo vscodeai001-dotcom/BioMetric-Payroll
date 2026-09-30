@@ -1438,6 +1438,23 @@
                         continue;
                     }
 
+                    // ----------------------------------------------------
+                    // Guard: employee has punches in the loaded SQLite data
+                    // for this date — treat them as already handled.
+                    //
+                    // Without this, a sync-timing race can cause the no-punch
+                    // loop to run Calculator with empty punches and overwrite a
+                    // correct "Present" / "Weekly Off (Worked)" summary with
+                    // "Absent" before FirebaseSqliteSyncService finishes
+                    // writing the GeofenceAuto punch into attendancelogs.
+                    // ----------------------------------------------------
+                    if (punches.Any(p =>
+                            p.EmployeeID == emp.EmployeeID &&
+                            DateOnly.FromDateTime(p.PunchTime.Date) == curDate))
+                    {
+                        continue;
+                    }
+
                     if (emp.HireDate.HasValue && emp.HireDate.Value > curDate)
                     {
                         continue;
@@ -1455,9 +1472,18 @@
                         continue;
                     }
 
-                    if (existing != null && curDate < today && !forceRecalculate)
+                    if (existing != null && !forceRecalculate)
                     {
-                        continue;
+                        // Always skip past dates.
+                        // For today: skip if the existing summary already reflects
+                        // a meaningful worked state — punches may not have reached
+                        // local SQLite yet (Firebase sync in-flight).
+                        if (curDate < today) continue;
+
+                        var isWorkedStatus =
+                            existing.Status is "Present" or "Weekly Off (Worked)" or
+                            "Half Day" or "Late" or "Missing Punch" or "Early Leave";
+                        if (isWorkedStatus) continue;
                     }
 
                     scheduleMap.TryGetValue((emp.EmployeeID, curDate), out var schedule);

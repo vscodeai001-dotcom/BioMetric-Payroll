@@ -105,6 +105,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         setupDropdowns()
         setupListeners()
         observeProfile()
+        observeCompanySettings()
         loadInitialData()
     }
 
@@ -218,6 +219,20 @@ class CompanySettingsActivity : MotionBaseActivity() {
             sharedViewModel.userProfile.collectLatest { profile ->
                 isSuperAdmin = profile?.isSuperAdmin() == true
                 binding.cardDangerZoneSettings.visibility = if (isSuperAdmin) View.VISIBLE else View.GONE
+            }
+        }
+    }
+
+    private fun observeCompanySettings() {
+        lifecycleScope.launch {
+            localSettingsDao.getCompanySettingsFlow().collectLatest { cs ->
+                if (cs != null) {
+                    localCompany = cs
+                    val hasFocus = currentFocus is android.widget.EditText
+                    if (!hasFocus) {
+                        populateUi()
+                    }
+                }
             }
         }
     }
@@ -656,6 +671,35 @@ class CompanySettingsActivity : MotionBaseActivity() {
             } catch (ex: Exception) {
                 binding.loadingOverlay.visibility = View.GONE
                 Toast.makeText(this@CompanySettingsActivity, "Deletion failed: ${ex.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch {
+            val cs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
+            if (cs != null) {
+                localCompany = cs
+                val hasFocus = currentFocus is android.widget.EditText
+                if (!hasFocus) {
+                    populateUi()
+                }
+            }
+            if (companySettingsRef == null) {
+                val owner = firebaseSync.getOwnerRef()
+                if (owner != null) {
+                    val ref = owner.child("company_settings").child("1")
+                    val listener = object : ValueEventListener {
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            hydrateFromFirebase(snapshot)
+                        }
+                        override fun onCancelled(error: DatabaseError) {}
+                    }
+                    ref.addValueEventListener(listener)
+                    companySettingsRef = ref
+                    companySettingsListener = listener
+                }
             }
         }
     }
