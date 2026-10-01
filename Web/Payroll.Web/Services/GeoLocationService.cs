@@ -1040,25 +1040,34 @@ public class GeoLocationService
             }
             else // i.e. generating an OUT punch
             {
-                // 5-minute OUT guard: cross-device safety net.
-                // If an OUT punch (any LogType alias) was created within the last 5 minutes,
-                // skip creating another OUT punch. This prevents duplicates when Android and
-                // Web server both detect the employee leaving the geofence at the same time.
-                var recentOutPunch = todaysPunches
-                    .Where(p => IsOutType(p.LogType))
-                    .Where(p => Math.Abs((p.PunchTime - punchTime).TotalSeconds) <= 300) // 5 minutes
+                // 10-minute OUT guard: cross-device safety net.
+                // Re-query the DB fresh (not the stale todaysPunches snapshot) so that
+                // any AndroidGeofenceAuto OUT written by Firebase sync AFTER the initial
+                // todaysPunches load is also caught, closing the async-write race window.
+                // Fetch the bounded 10-min window, then apply IsOutType in memory
+                // (IsOutType is a C# static method — not EF-translatable to SQL).
+                var guardWindowStart = punchTime.AddMinutes(-10);
+                var guardWindowEnd   = punchTime.AddMinutes(10);
+                var windowPunches = await db.AttendanceLogs
+                    .Where(p =>
+                        p.EmployeeID == employeeId &&
+                        p.PunchTime >= businessDayStart &&
+                        p.PunchTime < businessDayEnd &&
+                        p.PunchTime >= guardWindowStart &&
+                        p.PunchTime <= guardWindowEnd)
                     .OrderByDescending(p => p.PunchTime)
-                    .FirstOrDefault();
+                    .ToListAsync();
+                var freshOutPunch = windowPunches.FirstOrDefault(p => IsOutType(p.LogType));
 
-                if (recentOutPunch != null)
+                if (freshOutPunch != null)
                 {
                     _logger.LogInformation(
-                        "Automatic geofence OUT skipped — an OUT punch already exists within 5 minutes. " +
+                        "Automatic geofence OUT skipped — an OUT punch already exists within 10 minutes (fresh re-query). " +
                         "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
                         employeeId,
-                        recentOutPunch.LogID,
-                        recentOutPunch.DeviceID,
-                        recentOutPunch.PunchTime);
+                        freshOutPunch.LogID,
+                        freshOutPunch.DeviceID,
+                        freshOutPunch.PunchTime);
 
                     await transaction.CommitAsync();
                     return true;

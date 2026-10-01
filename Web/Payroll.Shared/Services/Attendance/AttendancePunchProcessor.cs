@@ -123,7 +123,31 @@ namespace Payroll.Shared.Services
                         bool isOut2 = t2.Contains("OUT");
                         if (isOut1 == isOut2)
                         {
+                            // Same direction at same minute — clear duplicate, drop incoming.
                             isDup = true;
+                        }
+                        else
+                        {
+                            // Opposite direction at same minute (e.g. geofence OUT + Android IN
+                            // arriving within seconds of each other due to sync race).
+                            // Keep the one whose direction matches the expected alternating
+                            // position (even index = IN, odd index = OUT).
+                            // The matched punch already occupies an index; the incoming punch
+                            // would extend by one. Determine which direction is expected at
+                            // the index the matched punch currently holds.
+                            int matchIndex = deduplicated.IndexOf(match);
+                            bool expectedOutAtMatch = (matchIndex % 2 != 0); // even=IN, odd=OUT
+                            if (expectedOutAtMatch == isOut1)
+                            {
+                                // The already-added punch is correctly positioned — drop incoming.
+                                isDup = true;
+                            }
+                            else
+                            {
+                                // The incoming punch is better positioned — replace the existing one.
+                                deduplicated[matchIndex] = p;
+                                isDup = true; // mark as dup so we don't Add again below
+                            }
                         }
                     }
                 }

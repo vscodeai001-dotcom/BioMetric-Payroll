@@ -107,7 +107,9 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     companion object {
         private const val TAG = "GeofenceAutoPunch"
         private const val DEBOUNCE_MS = 60_000L
-        private const val DUAL_IN_GUARD_MS = 5 * 60 * 1_000L // 5 minutes
+        // 10-minute guard (increased from 5 min) to handle app/service restarts
+        // where lastPunchTimeMs resets to 0. Covers worst-case sync delay scenario.
+        private const val DUAL_PUNCH_GUARD_MS = 10 * 60 * 1_000L
         private val istTimeZone = TimeZone.getTimeZone("Asia/Kolkata")
 
         // ---------------------------------------------------------------------------
@@ -253,24 +255,31 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 // In-memory guard: lastPunchTimeMs is set immediately on punch,
                 // before Room async write completes.
                 val lastInTime = maxOf(lastInTimeRoom, lastPunchTimeMs)
-                if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_IN_GUARD_MS) {
-                    Log.d(TAG, "Dual-IN guard: last IN was ${(nowMs - lastInTime) / 1000}s ago (< 5 min), skipping auto IN for employee $staffIdStr")
+                if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_PUNCH_GUARD_MS) {
+                    Log.d(TAG, "Dual-IN guard: last IN was ${(nowMs - lastInTime) / 1000}s ago (< 10 min), skipping auto IN for employee $staffIdStr")
                     lastEvaluatedInside = true
                     return
                 }
             } else {
                 // -------------------------------------------------------------------
                 // Dual-OUT guard: cross-device safety net.
-                // Prevent duplicate OUT punch within 5 minutes of any existing OUT,
+                // Prevent duplicate OUT punch within 10 minutes of any existing OUT,
                 // regardless of whether Android or Web server recorded it first.
+                // Re-query Room fresh here so we catch any punch written after mutex
+                // entry (async write lag from previous GPS fix).
                 // -------------------------------------------------------------------
-                val lastOutTimeRoom = todaysPunches
+                val freshPunches = runCatching { localAttendancePunchDao.getAll() }.getOrDefault(emptyList())
+                    .filter { p ->
+                        (p.staffId == staffIdStr || p.staffId.toIntOrNull() == employeeId) &&
+                        (p.date == todayStr || (p.timestamp > 0 && sdf.format(Date(p.timestamp)) == todayStr))
+                    }
+                val lastOutTimeRoom = freshPunches
                     .filter { isCheckOutType(it.type) }
                     .maxOfOrNull { it.timestamp }
                     ?: 0L
                 val lastOutTime = maxOf(lastOutTimeRoom, lastPunchTimeMs)
-                if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_IN_GUARD_MS) {
-                    Log.d(TAG, "Dual-OUT guard: last OUT was ${(nowMs - lastOutTime) / 1000}s ago (< 5 min), skipping auto OUT for employee $staffIdStr")
+                if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_PUNCH_GUARD_MS) {
+                    Log.d(TAG, "Dual-OUT guard: last OUT was ${(nowMs - lastOutTime) / 1000}s ago (< 10 min), skipping auto OUT for employee $staffIdStr")
                     lastEvaluatedInside = false
                     return
                 }

@@ -548,12 +548,35 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             val dayAttendance = attendance.filter { formatDate(it.checkInTime) == date }
             val rawPunches = punches.filter { it.date == date || formatDate(it.timestamp) == date }
             val dayPunches = if (rawPunches.isNotEmpty()) {
-                rawPunches.sortedBy { it.timestamp }
-                    .distinctBy { punch ->
-                        val minuteKey = punch.timestamp / 60000L
-                        val typeKey = if (punch.type.contains("OUT", ignoreCase = true)) "OUT" else "IN"
-                        Pair(minuteKey, typeKey)
+                // Dedup: same-direction within 60 s → keep first.
+                // Opposite-direction within 60 s (geofence/Android sync race) →
+                // keep whichever fits the expected alternating position (even=IN, odd=OUT).
+                val sorted = rawPunches.sortedBy { it.timestamp }
+                val deduped = mutableListOf<AttendancePunch>()
+                for (punch in sorted) {
+                    val isOutNew = punch.type.contains("OUT", ignoreCase = true)
+                    val matchIdx = deduped.indexOfFirst { exist ->
+                        Math.abs(exist.timestamp - punch.timestamp) < 60_000L
                     }
+                    if (matchIdx < 0) {
+                        deduped.add(punch)
+                        continue
+                    }
+                    val isOutExist = deduped[matchIdx].type.contains("OUT", ignoreCase = true)
+                    if (isOutExist == isOutNew) {
+                        // Same direction within 60 s — keep existing, skip duplicate.
+                        continue
+                    } else {
+                        // Opposite direction within 60 s — geofence sync race.
+                        val expectedOutAtIdx = (matchIdx % 2 != 0)
+                        if (expectedOutAtIdx == isOutExist) {
+                            continue // existing is correct
+                        } else {
+                            deduped[matchIdx] = punch // incoming fits better
+                        }
+                    }
+                }
+                deduped
             } else {
                 // Defensive fallback: synthesize punches from attendance record if raw punches table was not yet synced
                 dayAttendance.flatMap { att ->

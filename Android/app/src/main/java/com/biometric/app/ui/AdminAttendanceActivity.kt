@@ -45,6 +45,56 @@ class AdminAttendanceActivity : MotionBaseActivity() {
     private val punchTimeFormat = SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = istTimeZone }
     private val shiftDateFormat = SimpleDateFormat("dd-MMM (EEE)", Locale.getDefault()).apply { timeZone = istTimeZone }
 
+    /**
+     * Deduplicates a sorted list of (timestampMs, type) punch pairs for display.
+     *
+     * Rules:
+     * 1. Same direction (type) within 60 seconds → keep first, drop duplicate.
+     * 2. Opposite direction within 60 seconds (geofence/Android sync race) →
+     *    keep whichever matches the expected alternating position
+     *    (even index = IN, odd index = OUT). Discard the other.
+     *
+     * This mirrors the C# AttendancePunchProcessor logic on Android.
+     */
+    private fun deduplicatePunchesForDisplay(
+        sorted: List<Pair<Long, String>>
+    ): List<Pair<Long, String>> {
+        val result = mutableListOf<Pair<Long, String>>()
+        for (p in sorted) {
+            val (tsMs, type) = p
+            val isOutNew = type.equals("OUT", ignoreCase = true)
+
+            val matchIdx = result.indexOfFirst { (existTs, _) ->
+                Math.abs(existTs - tsMs) < 60_000L
+            }
+
+            if (matchIdx < 0) {
+                result.add(p)
+                continue
+            }
+
+            val (_, existType) = result[matchIdx]
+            val isOutExist = existType.equals("OUT", ignoreCase = true)
+
+            if (isOutExist == isOutNew) {
+                // Same direction within 60 s — clear duplicate, keep existing.
+                continue
+            } else {
+                // Opposite direction within 60 s — geofence sync race.
+                // Keep the punch that fits the expected alternating position.
+                val expectedOutAtIdx = (matchIdx % 2 != 0) // even = IN, odd = OUT
+                if (expectedOutAtIdx == isOutExist) {
+                    // Existing is correctly positioned — drop incoming.
+                    continue
+                } else {
+                    // Incoming fits better — replace existing.
+                    result[matchIdx] = p
+                }
+            }
+        }
+        return result
+    }
+
     private var fromCalendar = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
     private var toCalendar = Calendar.getInstance()
     private var employeeFilterId: Int? = null
@@ -267,8 +317,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     if (outTime > 0) list.add(Pair(outTime, "OUT"))
                     list
                 }
-            }.distinctBy { Pair(it.first / 60000, it.second) }
-             .sortedBy { it.first }
+            }.let { raw -> deduplicatePunchesForDisplay(raw.sortedBy { it.first }) }
 
             val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
                 resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
@@ -379,7 +428,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                         if (outTime > 0) list.add(Pair(outTime, "OUT"))
                         list
                     }
-                }.distinctBy { Pair(it.first / 60000, it.second) }.sortedBy { it.first }
+                }.let { raw -> deduplicatePunchesForDisplay(raw.sortedBy { it.first }) }
 
                 val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
                     resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
