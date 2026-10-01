@@ -651,7 +651,7 @@ public sealed class DatabaseBackupRestoreService
             {
                 try
                 {
-                    await db.Database.ExecuteSqlRawAsync($"DELETE FROM employees WHERE tenant_id = '{tenantId.Replace("'", "''")}';", cancellationToken);
+                    await db.Database.ExecuteSqlAsync($"DELETE FROM employees WHERE tenant_id = {tenantId};", cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -660,7 +660,7 @@ public sealed class DatabaseBackupRestoreService
 
                 try
                 {
-                    await db.Database.ExecuteSqlRawAsync($"DELETE FROM shops WHERE tenant_id = '{tenantId.Replace("'", "''")}';", cancellationToken);
+                    await db.Database.ExecuteSqlAsync($"DELETE FROM shops WHERE tenant_id = {tenantId};", cancellationToken);
                 }
                 catch { }
             }

@@ -368,7 +368,7 @@ else
             {
                 adminEmail = activeTenant.AdminEmail;
                 adminName = activeTenant.AdminName;
-                adminPhone = activeTenant.AdminPhone;
+                adminPhone = activeTenant.AdminPhone ?? "";
             }
 
             var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;

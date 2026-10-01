@@ -425,15 +425,16 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                 string? tenantId = null;
                 if (!isSuperAdmin)
                 {
+                    var currentUserId = user!.Id;
                     await using var db = await _dbFactory.CreateDbContextAsync();
                     var tenant = await db.CompanyTenants
-                        .FirstOrDefaultAsync(t => (user.Id != null && t.AdminUserId == user.Id) ||
+                        .FirstOrDefaultAsync(t => (currentUserId != null && t.AdminUserId == currentUserId) ||
                                                   (t.AdminEmail.ToLower() == email.ToLower()));
                     if (tenant != null)
                     {
-                        if (string.IsNullOrWhiteSpace(tenant.AdminUserId) || tenant.AdminUserId != user.Id)
+                        if (string.IsNullOrWhiteSpace(tenant.AdminUserId) || tenant.AdminUserId != currentUserId)
                         {
-                            tenant.AdminUserId = user.Id;
+                            tenant.AdminUserId = currentUserId;
                             await db.SaveChangesAsync();
                         }
                         tenantId = tenant.TenantId;
@@ -447,8 +448,8 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
                     customClaims.Add(new Claim("IsSuperAdmin", "true"));
                 }
 
-                await _signInManager.SignInWithClaimsAsync(user, Input.RememberMe, customClaims);
-                _logger.LogInformation("ADMIN / SUPERADMIN LOGIN SUCCESS WITHOUT RESTRICTION. UserId={UserId}, Email={Email}, TenantId={TenantId}", user.Id, email, tenantId);
+                await _signInManager.SignInWithClaimsAsync(user!, Input.RememberMe, customClaims);
+                _logger.LogInformation("ADMIN / SUPERADMIN LOGIN SUCCESS WITHOUT RESTRICTION. UserId={UserId}, Email={Email}, TenantId={TenantId}", user!.Id, email, tenantId);
 
                 await _attendanceMonitor.RecordAsync(
                     "LOGIN_SUCCESS", user.Id, user.Email ?? email, "WEB_ADMIN", "Web", "SUCCESS",
@@ -484,7 +485,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             {
                 currentDeviceOwnsSession =
                     await ReconcileCurrentDeviceLockAsync(
-                        user.Id,
+                        user!.Id,
                         deviceId);
             }
 
@@ -496,7 +497,7 @@ namespace Payroll.Web.Areas.Identity.Pages.Account
             deviceId ??= Guid.NewGuid().ToString("N");
 
 
-            var activeDeviceBeforeLogin = await _attendanceMonitor.GetActiveDeviceIdAsync(user.Id);
+            var activeDeviceBeforeLogin = await _attendanceMonitor.GetActiveDeviceIdAsync(user!.Id);
 
             await _attendanceMonitor.RecordAsync(
                 "LOGIN_ATTEMPT", user.Id, user.Email ?? email, deviceId, "Web", "PASSWORD_VERIFIED",
