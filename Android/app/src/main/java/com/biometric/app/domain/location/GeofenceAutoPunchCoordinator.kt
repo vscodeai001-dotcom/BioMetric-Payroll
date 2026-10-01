@@ -258,6 +258,22 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                     lastEvaluatedInside = true
                     return
                 }
+            } else {
+                // -------------------------------------------------------------------
+                // Dual-OUT guard: cross-device safety net.
+                // Prevent duplicate OUT punch within 5 minutes of any existing OUT,
+                // regardless of whether Android or Web server recorded it first.
+                // -------------------------------------------------------------------
+                val lastOutTimeRoom = todaysPunches
+                    .filter { isCheckOutType(it.type) }
+                    .maxOfOrNull { it.timestamp }
+                    ?: 0L
+                val lastOutTime = maxOf(lastOutTimeRoom, lastPunchTimeMs)
+                if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_IN_GUARD_MS) {
+                    Log.d(TAG, "Dual-OUT guard: last OUT was ${(nowMs - lastOutTime) / 1000}s ago (< 5 min), skipping auto OUT for employee $staffIdStr")
+                    lastEvaluatedInside = false
+                    return
+                }
             }
 
             // Debounce check: minimum 60s between punches

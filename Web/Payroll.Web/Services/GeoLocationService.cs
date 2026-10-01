@@ -1038,6 +1038,32 @@ public class GeoLocationService
                     return true;
                 }
             }
+            else // i.e. generating an OUT punch
+            {
+                // 5-minute OUT guard: cross-device safety net.
+                // If an OUT punch (any LogType alias) was created within the last 5 minutes,
+                // skip creating another OUT punch. This prevents duplicates when Android and
+                // Web server both detect the employee leaving the geofence at the same time.
+                var recentOutPunch = todaysPunches
+                    .Where(p => IsOutType(p.LogType))
+                    .Where(p => Math.Abs((p.PunchTime - punchTime).TotalSeconds) <= 300) // 5 minutes
+                    .OrderByDescending(p => p.PunchTime)
+                    .FirstOrDefault();
+
+                if (recentOutPunch != null)
+                {
+                    _logger.LogInformation(
+                        "Automatic geofence OUT skipped — an OUT punch already exists within 5 minutes. " +
+                        "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
+                        employeeId,
+                        recentOutPunch.LogID,
+                        recentOutPunch.DeviceID,
+                        recentOutPunch.PunchTime);
+
+                    await transaction.CommitAsync();
+                    return true;
+                }
+            }
 
             var log = new AttendanceLog
             {

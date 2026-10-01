@@ -20,6 +20,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private readonly ILogger<FirebaseSqliteSyncService> _logger;
     private readonly FirebaseSyncWriteScope _firebaseSyncWriteScope;
     private readonly AttendanceRefreshService _refreshService;
+    private static readonly SemaphoreSlim _attendancePunchLock = new(1, 1);
     private readonly long _serviceStartTimeEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     private long _lastProcessedWipeEpochMs = 0;
 
@@ -169,7 +170,6 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private static readonly (string EntityName, string FirebaseTable)[] ActiveStreamTables = new[]
     {
         ("AttendancePunch", "attendance_punches"),
-        ("AttendanceLog", "attendance"),
         ("LeaveRequest", "leave_requests"),
         ("SalaryAdvance", "advance_payments"),
         ("AttendanceRegularization", "regularizations"),
@@ -1431,6 +1431,23 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             return false;
 
         var keyParts = firebaseKey.Split('|');
+        if (entityType.ClrType == typeof(SalaryAdvance))
+        {
+            SalaryAdvance? advToDelete = null;
+            if (int.TryParse(keyParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedAdvId) && parsedAdvId > 0)
+            {
+                advToDelete = await db.SalaryAdvances.FirstOrDefaultAsync(s => s.AdvanceID == parsedAdvId, ct);
+            }
+
+            if (advToDelete != null)
+            {
+                using var advScope = _firebaseSyncWriteScope.Enter();
+                db.SalaryAdvances.Remove(advToDelete);
+                await db.SaveChangesAsync(ct);
+                return true;
+            }
+        }
+
         if (keyParts.Length < keys.Count)
             return false;
 
@@ -1968,133 +1985,139 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // and inserts new punches or updates existing ones.
         if (entityType.ClrType == typeof(AttendanceLog))
         {
-            var empId = GetInt(json, "employeeId", "EmployeeId", "staffId", "StaffId");
-            if (empId <= 0) return false;
-
-            DateTime punchTime = DateTime.MinValue;
-            var timeEl = FindJsonValue(json, "punchTime")
-                ?? FindJsonValue(json, "timestamp")
-                ?? FindJsonValue(json, "checkInTime")
-                ?? FindJsonValue(json, "createdAt")
-                ?? FindJsonValue(json, "PunchTime");
-
-            if (timeEl is { } te)
+            await _attendancePunchLock.WaitAsync(ct);
+            try
             {
-                if (te.ValueKind == JsonValueKind.Number && te.TryGetInt64(out var epochMs) && epochMs > 0)
+                var empId = GetInt(json, "employeeId", "EmployeeId", "staffId", "StaffId");
+                if (empId <= 0) return false;
+
+                DateTime punchTime = DateTime.MinValue;
+                var timeEl = FindJsonValue(json, "punchTime")
+                    ?? FindJsonValue(json, "timestamp")
+                    ?? FindJsonValue(json, "checkInTime")
+                    ?? FindJsonValue(json, "createdAt")
+                    ?? FindJsonValue(json, "PunchTime");
+
+                if (timeEl is { } te)
                 {
-                    punchTime = TimeZoneInfo.ConvertTimeFromUtc(
-                        DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime,
-                        IndiaTimeZone);
+                    if (te.ValueKind == JsonValueKind.Number && te.TryGetInt64(out var epochMs) && epochMs > 0)
+                    {
+                        punchTime = TimeZoneInfo.ConvertTimeFromUtc(
+                            DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime,
+                            IndiaTimeZone);
+                    }
+                    else if (ConvertValue(te, typeof(DateTime)) is DateTime dt && dt > DateTime.MinValue)
+                    {
+                        punchTime = dt;
+                    }
                 }
-                else if (ConvertValue(te, typeof(DateTime)) is DateTime dt && dt > DateTime.MinValue)
+
+                if (punchTime == DateTime.MinValue) return false;
+
+                var rawType = GetString(json, "type", "logType", "LogType", "note") ?? "IN";
+                var logType = "IN";
+                if (rawType.Equals("OUT", StringComparison.OrdinalIgnoreCase) ||
+                    rawType.Equals("CheckOut", StringComparison.OrdinalIgnoreCase))
                 {
-                    punchTime = dt;
+                    logType = "OUT";
                 }
-            }
 
-            if (punchTime == DateTime.MinValue) return false;
+                var deviceId = GetString(json, "deviceId", "DeviceID", "source") ?? "Mobile";
+                var biometricId = GetString(json, "biometricId", "BiometricID") ?? string.Empty;
+                var isApproved = GetBool(json, "isApproved", "IsApproved") ||
+                    string.Equals(GetString(json, "status", "Status"), "APPROVED", StringComparison.OrdinalIgnoreCase);
+                var lat = GetDouble(json, "latitude", "Latitude");
+                var lon = GetDouble(json, "longitude", "Longitude");
 
-            var rawType = GetString(json, "type", "logType", "LogType", "note") ?? "IN";
-            var logType = "IN";
-            if (rawType.Equals("OUT", StringComparison.OrdinalIgnoreCase) ||
-                rawType.Equals("CheckOut", StringComparison.OrdinalIgnoreCase))
-            {
-                logType = "OUT";
-            }
+                AttendanceLog? existingLog = null;
 
-            var deviceId = GetString(json, "deviceId", "DeviceID", "source") ?? "Mobile";
-            var biometricId = GetString(json, "biometricId", "BiometricID") ?? string.Empty;
-            var isApproved = GetBool(json, "isApproved", "IsApproved") ||
-                string.Equals(GetString(json, "status", "Status"), "APPROVED", StringComparison.OrdinalIgnoreCase);
-            var lat = GetDouble(json, "latitude", "Latitude");
-            var lon = GetDouble(json, "longitude", "Longitude");
+                // Extract the Firebase punch key (e.g. "AUTO_3_1790696351000" or a UUID)
+                // from the json punchId/attendanceId field, falling back to the firebaseKey.
+                var firebasePunchId = GetString(json, "punchId", "attendanceId") ?? firebaseKey;
+                var effectiveBiometricId = !string.IsNullOrEmpty(biometricId) ? biometricId
+                    : !string.IsNullOrEmpty(firebasePunchId) ? firebasePunchId
+                    : string.Empty;
 
-            AttendanceLog? existingLog = null;
+                // 0. Match by BiometricID == Firebase punch key or effectiveBiometricId
+                if (!string.IsNullOrEmpty(firebasePunchId))
+                {
+                    existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
+                        (l.BiometricID == firebasePunchId || (!string.IsNullOrEmpty(effectiveBiometricId) && l.BiometricID == effectiveBiometricId)) && l.EmployeeID == empId, ct)
+                        ?? db.ChangeTracker.Entries<AttendanceLog>()
+                            .Select(e => e.Entity)
+                            .FirstOrDefault(l => (l.BiometricID == firebasePunchId || (!string.IsNullOrEmpty(effectiveBiometricId) && l.BiometricID == effectiveBiometricId)) && l.EmployeeID == empId);
+                }
 
-            // Extract the Firebase punch key (e.g. "AUTO_3_1790696351000" or a UUID)
-            // from the json punchId/attendanceId field, falling back to the firebaseKey.
-            var firebasePunchId = GetString(json, "punchId", "attendanceId") ?? firebaseKey;
+                // 1. Try matching by integer LogID if key or json contains an integer id
+                var idEl = FindJsonValue(json, "logId") ?? FindJsonValue(json, "LogID") ?? FindJsonValue(json, "punchId") ?? FindJsonValue(json, "attendanceId");
+                var idStr = idEl?.GetString() ?? idEl?.ToString() ?? (firebaseKey.Contains('/') ? firebaseKey.Split('/')[^1] : firebaseKey);
+                int parsedLogId = 0;
+                if (existingLog == null && int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedLogId) && parsedLogId > 0)
+                {
+                    existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == parsedLogId, ct)
+                        ?? db.ChangeTracker.Entries<AttendanceLog>()
+                            .Select(e => e.Entity)
+                            .FirstOrDefault(l => l.LogID == parsedLogId);
+                }
 
-            // 0. Match by BiometricID == Firebase punch key — fastest dedup, works across
-            //    both attendance_punches and attendance stream events for the same punch.
-            if (!string.IsNullOrEmpty(firebasePunchId))
-            {
-                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
-                    l.BiometricID == firebasePunchId && l.EmployeeID == empId, ct)
-                    ?? db.ChangeTracker.Entries<AttendanceLog>()
-                        .Select(e => e.Entity)
-                        .FirstOrDefault(l => l.BiometricID == firebasePunchId && l.EmployeeID == empId);
-            }
+                // 2. If not found by ID, match by logical window (same employee, same day, within +/- 60 seconds)
+                if (existingLog == null)
+                {
+                    var punchDay = punchTime.Date;
+                    var dayPunches = await db.AttendanceLogs
+                        .Where(l => l.EmployeeID == empId && l.PunchTime.Date == punchDay)
+                        .ToListAsync(ct);
 
-            // 1. Try matching by integer LogID if key or json contains an integer id
-            var idEl = FindJsonValue(json, "logId") ?? FindJsonValue(json, "LogID") ?? FindJsonValue(json, "punchId") ?? FindJsonValue(json, "attendanceId");
-            var idStr = idEl?.GetString() ?? idEl?.ToString() ?? (firebaseKey.Contains('/') ? firebaseKey.Split('/')[^1] : firebaseKey);
-            int parsedLogId = 0;
-            if (existingLog == null && int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedLogId) && parsedLogId > 0)
-            {
-                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == parsedLogId, ct)
-                    ?? db.ChangeTracker.Entries<AttendanceLog>()
-                        .Select(e => e.Entity)
-                        .FirstOrDefault(l => l.LogID == parsedLogId);
-            }
-
-            // 2. If not found by ID, match by logical window (same employee, same punch type, within +/- 60 seconds)
-            if (existingLog == null)
-            {
-                var windowStart = punchTime.AddSeconds(-60);
-                var windowEnd = punchTime.AddSeconds(60);
-                existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
-                    l.EmployeeID == empId &&
-                    l.LogType == logType &&
-                    l.PunchTime >= windowStart &&
-                    l.PunchTime <= windowEnd, ct)
-                    ?? db.ChangeTracker.Entries<AttendanceLog>()
-                        .Select(e => e.Entity)
+                    existingLog = dayPunches
                         .FirstOrDefault(l =>
-                            l.EmployeeID == empId &&
-                            l.LogType == logType &&
-                            l.PunchTime >= windowStart &&
-                            l.PunchTime <= windowEnd);
+                            Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= 60 &&
+                            (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")))
+                        ?? db.ChangeTracker.Entries<AttendanceLog>()
+                            .Select(e => e.Entity)
+                            .FirstOrDefault(l =>
+                                l.EmployeeID == empId &&
+                                l.PunchTime.Date == punchDay &&
+                                Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= 60 &&
+                                (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")));
+                }
+
+                var isNew = existingLog == null;
+                var targetLog = existingLog ?? new AttendanceLog
+                {
+                    EmployeeID = empId,
+                    PunchTime = punchTime,
+                    LogType = logType,
+                    BiometricID = effectiveBiometricId,
+                    DeviceID = deviceId,
+                    IsApproved = isApproved,
+                    Latitude = lat != 0 ? lat : null,
+                    Longitude = lon != 0 ? lon : null
+                };
+
+                var changedLog = false;
+                if (targetLog.EmployeeID != empId) { targetLog.EmployeeID = empId; changedLog = true; }
+                if (targetLog.LogType != logType) { targetLog.LogType = logType; changedLog = true; }
+                if (targetLog.IsApproved != isApproved) { targetLog.IsApproved = isApproved; changedLog = true; }
+                if (lat != 0 && targetLog.Latitude != lat) { targetLog.Latitude = lat; changedLog = true; }
+                if (lon != 0 && targetLog.Longitude != lon) { targetLog.Longitude = lon; changedLog = true; }
+
+                if (isNew)
+                {
+                    if (parsedLogId > 0) targetLog.LogID = parsedLogId;
+                    db.AttendanceLogs.Add(targetLog);
+                    return true;
+                }
+                else if (changedLog && db.Entry(targetLog).State == EntityState.Unchanged)
+                {
+                    db.Entry(targetLog).State = EntityState.Modified;
+                }
+
+                return changedLog;
             }
-
-            var isNew = existingLog == null;
-            // Use the Firebase punch key as BiometricID when biometricId is empty (Android punches).
-            // This allows step-0 deduplication to match both attendance_punches and attendance
-            // stream events for the same punch key.
-            var effectiveBiometricId = !string.IsNullOrEmpty(biometricId) ? biometricId
-                : !string.IsNullOrEmpty(firebasePunchId) ? firebasePunchId
-                : string.Empty;
-            var targetLog = existingLog ?? new AttendanceLog
+            finally
             {
-                EmployeeID = empId,
-                PunchTime = punchTime,
-                LogType = logType,
-                BiometricID = effectiveBiometricId,
-                DeviceID = deviceId,
-                IsApproved = isApproved,
-                Latitude = lat != 0 ? lat : null,
-                Longitude = lon != 0 ? lon : null
-            };
-
-            var changedLog = false;
-            if (targetLog.EmployeeID != empId) { targetLog.EmployeeID = empId; changedLog = true; }
-            if (targetLog.LogType != logType) { targetLog.LogType = logType; changedLog = true; }
-            if (targetLog.IsApproved != isApproved) { targetLog.IsApproved = isApproved; changedLog = true; }
-            if (lat != 0 && targetLog.Latitude != lat) { targetLog.Latitude = lat; changedLog = true; }
-            if (lon != 0 && targetLog.Longitude != lon) { targetLog.Longitude = lon; changedLog = true; }
-
-            if (isNew)
-            {
-                if (parsedLogId > 0) targetLog.LogID = parsedLogId;
-                db.AttendanceLogs.Add(targetLog);
-                return true;
+                _attendancePunchLock.Release();
             }
-            else if (changedLog && db.Entry(targetLog).State == EntityState.Unchanged)
-            {
-                db.Entry(targetLog).State = EntityState.Modified;
-            }
-
-            return changedLog;
         }
 
         // Specialized handler for LeaveRequest:
@@ -2230,6 +2253,23 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     ?? candidates.FirstOrDefault(s =>
                         s.AdvanceDate.HasValue &&
                         s.AdvanceDate.Value.Date == advDate.Date);
+            }
+
+            var status = GetString(json, "status", "Status");
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                if (string.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(status, "Deleted", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (existingAdvance != null)
+                    {
+                        db.SalaryAdvances.Remove(existingAdvance);
+                        return true;
+                    }
+                    return false;
+                }
             }
 
             var isNew = existingAdvance == null;

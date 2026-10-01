@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Payroll.Shared;
@@ -80,6 +80,61 @@ namespace Payroll.Shared.Services
                 .OrderBy(p => p.PunchTime)
                 .ThenBy(p => p.LogID)
                 .ToList();
+
+            if (ordered.Count == 0)
+            {
+                return (
+                    new List<AttendanceLog>(),
+                    null,
+                    null);
+            }
+
+            // --------------------------------------------------------
+            // Deduplicate punches:
+            // 1. By non-empty BiometricID (UUID / punch key)
+            // 2. By EmployeeID + Minute + Type orientation (IN vs OUT)
+            // This prevents duplicate sync events or multi-touch machine punches
+            // from collapsing IN/OUT pairs into zero-duration micro-pairs.
+            // --------------------------------------------------------
+            var deduplicated = new List<AttendanceLog>();
+            foreach (var p in ordered)
+            {
+                bool isDup = false;
+                if (!string.IsNullOrWhiteSpace(p.BiometricID))
+                {
+                    if (deduplicated.Any(x => x.EmployeeID == p.EmployeeID &&
+                                              string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        isDup = true;
+                    }
+                }
+
+                if (!isDup)
+                {
+                    var match = deduplicated.FirstOrDefault(x =>
+                        x.EmployeeID == p.EmployeeID &&
+                        x.PunchTime == p.PunchTime);
+
+                    if (match != null)
+                    {
+                        var t1 = (match.LogType ?? "").ToUpperInvariant();
+                        var t2 = (p.LogType ?? "").ToUpperInvariant();
+                        bool isOut1 = t1.Contains("OUT");
+                        bool isOut2 = t2.Contains("OUT");
+                        if (isOut1 == isOut2)
+                        {
+                            isDup = true;
+                        }
+                    }
+                }
+
+                if (!isDup)
+                {
+                    deduplicated.Add(p);
+                }
+            }
+
+            ordered = deduplicated;
 
             if (ordered.Count == 0)
             {

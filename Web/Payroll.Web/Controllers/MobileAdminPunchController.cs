@@ -141,6 +141,7 @@ public sealed class MobileAdminPunchController : ControllerBase
             PunchTime = punchTime,
             DeviceID = "ManualCorrection",
             LogType = "Manual Correction",
+            BiometricID = $"MANUAL_{request.EmployeeId}_{punchTime:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}",
             IsApproved = true
         };
 
@@ -182,7 +183,8 @@ public sealed class MobileAdminPunchController : ControllerBase
             EmployeeID = request.EmployeeId,
             PunchTime = day.Date.Add(start.ToTimeSpan()),
             DeviceID = "ManualCorrection",
-            LogType = "Manual Correction",
+            LogType = "IN",
+            BiometricID = $"MANUAL_{request.EmployeeId}_{day:yyyyMMdd}_{start:HHmmss}_IN",
             IsApproved = true
         };
         var b = new AttendanceLog
@@ -190,7 +192,8 @@ public sealed class MobileAdminPunchController : ControllerBase
             EmployeeID = request.EmployeeId,
             PunchTime = day.Date.Add(end.ToTimeSpan()),
             DeviceID = "ManualCorrection",
-            LogType = "Manual Correction",
+            LogType = "OUT",
+            BiometricID = $"MANUAL_{request.EmployeeId}_{day:yyyyMMdd}_{end:HHmmss}_OUT",
             IsApproved = true
         };
 

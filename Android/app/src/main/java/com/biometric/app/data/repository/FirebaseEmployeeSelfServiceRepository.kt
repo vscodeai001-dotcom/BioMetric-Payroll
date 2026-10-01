@@ -549,6 +549,11 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             val rawPunches = punches.filter { it.date == date || formatDate(it.timestamp) == date }
             val dayPunches = if (rawPunches.isNotEmpty()) {
                 rawPunches.sortedBy { it.timestamp }
+                    .distinctBy { punch ->
+                        val minuteKey = punch.timestamp / 60000L
+                        val typeKey = if (punch.type.contains("OUT", ignoreCase = true)) "OUT" else "IN"
+                        Pair(minuteKey, typeKey)
+                    }
             } else {
                 // Defensive fallback: synthesize punches from attendance record if raw punches table was not yet synced
                 dayAttendance.flatMap { att ->

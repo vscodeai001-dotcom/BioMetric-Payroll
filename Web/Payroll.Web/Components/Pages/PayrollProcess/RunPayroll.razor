@@ -18,6 +18,7 @@
 @inject SalaryStructureService SalaryService
 @inject IToastService toastService
 @inject CsvExportService CsvService
+@inject FirebaseAdvanceService FirebaseAdvances
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Run Payroll</PageTitle>
@@ -77,7 +78,7 @@ else
                     <div class="row g-3 align-items-end">
                         <div class="col-md-3">
                             <label class="form-label small fw-bold text-muted">📅 Select Month</label>
-                            <select class="form-select form-select-sm fw-bold rounded-3" @bind="selectedMonth">
+                            <select class="form-select form-select-sm fw-bold rounded-3" @bind="selectedMonth" @bind:after="OnPeriodChanged">
                                 @for (int i = 1; i <= 12; i++)
                                 {
                                     <option value="@i">@CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(i)</option>
@@ -86,7 +87,7 @@ else
                         </div>
                         <div class="col-md-3">
                             <label class="form-label small fw-bold text-muted">📅 Select Year</label>
-                            <select class="form-select form-select-sm fw-bold rounded-3" @bind="selectedYear">
+                            <select class="form-select form-select-sm fw-bold rounded-3" @bind="selectedYear" @bind:after="OnPeriodChanged">
                                 <option value="@(DateTime.Now.Year - 1)">@(DateTime.Now.Year - 1)</option>
                                 <option value="@DateTime.Now.Year">@DateTime.Now.Year</option>
                                 <option value="@(DateTime.Now.Year + 1)">@(DateTime.Now.Year + 1)</option>
@@ -137,7 +138,8 @@ else
                                          IsLoading="isLoading"
                                          OnExport="ExportPayrollHistoryToCsv"
                                          OnView="ViewPayslip"
-                                         OnDelete="DeletePayrollEntry" />
+                                         OnDelete="DeletePayrollEntry"
+                                         OnDeleteAll="DeleteAllPayrollHistory" />
                 </div>
             }
             else
@@ -232,6 +234,10 @@ else
             if (employeeList != null && employeeList.Any())
             {
                 await LoadPayrollHistory();
+                if (payrollHistoryList == null || !payrollHistoryList.Any())
+                {
+                    await GeneratePreview();
+                }
             }
         }
         catch (Exception ex)
@@ -242,6 +248,18 @@ else
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task OnPeriodChanged()
+    {
+        lastPreviewMonth = null;
+        lastPreviewYear = null;
+        payrollPreviewList = null;
+        await LoadPayrollHistory();
+        if (payrollHistoryList == null || !payrollHistoryList.Any())
+        {
+            await GeneratePreview();
         }
     }
 
@@ -290,10 +308,34 @@ else
             // STRICT FEATURE CHECK FOR DATA
             // We pass the featureSettings to the processor, which now handles the logic of ignoring
             // disabled modules (Advances, Bonuses) internally.
-            var allUnpaidAdvances = await dbContext.SalaryAdvances
-                .Where(adv => adv.PayrollID_Paid == null && adv.AdvanceDate <= filterEndDate.ToDateTime(TimeOnly.MaxValue))
-                .AsNoTracking()
-                .ToListAsync();
+            List<SalaryAdvance> allUnpaidAdvances;
+            try
+            {
+                allUnpaidAdvances = await FirebaseAdvances.GetAsync(
+                    to: filterEndDate.ToDateTime(TimeOnly.MaxValue),
+                    unpaidOnly: true);
+
+                // Clean up orphan advances in local SQLite database that were deleted in Firebase
+                var localUnpaid = await dbContext.SalaryAdvances
+                    .Where(adv => adv.PayrollID_Paid == null && adv.AdvanceDate <= filterEndDate.ToDateTime(TimeOnly.MaxValue))
+                    .ToListAsync();
+
+                var activeKeys = allUnpaidAdvances.Select(a => $"{a.EmployeeID}_{a.Amount}_{a.AdvanceDate:yyyyMMdd}").ToHashSet();
+                var orphans = localUnpaid.Where(l => !activeKeys.Contains($"{l.EmployeeID}_{l.Amount}_{l.AdvanceDate:yyyyMMdd}")).ToList();
+                if (orphans.Count > 0)
+                {
+                    dbContext.SalaryAdvances.RemoveRange(orphans);
+                    await dbContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to load advances via FirebaseAdvanceService, falling back to local database.");
+                allUnpaidAdvances = await dbContext.SalaryAdvances
+                    .Where(adv => adv.PayrollID_Paid == null && adv.AdvanceDate <= filterEndDate.ToDateTime(TimeOnly.MaxValue))
+                    .AsNoTracking()
+                    .ToListAsync();
+            }
             var allUnpaidBonuses = await dbContext.BonusRecords
                 .Where(b => b.PayrollID_Paid == null && b.BonusDate >= monthStartDate.Date && b.BonusDate < monthEndDate.Date)
                 .AsNoTracking()
@@ -496,6 +538,61 @@ else
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task DeleteAllPayrollHistory()
+    {
+        if (payrollHistoryList == null || !payrollHistoryList.Any()) return;
+        var monthName = new DateTime(selectedYear, selectedMonth, 1).ToString("MMMM yyyy");
+        if (!await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to remove all saved payroll records for {monthName}?\n\nThis will delete saved entries for this period and release any linked advances or bonuses so you can re-generate payroll.")) return;
+
+        isLoading = true;
+        loadingMessage = "Removing saved payroll records...";
+        await InvokeAsync(StateHasChanged);
+
+        await using var dbContext = await DbFactory.CreateDbContextAsync();
+        try
+        {
+            var historyEntries = await dbContext.PayrollHistories
+                .Where(ph => ph.PayMonth == selectedMonth && ph.PayYear == selectedYear)
+                .ToListAsync();
+
+            if (historyEntries.Any())
+            {
+                var payrollIds = historyEntries.Select(h => h.PayrollID).ToList();
+
+                var advances = await dbContext.SalaryAdvances
+                    .Where(a => a.PayrollID_Paid != null && payrollIds.Contains(a.PayrollID_Paid.Value))
+                    .ToListAsync();
+                foreach (var a in advances) a.PayrollID_Paid = null;
+
+                var bonuses = await dbContext.BonusRecords
+                    .Where(b => b.PayrollID_Paid != null && payrollIds.Contains(b.PayrollID_Paid.Value))
+                    .ToListAsync();
+                foreach (var b in bonuses) b.PayrollID_Paid = null;
+
+                dbContext.PayrollHistories.RemoveRange(historyEntries);
+                await dbContext.SaveChangesAsync();
+            }
+
+            toastService.ShowSuccess($"All saved payroll records for {monthName} removed.");
+            payrollHistoryList = null;
+            lastPreviewMonth = null;
+            lastPreviewYear = null;
+            historyLoadedForRecalc = false;
+
+            await GeneratePreview();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting all payroll entries for {Year}-{Month}", selectedYear, selectedMonth);
+            toastService.ShowError($"Error removing payroll records: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 

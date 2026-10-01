@@ -17,10 +17,12 @@ public sealed class MobileAdminFinanceController : ControllerBase
     private readonly ResignationService _exit;
     private readonly YearEndSummaryService _yearEnd;
 
+    private readonly FirebaseAdvanceService _advances;
+
     public MobileAdminFinanceController(IDbContextFactory<AppDbContext> dbFactory, TaxDeclarationService tax,
-        FBPService fbp, ResignationService exit, YearEndSummaryService yearEnd)
+        FBPService fbp, ResignationService exit, YearEndSummaryService yearEnd, FirebaseAdvanceService advances)
     {
-        _dbFactory = dbFactory; _tax = tax; _fbp = fbp; _exit = exit; _yearEnd = yearEnd;
+        _dbFactory = dbFactory; _tax = tax; _fbp = fbp; _exit = exit; _yearEnd = yearEnd; _advances = advances;
     }
 
     [HttpGet("advances")]
@@ -40,6 +42,7 @@ public sealed class MobileAdminFinanceController : ControllerBase
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = new SalaryAdvance { EmployeeID = request.EmployeeID, Amount = request.Amount, AdvanceType = request.AdvanceType, AdvanceDate = request.AdvanceDate ?? DateTime.Now };
         db.SalaryAdvances.Add(row); await db.SaveChangesAsync();
+        await _advances.SaveAsync(row);
         return Ok(row);
     }
 
@@ -49,7 +52,9 @@ public sealed class MobileAdminFinanceController : ControllerBase
         await using var db = await _dbFactory.CreateDbContextAsync();
         var row = await db.SalaryAdvances.FirstOrDefaultAsync(x => x.AdvanceID == id);
         if (row == null) return NotFound();
-        db.SalaryAdvances.Remove(row); await db.SaveChangesAsync(); return NoContent();
+        db.SalaryAdvances.Remove(row); await db.SaveChangesAsync();
+        await _advances.DeleteAsync(row);
+        return NoContent();
     }
 
     [HttpGet("bonuses")]

@@ -778,7 +778,7 @@
             var punchesByEmpDate = relevantLogs
                 .Where(l => l.EmployeeID.HasValue)
                 .GroupBy(l => (l.EmployeeID!.Value, DateOnly.FromDateTime(l.PunchTime.Date)))
-                .ToDictionary(g => g.Key, g => g.OrderBy(l => l.PunchTime).ThenBy(l => l.LogID).ToList());
+                .ToDictionary(g => g.Key, g => DeduplicatePunchesForDisplay(g.OrderBy(l => l.PunchTime).ThenBy(l => l.LogID).ToList()));
 
             logs =
                 data
@@ -1309,7 +1309,13 @@
                 // Re-check after loading the current summary and after taking
                 // the employee/date lock. This closes the duplicate-processing
                 // window between two realtime callbacks.
-                if (!forceRecalculate &&
+                bool hasCorruptedSummary = existing != null &&
+                    !existing.IsManualOverride &&
+                    existing.EarnedStandardHours == 0 &&
+                    existing.TotalOvertimeDuration == TimeSpan.Zero &&
+                    group.Any();
+
+                if (!forceRecalculate && !hasCorruptedSummary &&
                     AttendanceProcessingCoordinator.IsAlreadyProcessed(
                         cacheKey,
                         fingerprint,
@@ -1710,6 +1716,43 @@
 
         return Convert.ToHexString(
             bytes);
+    }
+
+    private static List<AttendanceLog> DeduplicatePunchesForDisplay(List<AttendanceLog> list)
+    {
+        if (list == null || list.Count <= 1) return list ?? new List<AttendanceLog>();
+        var result = new List<AttendanceLog>();
+        foreach (var p in list)
+        {
+            bool isDup = false;
+            if (!string.IsNullOrWhiteSpace(p.BiometricID))
+            {
+                if (result.Any(x => x.EmployeeID == p.EmployeeID &&
+                                    string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))
+                {
+                    isDup = true;
+                }
+            }
+
+            if (!isDup)
+            {
+                var match = result.FirstOrDefault(x => x.EmployeeID == p.EmployeeID &&
+                    Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) < 60);
+                if (match != null)
+                {
+                    var t1 = (match.LogType ?? "").ToUpperInvariant();
+                    var t2 = (p.LogType ?? "").ToUpperInvariant();
+                    bool isOut1 = t1.Contains("OUT");
+                    bool isOut2 = t2.Contains("OUT");
+                    if (isOut1 == isOut2)
+                        isDup = true;
+                }
+            }
+
+            if (!isDup)
+                result.Add(p);
+        }
+        return result;
     }
 
     // ============================================================

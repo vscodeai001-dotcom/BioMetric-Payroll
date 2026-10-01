@@ -226,6 +226,18 @@ public sealed class FirebaseAdvanceService
         var payrollId = Int(row, "payrollIdPaid") ?? Int(row, "PayrollID_Paid");
         if (unpaidOnly && (recovered || payrollId.HasValue)) return null;
 
+        var status = String(row, "status") ?? String(row, "Status");
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (string.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(status, "Deleted", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+        }
+
         var numericId = Int(row, "advanceId") ?? Int(row, "AdvanceID") ?? IntFromKey(key) ?? StableInt(key);
         return new SalaryAdvance
         {
@@ -321,6 +333,44 @@ public sealed class FirebaseAdvanceService
         if (advance.PayrollID_Paid.HasValue) return false;
         var key = advance.FirebaseKey ?? (advance.AdvanceID > 0 ? advance.AdvanceID.ToString(CultureInfo.InvariantCulture) : null);
         if (string.IsNullOrWhiteSpace(key)) return false;
+
+        if (_scopeFactory != null)
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    SalaryAdvance? existing = null;
+                    if (advance.AdvanceID > 0)
+                    {
+                        existing = await db.SalaryAdvances.FirstOrDefaultAsync(a => a.AdvanceID == advance.AdvanceID, ct);
+                    }
+                    if (existing == null && advance.EmployeeID > 0 && advance.Amount > 0)
+                    {
+                        var candidates = await db.SalaryAdvances
+                            .Where(a => a.EmployeeID == advance.EmployeeID && a.Amount == advance.Amount)
+                            .ToListAsync(ct);
+                        existing = candidates.FirstOrDefault(a =>
+                            advance.AdvanceDate.HasValue && a.AdvanceDate.HasValue &&
+                            Math.Abs((a.AdvanceDate.Value - advance.AdvanceDate.Value).TotalMinutes) < 2)
+                            ?? candidates.FirstOrDefault();
+                    }
+                    if (existing != null)
+                    {
+                        db.SalaryAdvances.Remove(existing);
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort local cleanup
+            }
+        }
+
         var ok = await _firebase.DeleteOwnerRecordAsync(OwnerUid, Table, key, ct);
         if (ok) await _firebase.PublishLocalApplicationChangeAsync(OwnerUid, "AdvancePayment", "DELETED", key, ct);
         return ok;
