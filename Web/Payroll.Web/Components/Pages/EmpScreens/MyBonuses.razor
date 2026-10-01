@@ -87,7 +87,7 @@ else
     }
 }
 
-<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+<AttendanceRefreshListener OnBonusChanged="HandleRealtimeRefresh" />
 
 @code {
     private List<BonusRecord>? bonuses;
@@ -96,17 +96,22 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await CheckPermissionsAndLoadData();
+        await CheckPermissionsAndLoadData(isSilent: false);
     }
 
-    private async Task CheckPermissionsAndLoadData()
+    private async Task CheckPermissionsAndLoadData(bool isSilent = false)
     {
-        isLoading = true;
+        if (!isSilent && bonuses == null)
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+        }
         try
         {
             if (!await FirebaseBonuses.IsEnabledAsync() || !await FirebaseBonuses.CanEmployeeViewAsync())
             {
                 isAccessDenied = true;
+                isLoading = false;
                 return;
             }
 
@@ -115,19 +120,22 @@ else
             if (!int.TryParse(claim, out var employeeId) || employeeId <= 0)
             {
                 isAccessDenied = true;
+                isLoading = false;
                 return;
             }
 
-            bonuses = await FirebaseBonuses.GetAsync(employeeId);
+            var fresh = await FirebaseBonuses.GetAsync(employeeId);
+            bonuses = fresh;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Bonus load failed: {ex.Message}");
-            bonuses = new List<BonusRecord>();
+            if (bonuses == null) bonuses = new List<BonusRecord>();
         }
         finally
         {
             isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -135,8 +143,7 @@ else
     {
         try
         {
-            await CheckPermissionsAndLoadData();
-            await InvokeAsync(StateHasChanged);
+            await CheckPermissionsAndLoadData(isSilent: true);
         }
         catch (Exception ex)
         {

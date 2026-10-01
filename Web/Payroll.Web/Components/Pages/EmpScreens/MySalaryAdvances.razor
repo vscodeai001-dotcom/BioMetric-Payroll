@@ -110,7 +110,7 @@ else
 }
 }
 
-<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+<AttendanceRefreshListener OnAdvanceChanged="HandleRealtimeRefresh" />
 
 @code {
     private List<SalaryAdvance> advanceHistory = new();
@@ -121,12 +121,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await CheckPermissionsAndLoadData();
+        await CheckPermissionsAndLoadData(isSilent: false);
     }
 
-    private async Task CheckPermissionsAndLoadData()
+    private async Task CheckPermissionsAndLoadData(bool isSilent = false)
     {
-        isLoading = true;
+        if (!isSilent && (advanceHistory == null || !advanceHistory.Any()))
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+        }
         try
         {
             // Firebase is the SSOT for the self-service gate.
@@ -149,21 +153,31 @@ else
                 }
                 else
                 {
-                    linkedEmployee = (await FirebaseAdvances.GetActiveEmployeesAsync())
-                        .FirstOrDefault(e => e.EmployeeID == employeeId);
+                    if (linkedEmployee == null)
+                    {
+                        linkedEmployee = (await FirebaseAdvances.GetActiveEmployeesAsync())
+                            .FirstOrDefault(e => e.EmployeeID == employeeId);
+                    }
                     if (linkedEmployee != null)
-                        advanceHistory = await FirebaseAdvances.GetAsync(employeeId);
+                    {
+                        var fresh = await FirebaseAdvances.GetAsync(employeeId);
+                        advanceHistory = fresh;
+                    }
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading employee advance history.");
-            toastService.ShowError("An error occurred while loading your data.");
+            if (!isSilent)
+            {
+                toastService.ShowError("An error occurred while loading your data.");
+            }
         }
         finally
         {
             isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -171,8 +185,7 @@ else
     {
         try
         {
-            await CheckPermissionsAndLoadData();
-            await InvokeAsync(StateHasChanged);
+            await CheckPermissionsAndLoadData(isSilent: true);
         }
         catch (Exception ex)
         {

@@ -35,6 +35,14 @@
     public EventCallback OnLeaveChanged { get; set; }
 
 
+    [Parameter]
+    public EventCallback OnAdvanceChanged { get; set; }
+
+
+    [Parameter]
+    public EventCallback OnBonusChanged { get; set; }
+
+
     // ============================================================
     // SIGNALR JS REFERENCE
     // ============================================================
@@ -276,6 +284,60 @@
         {
             Console.Error.WriteLine(
                 $"LeaveChanged callback failed: {ex}");
+        }
+    }
+
+
+    // ============================================================
+    // ADVANCE CHANGED
+    // ============================================================
+
+    [JSInvokable]
+    public async Task AdvanceChanged(object? data = null)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            if (OnAdvanceChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnAdvanceChanged.InvokeAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"AdvanceChanged callback failed: {ex}");
+        }
+    }
+
+
+    // ============================================================
+    // BONUS CHANGED
+    // ============================================================
+
+    [JSInvokable]
+    public async Task BonusChanged(object? data = null)
+    {
+        if (_disposed)
+            return;
+
+        try
+        {
+            if (OnBonusChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnBonusChanged.InvokeAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"BonusChanged callback failed: {ex}");
         }
     }
 

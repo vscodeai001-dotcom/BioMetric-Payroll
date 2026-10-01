@@ -22,8 +22,24 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3>Manual Punch Correction</h3>
-    <div>
-        <button type="button" class="btn btn-primary" @onclick="() => LoadProblematicDays(false)" disabled="@isLoading">
+    <div class="d-flex gap-2">
+        @if (problematicDays != null && problematicDays.Any(d => d.Punches.Count == 0))
+        {
+            var missingCount = problematicDays.Count(d => d.Punches.Count == 0);
+            <button type="button" class="btn btn-success fw-semibold" @onclick="BulkQuickAddAllFullDays" disabled="@(isLoading || isBulkProcessing)">
+                @if (isBulkProcessing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                    <span>Adding (@bulkProcessedCount / @bulkTotalCount)...</span>
+                }
+                else
+                {
+                    <i class="bi bi-magic me-1"></i>
+                    <span>Quick Add All Full Days (@missingCount)</span>
+                }
+            </button>
+        }
+        <button type="button" class="btn btn-primary" @onclick="() => LoadProblematicDays(false)" disabled="@(isLoading || isBulkProcessing)">
             @if (isLoading)
             {
                 <span class="spinner-border spinner-border-sm"></span>
@@ -79,6 +95,32 @@ else if (!problematicDays.Any())
 }
 else
 {
+    @if (problematicDays.Any(d => d.Punches.Count == 0))
+    {
+        var missingCount = problematicDays.Count(d => d.Punches.Count == 0);
+        <div class="d-flex justify-content-between align-items-center mb-3 p-3 bg-success bg-opacity-10 border border-success rounded-3 shadow-sm">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fs-4">🪄</span>
+                <div>
+                    <strong class="text-success d-block">@missingCount listed day@(missingCount > 1 ? "s are" : " is") missing all punches</strong>
+                    <small class="text-muted">Click to automatically generate shift start (IN) and shift end (OUT) punches for all listed rows at once.</small>
+                </div>
+            </div>
+            <button type="button" class="btn btn-success fw-bold px-3 py-2 text-nowrap" @onclick="BulkQuickAddAllFullDays" disabled="@(isLoading || isBulkProcessing)">
+                @if (isBulkProcessing)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                    <span>Adding Punches (@bulkProcessedCount / @bulkTotalCount)...</span>
+                }
+                else
+                {
+                    <i class="bi bi-check-all me-1"></i>
+                    <span>Quick Add All Full Days (@missingCount)</span>
+                }
+            </button>
+        </div>
+    }
+
     <div class="list-group shadow-sm">
         @foreach (var dayInfo in problematicDays.OrderBy(d => d.Date).ThenBy(d => d.EmployeeName))
         {
@@ -175,6 +217,9 @@ else
     private DateTime? startDate;
     private DateTime? endDate;
     private bool isLoading = false;
+    private bool isBulkProcessing = false;
+    private int bulkProcessedCount = 0;
+    private int bulkTotalCount = 0;
 
     private List<ProblemDayInfo>? problematicDays;
 
@@ -520,6 +565,136 @@ else
         catch (Exception ex)
         {
             toastService.ShowError($"Error adding full day: {ex.Message}");
+        }
+    }
+
+    private async Task BulkQuickAddAllFullDays()
+    {
+        if (problematicDays == null || !problematicDays.Any()) return;
+
+        var targetDays = problematicDays.Where(d => d.Punches.Count == 0).ToList();
+        if (!targetDays.Any())
+        {
+            toastService.ShowInfo("No rows with missing punches found to add.");
+            return;
+        }
+
+        isBulkProcessing = true;
+        bulkProcessedCount = 0;
+        bulkTotalCount = targetDays.Count;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            var addedCount = 0;
+            var skippedLockedCount = 0;
+
+            foreach (var dayInfo in targetDays)
+            {
+                // Lock check
+                if (await LockService.IsLockedAsync(dayInfo.EmployeeID, dayInfo.Date))
+                {
+                    skippedLockedCount++;
+                    bulkProcessedCount++;
+                    await InvokeAsync(StateHasChanged);
+                    continue;
+                }
+
+                var start = dayInfo.ShiftStart ?? new TimeOnly(9, 0);
+                var end = dayInfo.ShiftEnd ?? new TimeOnly(18, 0);
+
+                try
+                {
+                    await using var dbContext = await DbFactory.CreateDbContextAsync();
+
+                    var inLog = new AttendanceLog
+                    {
+                        EmployeeID = dayInfo.EmployeeID,
+                        PunchTime = dayInfo.Date.Add(start.ToTimeSpan()),
+                        DeviceID = "ManualCorrection",
+                        LogType = "IN",
+                        BiometricID = $"MANUAL_{dayInfo.EmployeeID}_{dayInfo.Date:yyyyMMdd}_{start:HHmmss}_IN",
+                        IsApproved = true
+                    };
+
+                    var outLog = new AttendanceLog
+                    {
+                        EmployeeID = dayInfo.EmployeeID,
+                        PunchTime = dayInfo.Date.Add(end.ToTimeSpan()),
+                        DeviceID = "ManualCorrection",
+                        LogType = "OUT",
+                        BiometricID = $"MANUAL_{dayInfo.EmployeeID}_{dayInfo.Date:yyyyMMdd}_{end:HHmmss}_OUT",
+                        IsApproved = true
+                    };
+
+                    var processingKey = $"{dayInfo.EmployeeID}:{dayInfo.Date:yyyy-MM-dd}";
+                    using var processingLease = await AttendanceProcessingCoordinator.AcquireAsync(processingKey);
+
+                    dbContext.AttendanceLogs.AddRange(inLog, outLog);
+                    await dbContext.SaveChangesAsync();
+
+                    // Upsert to Firebase SSOT
+                    var firebaseInOk = await FirebaseAttendanceMutations.UpsertPunchAsync(inLog, "CREATED");
+                    var firebaseOutOk = await FirebaseAttendanceMutations.UpsertPunchAsync(outLog, "CREATED");
+
+                    await AuditService.LogAsync("CREATE", "AttendanceLog", $"{inLog.LogID},{outLog.LogID}",
+                        $"Bulk Quick Added {start:hh:mm tt}-{end:hh:mm tt} punches for EmpID: {dayInfo.EmployeeID} on {dayInfo.Date:yyyy-MM-dd}");
+
+                    await RecalculateAndSaveSummary(dayInfo.EmployeeID, dayInfo.Date);
+                    AttendanceProcessingCoordinator.Invalidate(processingKey);
+
+                    if (!firebaseInOk || !firebaseOutOk)
+                    {
+                        _logger.LogWarning("Manual bulk full-day punches saved to SQL but Firebase projection was incomplete. EmployeeId={EmployeeId}, Date={Date}", dayInfo.EmployeeID, dayInfo.Date.Date);
+                    }
+
+                    dayInfo.Punches.Clear();
+                    dayInfo.Punches.Add(inLog);
+                    dayInfo.Punches.Add(outLog);
+                    problematicDays.Remove(dayInfo);
+
+                    addedCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error bulk adding full day for EmpID: {EmployeeID} on {Date}", dayInfo.EmployeeID, dayInfo.Date);
+                }
+
+                bulkProcessedCount++;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            _ignoreRealtimeUntil = DateTime.UtcNow.AddSeconds(5);
+
+            // Broadcast refresh for affected employees and dates
+            var distinctEmpDays = targetDays.Select(d => (d.EmployeeID, d.Date.Date)).Distinct();
+            foreach (var (empId, dt) in distinctEmpDays)
+            {
+                try
+                {
+                    await AttendanceRefreshService.NotifyPunchChangedAsync(empId, DateOnly.FromDateTime(dt), "CREATED");
+                    await AttendanceRefreshService.NotifyAttendanceChangedAsync(empId, DateOnly.FromDateTime(dt));
+                }
+                catch { }
+            }
+
+            if (addedCount > 0)
+            {
+                toastService.ShowSuccess($"Successfully bulk added full day punches for {addedCount} days! 🪄 ✅");
+            }
+            if (skippedLockedCount > 0)
+            {
+                toastService.ShowWarning($"{skippedLockedCount} days were skipped because payroll is finalized/locked.");
+            }
+        }
+        catch (Exception ex)
+        {
+            toastService.ShowError($"Error during bulk punch addition: {ex.Message}");
+        }
+        finally
+        {
+            isBulkProcessing = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 

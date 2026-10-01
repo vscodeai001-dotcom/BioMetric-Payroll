@@ -80,11 +80,13 @@ class BiometricApplication : Application(), Configuration.Provider {
                 delay(150)
                 if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return@launch
 
+                // Wipe events and reconnect recovery monitoring must run for ALL users (both Admin and Employee)
+                firebaseRoomHydrator.start()
+                runCatching { firebaseReconnectCoordinator.start() }
+                    .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
+
                 if (isAdmin) {
                     adminRealtimeCoordinator.start { realtimeUiDispatcher.refreshVisible() }
-                    firebaseRoomHydrator.start()
-                    runCatching { firebaseReconnectCoordinator.start() }
-                        .onFailure { Log.w("BiometricApplication", "Firebase reconnect coordinator start skipped", it) }
                 }
                 runCatching { signalRManager.start() }
                     .onFailure { Log.w("BiometricApplication", "Firebase realtime manager start skipped", it) }

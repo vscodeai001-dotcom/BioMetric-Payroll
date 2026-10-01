@@ -261,6 +261,19 @@ window.attendanceRefresh = (function () {
                     await notifyListeners('ApplicationDataChanged', eventData);
                     window.dispatchEvent(new CustomEvent('application-data-changed', { detail: eventData }));
 
+                    if (applicationEventContainsEntity(eventData, 'AdvancePayment') || applicationEventContainsEntity(eventData, 'SalaryAdvance')) {
+                        await notifyListeners('AdvanceChanged', eventData);
+                        window.dispatchEvent(new CustomEvent('advance-changed', { detail: eventData }));
+                    }
+                    if (applicationEventContainsEntity(eventData, 'BonusRecord') || applicationEventContainsEntity(eventData, 'Bonus')) {
+                        await notifyListeners('BonusChanged', eventData);
+                        window.dispatchEvent(new CustomEvent('bonus-changed', { detail: eventData }));
+                    }
+                    if (applicationEventContainsEntity(eventData, 'LeaveRequest') || applicationEventContainsEntity(eventData, 'Leave')) {
+                        await notifyListeners('LeaveChanged', eventData);
+                        window.dispatchEvent(new CustomEvent('leave-changed', { detail: eventData }));
+                    }
+
                     // The Attendance Log Viewer is a route-level consumer.
                     // Firebase application events are the realtime source for
                     // Web-side SSOT invalidation, so bridge only attendance-

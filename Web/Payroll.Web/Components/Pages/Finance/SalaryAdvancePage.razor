@@ -28,7 +28,7 @@
 }
 else
 {
-    <AttendanceRefreshListener OnAttendanceChanged="HandleAttendanceRefresh" />
+    <AttendanceRefreshListener OnAdvanceChanged="HandleAdvanceRefresh" />
 
     <div class="page-header-container">
         <div class="d-flex align-items-center gap-3">
@@ -164,32 +164,46 @@ else
         }
     }
 
-    private async Task HandleAttendanceRefresh()
+    private async Task HandleAdvanceRefresh()
     {
-        await LoadData();
+        await LoadDataSmoothly();
     }
 
     private async Task LoadData()
     {
-        await Task.WhenAll(LoadUnpaidAdvances(), LoadAllHistory());
+        await Task.WhenAll(LoadUnpaidAdvances(isSilent: false), LoadAllHistory(isSilent: false));
     }
 
-    private async Task LoadUnpaidAdvances()
+    private async Task LoadDataSmoothly()
     {
-        isLoadingUnpaid = true;
-        unpaidAdvances = null;
-        await InvokeAsync(StateHasChanged);
+        await Task.WhenAll(LoadUnpaidAdvances(isSilent: true), LoadAllHistory(isSilent: true));
+    }
+
+    private async Task LoadUnpaidAdvances(bool isSilent = false)
+    {
+        if (!isSilent && unpaidAdvances == null)
+        {
+            isLoadingUnpaid = true;
+            await InvokeAsync(StateHasChanged);
+        }
 
         try
         {
-            unpaidAdvances = await FirebaseAdvances.GetAsync(
+            var freshAdvances = await FirebaseAdvances.GetAsync(
                 selectedEmployeeId, startDate, endDate, unpaidOnly: true);
+            unpaidAdvances = freshAdvances;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading unpaid advances.");
-            toastService.ShowError($"Error loading unpaid advances: {ex.Message}");
-            unpaidAdvances = new List<SalaryAdvance>();
+            if (!isSilent)
+            {
+                toastService.ShowError($"Error loading unpaid advances: {ex.Message}");
+            }
+            if (unpaidAdvances == null)
+            {
+                unpaidAdvances = new List<SalaryAdvance>();
+            }
         }
         finally
         {
@@ -198,21 +212,31 @@ else
         }
     }
 
-    private async Task LoadAllHistory()
+    private async Task LoadAllHistory(bool isSilent = false)
     {
-        isLoadingHistory = true;
-        allAdvancesHistory = null;
-        await InvokeAsync(StateHasChanged);
+        if (!isSilent && allAdvancesHistory == null)
+        {
+            isLoadingHistory = true;
+            await InvokeAsync(StateHasChanged);
+        }
+
         try
         {
-            allAdvancesHistory = await FirebaseAdvances.GetAsync(
+            var freshHistory = await FirebaseAdvances.GetAsync(
                 selectedEmployeeId, startDate, endDate, unpaidOnly: false);
+            allAdvancesHistory = freshHistory;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading advance history with filters.");
-            toastService.ShowError($"Error loading advance history: {ex.Message}");
-            allAdvancesHistory = new List<SalaryAdvance>();
+            if (!isSilent)
+            {
+                toastService.ShowError($"Error loading advance history: {ex.Message}");
+            }
+            if (allAdvancesHistory == null)
+            {
+                allAdvancesHistory = new List<SalaryAdvance>();
+            }
         }
         finally
         {

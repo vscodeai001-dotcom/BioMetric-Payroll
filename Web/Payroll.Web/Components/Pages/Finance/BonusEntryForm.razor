@@ -1,6 +1,7 @@
 @using global::Payroll.Shared
 @inject IToastService toastService
 @inject FirebaseBonusService FirebaseBonuses
+@inject AttendanceRefreshService AttendanceRefresh
 
 <details class="mb-4 border rounded p-3">
     <summary class="fw-bold text-success" style="cursor:pointer;">
@@ -64,6 +65,10 @@
 
         try
         {
+            // Always ensure new bonus gets a fresh ID and unique Firebase key
+            NewBonus.BonusID = 0;
+            NewBonus.FirebaseKey = null;
+
             if (!await FirebaseBonuses.SaveAsync(NewBonus))
             {
                 toastService.ShowError("Unable to save the bonus to Firebase.");
@@ -72,10 +77,21 @@
 
             toastService.ShowSuccess("Bonus issued successfully.");
 
+            var savedEmpId = NewBonus.EmployeeID;
+            try
+            {
+                await AttendanceRefresh.NotifyBonusChangedAsync(savedEmpId, "CREATED");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to broadcast bonus creation: {ex.Message}");
+            }
+
             // Reset the existing parameter instance in place. The parent owns this
             // object; replacing the reference here can make the next save reuse
             // the already-generated BonusID.
             NewBonus.BonusID = 0;
+            NewBonus.FirebaseKey = null;
             NewBonus.EmployeeID = 0;
             NewBonus.BonusDate = DateTime.Now;
             NewBonus.Amount = 0m;

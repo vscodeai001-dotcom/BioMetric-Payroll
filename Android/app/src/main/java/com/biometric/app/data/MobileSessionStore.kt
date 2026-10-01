@@ -47,6 +47,13 @@ class MobileSessionStore @Inject constructor(
     fun isReliabilitySetupDone(): Boolean = prefs.getBoolean(KEY_RELIABILITY_DONE, false)
     fun setReliabilitySetupDone(done: Boolean) { prefs.edit { putBoolean(KEY_RELIABILITY_DONE, done) } }
 
+    private val syncStatePrefs get() = context.getSharedPreferences("app_sync_state", Context.MODE_PRIVATE)
+
+    fun lastProcessedWipeTimestamp(): Long = syncStatePrefs.getLong("last_processed_wipe_timestamp", 0L)
+    fun setLastProcessedWipeTimestamp(timestamp: Long) {
+        syncStatePrefs.edit { putLong("last_processed_wipe_timestamp", timestamp) }
+    }
+
     fun deviceId(): String = android.provider.Settings.Secure.getString(
         context.contentResolver,
         android.provider.Settings.Secure.ANDROID_ID

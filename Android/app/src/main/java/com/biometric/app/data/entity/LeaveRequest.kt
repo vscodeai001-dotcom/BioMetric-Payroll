@@ -11,6 +11,7 @@ data class LeaveRequest(
     var leaveType: String = "Casual Leave", // Casual, Sick, Earned
     var startDate: Long = System.currentTimeMillis(),
     var endDate: Long = System.currentTimeMillis(),
+    var leaveDate: String? = null,
     var reason: String = "",
     var status: String = "Pending", // Pending, Approved, Rejected
     var adminNotes: String? = null,

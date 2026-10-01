@@ -2143,13 +2143,31 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             var empId = GetInt(json, "employeeId", "EmployeeId", "staffId", "StaffId");
             if (empId <= 0) return false;
 
-            // leaveDate: Android sends startDate as epoch-milliseconds (Long).
+            // Prefer the explicit calendar date string (e.g. "2026-10-15") if present to avoid UTC/IST boundary truncation.
             DateTime? leaveDate = null;
-            var startDateEl = FindJsonValue(json, "startDate") ?? FindJsonValue(json, "leaveDate") ?? FindJsonValue(json, "LeaveDate");
-            if (startDateEl is { } sde)
+            var leaveDateEl = FindJsonValue(json, "leaveDate") ?? FindJsonValue(json, "LeaveDate");
+            if (leaveDateEl is { } lde && DateTime.TryParse(lde.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
             {
-                var converted = ConvertValue(sde, typeof(DateTime));
-                if (converted is DateTime dt) leaveDate = dt.Date;
+                leaveDate = parsedDate.Date;
+            }
+            else
+            {
+                var startDateEl = FindJsonValue(json, "startDate") ?? leaveDateEl;
+                if (startDateEl is { } sde)
+                {
+                    if (sde.ValueKind == JsonValueKind.Number && sde.TryGetInt64(out var ms))
+                    {
+                        // Convert UTC milliseconds to India business date to prevent timezone day-shift
+                        leaveDate = TimeZoneInfo.ConvertTimeFromUtc(
+                            DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime,
+                            IndiaTimeZone).Date;
+                    }
+                    else
+                    {
+                        var converted = ConvertValue(sde, typeof(DateTime));
+                        if (converted is DateTime dt) leaveDate = dt.Date;
+                    }
+                }
             }
 
             if (!leaveDate.HasValue) return false;

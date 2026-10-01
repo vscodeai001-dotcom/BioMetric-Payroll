@@ -119,7 +119,7 @@ else
     }
 }
 
-<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+<AttendanceRefreshListener OnLeaveChanged="HandleRealtimeRefresh" />
 
 @code {
     private List<LeaveRequest> leaveHistory = new();
@@ -129,12 +129,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await CheckPermissionsAndLoadData();
+        await CheckPermissionsAndLoadData(isSilent: false);
     }
 
-    private async Task CheckPermissionsAndLoadData()
+    private async Task CheckPermissionsAndLoadData(bool isSilent = false)
     {
-        isLoading = true;
+        if (!isSilent && (leaveHistory == null || !leaveHistory.Any()))
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+        }
         try
         {
             await using var dbContext = await DbFactory.CreateDbContextAsync();
@@ -161,26 +165,34 @@ else
 
             if (user.Identity?.IsAuthenticated == true)
             {
-                var email = user.Identity.Name;
-                linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
+                if (linkedEmployee == null)
+                {
+                    var email = user.Identity.Name;
+                    linkedEmployee = await FirebaseEmployees.GetEmployeeByEmailAsync(email);
+                }
 
                 if (linkedEmployee != null)
                 {
-                    leaveHistory = await dbContext.LeaveRequests
+                    var fresh = await dbContext.LeaveRequests
                         .Where(p => p.EmployeeID == linkedEmployee.EmployeeID)
                         .OrderByDescending(p => p.LeaveDate)
                         .ToListAsync();
+                    leaveHistory = fresh;
                 }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error loading employee leave history.");
-            toastService.ShowError("An error occurred while loading your data.");
+            if (!isSilent)
+            {
+                toastService.ShowError("An error occurred while loading your data.");
+            }
         }
         finally
         {
             isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -188,8 +200,7 @@ else
     {
         try
         {
-            await CheckPermissionsAndLoadData();
-            await InvokeAsync(StateHasChanged);
+            await CheckPermissionsAndLoadData(isSilent: true);
         }
         catch (Exception ex)
         {

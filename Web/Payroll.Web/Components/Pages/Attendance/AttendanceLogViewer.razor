@@ -675,6 +675,16 @@
                 data = data.Where(ds => ds.EmployeeID == selectedEmployeeId).ToList();
             }
 
+            // Deduplicate by (EmployeeID, ShiftDate): Firebase may return multiple entries
+            // for the same employee+date. Keep the most complete record (highest EarnedStandardHours,
+            // then largest SummaryID as tiebreaker). Application-level fix — no DB changes.
+            data = data
+                .GroupBy(ds => (ds.EmployeeID, ds.ShiftDate))
+                .Select(g => g.OrderByDescending(ds => ds.EarnedStandardHours)
+                              .ThenByDescending(ds => ds.SummaryID)
+                              .First())
+                .ToList();
+
             // ----------------------------------------------------
             // EMPLOYEE IDS
             // ----------------------------------------------------
@@ -949,6 +959,9 @@
                                         dayPunches.Count - 1;
                                     i += 2)
                                 {
+                                    var prevIn =
+                                        dayPunches[i - 1];
+
                                     var outTime =
                                         dayPunches[i];
 
@@ -959,6 +972,29 @@
                                         inTime >
                                         outTime)
                                     {
+                                        // Exclude gap between regular shift completion and post-shift overtime
+                                        if (sEnd.HasValue)
+                                        {
+                                            var shiftEndDt = (sStart.HasValue && sEnd.Value < sStart.Value)
+                                                ? ds.ShiftDate.AddDays(1).ToDateTime(sEnd.Value)
+                                                : ds.ShiftDate.ToDateTime(sEnd.Value);
+
+                                            if (prevIn < shiftEndDt && inTime >= shiftEndDt)
+                                            {
+                                                continue;
+                                            }
+                                        }
+
+                                        // Exclude gap between pre-shift overtime and regular shift start
+                                        if (sStart.HasValue)
+                                        {
+                                            var shiftStartDt = ds.ShiftDate.ToDateTime(sStart.Value);
+                                            if (outTime <= shiftStartDt && inTime >= shiftStartDt)
+                                            {
+                                                continue;
+                                            }
+                                        }
+
                                         var gap =
                                             inTime -
                                             outTime;
@@ -1003,8 +1039,12 @@
 
                             return dto;
                         })
+                    .DistinctBy(
+                        x => (x.EmployeeID, x.Date))
                     .OrderByDescending(
                         x => x.Date)
+                    .ThenBy(
+                        x => x.EmployeeName)
                     .ToList();
 
             // ----------------------------------------------------

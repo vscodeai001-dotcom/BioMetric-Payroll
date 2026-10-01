@@ -74,6 +74,10 @@
 
         try
         {
+            // Always ensure new advance gets a fresh ID and unique Firebase key
+            NewAdvance.AdvanceID = 0;
+            NewAdvance.FirebaseKey = null;
+
             if (!await FirebaseAdvances.SaveAsync(NewAdvance))
             {
                 toastService.ShowError("Unable to save the advance to Firebase.");
@@ -100,6 +104,7 @@
             // The parent owns this object, so replacing the reference here would
             // leave the parent holding the already-saved entity/primary key.
             NewAdvance.AdvanceID = 0;
+            NewAdvance.FirebaseKey = null;
             NewAdvance.EmployeeID = 0;
             NewAdvance.AdvanceDate = DateTime.Now.Date;
             NewAdvance.AdvanceType = "General";

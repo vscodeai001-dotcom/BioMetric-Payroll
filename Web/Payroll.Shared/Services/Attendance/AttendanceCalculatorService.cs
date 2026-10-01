@@ -1063,7 +1063,9 @@ namespace Payroll.Shared.Services
                         _breakService
                             .CalculateBreakPenalty(
                                 pr.Ordered,
-                                0);
+                                0,
+                                scheduleResult.HasShift ? scheduleResult.ShiftStart : (DateTime?)null,
+                                scheduleResult.HasShift ? scheduleResult.ShiftEnd : (DateTime?)null);
 
                     earnedStandard =
                         CalculateGrossWorkedIncludingOpenPunch(
@@ -1113,7 +1115,9 @@ namespace Payroll.Shared.Services
                         _breakService
                             .CalculateBreakPenalty(
                                 pr.Ordered,
-                                0);
+                                0,
+                                scheduleResult.HasShift ? scheduleResult.ShiftStart : (DateTime?)null,
+                                scheduleResult.HasShift ? scheduleResult.ShiftEnd : (DateTime?)null);
 
                     // ------------------------------------------------
                     // WEEKLY OFF WORKED
@@ -1294,7 +1298,9 @@ namespace Payroll.Shared.Services
                         _breakService
                             .CalculateBreakPenalty(
                                 pr.Ordered,
-                                paidBreakMin);
+                                paidBreakMin,
+                                scheduleResult.HasShift ? scheduleResult.ShiftStart : (DateTime?)null,
+                                scheduleResult.HasShift ? scheduleResult.ShiftEnd : (DateTime?)null);
 
                     // ------------------------------------------------
                     // REGULAR WORKED

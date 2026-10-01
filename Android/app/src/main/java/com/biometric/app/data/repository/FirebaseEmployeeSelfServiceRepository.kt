@@ -56,6 +56,20 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 ) {
     private val auth = FirebaseAuth.getInstance()
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+    private val indiaZoneId = java.time.ZoneId.of("Asia/Kolkata")
+
+    private fun parseLocalDate(epochMillis: Long, literalDate: String? = null): LocalDate {
+        if (!literalDate.isNullOrBlank()) {
+            val trimmed = literalDate.trim().take(10)
+            runCatching { LocalDate.parse(trimmed, dateFormatter) }.getOrNull()?.let { return it }
+        }
+        if (epochMillis <= 0L) return LocalDate.now(indiaZoneId)
+        return runCatching {
+            Instant.ofEpochMilli(epochMillis).atZone(indiaZoneId).toLocalDate()
+        }.getOrElse {
+            LocalDate.ofEpochDay(epochMillis / 86_400_000L)
+        }
+    }
 
     private fun ownerRef(): DatabaseReference =
         firebaseSync.getOwnerRef()
@@ -264,6 +278,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         leaveType = string("leaveType") ?: "Casual Leave",
         startDate = long("startDate"),
         endDate = long("endDate"),
+        leaveDate = string("leaveDate") ?: string("LeaveDate"),
         reason = string("reason").orEmpty(),
         status = string("status") ?: "Pending",
         adminNotes = string("adminNotes"),
@@ -692,12 +707,13 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun leaves(): List<LeaveDto> {
         val id = employeeId()
         val requests = readList("leave_requests") { it.toLeaveRequest() }
-            .filter { it.staffId == id }
+            .filter { it.staffId == id || it.employeeId == id }
         val result = mutableListOf<LeaveDto>()
         requests.forEach { req ->
-            val start = LocalDate.ofEpochDay(req.startDate / 86_400_000L)
-            val end = LocalDate.ofEpochDay(req.endDate / 86_400_000L)
-            val days = ChronoUnit.DAYS.between(start, end).toInt().coerceAtLeast(0)
+            val start = parseLocalDate(req.startDate, req.leaveDate)
+            val end = if (req.endDate > 0L) parseLocalDate(req.endDate, null) else start
+            val safeEnd = if (end.isBefore(start)) start else end
+            val days = ChronoUnit.DAYS.between(start, safeEnd).toInt().coerceAtLeast(0)
             for (offset in 0..days) {
                 val date = start.plusDays(offset.toLong()).format(dateFormatter)
                 result += LeaveDto(
@@ -716,7 +732,8 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun createLeave(leaveDate: String, leaveType: String, isHalfDay: Boolean, notes: String?) {
         requireFeatureAllowed("leave")
         val emp = employee() ?: throw IllegalStateException("Employee record not found")
-        val date = LocalDate.parse(leaveDate, dateFormatter).toEpochDay() * 86_400_000L
+        val parsedDate = LocalDate.parse(leaveDate, dateFormatter)
+        val date = parsedDate.atStartOfDay(indiaZoneId).toInstant().toEpochMilli()
 
         // Rapid duplicate debounce: if a leave for this employee+date was pushed within the
         // last 10 seconds (e.g. from a previous fast tap), skip the new push.
@@ -727,8 +744,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 val eId = s.child("employeeId").value?.toString()
                     ?: s.child("staffId").value?.toString()
                 val d = s.child("startDate").value?.toString()?.toLongOrNull()
+                val ld = s.child("leaveDate").value?.toString()
                 val created = s.child("createdAt").value?.toString()?.toLongOrNull() ?: 0L
-                eId == emp.employeeId && d == date && (now - created) < 10_000L
+                (eId == emp.employeeId) && (ld == leaveDate || d == date) && (now - created) < 10_000L
             }
             if (isDuplicate) return
         }
@@ -743,6 +761,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 leaveType = leaveType,
                 startDate = date,
                 endDate = date,
+                leaveDate = leaveDate,
                 reason = notes.orEmpty(),
                 status = "Pending",
                 adminNotes = null,
@@ -1049,7 +1068,10 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
 
     private fun stableIntId(value: String): Int = abs(value.hashCode()).coerceAtLeast(1)
     private fun parseDate(value: String): Long =
-        runCatching { LocalDate.parse(value, dateFormatter).toEpochDay() * 86_400_000L }.getOrDefault(System.currentTimeMillis())
+        runCatching {
+            val date = LocalDate.parse(value.trim().take(10), dateFormatter)
+            date.atStartOfDay(indiaZoneId).toInstant().toEpochMilli()
+        }.getOrDefault(System.currentTimeMillis())
 
     private fun parseDateTime(date: String, time: String): Long =
         runCatching { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).parse("$date $time")?.time }

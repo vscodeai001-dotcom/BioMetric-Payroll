@@ -27,9 +27,21 @@ class ApplyLeaveFragment : Fragment() {
 
     @Inject lateinit var selfService: FirebaseEmployeeSelfServiceRepository
 
-    private var startDate: Long = System.currentTimeMillis()
-    private var endDate: Long = System.currentTimeMillis()
-    private val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private var isSingleDay: Boolean = true
+    private var startDate: Long = getUtcToday()
+    private var endDate: Long = getUtcToday()
+    private val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+
+    private fun getUtcToday(): Long {
+        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
+        cal.set(Calendar.HOUR_OF_DAY, 0)
+        cal.set(Calendar.MINUTE, 0)
+        cal.set(Calendar.SECOND, 0)
+        cal.set(Calendar.MILLISECOND, 0)
+        return cal.timeInMillis
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentApplyLeaveBinding.inflate(inflater, container, false)
@@ -42,19 +54,47 @@ class ApplyLeaveFragment : Fragment() {
     }
 
     private fun setupForm() {
-        updateDateRangeDisplay()
-        
-        binding.etDateRange.setOnClickListener {
-            val picker = MaterialDatePicker.Builder.dateRangePicker()
-                .setTitleText("Select Leave Range")
-                .setSelection(Pair(startDate, endDate))
-                .build()
-            picker.addOnPositiveButtonClickListener { selection ->
-                startDate = selection.first ?: startDate
-                endDate = selection.second ?: endDate
-                updateDateRangeDisplay()
+        updateDateDisplay()
+
+        binding.toggleDurationType.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (isChecked) {
+                isSingleDay = (checkedId == binding.btnSingleDay.id)
+                if (isSingleDay) {
+                    binding.tilDateRange.hint = "Select Date 📅"
+                    endDate = startDate
+                } else {
+                    binding.tilDateRange.hint = "Select Date Range 🗓️"
+                }
+                updateDateDisplay()
             }
-            picker.show(parentFragmentManager, "leave_date_range")
+        }
+
+        binding.etDateRange.setOnClickListener {
+            if (isSingleDay) {
+                val picker = MaterialDatePicker.Builder.datePicker()
+                    .setTitleText("Select Leave Date")
+                    .setSelection(startDate)
+                    .build()
+                picker.addOnPositiveButtonClickListener { selection ->
+                    if (selection != null) {
+                        startDate = selection
+                        endDate = selection
+                        updateDateDisplay()
+                    }
+                }
+                picker.show(parentFragmentManager, "leave_single_date")
+            } else {
+                val picker = MaterialDatePicker.Builder.dateRangePicker()
+                    .setTitleText("Select Leave Range")
+                    .setSelection(Pair(startDate, endDate))
+                    .build()
+                picker.addOnPositiveButtonClickListener { selection ->
+                    startDate = selection.first ?: startDate
+                    endDate = selection.second ?: endDate
+                    updateDateDisplay()
+                }
+                picker.show(parentFragmentManager, "leave_date_range")
+            }
         }
 
         val leaveTypes = arrayOf("Sick Leave", "Casual Leave", "Privilege Leave", "Leave Without Pay")
@@ -66,10 +106,14 @@ class ApplyLeaveFragment : Fragment() {
         }
     }
 
-    private fun updateDateRangeDisplay() {
+    private fun updateDateDisplay() {
         val startStr = sdf.format(Date(startDate))
-        val endStr = sdf.format(Date(endDate))
-        binding.etDateRange.setText("$startStr to $endStr")
+        if (isSingleDay || startDate == endDate) {
+            binding.etDateRange.setText(startStr)
+        } else {
+            val endStr = sdf.format(Date(endDate))
+            binding.etDateRange.setText("$startStr to $endStr")
+        }
     }
 
     private fun submitLeave() {
@@ -80,21 +124,36 @@ class ApplyLeaveFragment : Fragment() {
             if (isAdded) Toast.makeText(requireContext(), "Please select leave type ⚠️", Toast.LENGTH_SHORT).show()
             return
         }
-        // Disable the button immediately to prevent duplicate submissions if the user
-        // taps rapidly. Each tap previously created a new UUID → new Firebase record → duplicate row.
+
+        // Disable button immediately to prevent rapid multi-taps creating duplicate requests
         _binding?.btnSubmit?.isEnabled = false
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val daysCount = ((endDate - startDate) / (1000L * 60 * 60 * 24)).toInt() + 1
-                repeat(daysCount) { i ->
-                    val dateStr = sdf.format(Date(startDate + i * 1000L * 60 * 60 * 24))
+                var daysCount = 0
+                if (isSingleDay || startDate == endDate) {
+                    val dateStr = sdf.format(Date(startDate))
                     selfService.createLeave(dateStr, type, isHalfDay, notes)
+                    daysCount = 1
+                } else {
+                    val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                        timeInMillis = startDate
+                    }
+                    val endCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                        timeInMillis = endDate
+                    }
+                    while (!cal.after(endCal)) {
+                        val dateStr = sdf.format(cal.time)
+                        selfService.createLeave(dateStr, type, isHalfDay, notes)
+                        daysCount++
+                        cal.add(Calendar.DAY_OF_MONTH, 1)
+                    }
                 }
-                Toast.makeText(requireContext(), "$daysCount days applied successfully! 🌴 💎 ✅", Toast.LENGTH_SHORT).show()
+                val msg = if (daysCount == 1) "Leave applied successfully! 🌴 💎 ✅" else "$daysCount days applied successfully! 🌴 💎 ✅"
+                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                 activity?.onBackPressedDispatcher?.onBackPressed()
             } catch (e: Exception) {
                 if (isAdded) Toast.makeText(requireContext(), "Submission error: ${e.message ?: "Firebase unavailable"} ⚠️", Toast.LENGTH_SHORT).show()
-                // Re-enable so the user can retry on error.
+                // Re-enable so the user can retry on error
                 _binding?.btnSubmit?.isEnabled = true
             }
         }

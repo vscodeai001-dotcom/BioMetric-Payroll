@@ -1047,7 +1047,7 @@ public class GeoLocationService
                 // Fetch the bounded 10-min window, then apply IsOutType in memory
                 // (IsOutType is a C# static method — not EF-translatable to SQL).
                 var guardWindowStart = punchTime.AddMinutes(-10);
-                var guardWindowEnd   = punchTime.AddMinutes(10);
+                var guardWindowEnd   = punchTime;
                 var windowPunches = await db.AttendanceLogs
                     .Where(p =>
                         p.EmployeeID == employeeId &&
@@ -1057,7 +1057,8 @@ public class GeoLocationService
                         p.PunchTime <= guardWindowEnd)
                     .OrderByDescending(p => p.PunchTime)
                     .ToListAsync();
-                var freshOutPunch = windowPunches.FirstOrDefault(p => IsOutType(p.LogType));
+                var freshOutPunch = windowPunches.FirstOrDefault(p => IsOutType(p.LogType) &&
+                    (p.DeviceID == "GeofenceAuto" || p.DeviceID == "AndroidGeofenceAuto"));
 
                 if (freshOutPunch != null)
                 {

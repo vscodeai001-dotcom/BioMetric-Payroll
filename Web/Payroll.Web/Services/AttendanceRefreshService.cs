@@ -248,6 +248,29 @@ namespace Payroll.Web.Services
 
         /*
          * ==========================================================
+         * BONUS CHANGES
+         * ==========================================================
+         *
+         * Notify when bonus records are created or deleted.
+         */
+
+        public async Task NotifyBonusChangedAsync(
+            int? employeeId = null,
+            string? action = null)
+        {
+            await _hub.Clients.All.SendAsync(
+                "BonusChanged",
+                new
+                {
+                    EmployeeId = employeeId,
+                    Action = action ?? "MODIFIED",
+                    Timestamp = DateTime.UtcNow
+                });
+        }
+
+
+        /*
+         * ==========================================================
          * PUNCH CHANGES (Manual/Correction)
          * ==========================================================
          *

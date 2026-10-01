@@ -68,7 +68,8 @@ class FirebaseRoomHydrator @Inject constructor(
     private val fbpComponentDao: LocalFbpComponentDao,
     private val fbpDeclarationDao: LocalFbpDeclarationDao,
     private val settingsDao: LocalSettingsDao,
-    private val firebaseAuthTokenManager: FirebaseAuthTokenManager
+    private val firebaseAuthTokenManager: FirebaseAuthTokenManager,
+    private val realtimeUiDispatcher: RealtimeUiDispatcher
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
@@ -82,16 +83,9 @@ class FirebaseRoomHydrator @Inject constructor(
     fun start() {
         if (!firebaseSync.isAuthenticated()) return
 
-        val role = sessionStore.userRole().trim().uppercase()
-        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
-        if (!isAdmin) {
-            Log.i("FirebaseRoomHydrator", "Skipping Admin Room hydration for role=$role")
-            return
-        }
-
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
 
-        if (activeOwnerUid == ownerUid && listeners.isNotEmpty()) return
+        if (activeOwnerUid == ownerUid && (listeners.isNotEmpty() || valueListeners.isNotEmpty())) return
 
         if (activeOwnerUid != null && activeOwnerUid != ownerUid) {
             stop()
@@ -99,6 +93,18 @@ class FirebaseRoomHydrator @Inject constructor(
 
         firebaseSync.startSync()
         activeOwnerUid = ownerUid
+
+        // ALWAYS observe wipe events for ALL users (both Admin and Employee).
+        // If admin wipes cloud data while mobile was offline, the moment mobile gets network
+        // this listener fires and clears stale local Room tables.
+        observeWipeEvents()
+
+        val role = sessionStore.userRole().trim().uppercase()
+        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        if (!isAdmin) {
+            Log.i("FirebaseRoomHydrator", "Skipping Admin Room table hydration for role=$role (wipe listener active)")
+            return
+        }
 
         hydrationJob = scope.launch {
             // Core employee/self-service tables are hydrated from raw snapshots.
@@ -164,26 +170,31 @@ class FirebaseRoomHydrator @Inject constructor(
             observeValue("feature_settings", existing = { emptyList() }, onDelete = { }) { 
                 if (it.key == "1") settingsDao.upsertFeatureSettings(it.toLocalFeatureSettings())
             }
-
-            observeWipeEvents()
         }
     }
 
-    @Volatile private var lastProcessedWipeTimestamp: Long = System.currentTimeMillis() - 10_000L
+    private var wipeListener: ValueEventListener? = null
+    private var wipeQuery: DatabaseReference? = null
 
     private fun observeWipeEvents() {
         val ownerRef = firebaseSync.getOwnerRef() ?: return
         val wipeRef = ownerRef.child("system_events").child("wipe")
-        wipeRef.addValueEventListener(object : ValueEventListener {
+        if (wipeQuery == wipeRef && wipeListener != null) return
+
+        wipeListener?.let { wipeQuery?.removeEventListener(it) }
+        wipeQuery = wipeRef
+
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) return
                 val timestamp = snapshot.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
                 val wipeType = snapshot.child("wipeType").value?.toString()?.uppercase() ?: "PARTIAL"
-                if (timestamp > lastProcessedWipeTimestamp) {
-                    lastProcessedWipeTimestamp = timestamp
-                    Log.i("FirebaseRoomHydrator", "Real-time WIPE event received from cloud: type=$wipeType, ts=$timestamp")
+                val lastProcessed = sessionStore.lastProcessedWipeTimestamp()
+                if (timestamp > lastProcessed) {
+                    sessionStore.setLastProcessedWipeTimestamp(timestamp)
+                    Log.i("FirebaseRoomHydrator", "Real-time WIPE event received from cloud: type=$wipeType, ts=$timestamp (lastProcessed=$lastProcessed)")
                     scope.launch {
-                        handleRealtimeWipe(isFull = (wipeType == "FULL"))
+                        handleRealtimeWipe(isFull = (wipeType == "FULL"), wipeTimestamp = timestamp)
                     }
                 }
             }
@@ -191,10 +202,12 @@ class FirebaseRoomHydrator @Inject constructor(
             override fun onCancelled(error: DatabaseError) {
                 Log.w("FirebaseRoomHydrator", "Wipe event listener cancelled: ${error.message}")
             }
-        })
+        }
+        wipeListener = listener
+        wipeRef.addValueEventListener(listener)
     }
 
-    private suspend fun handleRealtimeWipe(isFull: Boolean) {
+    suspend fun handleRealtimeWipe(isFull: Boolean, wipeTimestamp: Long = 0L) {
         withContext(Dispatchers.IO) {
             writeMutex.withLock {
                 try {
@@ -233,11 +246,21 @@ class FirebaseRoomHydrator @Inject constructor(
                         }
                     }
 
-                    Log.i("FirebaseRoomHydrator", "Local database cleared in response to remote wipe event (isFull=$isFull)")
+                    Log.i("FirebaseRoomHydrator", "Local database cleared in response to remote wipe event (isFull=$isFull, ts=$wipeTimestamp)")
                 } catch (e: Exception) {
                     Log.e("FirebaseRoomHydrator", "Failed to clear local Room on wipe event", e)
                 }
             }
+        }
+
+        withContext(Dispatchers.Main) {
+            realtimeUiDispatcher.refreshVisible()
+        }
+
+        val role = sessionStore.userRole().trim().uppercase()
+        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        if (isAdmin) {
+            forceRebind("Post-wipe resync")
         }
     }
 
@@ -584,14 +607,13 @@ class FirebaseRoomHydrator @Inject constructor(
         val sName = s("staffName")?.takeIf { it.isNotBlank() }
             ?: s("employeeName")?.takeIf { it.isNotBlank() }
             ?: ""
-        val start = l("startDate").takeIf { it > 0 }
-            ?: s("leaveDate")?.let { str ->
-                runCatching {
-                    java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).parse(str)?.time
-                        ?: java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(str)?.time
-                        ?: java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(str)?.time
-                }.getOrNull()
-            } ?: 0L
+        val literalLeaveDate = s("leaveDate")?.takeIf { it.isNotBlank() }
+        val start = literalLeaveDate?.let { str ->
+            runCatching {
+                val trimmed = str.trim().take(10)
+                java.time.LocalDate.parse(trimmed).atStartOfDay(java.time.ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli()
+            }.getOrNull()
+        } ?: l("startDate").takeIf { it > 0 } ?: 0L
         val end = l("endDate").takeIf { it > 0 } ?: start
         val isAppr = b("isApproved")
         val stat = s("status")?.takeIf { it.isNotBlank() } ?: if (isAppr) "Approved" else "Pending"
@@ -605,6 +627,7 @@ class FirebaseRoomHydrator @Inject constructor(
             leaveType = s("leaveType") ?: "Casual Leave",
             startDate = start,
             endDate = end,
+            leaveDate = literalLeaveDate,
             reason = rsn,
             status = stat,
             adminNotes = admNotes,
@@ -914,6 +937,10 @@ class FirebaseRoomHydrator @Inject constructor(
             runCatching { query.removeEventListener(listener) }
         }
         valueListeners.clear()
+
+        wipeListener?.let { wipeQuery?.removeEventListener(it) }
+        wipeListener = null
+        wipeQuery = null
 
         activeOwnerUid = null
     }

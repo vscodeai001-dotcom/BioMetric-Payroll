@@ -62,7 +62,11 @@ public sealed class FirebaseAttendanceService
                 var hasAnyLocal = await db.DailySummaries.AnyAsync(ct);
                 if (localList.Count > 0 || isOffline || hasAnyLocal)
                 {
-                    return localList;
+                    return localList
+                        .GroupBy(x => (x.EmployeeID, x.ShiftDate))
+                        .Select(g => g.OrderByDescending(s => s.EarnedStandardHours).ThenByDescending(s => s.SummaryID).First())
+                        .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                        .ToList();
                 }
             }
         }
@@ -93,7 +97,11 @@ public sealed class FirebaseAttendanceService
             }
         }
 
-        var sortedResult = result.OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID).ToList();
+        var sortedResult = result
+            .GroupBy(x => (x.EmployeeID, x.ShiftDate))
+            .Select(g => g.OrderByDescending(s => s.EarnedStandardHours).ThenByDescending(s => s.SummaryID).First())
+            .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+            .ToList();
 
         if (sortedResult.Count > 0 && _scopeFactory != null)
         {
@@ -173,7 +181,11 @@ public sealed class FirebaseAttendanceService
                 var hasAnyLocal = await db.DailySummaries.AnyAsync(ct);
                 if (localList.Count > 0 || isOffline || hasAnyLocal)
                 {
-                    return localList;
+                    return localList
+                        .GroupBy(x => (x.EmployeeID, x.ShiftDate))
+                        .Select(g => g.OrderByDescending(s => s.EarnedStandardHours).ThenByDescending(s => s.SummaryID).First())
+                        .OrderBy(x => x.ShiftDate)
+                        .ToList();
                 }
             }
         }
@@ -206,7 +218,11 @@ public sealed class FirebaseAttendanceService
             }
         }
 
-        var sortedResult = result.OrderBy(x => x.ShiftDate).ToList();
+        var sortedResult = result
+            .GroupBy(x => (x.EmployeeID, x.ShiftDate))
+            .Select(g => g.OrderByDescending(s => s.EarnedStandardHours).ThenByDescending(s => s.SummaryID).First())
+            .OrderBy(x => x.ShiftDate)
+            .ToList();
 
         if (sortedResult.Count > 0 && _scopeFactory != null)
         {

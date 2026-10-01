@@ -41,12 +41,48 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Leave Duration 📅"
+                    android:textStyle="bold"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:layout_marginBottom="8dp"
+                    android:paddingHorizontal="4dp"/>
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/toggleDurationType"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:singleSelection="true"
+                    app:selectionRequired="true"
+                    app:checkedButton="@+id/btnSingleDay">
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnSingleDay"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Single Day 📅"
+                        android:textSize="11sp"/>
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnDateRange"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Date Range 🗓️"
+                        android:textSize="11sp"/>
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
                 <com.google.android.material.textfield.TextInputLayout
                     android:id="@+id/tilDateRange"
                     style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:hint="Select Dates 🗓️"
+                    android:hint="Select Date 📅"
                     android:layout_marginBottom="16dp"
                     app:startIconDrawable="@drawable/ic_calendar">
                     <com.google.android.material.textfield.TextInputEditText

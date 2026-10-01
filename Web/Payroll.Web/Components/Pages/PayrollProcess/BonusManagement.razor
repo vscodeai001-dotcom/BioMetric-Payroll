@@ -6,6 +6,7 @@
 @inject FirebaseBonusService FirebaseBonuses
 @inject IToastService toastService
 @inject IJSRuntime JSRuntime
+@inject AttendanceRefreshService AttendanceRefresh
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Bonus Management</PageTitle>
@@ -38,7 +39,7 @@ else
                        OnDelete="DeleteBonus" />
 }
 
-<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+<AttendanceRefreshListener OnBonusChanged="HandleRealtimeRefresh" />
 
 @code {
     private List<Employee>? employeeList;
@@ -50,12 +51,16 @@ else
     protected override async Task OnInitializedAsync()
     {
         newBonus.BonusDate = DateTime.Now;
-        await CheckPermissionsAndLoadData();
+        await CheckPermissionsAndLoadData(isSilent: false);
     }
 
-    private async Task CheckPermissionsAndLoadData()
+    private async Task CheckPermissionsAndLoadData(bool isSilent = false)
     {
-        isLoading = true;
+        if (!isSilent && bonusList == null)
+        {
+            isLoading = true;
+            await InvokeAsync(StateHasChanged);
+        }
         try
         {
             if (!await FirebaseBonuses.IsEnabledAsync())
@@ -64,16 +69,30 @@ else
                 return;
             }
 
-            employeeList = await FirebaseBonuses.GetActiveEmployeesAsync();
-            bonusList = await FirebaseBonuses.GetAsync();
+            if (employeeList == null)
+            {
+                employeeList = await FirebaseBonuses.GetActiveEmployeesAsync();
+            }
+
+            var freshBonuses = await FirebaseBonuses.GetAsync();
+            bonusList = freshBonuses;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Bonus load failed: {ex.Message}");
+            if (bonusList == null) bonusList = new List<BonusRecord>();
         }
         finally
         {
             isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task LoadData() => await CheckPermissionsAndLoadData();
+    private async Task LoadData()
+    {
+        await CheckPermissionsAndLoadData(isSilent: true);
+    }
 
     private async Task DeleteBonus(BonusRecord bonus)
     {
@@ -89,6 +108,16 @@ else
             return;
         }
         toastService.ShowSuccess("Bonus deleted.");
+
+        try
+        {
+            await AttendanceRefresh.NotifyBonusChangedAsync(bonus.EmployeeID, "DELETED");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to notify bonus deleted: {ex.Message}");
+        }
+
         await LoadData();
     }
 
@@ -96,8 +125,7 @@ else
     {
         try
         {
-            await LoadData();
-            await InvokeAsync(StateHasChanged);
+            await CheckPermissionsAndLoadData(isSilent: true);
         }
         catch (Exception ex)
         {

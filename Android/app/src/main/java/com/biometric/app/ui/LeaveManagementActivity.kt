@@ -490,6 +490,7 @@ class LeaveManagementActivity : MotionBaseActivity() {
                         leaveType = leaveTypeStr,
                         startDate = dateMs,
                         endDate = dateMs,
+                        leaveDate = leaveDateStr,
                         reason = notes.orEmpty(),
                         status = "Approved",
                         adminNotes = "Granted by Admin",

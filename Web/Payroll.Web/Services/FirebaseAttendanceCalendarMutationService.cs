@@ -250,9 +250,9 @@ public sealed class FirebaseAttendanceCalendarMutationService
     private static long? ToUnixMilliseconds(DateTime? value)
     {
         if (!value.HasValue) return null;
-        var business = DateTime.SpecifyKind(value.Value, DateTimeKind.Unspecified);
+        var business = DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Unspecified);
         return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(business, IndiaTimeZone)).ToUnixTimeMilliseconds();
     }
 
-    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
 }

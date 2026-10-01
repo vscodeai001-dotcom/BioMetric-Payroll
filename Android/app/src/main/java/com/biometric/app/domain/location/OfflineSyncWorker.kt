@@ -12,6 +12,8 @@ import com.biometric.app.data.entity.OfflineTrackingEvent
 import com.biometric.app.data.dao.LocalAttendancePunchDao
 import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.sync.FirebaseSyncManager
+import com.biometric.app.sync.FirebaseRoomHydrator
+import kotlinx.coroutines.tasks.await
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +35,8 @@ class OfflineSyncWorker @AssistedInject constructor(
     private val punchDao: LocalAttendancePunchDao,
     private val sessionStore: MobileSessionStore,
     private val monitor: OfflineTrackingMonitor,
-    private val firebaseSync: FirebaseSyncManager
+    private val firebaseSync: FirebaseSyncManager,
+    private val hydrator: FirebaseRoomHydrator
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -44,6 +47,9 @@ class OfflineSyncWorker @AssistedInject constructor(
             )
             return Result.retry()
         }
+
+        // Check for any cloud wipe event first so we do not push pre-wipe stale offline punches
+        checkAndApplyCloudWipe()
 
         withContext(Dispatchers.IO) {
             locationDao.recoverStaleInFlight(
@@ -278,6 +284,25 @@ class OfflineSyncWorker @AssistedInject constructor(
             }
         }
         return true
+    }
+
+    private suspend fun checkAndApplyCloudWipe() {
+        val ownerRef = firebaseSync.getOwnerRef() ?: return
+        val snapshot = runCatching {
+            withTimeoutOrNull(5000L) {
+                ownerRef.child("system_events").child("wipe").get().await()
+            }
+        }.getOrNull() ?: return
+
+        if (!snapshot.exists()) return
+        val timestamp = snapshot.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
+        val wipeType = snapshot.child("wipeType").value?.toString()?.uppercase() ?: "PARTIAL"
+        val lastProcessed = sessionStore.lastProcessedWipeTimestamp()
+        if (timestamp > lastProcessed) {
+            sessionStore.setLastProcessedWipeTimestamp(timestamp)
+            Log.i("OfflineSyncWorker", "Detected pending cloud wipe event during sync: type=$wipeType, ts=$timestamp (lastProcessed=$lastProcessed)")
+            hydrator.handleRealtimeWipe(isFull = (wipeType == "FULL"), wipeTimestamp = timestamp)
+        }
     }
 
     private suspend fun syncOfflinePunches() {

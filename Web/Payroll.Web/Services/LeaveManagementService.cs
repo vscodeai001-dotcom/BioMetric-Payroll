@@ -69,10 +69,19 @@ namespace Payroll.Web.Services
             else if (filterStatus == "Rejected")
                 query = query.Where(lr => lr.Status == "Rejected");
 
-            return await query
+            var list = await query
                 .OrderByDescending(lr => lr.LeaveDate)
                 .ThenBy(lr => lr.EmployeeID)
                 .ToListAsync();
+
+            return list
+                .GroupBy(lr => !string.IsNullOrEmpty(lr.FirebaseLeaveId)
+                    ? lr.FirebaseLeaveId
+                    : lr.LeaveRequestID > 0
+                        ? lr.LeaveRequestID.ToString()
+                        : $"{lr.EmployeeID}_{lr.LeaveDate:yyyyMMdd}_{lr.LeaveType}")
+                .Select(g => g.First())
+                .ToList();
         }
 
         // --- 2. SAVE NEW REQUEST (Admin Entry) ---

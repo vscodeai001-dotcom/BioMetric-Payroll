@@ -260,9 +260,15 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
         // Snapshot all StateFlow data on Main, then crunch off Main
         val employees = sharedViewModel.allEmployees.value.associateBy { it.employeeId.toIntOrNull() ?: -1 }
-        val summariesInRange = sharedViewModel.allDailySummaries.value.filter {
-            it.shiftDate in f..t && (employeeFilterId == null || it.employeeId == employeeFilterId)
-        }
+        // Deduplicate by (employeeId, shiftDate): Firebase may have synced multiple entries
+        // for the same employee+date. Keep the one with the most complete data (highest
+        // earnedStandardHours, then latest summaryId as tiebreaker). Application-level fix only.
+        val summariesInRange = sharedViewModel.allDailySummaries.value
+            .filter { it.shiftDate in f..t && (employeeFilterId == null || it.employeeId == employeeFilterId) }
+            .groupBy { Pair(it.employeeId, it.shiftDate) }
+            .map { (_, group) ->
+                group.maxByOrNull { it.earnedStandardHours * 1_000_000 + it.summaryId.toLong() }!!
+            }
         val allPunches = sharedViewModel.allAttendancePunches.value
         val allAttendance = sharedViewModel.allAttendance.value
 
@@ -496,7 +502,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             }
         }
 
-        val combinedRows = (allRows + synthesizedRows)
+        val combinedRows = (allRows + synthesizedRows).distinctBy { Pair(it.employeeID, it.date) }
 
         // Compute KPI Cumulative Metrics across all filtered summaries and synthesized rows
         val employeesProcessed = combinedRows.map { it.employeeID }.distinct().count()

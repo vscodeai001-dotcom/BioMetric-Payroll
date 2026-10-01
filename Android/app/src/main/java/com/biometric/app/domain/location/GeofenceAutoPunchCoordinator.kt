@@ -55,7 +55,8 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
 ) {
     private val evalMutex = Mutex()
     private var lastEvaluatedInside: Boolean? = null
-    private var lastPunchTimeMs: Long = 0L
+    private var lastInPunchTimeMs: Long = 0L
+    private var lastOutPunchTimeMs: Long = 0L
     private var lastLocation: Location? = null
 
     /**
@@ -252,9 +253,9 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                     ?: todaySessions
                         .maxOfOrNull { it.checkInTime }
                         ?: 0L
-                // In-memory guard: lastPunchTimeMs is set immediately on punch,
+                // In-memory guard: lastInPunchTimeMs is set immediately on punch,
                 // before Room async write completes.
-                val lastInTime = maxOf(lastInTimeRoom, lastPunchTimeMs)
+                val lastInTime = maxOf(lastInTimeRoom, lastInPunchTimeMs)
                 if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_PUNCH_GUARD_MS) {
                     Log.d(TAG, "Dual-IN guard: last IN was ${(nowMs - lastInTime) / 1000}s ago (< 10 min), skipping auto IN for employee $staffIdStr")
                     lastEvaluatedInside = true
@@ -274,10 +275,10 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                         (p.date == todayStr || (p.timestamp > 0 && sdf.format(Date(p.timestamp)) == todayStr))
                     }
                 val lastOutTimeRoom = freshPunches
-                    .filter { isCheckOutType(it.type) }
+                    .filter { isCheckOutType(it.type) && (it.source == "GEOFENCE_AUTO" || it.punchId.startsWith("AUTO_")) }
                     .maxOfOrNull { it.timestamp }
                     ?: 0L
-                val lastOutTime = maxOf(lastOutTimeRoom, lastPunchTimeMs)
+                val lastOutTime = maxOf(lastOutTimeRoom, lastOutPunchTimeMs)
                 if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_PUNCH_GUARD_MS) {
                     Log.d(TAG, "Dual-OUT guard: last OUT was ${(nowMs - lastOutTime) / 1000}s ago (< 10 min), skipping auto OUT for employee $staffIdStr")
                     lastEvaluatedInside = false
@@ -286,8 +287,12 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             }
 
             // Debounce check: minimum 60s between punches
-            val elapsedSinceLast = nowMs - (lastPunch?.timestamp?.takeIf { it > 0 } ?: lastPunchTimeMs)
-            if (elapsedSinceLast < DEBOUNCE_MS) {
+            val lastAnyPunchTime = maxOf(
+                lastPunch?.timestamp?.takeIf { it > 0 } ?: 0L,
+                maxOf(lastInPunchTimeMs, lastOutPunchTimeMs)
+            )
+            val elapsedSinceLast = nowMs - lastAnyPunchTime
+            if (lastAnyPunchTime > 0 && elapsedSinceLast < DEBOUNCE_MS) {
                 Log.d(TAG, "Debounce: only ${elapsedSinceLast}ms since last punch, skipping auto punch")
                 return
             }
@@ -331,7 +336,11 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             firebaseSync.pushAttendancePunch(punch)
 
             lastEvaluatedInside = isInside
-            lastPunchTimeMs = nowMs
+            if (isInside) {
+                lastInPunchTimeMs = nowMs
+            } else {
+                lastOutPunchTimeMs = nowMs
+            }
             Log.i(TAG, "Automatic geofence $punchType punch recorded for employee $staffIdStr (dist: ${distanceMeters.toInt()}m)")
         }
     }
@@ -426,6 +435,9 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                             )
                             localAttendancePunchDao.upsert(local)
                             firebaseSync.pushAttendancePunch(punch)
+                            if (empId == sessionStore.employeeId()) {
+                                lastOutPunchTimeMs = nowMs
+                            }
                             Log.i(TAG, "Rebaseline: Created auto OUT punch for employee $empId (dist: ${distanceMeters.toInt()}m > $radiusMeters m)")
                         }
                     }
