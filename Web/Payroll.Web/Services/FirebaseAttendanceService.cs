@@ -359,8 +359,19 @@ public sealed class FirebaseAttendanceService
         if (localPunches.Count > 0)
         {
             var existingKeys = new HashSet<string>(result.Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{r.LogType?.ToUpperInvariant()}"));
+            var existingLogIds = new HashSet<int>(result.Where(r => r.LogID > 0).Select(r => r.LogID));
+            var existingBioIds = new HashSet<string>(result.Where(r => !string.IsNullOrEmpty(r.BiometricID) && !r.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase)).Select(r => $"{r.EmployeeID}_{r.BiometricID.ToUpperInvariant()}"));
+
             foreach (var lp in localPunches)
             {
+                if (lp.LogID > 0 && existingLogIds.Contains(lp.LogID))
+                    continue;
+
+                if (!string.IsNullOrEmpty(lp.BiometricID) &&
+                    !lp.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) &&
+                    existingBioIds.Contains($"{lp.EmployeeID}_{lp.BiometricID.ToUpperInvariant()}"))
+                    continue;
+
                 var key = $"{lp.EmployeeID}_{lp.PunchTime:yyyyMMdd_HHmm}_{lp.LogType?.ToUpperInvariant()}";
                 if (existingKeys.Add(key))
                 {

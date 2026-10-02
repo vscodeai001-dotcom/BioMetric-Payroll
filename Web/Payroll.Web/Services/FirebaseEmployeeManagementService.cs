@@ -48,128 +48,176 @@ public sealed class FirebaseEmployeeManagementService
 
     public async Task<List<Employee>> GetEmployeesAsync(CancellationToken ct = default)
     {
+        bool isOffline = false;
         using (var scope = _scopeFactory.CreateScope())
         {
+            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
+            isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+            if (isOffline)
+            {
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    return await db.Employees.AsNoTracking()
+                        .Where(x => !x.IsDeleted)
+                        .OrderBy(x => x.Name)
+                        .ToListAsync(ct);
+                }
+            }
+        }
+
+        try
+        {
+            var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
+            if (!snapshot.HasValue)
+            {
+                _logger.LogWarning(
+                    "Firebase employees read returned no data for owner {OwnerUid}.",
+                    OwnerUid);
+                return new List<Employee>();
+            }
+
+            var result = new List<Employee>();
+            var allEmployeesFromFirebase = new List<Employee>();
+
+            if (snapshot.Value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var item in snapshot.Value.EnumerateObject())
+                {
+                    try
+                    {
+                        if (item.Value.ValueKind == JsonValueKind.Null)
+                            continue;
+
+                        var employee = ToEmployee(item.Value, item.Name);
+                        allEmployeesFromFirebase.Add(employee);
+                        if (!employee.IsDeleted)
+                            result.Add(employee);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Ignoring malformed Firebase employee record {RecordId}.", item.Name);
+                    }
+                }
+            }
+            else if (snapshot.Value.ValueKind == JsonValueKind.Array)
+            {
+                _logger.LogInformation(
+                    "Firebase employees collection is array-shaped for owner {OwnerUid}; reading numeric employee records.",
+                    OwnerUid);
+
+                var index = 0;
+                foreach (var item in snapshot.Value.EnumerateArray())
+                {
+                    var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                    index++;
+
+                    try
+                    {
+                        if (item.ValueKind == JsonValueKind.Null)
+                            continue;
+
+                        var employee = ToEmployee(item, fallbackId);
+                        allEmployeesFromFirebase.Add(employee);
+                        if (!employee.IsDeleted)
+                            result.Add(employee);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Ignoring malformed Firebase employee array record {RecordId}.", fallbackId);
+                    }
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Firebase employees table returned unsupported JSON shape {ValueKind} for owner {OwnerUid}.",
+                    snapshot.Value.ValueKind,
+                    OwnerUid);
+            }
+
+            var distinctResult = result
+                .GroupBy(x => x.EmployeeID)
+                .Select(g => g.First())
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // Reconcile local SQLite cache with Firebase SSOT
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                if (dbFactory != null)
+                {
+                    using var db = await dbFactory.CreateDbContextAsync(ct);
+                    var localEmps = await db.Employees.ToListAsync(ct);
+                    bool dbChanged = false;
+
+                    var activeIds = distinctResult.Select(e => e.EmployeeID).ToHashSet();
+                    var deletedIds = allEmployeesFromFirebase.Where(e => e.IsDeleted).Select(e => e.EmployeeID).ToHashSet();
+
+                    foreach (var local in localEmps)
+                    {
+                        if (deletedIds.Contains(local.EmployeeID) && !local.IsDeleted)
+                        {
+                            local.IsDeleted = true;
+                            dbChanged = true;
+                        }
+                    }
+
+                    if (dbChanged)
+                    {
+                        await db.SaveChangesAsync(ct);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Local SQLite employee cache reconciliation skipped.");
+            }
+
+            return distinctResult;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read employees from Firebase for owner {OwnerUid}; falling back to local SQLite cache.", OwnerUid);
+            using var scope = _scopeFactory.CreateScope();
             var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
             if (dbFactory != null)
             {
                 using var db = await dbFactory.CreateDbContextAsync(ct);
-                var localEmployees = await db.Employees.AsNoTracking()
+                return await db.Employees.AsNoTracking()
                     .Where(x => !x.IsDeleted)
                     .OrderBy(x => x.Name)
                     .ToListAsync(ct);
-
-                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
-
-                if (localEmployees.Count > 0 || isOffline)
-                {
-                    return localEmployees;
-                }
             }
-        }
-
-        var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
-        if (!snapshot.HasValue)
-        {
-            _logger.LogWarning(
-                "Firebase employees read returned no data for owner {OwnerUid}.",
-                OwnerUid);
             return new List<Employee>();
         }
-
-        var result = new List<Employee>();
-
-        // Firebase Realtime Database returns numeric-keyed collections as a JSON
-        // array in REST responses. Older data and some writes can return an
-        // object instead. Support both shapes so valid employees are never
-        // mistaken for an empty collection.
-        if (snapshot.Value.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var item in snapshot.Value.EnumerateObject())
-            {
-                try
-                {
-                    if (item.Value.ValueKind == JsonValueKind.Null)
-                        continue;
-
-                    var employee = ToEmployee(item.Value, item.Name);
-                    if (!employee.IsDeleted)
-                        result.Add(employee);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Ignoring malformed Firebase employee record {RecordId}.", item.Name);
-                }
-            }
-        }
-        else if (snapshot.Value.ValueKind == JsonValueKind.Array)
-        {
-            _logger.LogInformation(
-                "Firebase employees collection is array-shaped for owner {OwnerUid}; reading numeric employee records.",
-                OwnerUid);
-
-            var index = 0;
-            foreach (var item in snapshot.Value.EnumerateArray())
-            {
-                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
-                index++;
-
-                try
-                {
-                    if (item.ValueKind == JsonValueKind.Null)
-                        continue;
-
-                    var employee = ToEmployee(item, fallbackId);
-                    if (!employee.IsDeleted)
-                        result.Add(employee);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Ignoring malformed Firebase employee array record {RecordId}.", fallbackId);
-                }
-            }
-        }
-        else
-        {
-            _logger.LogWarning(
-                "Firebase employees table returned unsupported JSON shape {ValueKind} for owner {OwnerUid}.",
-                snapshot.Value.ValueKind,
-                OwnerUid);
-        }
-
-        return result
-            .GroupBy(x => x.EmployeeID)
-            .Select(g => g.First())
-            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
     }
 
     public async Task<Employee?> GetEmployeeAsync(int employeeId, CancellationToken ct = default)
     {
         if (employeeId <= 0) return null;
 
+        var snapshot = await _firebase.GetOwnerRecordAsync(
+            OwnerUid, EmployeesTable, employeeId.ToString(CultureInfo.InvariantCulture), ct);
+        if (snapshot.HasValue && snapshot.Value.ValueKind == JsonValueKind.Object)
+        {
+            return ToEmployee(snapshot.Value, employeeId.ToString(CultureInfo.InvariantCulture));
+        }
+
         using (var scope = _scopeFactory.CreateScope())
         {
             var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
             if (dbFactory != null)
             {
                 using var db = await dbFactory.CreateDbContextAsync(ct);
-                var localEmployee = await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeID == employeeId, ct);
-                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
-                if (localEmployee != null || isOffline)
-                {
-                    return localEmployee;
-                }
+                return await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.EmployeeID == employeeId, ct);
             }
         }
 
-        var snapshot = await _firebase.GetOwnerRecordAsync(
-            OwnerUid, EmployeesTable, employeeId.ToString(CultureInfo.InvariantCulture), ct);
-        return snapshot.HasValue && snapshot.Value.ValueKind == JsonValueKind.Object
-            ? ToEmployee(snapshot.Value, employeeId.ToString(CultureInfo.InvariantCulture))
-            : null;
+        return null;
     }
 
     public async Task<Dictionary<int, string>> GetEmployeeNameMapAsync(
@@ -403,6 +451,26 @@ public sealed class FirebaseEmployeeManagementService
                     ["WriteId"] = writeId
                 }
             }, OwnerUid, ct);
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var local = await db.Employees.FirstOrDefaultAsync(e => e.EmployeeID == employeeId, ct);
+                if (local != null)
+                {
+                    local.IsDeleted = true;
+                    await db.SaveChangesAsync(ct);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to mark employee {EmployeeId} as deleted in local SQLite cache.", employeeId);
+        }
 
         return (true, employee, "Employee moved to the Firebase recycle/deleted state.");
     }
@@ -961,7 +1029,7 @@ public sealed class FirebaseEmployeeManagementService
             SickLeaveBalance = DecimalValue("sickLeaveBalance"),
             NightShiftAllowance = DecimalValue("nightShiftAllowance"),
             TdsRatePercent = DecimalValue("tdsRatePercent"),
-            IsDeleted = !BoolValue("isActive", true),
+            IsDeleted = !BoolValue("isActive", true) || BoolValue("isDeleted", false),
 
             // --- NEW: ANDROID SYNCHRONIZATION ---
             PhoneNumber = StringValue("phone"),
@@ -1051,6 +1119,7 @@ public sealed class FirebaseEmployeeManagementService
             ["lastRotatedDate"] = DateUnix(employee.LastRotatedDate),
             ["currentShiftIndex"] = employee.CurrentShiftIndex,
             ["isActive"] = !employee.IsDeleted,
+            ["isDeleted"] = employee.IsDeleted,
             ["createdAt"] = createdAt,
             ["lastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };

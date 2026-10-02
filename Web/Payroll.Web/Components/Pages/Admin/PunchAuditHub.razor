@@ -1,0 +1,1301 @@
+@page "/admin/punch-audit-hub"
+@page "/attendance/punch-inspector"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@using System.Globalization
+@using System.Text
+@using global::Payroll.Shared
+@using global::Payroll.Shared.Data
+@using global::Payroll.Shared.Services
+@using global::Payroll.Web.Services
+@using global::Payroll.Web.Models
+@using global::Payroll.Web.Components.UI.Attendance
+
+@inject IDbContextFactory<AppDbContext> DbFactory
+@inject FirebaseAttendanceService FirebaseAttendance
+@inject FirebaseEmployeeManagementService FirebaseEmployees
+@inject AttendancePunchProcessor PunchProcessor
+@inject AttendanceRefreshService AttendanceRefresh
+@inject AttendanceTestMatrixSeeder MatrixSeeder
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+@inject IJSRuntime JSRuntime
+@inject ILogger<PunchAuditHub> Logger
+
+@attribute [Authorize(Roles = "Admin, SuperAdmin")]
+
+<PageTitle>Raw Punch Inspector & Multi-Mode Audit Hub</PageTitle>
+
+<AttendanceRefreshListener OnAttendanceChanged="HandleDataRefreshAsync" />
+<ApplicationRealtimeRefreshListener OnApplicationDataChanged="HandleDataRefreshAsync" />
+
+<div class="punch-hub-wrapper">
+    <!-- Top Header Banner -->
+    <div class="hub-header card border-0 shadow-sm rounded-4 p-4 mb-4">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
+            <div class="d-flex align-items-center gap-3">
+                <div class="hub-header-icon rounded-4 d-flex align-items-center justify-content-center">
+                    <span class="fs-1">🛰️</span>
+                </div>
+                <div>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <h2 class="fw-bold mb-0 text-hub-title">Raw Punch Inspector & Multi-Mode Hub</h2>
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-1.5 rounded-pill fw-semibold">
+                            Enterprise Telemetry
+                        </span>
+                    </div>
+                    <p class="text-hub-muted mb-0 mt-1">
+                        Deep inspection of all raw punch events across <strong>📟 Physical Machine</strong>, <strong>✍️ Manual Correction</strong>, and <strong>📍 Android Auto-Geofence</strong> modes vs the final accepted sequence.
+                    </p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <button class="btn btn-outline-warning rounded-pill px-3 py-2 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm"
+                        @onclick="LoadOctoberMatrixPreset"
+                        disabled="@isLoading"
+                        title="Quick preset: Jump to October 2026 31-day hybrid test dataset">
+                    <span>🧪</span>
+                    <span>Oct 2026 Matrix</span>
+                </button>
+
+                <button class="btn btn-outline-success rounded-pill px-3 py-2 fw-semibold d-inline-flex align-items-center gap-1 shadow-sm"
+                        @onclick="ExportToCsv"
+                        disabled="@(filteredPunches == null || !filteredPunches.Any() || isLoading)">
+                    <i class="bi bi-download"></i>
+                    <span>Export CSV</span>
+                </button>
+
+                <button class="btn btn-primary rounded-pill px-4 py-2 fw-semibold d-inline-flex align-items-center gap-1.5 shadow-sm"
+                        @onclick="LoadDataAsync"
+                        disabled="@isLoading">
+                    @if (isLoading)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status"></span>
+                        <span>Analyzing...</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-clockwise"></i>
+                        <span>Refresh Telemetry</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Analytics & KPI Cards -->
+    <div class="row g-3 mb-4">
+        <!-- Total Raw Punches -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-total">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-hub-muted">All Raw Punches</span>
+                    <span class="fs-5">📊</span>
+                </div>
+                <div class="fs-3 fw-bold text-hub-title">@totalRawCount</div>
+                <div class="small text-hub-muted">100% captured</div>
+            </div>
+        </div>
+
+        <!-- Accepted / Valid -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-accepted">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-success">Accepted / Valid</span>
+                    <span class="fs-5">✅</span>
+                </div>
+                <div class="fs-3 fw-bold text-success">@acceptedCount</div>
+                <div class="small text-hub-muted">
+                    @(totalRawCount > 0 ? $"{(acceptedCount * 100.0 / totalRawCount):F1}% acceptance" : "0%")
+                </div>
+            </div>
+        </div>
+
+        <!-- Suppressed / Filtered -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-suppressed">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-danger">Suppressed</span>
+                    <span class="fs-5">🚫</span>
+                </div>
+                <div class="fs-3 fw-bold text-danger">@suppressedCount</div>
+                <div class="small text-hub-muted">
+                    @(totalRawCount > 0 ? $"{(suppressedCount * 100.0 / totalRawCount):F1}% suppressed" : "0%")
+                </div>
+            </div>
+        </div>
+
+        <!-- Physical Machine -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-physical">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-info">Physical Machine</span>
+                    <span class="fs-5">📟</span>
+                </div>
+                <div class="fs-3 fw-bold text-info">@physicalCount</div>
+                <div class="small text-hub-muted">Tier 1 Hardware</div>
+            </div>
+        </div>
+
+        <!-- Manual Correction -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-manual">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-warning">Manual Correction</span>
+                    <span class="fs-5">✍️</span>
+                </div>
+                <div class="fs-3 fw-bold text-warning">@manualCount</div>
+                <div class="small text-hub-muted">Tier 2 Overrides</div>
+            </div>
+        </div>
+
+        <!-- Auto Geofence -->
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card card border-0 shadow-sm rounded-4 p-3 h-100 kpi-border-auto">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="small fw-semibold text-primary">Auto Geofence</span>
+                    <span class="fs-5">📍</span>
+                </div>
+                <div class="fs-3 fw-bold text-primary">@autoGeofenceCount</div>
+                <div class="small text-hub-muted">Tier 3 Dynamic GPS</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filter Station Card -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4 filter-station-card">
+        <div class="row g-3">
+            <!-- Start Date -->
+            <div class="col-12 col-sm-6 col-lg-3">
+                <label class="form-label small fw-bold text-hub-muted mb-1">📅 Start Date</label>
+                <input type="date" class="form-control rounded-3 hub-input" @bind="startDate" @bind:after="ApplyFilter" />
+            </div>
+
+            <!-- End Date -->
+            <div class="col-12 col-sm-6 col-lg-3">
+                <label class="form-label small fw-bold text-hub-muted mb-1">📅 End Date</label>
+                <input type="date" class="form-control rounded-3 hub-input" @bind="endDate" @bind:after="ApplyFilter" />
+            </div>
+
+            <!-- Employee Dropdown -->
+            <div class="col-12 col-sm-6 col-lg-3">
+                <label class="form-label small fw-bold text-hub-muted mb-1">👤 Employee</label>
+                <select class="form-select rounded-3 hub-input" @bind="selectedEmployeeId" @bind:after="ApplyFilter">
+                    <option value="0">All Employees (@employees.Count)</option>
+                    @foreach (var emp in employees.OrderBy(e => e.Name))
+                    {
+                        <option value="@emp.EmployeeID">@emp.Name (#@emp.EmployeeID)</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Search Box -->
+            <div class="col-12 col-sm-6 col-lg-3">
+                <label class="form-label small fw-bold text-hub-muted mb-1">🔍 Search Telemetry</label>
+                <div class="input-group">
+                    <span class="input-group-text hub-input border-end-0"><i class="bi bi-search"></i></span>
+                    <input type="text"
+                           class="form-control rounded-end-3 hub-input border-start-0"
+                           placeholder="Filter reason, ID, device..."
+                           @bind="searchQuery"
+                           @bind:event="oninput"
+                           @bind:after="ApplyFilter" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Filter Chips Row -->
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mt-3 pt-3 border-top">
+            <!-- Source Filter Chips -->
+            <div class="d-flex align-items-center gap-1.5 flex-wrap">
+                <span class="small fw-bold text-hub-muted me-2">Modes:</span>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(sourceFilter == null ? "btn-primary" : "btn-outline-secondary")"
+                        @onclick="() => SetSourceFilter(null)">
+                    All Modes
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(sourceFilter == PunchSourceTier.PhysicalMachine ? "btn-info text-white" : "btn-outline-info")"
+                        @onclick="() => SetSourceFilter(PunchSourceTier.PhysicalMachine)">
+                    📟 Physical Machine
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(sourceFilter == PunchSourceTier.ManualAdmin ? "btn-warning text-dark" : "btn-outline-warning")"
+                        @onclick="() => SetSourceFilter(PunchSourceTier.ManualAdmin)">
+                    ✍️ Manual Correction
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(sourceFilter == PunchSourceTier.GeofenceAuto ? "btn-primary" : "btn-outline-primary")"
+                        @onclick="() => SetSourceFilter(PunchSourceTier.GeofenceAuto)">
+                    📍 Auto Geofence
+                </button>
+            </div>
+
+            <!-- Status Filter Chips -->
+            <div class="d-flex align-items-center gap-1.5 flex-wrap">
+                <span class="small fw-bold text-hub-muted me-2">Status:</span>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == null ? "btn-secondary" : "btn-outline-secondary")"
+                        @onclick="() => SetStatusFilter(null)">
+                    All Status
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == true ? "btn-success" : "btn-outline-success")"
+                        @onclick="() => SetStatusFilter(true)">
+                    ✅ Accepted Only
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == false ? "btn-danger" : "btn-outline-danger")"
+                        @onclick="() => SetStatusFilter(false)">
+                    🚫 Suppressed Only
+                </button>
+            </div>
+
+            <!-- Direction Filter Chips -->
+            <div class="d-flex align-items-center gap-1.5 flex-wrap">
+                <span class="small fw-bold text-hub-muted me-2">Direction:</span>
+                <button class="btn btn-sm rounded-pill px-2.5 py-1 @(directionFilter == null ? "btn-dark" : "btn-outline-secondary")"
+                        @onclick="() => SetDirectionFilter(null)">
+                    All
+                </button>
+                <button class="btn btn-sm rounded-pill px-2.5 py-1 @(directionFilter == "IN" ? "btn-success" : "btn-outline-success")"
+                        @onclick='() => SetDirectionFilter("IN")'>
+                    📥 IN
+                </button>
+                <button class="btn btn-sm rounded-pill px-2.5 py-1 @(directionFilter == "OUT" ? "btn-warning text-dark" : "btn-outline-warning")"
+                        @onclick='() => SetDirectionFilter("OUT")'>
+                    📤 OUT
+                </button>
+            </div>
+        </div>
+
+        <!-- Quick Date Range Presets -->
+        <div class="d-flex align-items-center gap-2 flex-wrap mt-3 pt-2">
+            <span class="small fw-bold text-hub-muted me-1">⚡ Quick Ranges:</span>
+            <button class="btn btn-sm btn-outline-secondary rounded-pill px-2.5 py-0.5" @onclick="SetDateToday">Today</button>
+            <button class="btn btn-sm btn-outline-secondary rounded-pill px-2.5 py-0.5" @onclick="SetDateYesterday">Yesterday</button>
+            <button class="btn btn-sm btn-outline-secondary rounded-pill px-2.5 py-0.5" @onclick="SetDateLast7Days">Last 7 Days</button>
+            <button class="btn btn-sm btn-outline-secondary rounded-pill px-2.5 py-0.5" @onclick="SetDateLast30Days">Last 30 Days</button>
+            <button class="btn btn-sm btn-outline-primary rounded-pill px-3 py-0.5 fw-semibold" @onclick="SetDateOctober2026">
+                🗓️ October 2026 (Full Month)
+            </button>
+        </div>
+    </div>
+
+    <!-- View Mode Switcher -->
+    <div class="d-flex align-items-center justify-content-between gap-3 mb-3 flex-wrap">
+        <ul class="nav nav-pills hub-nav-pills gap-2 p-1 rounded-pill shadow-sm">
+            <li class="nav-item">
+                <button class="nav-link rounded-pill @(activeTab == "table" ? "active" : "")"
+                        @onclick='() => SetActiveTab("table")'>
+                    <i class="bi bi-table me-1.5"></i>
+                    <span>Chronological Audit Grid (@(filteredPunches?.Count ?? 0))</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link rounded-pill @(activeTab == "sequence" ? "active" : "")"
+                        @onclick='() => SetActiveTab("sequence")'>
+                    <i class="bi bi-diagram-3 me-1.5"></i>
+                    <span>Sequence Flow Reconstructor (@dailySummaries.Count Days)</span>
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link rounded-pill @(activeTab == "intelligence" ? "active" : "")"
+                        @onclick='() => SetActiveTab("intelligence")'>
+                    <i class="bi bi-pie-chart me-1.5"></i>
+                    <span>Mode &amp; Rule Intelligence</span>
+                </button>
+            </li>
+        </ul>
+
+        <div class="text-hub-muted small fw-semibold">
+            Showing @(filteredPunches?.Count ?? 0) of @totalRawCount punches (@(dailySummaries?.Count ?? 0) employee-days)
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    @if (isLoading)
+    {
+        <div class="text-center p-5 card border-0 shadow-sm rounded-4">
+            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status"></div>
+            <h5 class="fw-bold text-hub-title">Running Multi-Mode Punch Telemetry Engine...</h5>
+            <p class="text-hub-muted mb-0">Analyzing physical machine logs, manual corrections, and geofence state machines across SQLite and Firebase SSOT.</p>
+        </div>
+    }
+    else if (!filteredPunches.Any())
+    {
+        <div class="text-center p-5 card border-0 shadow-sm rounded-4">
+            <span class="fs-1 d-block mb-3">🔍</span>
+            <h4 class="fw-bold text-hub-title">No punches found for the selected criteria</h4>
+            <p class="text-hub-muted mb-3">Adjust your date range, employee selector, or filter chips to view punch logs.</p>
+            <button class="btn btn-primary rounded-pill px-4 py-2" @onclick="LoadOctoberMatrixPreset">
+                🧪 Load October 2026 Test Dataset
+            </button>
+        </div>
+    }
+    else
+    {
+        @if (activeTab == "table")
+        {
+            <!-- Tab 1: Chronological Table Grid -->
+            <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-4 hub-table-card">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 hub-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 130px;">📅 Date</th>
+                                <th style="width: 110px;">⏰ Time</th>
+                                <th style="min-width: 180px;">👤 Employee</th>
+                                <th style="width: 120px;">🧭 Direction</th>
+                                <th style="min-width: 170px;">⚡ Punch Source</th>
+                                <th style="min-width: 150px;">📟 Terminal / ID</th>
+                                <th style="width: 140px;">🎯 Result</th>
+                                <th style="min-width: 280px;">🧠 Hybrid Rule Reason</th>
+                                <th style="width: 80px;" class="text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var punch in filteredPunches)
+                            {
+                                <tr class="@(punch.IsAccepted ? "row-accepted" : "row-suppressed")">
+                                    <!-- Date -->
+                                    <td class="fw-semibold">
+                                        @punch.PunchDate.ToString("dd-MMM-yyyy")
+                                    </td>
+
+                                    <!-- Time -->
+                                    <td>
+                                        <span class="fw-bold font-monospace fs-6">
+                                            @punch.PunchTime.ToString("HH:mm:ss")
+                                        </span>
+                                    </td>
+
+                                    <!-- Employee -->
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="emp-avatar rounded-circle d-flex align-items-center justify-content-center fw-bold">
+                                                @(string.IsNullOrWhiteSpace(punch.EmployeeName) ? "?" : punch.EmployeeName.Substring(0, 1).ToUpperInvariant())
+                                            </div>
+                                            <div>
+                                                <div class="fw-bold text-hub-title">@punch.EmployeeName</div>
+                                                <div class="small text-hub-muted">ID: #@punch.EmployeeId | @(punch.Role ?? "Staff")</div>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <!-- Direction (IN vs OUT) -->
+                                    <td>
+                                        @if (punch.IsIn)
+                                        {
+                                            <span class="badge badge-in rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1">
+                                                <span>📥</span> <strong>IN</strong>
+                                            </span>
+                                        }
+                                        else if (punch.IsOut)
+                                        {
+                                            <span class="badge badge-out rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1">
+                                                <span>📤</span> <strong>OUT</strong>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary rounded-pill px-3 py-1.5">
+                                                <span>🔄</span> @punch.RawDirection
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <!-- Punch Source Tier -->
+                                    <td>
+                                        @switch (punch.SourceTier)
+                                        {
+                                            case PunchSourceTier.PhysicalMachine:
+                                                <span class="badge tier-badge-physical rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1.5">
+                                                    <span>📟</span>
+                                                    <span>Physical Machine</span>
+                                                </span>
+                                                break;
+                                            case PunchSourceTier.ManualAdmin:
+                                                <span class="badge tier-badge-manual rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1.5">
+                                                    <span>✍️</span>
+                                                    <span>Manual Correction</span>
+                                                </span>
+                                                break;
+                                            case PunchSourceTier.GeofenceAuto:
+                                                <span class="badge tier-badge-auto rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1.5">
+                                                    <span>📍</span>
+                                                    <span>Android Geofence</span>
+                                                </span>
+                                                break;
+                                        }
+                                    </td>
+
+                                    <!-- Terminal / Biometric ID -->
+                                    <td>
+                                        <div class="text-truncate" style="max-width: 160px;" title="@punch.DeviceId">
+                                            <span class="fw-semibold font-monospace small">@punch.DeviceId</span>
+                                        </div>
+                                        <div class="text-hub-muted font-monospace small text-truncate" style="max-width: 160px;" title="@punch.BiometricId">
+                                            @punch.BiometricId
+                                        </div>
+                                    </td>
+
+                                    <!-- Result -->
+                                    <td>
+                                        @if (punch.IsAccepted)
+                                        {
+                                            <span class="badge status-badge-accepted rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1">
+                                                <i class="bi bi-check-circle-fill"></i>
+                                                <strong>VALID</strong>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge status-badge-suppressed rounded-pill px-3 py-1.5 d-inline-flex align-items-center gap-1">
+                                                <i class="bi bi-slash-circle-fill"></i>
+                                                <strong>SUPPRESSED</strong>
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <!-- Hybrid Rule Reason -->
+                                    <td>
+                                        <div class="d-flex align-items-start gap-1.5">
+                                            <span class="rule-reason-text small @(punch.IsAccepted ? "text-success-emphasis" : "text-danger-emphasis")">
+                                                @punch.Reason
+                                            </span>
+                                        </div>
+                                    </td>
+
+                                    <!-- Action (Inspect) -->
+                                    <td class="text-center">
+                                        <button class="btn btn-sm btn-outline-primary rounded-circle p-1.5"
+                                                @onclick="() => InspectPunch(punch)"
+                                                title="View detailed telemetry inspector">
+                                            <i class="bi bi-info-circle-fill"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+        else if (activeTab == "sequence")
+        {
+            <!-- Tab 2: Sequence Flow Reconstructor -->
+            <div class="d-flex flex-column gap-4 mb-4">
+                @foreach (var dayGroup in dailySummaries)
+                {
+                    <div class="card border-0 shadow-sm rounded-4 overflow-hidden sequence-card">
+                        <!-- Card Header -->
+                        <div class="card-header bg-transparent p-3.5 border-bottom d-flex flex-wrap align-items-center justify-content-between gap-2">
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="emp-avatar-lg rounded-circle d-flex align-items-center justify-content-center fw-bold fs-5">
+                                    @(string.IsNullOrWhiteSpace(dayGroup.EmployeeName) ? "?" : dayGroup.EmployeeName.Substring(0, 1).ToUpperInvariant())
+                                </div>
+                                <div>
+                                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                                        <h5 class="fw-bold mb-0 text-hub-title">@dayGroup.EmployeeName</h5>
+                                        <span class="badge bg-secondary-subtle text-secondary rounded-pill px-2.5 py-0.5 small">ID: #@dayGroup.EmployeeId</span>
+                                        <span class="badge bg-primary-subtle text-primary rounded-pill px-2.5 py-0.5 small">📅 @dayGroup.Date.ToString("dd-MMM-yyyy (ddd)")</span>
+                                        <span class="badge bg-info-subtle text-info rounded-pill px-2.5 py-0.5 small">⏰ Shift: @dayGroup.ShiftName</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center gap-3">
+                                <div class="text-end">
+                                    <div class="small text-hub-muted">Effective Work Duration</div>
+                                    <div class="fw-bold fs-5 text-success">@FormatHoursToHhMm(dayGroup.TotalValidHoursWorked)</div>
+                                </div>
+                                @if (dayGroup.OvertimeHours > 0)
+                                {
+                                    <div class="text-end ps-3 border-start">
+                                        <div class="small text-hub-muted">Approved Overtime</div>
+                                        <div class="fw-bold fs-5 text-warning">@FormatHoursToHhMm(dayGroup.OvertimeHours)</div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Card Body: Sequence Comparison -->
+                        <div class="card-body p-4">
+                            <!-- Stream 1: Raw Ingest Sequence -->
+                            <div class="mb-4">
+                                <div class="d-flex align-items-center justify-content-between mb-2">
+                                    <h6 class="fw-bold text-hub-muted mb-0 small text-uppercase letter-spacing-1">
+                                        📥 Raw Ingest Stream (@dayGroup.RawPunches.Count raw punches logged)
+                                    </h6>
+                                    <span class="small text-hub-muted">Chronological order of arrival from all sources</span>
+                                </div>
+
+                                <div class="d-flex align-items-center gap-2 flex-wrap p-3 rounded-3 raw-stream-box">
+                                    @for (int i = 0; i < dayGroup.RawPunches.Count; i++)
+                                    {
+                                        var p = dayGroup.RawPunches[i];
+                                        <div class="raw-punch-node @(p.IsAccepted ? "node-accepted" : "node-suppressed")"
+                                             @onclick="() => InspectPunch(p)"
+                                             role="button"
+                                             title="Click to inspect: @p.Reason">
+                                            <div class="node-time">@p.PunchTime.ToString("HH:mm")</div>
+                                            <div class="node-dir">@(p.IsIn ? "IN" : "OUT")</div>
+                                            <div class="node-tier">
+                                                @switch (p.SourceTier)
+                                                {
+                                                    case PunchSourceTier.PhysicalMachine:
+                                                        <span>📟 Machine</span>
+                                                        break;
+                                                    case PunchSourceTier.ManualAdmin:
+                                                        <span>✍️ Manual</span>
+                                                        break;
+                                                    case PunchSourceTier.GeofenceAuto:
+                                                        <span>📍 Geofence</span>
+                                                        break;
+                                                }
+                                            </div>
+                                            @if (!p.IsAccepted)
+                                            {
+                                                <div class="node-badge-x">🚫</div>
+                                            }
+                                        </div>
+
+                                        @if (i < dayGroup.RawPunches.Count - 1)
+                                        {
+                                            <div class="stream-arrow text-hub-muted">→</div>
+                                        }
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Stream 2: Accepted Sequence Flow -->
+                            <div>
+                                <div class="d-flex align-items-center justify-content-between mb-2">
+                                    <h6 class="fw-bold text-success mb-0 small text-uppercase letter-spacing-1">
+                                        ✅ Accepted Sequence Chain (@dayGroup.AcceptedPunches.Count accepted punches)
+                                    </h6>
+                                    <span class="small text-success fw-semibold">Deterministic IN ↔ OUT Alternating Pairs</span>
+                                </div>
+
+                                <div class="d-flex align-items-center gap-2 flex-wrap p-3 rounded-3 accepted-stream-box">
+                                    @if (!dayGroup.AcceptedPunches.Any())
+                                    {
+                                        <div class="text-hub-muted small fst-italic">No valid attendance punches formed for this day.</div>
+                                    }
+                                    else
+                                    {
+                                        @for (int i = 0; i < dayGroup.AcceptedPunches.Count; i++)
+                                        {
+                                            var ap = dayGroup.AcceptedPunches[i];
+                                            <div class="accepted-punch-pill @(ap.IsIn ? "pill-in" : "pill-out")"
+                                                 @onclick="() => InspectPunch(ap)"
+                                                 role="button">
+                                                <span class="pill-icon">@(ap.IsIn ? "📥" : "📤")</span>
+                                                <span class="pill-time">@ap.PunchTime.ToString("HH:mm")</span>
+                                                <span class="pill-dir">@(ap.IsIn ? "IN" : "OUT")</span>
+                                                <span class="pill-source">
+                                                    @(ap.SourceTier == PunchSourceTier.PhysicalMachine ? "📟 Machine" : (ap.SourceTier == PunchSourceTier.ManualAdmin ? "✍️ Manual" : "📍 Auto"))
+                                                </span>
+                                            </div>
+
+                                            @if (i < dayGroup.AcceptedPunches.Count - 1)
+                                            {
+                                                <div class="accepted-chain-link text-success">
+                                                    @(i % 2 == 0 ? "— (working session) →" : "··· (break/transit) ···>")
+                                                </div>
+                                            }
+                                        }
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Suppressed Breakdown if any -->
+                            @if (dayGroup.SuppressedPunches.Any())
+                            {
+                                <div class="mt-3 pt-3 border-top">
+                                    <div class="d-flex align-items-center gap-2 text-danger small fw-semibold mb-2">
+                                        <i class="bi bi-exclamation-circle-fill"></i>
+                                        <span>Suppressed Punches In This Day (@dayGroup.SuppressedPunches.Count):</span>
+                                    </div>
+                                    <div class="d-flex flex-column gap-1.5 ps-3">
+                                        @foreach (var sp in dayGroup.SuppressedPunches)
+                                        {
+                                            <div class="small d-flex align-items-center gap-2">
+                                                <span class="badge bg-danger-subtle text-danger rounded-pill px-2 py-0.5 font-monospace">
+                                                    @sp.PunchTime.ToString("HH:mm") @(sp.IsIn ? "IN" : "OUT")
+                                                </span>
+                                                <span class="text-hub-muted font-monospace">(@sp.DeviceId):</span>
+                                                <span class="text-hub-title">@sp.Reason</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else if (activeTab == "intelligence")
+        {
+            <!-- Tab 3: Mode & Rule Intelligence -->
+            <div class="row g-4 mb-4">
+                <!-- Source Distribution Card -->
+                <div class="col-12 col-lg-6">
+                    <div class="card border-0 shadow-sm rounded-4 p-4 h-100">
+                        <h5 class="fw-bold text-hub-title mb-3 d-flex align-items-center gap-2">
+                            <span>📊</span>
+                            <span>Punch Source Distribution</span>
+                        </h5>
+
+                        <div class="d-flex flex-column gap-3">
+                            <!-- Physical Machine Bar -->
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="fw-semibold text-info d-flex align-items-center gap-1.5">
+                                        <span>📟</span> Physical Machine (Tier 1)
+                                    </span>
+                                    <span class="fw-bold">@physicalCount (@(totalRawCount > 0 ? (physicalCount * 100.0 / totalRawCount).ToString("F1") : "0")%)</span>
+                                </div>
+                                <div class="progress rounded-pill" style="height: 10px;">
+                                    <div class="progress-bar bg-info" style="width: @(totalRawCount > 0 ? (physicalCount * 100.0 / totalRawCount) : 0)%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Manual Correction Bar -->
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="fw-semibold text-warning d-flex align-items-center gap-1.5">
+                                        <span>✍️</span> Manual Correction (Tier 2)
+                                    </span>
+                                    <span class="fw-bold">@manualCount (@(totalRawCount > 0 ? (manualCount * 100.0 / totalRawCount).ToString("F1") : "0")%)</span>
+                                </div>
+                                <div class="progress rounded-pill" style="height: 10px;">
+                                    <div class="progress-bar bg-warning" style="width: @(totalRawCount > 0 ? (manualCount * 100.0 / totalRawCount) : 0)%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Auto Geofence Bar -->
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                    <span class="fw-semibold text-primary d-flex align-items-center gap-1.5">
+                                        <span>📍</span> Android Auto Geofence (Tier 3)
+                                    </span>
+                                    <span class="fw-bold">@autoGeofenceCount (@(totalRawCount > 0 ? (autoGeofenceCount * 100.0 / totalRawCount).ToString("F1") : "0")%)</span>
+                                </div>
+                                <div class="progress rounded-pill" style="height: 10px;">
+                                    <div class="progress-bar bg-primary" style="width: @(totalRawCount > 0 ? (autoGeofenceCount * 100.0 / totalRawCount) : 0)%"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 p-3 rounded-3 bg-light-subtle border">
+                            <h6 class="fw-bold mb-1 small text-uppercase">Hierarchy Resolution Rules</h6>
+                            <ul class="small text-hub-muted mb-0 ps-3">
+                                <li><strong>Tier 1: Physical Machine</strong> always wins collisions and breaks intermediate sessions.</li>
+                                <li><strong>Tier 2: Manual Correction</strong> defines authoritative shifts and suppresses intermediate drift.</li>
+                                <li><strong>Tier 3: Auto Geofence</strong> acts as dynamic arrival/departure fallback outside shifts.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Suppression Reasons Card -->
+                <div class="col-12 col-lg-6">
+                    <div class="card border-0 shadow-sm rounded-4 p-4 h-100">
+                        <h5 class="fw-bold text-hub-title mb-3 d-flex align-items-center gap-2">
+                            <span>🛡️</span>
+                            <span>Rule Engine Filtering Breakdown</span>
+                        </h5>
+
+                        <div class="d-flex flex-column gap-2.5">
+                            @foreach (var reasonGroup in GetTopSuppressionReasons())
+                            {
+                                <div class="d-flex align-items-center justify-content-between p-2.5 rounded-3 bg-light-subtle border">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="fs-5">🚫</span>
+                                        <div>
+                                            <div class="fw-semibold text-hub-title small">@reasonGroup.Category</div>
+                                            <div class="text-hub-muted text-xs">@reasonGroup.SampleReason</div>
+                                        </div>
+                                    </div>
+                                    <span class="badge bg-danger rounded-pill px-3 py-1.5 fw-bold">@reasonGroup.Count punches</span>
+                                </div>
+                            }
+
+                            @if (!GetTopSuppressionReasons().Any())
+                            {
+                                <div class="text-center p-4 text-hub-muted">
+                                    <span>🎉 No punches have been suppressed under current filter criteria!</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- Detailed Punch Inspector Modal -->
+@if (selectedPunchForInspection != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background: rgba(0,0,0,0.65); z-index: 1055;">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content rounded-4 border-0 shadow-lg hub-modal">
+                <div class="modal-header border-bottom p-4">
+                    <div class="d-flex align-items-center gap-2.5">
+                        <span class="fs-3">
+                            @(selectedPunchForInspection.SourceTier == PunchSourceTier.PhysicalMachine ? "📟" : (selectedPunchForInspection.SourceTier == PunchSourceTier.ManualAdmin ? "✍️" : "📍"))
+                        </span>
+                        <div>
+                            <h5 class="modal-title fw-bold text-hub-title mb-0">
+                                Telemetry Inspector: @selectedPunchForInspection.EmployeeName
+                            </h5>
+                            <span class="small text-hub-muted">
+                                Log ID: #@selectedPunchForInspection.LogId | @selectedPunchForInspection.PunchDate.ToString("dd-MMM-yyyy")
+                            </span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close" @onclick="CloseInspectionModal"></button>
+                </div>
+
+                <div class="modal-body p-4">
+                    <div class="row g-3 mb-4">
+                        <div class="col-6 col-md-3">
+                            <div class="small text-hub-muted">Punch Time</div>
+                            <div class="fs-5 fw-bold font-monospace text-hub-title">@selectedPunchForInspection.PunchTime.ToString("HH:mm:ss")</div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="small text-hub-muted">Direction</div>
+                            <div class="fs-5 fw-bold">
+                                @(selectedPunchForInspection.IsIn ? "📥 Check-IN" : "📤 Check-OUT")
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="small text-hub-muted">Source Tier</div>
+                            <div class="fs-5 fw-bold text-primary">
+                                @selectedPunchForInspection.SourceTier
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <div class="small text-hub-muted">Evaluation Result</div>
+                            <div class="fs-5 fw-bold @(selectedPunchForInspection.IsAccepted ? "text-success" : "text-danger")">
+                                @(selectedPunchForInspection.IsAccepted ? "✅ VALID" : "🚫 SUPPRESSED")
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Rule & Reason Banner -->
+                    <div class="alert @(selectedPunchForInspection.IsAccepted ? "alert-success border-success" : "alert-danger border-danger") rounded-3 mb-4">
+                        <div class="d-flex align-items-start gap-2">
+                            <span class="fs-4">@(selectedPunchForInspection.IsAccepted ? "✅" : "🛡️")</span>
+                            <div>
+                                <h6 class="fw-bold mb-1">Engine Decision: @selectedPunchForInspection.RuleCategory</h6>
+                                <p class="mb-0 small">@selectedPunchForInspection.Reason</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metadata Grid -->
+                    <div class="card border rounded-3 p-3 bg-light-subtle">
+                        <h6 class="fw-bold small text-uppercase mb-3 text-hub-muted">Raw Telemetry & Device Metadata</h6>
+                        <div class="row g-2 small font-monospace">
+                            <div class="col-sm-6">
+                                <span class="text-hub-muted">Device ID:</span> <strong>@selectedPunchForInspection.DeviceId</strong>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-hub-muted">Biometric ID:</span> <strong>@selectedPunchForInspection.BiometricId</strong>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-hub-muted">Employee ID:</span> <strong>#@selectedPunchForInspection.EmployeeId</strong>
+                            </div>
+                            <div class="col-sm-6">
+                                <span class="text-hub-muted">Raw Direction:</span> <strong>@selectedPunchForInspection.RawDirection</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer border-top p-3 bg-light-subtle">
+                    <button type="button" class="btn btn-secondary rounded-pill px-4" @onclick="CloseInspectionModal">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool isLoading = true;
+    private string activeTab = "table"; // "table", "sequence", "intelligence"
+
+    // Filter properties
+    private DateOnly startDate = new DateOnly(2026, 10, 1);
+    private DateOnly endDate = new DateOnly(2026, 10, 31);
+    private int selectedEmployeeId = 0;
+    private PunchSourceTier? sourceFilter = null;
+    private bool? statusFilter = null;
+    private string? directionFilter = null;
+    private string searchQuery = "";
+
+    // Data lists
+    private List<Employee> employees = new();
+    private List<AttendanceLog> rawLogs = new();
+    private List<EvaluatedPunchRecord> allEvaluatedPunches = new();
+    private List<EvaluatedPunchRecord> filteredPunches = new();
+    private List<DailyEmployeePunchSummary> dailySummaries = new();
+
+    // Inspection Modal
+    private EvaluatedPunchRecord? selectedPunchForInspection = null;
+
+    // KPI Counters
+    private int totalRawCount => filteredPunches.Count;
+    private int acceptedCount => filteredPunches.Count(p => p.IsAccepted);
+    private int suppressedCount => filteredPunches.Count(p => !p.IsAccepted);
+    private int physicalCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.PhysicalMachine);
+    private int manualCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.ManualAdmin);
+    private int autoGeofenceCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.GeofenceAuto);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEmployeesAsync();
+        await LoadDataAsync();
+    }
+
+    private async Task LoadEmployeesAsync()
+    {
+        try
+        {
+            employees = await FirebaseEmployees.GetEmployeesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching employee directory.");
+            employees = new();
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        isLoading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            // Read raw punches from Firebase SSOT (with fallback to SQLite)
+            rawLogs = await FirebaseAttendance.GetAttendancePunchesAsync(
+                startDate,
+                endDate,
+                selectedEmployeeId > 0 ? selectedEmployeeId : null);
+
+            // Run evaluation engine across all days and employees
+            EvaluateAllPunches();
+
+            ApplyFilter();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error executing punch audit telemetry.");
+            ToastService.ShowError($"Error loading punches: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void EvaluateAllPunches()
+    {
+        allEvaluatedPunches.Clear();
+        dailySummaries.Clear();
+
+        if (rawLogs == null || !rawLogs.Any())
+            return;
+
+        var employeeMap = employees.ToDictionary(e => e.EmployeeID, e => e);
+
+        // Group by (EmployeeID, PunchDate)
+        var groupedByEmpAndDay = rawLogs
+            .Where(l => l.EmployeeID.HasValue)
+            .GroupBy(l => new { EmployeeID = l.EmployeeID!.Value, Day = DateOnly.FromDateTime(l.PunchTime.Date) })
+            .OrderBy(g => g.Key.Day)
+            .ThenBy(g => g.Key.EmployeeID);
+
+        foreach (var group in groupedByEmpAndDay)
+        {
+            var empId = group.Key.EmployeeID;
+            var dayDate = group.Key.Day;
+            employeeMap.TryGetValue(empId, out var emp);
+
+            var empName = emp?.Name ?? $"Employee #{empId}";
+            var role = emp?.Role;
+
+            // Resolve Shift Windows
+            DateTime baseD = dayDate.ToDateTime(TimeOnly.MinValue);
+            DateTime? shiftStartDt = emp?.ShiftStartTime.HasValue == true ? baseD.Add(emp.ShiftStartTime.Value.ToTimeSpan()) : null;
+            DateTime? shiftEndDt = emp?.ShiftEndTime.HasValue == true ? baseD.Add(emp.ShiftEndTime.Value.ToTimeSpan()) : null;
+
+            // Default shifts for known matrix employees if missing
+            if (!shiftStartDt.HasValue && empId == 4) // Dinesh
+            {
+                shiftStartDt = baseD.AddHours(10).AddMinutes(30);
+                shiftEndDt = baseD.AddHours(16).AddMinutes(30);
+            }
+            else if (!shiftStartDt.HasValue && empId == 3) // Nevetha
+            {
+                shiftStartDt = baseD.AddHours(6);
+                shiftEndDt = baseD.AddHours(16);
+            }
+
+            var dayPunches = group.OrderBy(x => x.PunchTime).ToList();
+
+            // Run deterministic AttendancePunchProcessor
+            var processResult = PunchProcessor.ProcessPunches(
+                dayPunches,
+                baseD,
+                shiftStartDt,
+                shiftEndDt);
+
+            var acceptedList = processResult.Ordered;
+
+            // Build Daily Summary model
+            var summary = new DailyEmployeePunchSummary
+            {
+                EmployeeId = empId,
+                EmployeeName = empName,
+                Date = dayDate,
+                ShiftStart = emp?.ShiftStartTime ?? (shiftStartDt.HasValue ? TimeOnly.FromDateTime(shiftStartDt.Value) : null),
+                ShiftEnd = emp?.ShiftEndTime ?? (shiftEndDt.HasValue ? TimeOnly.FromDateTime(shiftEndDt.Value) : null)
+            };
+
+            // Calculate accepted work hours
+            double totalWorkedMinutes = 0;
+            for (int i = 0; i < acceptedList.Count - 1; i += 2)
+            {
+                var span = acceptedList[i + 1].PunchTime - acceptedList[i].PunchTime;
+                if (span.TotalMinutes > 0)
+                    totalWorkedMinutes += span.TotalMinutes;
+            }
+            summary.TotalValidHoursWorked = totalWorkedMinutes / 60.0;
+
+            double standardShiftHours = 8.0;
+            if (summary.ShiftStart.HasValue && summary.ShiftEnd.HasValue)
+            {
+                standardShiftHours = Math.Max(1.0, (summary.ShiftEnd.Value - summary.ShiftStart.Value).TotalHours);
+            }
+            summary.OvertimeHours = Math.Max(0.0, summary.TotalValidHoursWorked - standardShiftHours);
+
+            // Now evaluate each individual raw punch
+            for (int idx = 0; idx < dayPunches.Count; idx++)
+            {
+                var raw = dayPunches[idx];
+                var tier = AttendancePunchProcessor.GetPunchTier(raw);
+                var rawDir = raw.LogType ?? "PUNCH";
+
+                // Check if accepted in final sequence
+                int acceptedIndex = -1;
+                for (int a = 0; a < acceptedList.Count; a++)
+                {
+                    var acc = acceptedList[a];
+                    if ((raw.LogID > 0 && acc.LogID == raw.LogID) ||
+                        (acc.PunchTime == raw.PunchTime && acc.EmployeeID == raw.EmployeeID &&
+                         string.Equals(acc.BiometricID, raw.BiometricID, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        acceptedIndex = a;
+                        break;
+                    }
+                }
+
+                bool isAccepted = acceptedIndex >= 0;
+                string reason = "";
+                string category = "";
+
+                if (isAccepted)
+                {
+                    if (acceptedIndex % 2 == 0)
+                    {
+                        reason = acceptedIndex == 0
+                            ? "Accepted: Primary shift clock-in"
+                            : "Accepted: Resumed work after break";
+                        category = "Valid Check-IN";
+                    }
+                    else
+                    {
+                        reason = acceptedIndex == (acceptedList.Count - 1)
+                            ? "Accepted: Final shift clock-out"
+                            : "Accepted: Departure for break / transit";
+                        category = "Valid Check-OUT";
+                    }
+                }
+                else
+                {
+                    // Deduce exact reason for suppression
+                    // 1. Same-minute priority collision
+                    var collision = dayPunches.FirstOrDefault(o => o != raw &&
+                        o.PunchTime == raw.PunchTime &&
+                        AttendancePunchProcessor.GetPunchTier(o) < tier);
+
+                    if (collision != null)
+                    {
+                        reason = $"Suppressed: Collided at {raw.PunchTime:HH:mm} with higher priority {AttendancePunchProcessor.GetPunchTier(collision)} (Physical > Manual > Geofence)";
+                        category = "Priority Collision";
+                    }
+                    else
+                    {
+                        // 2. Authoritative Manual Correction window override
+                        var mIns = dayPunches.Where(x => AttendancePunchProcessor.GetPunchTier(x) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.IsExplicitInPunch(x)).OrderBy(x => x.PunchTime).ToList();
+                        var mOuts = dayPunches.Where(x => AttendancePunchProcessor.GetPunchTier(x) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.IsExplicitOutPunch(x)).OrderBy(x => x.PunchTime).ToList();
+
+                        if (mIns.Count > 0 && mOuts.Count > 0 && raw.PunchTime > mIns.First().PunchTime && raw.PunchTime < mOuts.Last().PunchTime)
+                        {
+                            reason = $"Suppressed: Covered by authoritative Manual Correction window ({mIns.First().PunchTime:HH:mm} - {mOuts.Last().PunchTime:HH:mm}); intermediate punch ignored";
+                            category = "Manual Shift Override";
+                        }
+                        else if (tier == PunchSourceTier.GeofenceAuto)
+                        {
+                            var authIn = dayPunches.FirstOrDefault(x => AttendancePunchProcessor.GetPunchTier(x) <= PunchSourceTier.ManualAdmin && AttendancePunchProcessor.IsExplicitInPunch(x));
+                            var authOut = dayPunches.LastOrDefault(x => AttendancePunchProcessor.GetPunchTier(x) <= PunchSourceTier.ManualAdmin && AttendancePunchProcessor.IsExplicitOutPunch(x));
+
+                            if (authIn != null && authOut != null && raw.PunchTime > authIn.PunchTime && raw.PunchTime < authOut.PunchTime)
+                            {
+                                reason = "Suppressed: GPS geofence drift suppressed during active authoritative shift";
+                                category = "GPS Drift Suppression";
+                            }
+                            else if (AttendancePunchProcessor.IsExplicitOutPunch(raw))
+                            {
+                                reason = "Suppressed: Redundant geofence OUT — employee already clocked out";
+                                category = "Redundant Exit";
+                            }
+                            else
+                            {
+                                reason = "Suppressed: Redundant consecutive geofence IN — employee already clocked in";
+                                category = "Consecutive Entry";
+                            }
+                        }
+                        else if (AttendancePunchProcessor.IsExplicitInPunch(raw))
+                        {
+                            reason = "Suppressed: Redundant consecutive IN punch — prior clock-in maintained";
+                            category = "Consecutive Entry";
+                        }
+                        else if (AttendancePunchProcessor.IsExplicitOutPunch(raw))
+                        {
+                            reason = "Suppressed: Redundant OUT punch — employee already clocked out";
+                            category = "Redundant Exit";
+                        }
+                        else
+                        {
+                            reason = "Suppressed: Discarded by alternating state machine (IN ↔ OUT)";
+                            category = "Sequence Discard";
+                        }
+                    }
+                }
+
+                var record = new EvaluatedPunchRecord
+                {
+                    LogId = raw.LogID,
+                    EmployeeId = empId,
+                    EmployeeName = empName,
+                    Role = role,
+                    PunchTime = raw.PunchTime,
+                    RawDirection = rawDir,
+                    SourceTier = tier,
+                    DeviceId = raw.DeviceID ?? "Terminal",
+                    BiometricId = raw.BiometricID ?? string.Empty,
+                    IsAccepted = isAccepted,
+                    EvaluationStatus = isAccepted ? (acceptedIndex % 2 == 0 ? "ACCEPTED_IN" : "ACCEPTED_OUT") : "SUPPRESSED",
+                    Reason = reason,
+                    RuleCategory = category,
+                    SequenceOrder = idx + 1
+                };
+
+                allEvaluatedPunches.Add(record);
+                summary.RawPunches.Add(record);
+            }
+
+            dailySummaries.Add(summary);
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        var query = allEvaluatedPunches.AsEnumerable();
+
+        if (selectedEmployeeId > 0)
+            query = query.Where(p => p.EmployeeId == selectedEmployeeId);
+
+        if (sourceFilter.HasValue)
+            query = query.Where(p => p.SourceTier == sourceFilter.Value);
+
+        if (statusFilter.HasValue)
+            query = query.Where(p => p.IsAccepted == statusFilter.Value);
+
+        if (!string.IsNullOrWhiteSpace(directionFilter))
+        {
+            if (directionFilter == "IN")
+                query = query.Where(p => p.IsIn);
+            else if (directionFilter == "OUT")
+                query = query.Where(p => p.IsOut);
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            var q = searchQuery.Trim().ToLowerInvariant();
+            query = query.Where(p =>
+                p.EmployeeName.ToLowerInvariant().Contains(q) ||
+                p.EmployeeId.ToString().Contains(q) ||
+                p.DeviceId.ToLowerInvariant().Contains(q) ||
+                p.BiometricId.ToLowerInvariant().Contains(q) ||
+                p.Reason.ToLowerInvariant().Contains(q) ||
+                p.RuleCategory.ToLowerInvariant().Contains(q));
+        }
+
+        filteredPunches = query.OrderBy(p => p.PunchTime).ThenBy(p => p.EmployeeName).ToList();
+        StateHasChanged();
+    }
+
+    private void SetSourceFilter(PunchSourceTier? tier)
+    {
+        sourceFilter = tier;
+        ApplyFilter();
+    }
+
+    private void SetStatusFilter(bool? status)
+    {
+        statusFilter = status;
+        ApplyFilter();
+    }
+
+    private void SetDirectionFilter(string? direction)
+    {
+        directionFilter = direction;
+        ApplyFilter();
+    }
+
+    private async Task SetDateToday()
+    {
+        startDate = DateOnly.FromDateTime(DateTime.Today);
+        endDate = DateOnly.FromDateTime(DateTime.Today);
+        await LoadDataAsync();
+    }
+
+    private async Task SetDateYesterday()
+    {
+        startDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-1));
+        endDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-1));
+        await LoadDataAsync();
+    }
+
+    private async Task SetDateLast7Days()
+    {
+        startDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-7));
+        endDate = DateOnly.FromDateTime(DateTime.Today);
+        await LoadDataAsync();
+    }
+
+    private async Task SetDateLast30Days()
+    {
+        startDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-30));
+        endDate = DateOnly.FromDateTime(DateTime.Today);
+        await LoadDataAsync();
+    }
+
+    private async Task SetDateOctober2026()
+    {
+        startDate = new DateOnly(2026, 10, 1);
+        endDate = new DateOnly(2026, 10, 31);
+        await LoadDataAsync();
+    }
+
+    private async Task LoadOctoberMatrixPreset()
+    {
+        startDate = new DateOnly(2026, 10, 1);
+        endDate = new DateOnly(2026, 10, 31);
+        selectedEmployeeId = 0;
+        sourceFilter = null;
+        statusFilter = null;
+        directionFilter = null;
+        searchQuery = "";
+        await LoadDataAsync();
+        ToastService.ShowSuccess("Switched to October 2026 matrix telemetry.");
+    }
+
+    private void InspectPunch(EvaluatedPunchRecord punch)
+    {
+        selectedPunchForInspection = punch;
+    }
+
+    private void CloseInspectionModal()
+    {
+        selectedPunchForInspection = null;
+    }
+
+    private async Task HandleDataRefreshAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private List<(string Category, string SampleReason, int Count)> GetTopSuppressionReasons()
+    {
+        return allEvaluatedPunches
+            .Where(p => !p.IsAccepted)
+            .GroupBy(p => p.RuleCategory)
+            .Select(g => (
+                Category: g.Key,
+                SampleReason: g.First().Reason,
+                Count: g.Count()
+            ))
+            .OrderByDescending(x => x.Count)
+            .ToList();
+    }
+
+    private string FormatHoursToHhMm(double hours)
+    {
+        if (hours <= 0) return "0h 00m";
+        var ts = TimeSpan.FromHours(hours);
+        return $"{(int)ts.TotalHours}h {ts.Minutes:D2}m";
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        activeTab = tab;
+    }
+
+    private static string EscapeCsv(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "\"\"";
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private async Task ExportToCsv()
+    {
+        if (!filteredPunches.Any()) return;
+
+        var sb = new StringBuilder();
+        sb.AppendLine("LogID,Date,Time,EmployeeID,EmployeeName,Direction,SourceTier,DeviceID,BiometricID,IsAccepted,Status,RuleCategory,Reason");
+
+        foreach (var p in filteredPunches)
+        {
+            var line = string.Join(",",
+                p.LogId,
+                p.PunchDate.ToString("yyyy-MM-dd"),
+                p.PunchTime.ToString("HH:mm:ss"),
+                p.EmployeeId,
+                EscapeCsv(p.EmployeeName),
+                p.IsIn ? "IN" : (p.IsOut ? "OUT" : p.RawDirection),
+                p.SourceTier.ToString(),
+                EscapeCsv(p.DeviceId),
+                EscapeCsv(p.BiometricId),
+                p.IsAccepted ? "true" : "false",
+                p.EvaluationStatus,
+                EscapeCsv(p.RuleCategory),
+                EscapeCsv(p.Reason)
+            );
+            sb.AppendLine(line);
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        var base64 = Convert.ToBase64String(bytes);
+        var fileName = $"PunchAudit_{startDate:yyyyMMdd}_{endDate:yyyyMMdd}.csv";
+
+        await JSRuntime.InvokeVoidAsync("downloadFileFromBase64", fileName, "text/csv", base64);
+        ToastService.ShowSuccess("Punch audit export generated.");
+    }
+}

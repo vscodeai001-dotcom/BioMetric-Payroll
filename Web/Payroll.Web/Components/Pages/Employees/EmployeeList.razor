@@ -305,42 +305,68 @@ else
                                     }
                                 </div>
 
-                                <div class="alert alert-warning mt-3 mb-0">
+                                <div class="alert alert-warning mt-3 mb-2">
                                     <h6 class="fw-bold mb-2">
-                                        <i class="bi bi-lightbulb me-2"></i>To delete this employee:
+                                        <i class="bi bi-lightbulb me-2"></i>Standard Deletion:
                                     </h6>
-                                    <ol class="mb-0 ps-3">
-                                        <li>Delete or archive related records first</li>
-                                        <li>Start with oldest records (e.g., historical attendance)</li>
-                                        <li>Then delete current/pending records (advances, leave)</li>
-                                        <li>Once all related data is removed, you can delete the employee</li>
-                                    </ol>
+                                    <p class="small mb-0">To archive normally, delete or archive related records first so historical data is preserved.</p>
+                                </div>
+
+                                <div class="alert alert-danger mt-2 mb-0 border border-danger">
+                                    <div class="d-flex align-items-start gap-2">
+                                        <i class="bi bi-radioactive fs-4 text-danger flex-shrink-0"></i>
+                                        <div>
+                                            <h6 class="fw-bold text-danger mb-1">Force Delete Option:</h6>
+                                            <p class="small mb-0">
+                                                Use <strong>Force Delete</strong> below to permanently delete <strong>@deletionDependencies.EmployeeName</strong> and cascade-purge all <strong>@deletionDependencies.GetTotalDependencies()</strong> associated records (attendance, punches, daily summaries, payroll history, advances, leave, shift schedules, device locks) from both local database and Cloud SSOT.
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         }
                     }
                 </div>
 
-                <div class="modal-footer bg-light">
-                    <button type="button" class="btn btn-secondary" @onclick="CloseDeletionDialog" disabled="@isProcessingDeletion">
-                        <i class="bi bi-x-circle me-2"></i>Close
-                    </button>
-
-                    @if (deletionDependencies?.CanDelete == true)
-                    {
-                        <button type="button" class="btn btn-danger" @onclick="ConfirmDeletion" disabled="@isProcessingDeletion">
-                            @if (isProcessingDeletion)
-                            {
-                                <span class="spinner-border spinner-border-sm me-2"></span>
-                                <span>Moving to Bin...</span>
-                            }
-                            else
-                            {
-                                <i class="bi bi-trash me-2"></i>
-                                <span>Move to Recycle Bin</span>
-                            }
+                <div class="modal-footer bg-light d-flex justify-content-between">
+                    <div>
+                        @if (deletionDependencies != null && !deletionDependencies.CanDelete)
+                        {
+                            <button type="button" class="btn btn-danger" @onclick="ConfirmForceDeletion" disabled="@isProcessingDeletion">
+                                @if (isProcessingDeletion)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                    <span>Force Deleting All Records...</span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-trash3-fill me-2"></i>
+                                    <span>Force Delete (Delete Employee &amp; All Data)</span>
+                                }
+                            </button>
+                        }
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseDeletionDialog" disabled="@isProcessingDeletion">
+                            <i class="bi bi-x-circle me-2"></i>Close
                         </button>
-                    }
+
+                        @if (deletionDependencies?.CanDelete == true)
+                        {
+                            <button type="button" class="btn btn-danger" @onclick="ConfirmDeletion" disabled="@isProcessingDeletion">
+                                @if (isProcessingDeletion)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                    <span>Moving to Bin...</span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-trash me-2"></i>
+                                    <span>Move to Recycle Bin</span>
+                                }
+                            </button>
+                        }
+                    </div>
                 </div>
             </div>
         </div>
@@ -749,6 +775,46 @@ private DotNetObjectReference<EmployeeList>? employeeCacheRef;
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during employee deletion");
+            toastService.ShowError($"Error: {ex.Message}");
+        }
+        finally
+        {
+            isProcessingDeletion = false;
+        }
+    }
+
+    private async Task ConfirmForceDeletion()
+    {
+        if (selectedEmployeeForDeletion == null || deletionDependencies == null) return;
+
+        isProcessingDeletion = true;
+        try
+        {
+            var empId = selectedEmployeeForDeletion.EmployeeID;
+            var empName = selectedEmployeeForDeletion.Name;
+
+            var result = await DeletionService.ForceDeleteEmployeeAsync(empId);
+            if (!result.Success)
+            {
+                toastService.ShowError(result.Message);
+                return;
+            }
+
+            await AttendanceRefresh.NotifyEmployeeChangedAsync(empId, "DELETED");
+
+            await FirebaseEmployees.LogAuditAsync(
+                "FORCE DELETE",
+                "Employee",
+                empId.ToString(),
+                $"Employee '{empName}' (#{empId}) and all {result.TotalDeletedRecords} associated records were permanently force-deleted.");
+
+            toastService.ShowSuccess($"'{empName}' and all {result.TotalDeletedRecords} associated records permanently deleted.");
+            CloseDeletionDialog();
+            await LoadEmployees();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during employee force deletion");
             toastService.ShowError($"Error: {ex.Message}");
         }
         finally

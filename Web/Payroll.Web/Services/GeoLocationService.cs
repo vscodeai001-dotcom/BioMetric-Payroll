@@ -1011,28 +1011,35 @@ public class GeoLocationService
                 return true;
             }
 
-            // 5-minute IN guard: cross-device safety net.
-            // If an IN punch (any LogType alias) was created within the last 5 minutes,
-            // skip creating another IN even if the parity check above passed
-            // (can happen when Android auto-punch fires concurrently and its "IN" type
-            // was not yet normalised at parity-check time).
+            // 5-minute Debounce & Cross-Device Safety Net (Symmetric +/- 5 minutes):
+            // Re-query the DB fresh (not the stale todaysPunches snapshot) so that
+            // any AndroidGeofenceAuto written by Android or Firebase sync is caught.
+            var guardWindowStart = punchTime.AddMinutes(-5);
+            var guardWindowEnd   = punchTime.AddMinutes(5);
+            var windowPunches = await db.AttendanceLogs
+                .Where(p =>
+                    p.EmployeeID == employeeId &&
+                    p.PunchTime >= businessDayStart &&
+                    p.PunchTime < businessDayEnd &&
+                    p.PunchTime >= guardWindowStart &&
+                    p.PunchTime <= guardWindowEnd)
+                .OrderByDescending(p => p.PunchTime)
+                .ToListAsync();
+
             if (currentLocationState) // i.e. generating an IN punch
             {
-                var recentInPunch = todaysPunches
-                    .Where(p => IsInType(p.LogType))
-                    .Where(p => Math.Abs((p.PunchTime - punchTime).TotalSeconds) <= 300) // 5 minutes
-                    .OrderByDescending(p => p.PunchTime)
-                    .FirstOrDefault();
+                var freshInPunch = windowPunches.FirstOrDefault(p => IsInType(p.LogType) &&
+                    (p.DeviceID == "GeofenceAuto" || p.DeviceID == "AndroidGeofenceAuto" || (p.BiometricID != null && p.BiometricID.StartsWith("AUTO_"))));
 
-                if (recentInPunch != null)
+                if (freshInPunch != null)
                 {
                     _logger.LogInformation(
                         "Automatic geofence IN skipped — an IN punch already exists within 5 minutes. " +
                         "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
                         employeeId,
-                        recentInPunch.LogID,
-                        recentInPunch.DeviceID,
-                        recentInPunch.PunchTime);
+                        freshInPunch.LogID,
+                        freshInPunch.DeviceID,
+                        freshInPunch.PunchTime);
 
                     await transaction.CommitAsync();
                     return true;
@@ -1040,30 +1047,13 @@ public class GeoLocationService
             }
             else // i.e. generating an OUT punch
             {
-                // 10-minute OUT guard: cross-device safety net.
-                // Re-query the DB fresh (not the stale todaysPunches snapshot) so that
-                // any AndroidGeofenceAuto OUT written by Firebase sync AFTER the initial
-                // todaysPunches load is also caught, closing the async-write race window.
-                // Fetch the bounded 10-min window, then apply IsOutType in memory
-                // (IsOutType is a C# static method — not EF-translatable to SQL).
-                var guardWindowStart = punchTime.AddMinutes(-10);
-                var guardWindowEnd   = punchTime;
-                var windowPunches = await db.AttendanceLogs
-                    .Where(p =>
-                        p.EmployeeID == employeeId &&
-                        p.PunchTime >= businessDayStart &&
-                        p.PunchTime < businessDayEnd &&
-                        p.PunchTime >= guardWindowStart &&
-                        p.PunchTime <= guardWindowEnd)
-                    .OrderByDescending(p => p.PunchTime)
-                    .ToListAsync();
                 var freshOutPunch = windowPunches.FirstOrDefault(p => IsOutType(p.LogType) &&
-                    (p.DeviceID == "GeofenceAuto" || p.DeviceID == "AndroidGeofenceAuto"));
+                    (p.DeviceID == "GeofenceAuto" || p.DeviceID == "AndroidGeofenceAuto" || (p.BiometricID != null && p.BiometricID.StartsWith("AUTO_"))));
 
                 if (freshOutPunch != null)
                 {
                     _logger.LogInformation(
-                        "Automatic geofence OUT skipped — an OUT punch already exists within 10 minutes (fresh re-query). " +
+                        "Automatic geofence OUT skipped — an OUT punch already exists within 5 minutes. " +
                         "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
                         employeeId,
                         freshOutPunch.LogID,
@@ -1075,10 +1065,11 @@ public class GeoLocationService
                 }
             }
 
+            var autoPunchId = $"AUTO_{employeeId}_{new DateTimeOffset(punchTime).ToUnixTimeMilliseconds()}";
             var log = new AttendanceLog
             {
                 EmployeeID = employeeId,
-                BiometricID = "GEOFENCE_AUTO",
+                BiometricID = autoPunchId,
                 PunchTime = punchTime,
                 DeviceID = "GeofenceAuto",
                 LogType = punchType,

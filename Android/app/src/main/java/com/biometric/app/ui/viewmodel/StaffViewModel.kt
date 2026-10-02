@@ -45,7 +45,8 @@ class StaffViewModel @Inject constructor(
         val flow = if (sId.isNullOrBlank()) repository.getAllEmployees() else repository.getShopEmployees(sId)
         flow.map { list ->
             list.filter { emp ->
-                val isActive = (emp.isActive || emp.terminateDate == null)
+                val isTerminated = emp.terminateDate != null && emp.terminateDate!! <= System.currentTimeMillis()
+                val isActive = emp.isActive && !isTerminated
                 val matchesQuery = query.isBlank() ||
                     emp.name.contains(query, ignoreCase = true) ||
                     emp.biometricId.contains(query, ignoreCase = true) ||

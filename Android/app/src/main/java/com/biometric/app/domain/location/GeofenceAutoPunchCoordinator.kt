@@ -241,16 +241,16 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 return
             }
 
-            // Directional Debounce Protection:
-            // Prevent duplicate IN punches within 60s of an existing IN.
-            // Prevent duplicate OUT punches within 60s of an existing OUT.
+            // Directional Debounce & Cross-Device Safety Net:
+            // Prevent duplicate IN punches within 5 minutes of an existing IN.
+            // Prevent duplicate OUT punches within 5 minutes of an existing OUT.
             if (isInside) {
                 val lastInTime = pastPunches
                     .filter { isCheckInType(it.type) }
                     .maxOfOrNull { it.timestamp }
                     ?: lastInPunchTimeMs
-                if (lastInTime > 0 && (nowMs - lastInTime) < DEBOUNCE_MS) {
-                    Log.d(TAG, "Debounce IN: only ${(nowMs - lastInTime) / 1000}s since last IN, skipping duplicate IN")
+                if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_PUNCH_GUARD_MS) {
+                    Log.d(TAG, "Guard IN: only ${(nowMs - lastInTime) / 1000}s since last IN, skipping duplicate IN")
                     lastEvaluatedInside = true
                     return
                 }
@@ -259,8 +259,8 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                     .filter { isCheckOutType(it.type) }
                     .maxOfOrNull { it.timestamp }
                     ?: lastOutPunchTimeMs
-                if (lastOutTime > 0 && (nowMs - lastOutTime) < DEBOUNCE_MS) {
-                    Log.d(TAG, "Debounce OUT: only ${(nowMs - lastOutTime) / 1000}s since last OUT, skipping duplicate OUT")
+                if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_PUNCH_GUARD_MS) {
+                    Log.d(TAG, "Guard OUT: only ${(nowMs - lastOutTime) / 1000}s since last OUT, skipping duplicate OUT")
                     lastEvaluatedInside = false
                     return
                 }

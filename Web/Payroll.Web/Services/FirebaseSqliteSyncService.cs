@@ -2095,14 +2095,23 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     }
                 }
 
-                // 0. Match by BiometricID == Firebase punch key or effectiveBiometricId
-                if (!string.IsNullOrEmpty(firebasePunchId))
+                // 0. Match by unique BiometricID == Firebase punch key
+                // CRITICAL: Never match on generic non-unique tokens like "GEOFENCE_AUTO" or empty strings!
+                // An IN punch must NEVER match an OUT punch or vice versa.
+                if (!string.IsNullOrEmpty(firebasePunchId) &&
+                    !string.Equals(firebasePunchId, "GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(firebasePunchId, "MANUAL", StringComparison.OrdinalIgnoreCase))
                 {
                     existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l =>
-                        (l.BiometricID == firebasePunchId || (!string.IsNullOrEmpty(effectiveBiometricId) && l.BiometricID == effectiveBiometricId)) && l.EmployeeID == empId, ct)
+                        l.EmployeeID == empId &&
+                        l.BiometricID == firebasePunchId &&
+                        (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")), ct)
                         ?? db.ChangeTracker.Entries<AttendanceLog>()
                             .Select(e => e.Entity)
-                            .FirstOrDefault(l => (l.BiometricID == firebasePunchId || (!string.IsNullOrEmpty(effectiveBiometricId) && l.BiometricID == effectiveBiometricId)) && l.EmployeeID == empId);
+                            .FirstOrDefault(l =>
+                                l.EmployeeID == empId &&
+                                l.BiometricID == firebasePunchId &&
+                                (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")));
                 }
 
                 // 1. Try matching by integer LogID if key or json contains an integer id
@@ -2111,13 +2120,20 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 int parsedLogId = 0;
                 if (existingLog == null && int.TryParse(idStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedLogId) && parsedLogId > 0)
                 {
-                    existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == parsedLogId, ct)
+                    var candidate = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == parsedLogId, ct)
                         ?? db.ChangeTracker.Entries<AttendanceLog>()
                             .Select(e => e.Entity)
                             .FirstOrDefault(l => l.LogID == parsedLogId);
+
+                    // Direction must agree; an existing IN punch cannot be updated to OUT via integer id
+                    if (candidate != null && candidate.EmployeeID == empId &&
+                        (string.IsNullOrEmpty(logType) || (candidate.LogType ?? "").Contains("OUT") == logType.Contains("OUT")))
+                    {
+                        existingLog = candidate;
+                    }
                 }
 
-                // 2. If not found by ID, match by logical window (same employee, same day, within +/- 60 seconds)
+                // 2. If not found by ID, match by logical window (same employee, same day, same punch direction)
                 if (existingLog == null)
                 {
                     var punchDay = punchTime.Date;
@@ -2126,9 +2142,20 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                         .Where(l => l.EmployeeID == empId && l.PunchTime.Date == punchDay)
                         .ToListAsync(ct);
 
+                    // Cross-device geofence deduplication:
+                    // When Android and Web both evaluate geofence transitions concurrently,
+                    // Android sends 'AndroidGeofenceAuto' (or 'AUTO_*') and Web creates 'GeofenceAuto'.
+                    // Use a +/- 300-second (5 minute) deduplication window for geofence auto punches
+                    // so duplicate OUT or IN punches are not created.
+                    bool isAutoGeofence = deviceId.Contains("Geofence", StringComparison.OrdinalIgnoreCase) ||
+                                          rawType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                                          effectiveBiometricId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase);
+
+                    double maxWindowSeconds = isAutoGeofence ? 300.0 : 60.0;
+
                     var matched = candidates
                         .FirstOrDefault(l =>
-                            Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= 60 &&
+                            Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= maxWindowSeconds &&
                             (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")));
 
                     if (matched != null)
@@ -2152,7 +2179,11 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
                 var changedLog = false;
                 if (targetLog.EmployeeID != empId) { targetLog.EmployeeID = empId; changedLog = true; }
-                if (targetLog.LogType != logType) { targetLog.LogType = logType; changedLog = true; }
+                // IMMUTABILITY GUARD: Never mutate punch direction between IN and OUT!
+                if (string.IsNullOrEmpty(targetLog.LogType) || targetLog.LogType.Contains("OUT") == logType.Contains("OUT"))
+                {
+                    if (targetLog.LogType != logType) { targetLog.LogType = logType; changedLog = true; }
+                }
                 if (targetLog.IsApproved != isApproved) { targetLog.IsApproved = isApproved; changedLog = true; }
                 if (lat != 0 && targetLog.Latitude != lat) { targetLog.Latitude = lat; changedLog = true; }
                 if (lon != 0 && targetLog.Longitude != lon) { targetLog.Longitude = lon; changedLog = true; }
@@ -2464,13 +2495,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 }
             }
 
-            // Special mapping for Employee isActive (Firebase) to IsDeleted (SQL) - REVERSED
+            // Special mapping for Employee: check isDeleted / isActive unambiguously
             if (entityType.ClrType.Name == "Employee" && property.Name == "IsDeleted")
             {
-                if (converted is bool isActuallyActive)
+                bool isDeleted = false;
+                if (json.TryGetProperty("isDeleted", out var delEl) && (delEl.ValueKind == JsonValueKind.True || delEl.ValueKind == JsonValueKind.False))
                 {
-                    converted = !isActuallyActive;
+                    isDeleted = delEl.GetBoolean();
                 }
+                else if (json.TryGetProperty("isActive", out var actEl) && (actEl.ValueKind == JsonValueKind.True || actEl.ValueKind == JsonValueKind.False))
+                {
+                    isDeleted = !actEl.GetBoolean();
+                }
+                converted = isDeleted;
             }
 
             // Special mapping for BonusRecord payrollIdPaid <= 0 (Firebase) to null (SQL)

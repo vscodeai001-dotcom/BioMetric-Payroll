@@ -138,7 +138,15 @@ namespace Payroll.Shared.Services
             foreach (var p in normalized)
             {
                 bool isDup = false;
-                if (!string.IsNullOrWhiteSpace(p.BiometricID))
+                if (p.LogID > 0 && deduplicated.Any(x => x.LogID == p.LogID))
+                {
+                    isDup = true;
+                }
+
+                if (!isDup && !string.IsNullOrWhiteSpace(p.BiometricID) &&
+                    (p.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                     p.BiometricID.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
+                     Guid.TryParse(p.BiometricID, out _)))
                 {
                     if (deduplicated.Any(x => x.EmployeeID == p.EmployeeID &&
                                               string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))
@@ -151,7 +159,11 @@ namespace Payroll.Shared.Services
                 {
                     var match = deduplicated.FirstOrDefault(x =>
                         x.EmployeeID == p.EmployeeID &&
-                        x.PunchTime == p.PunchTime);
+                        (x.PunchTime == p.PunchTime ||
+                         (Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) <= 120 &&
+                          GetPunchTier(x) == PunchSourceTier.GeofenceAuto &&
+                          GetPunchTier(p) == PunchSourceTier.GeofenceAuto &&
+                          IsExplicitOutPunch(x) == IsExplicitOutPunch(p))));
 
                     if (match != null)
                     {

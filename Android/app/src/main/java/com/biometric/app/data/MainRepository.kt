@@ -453,9 +453,11 @@ class MainRepository(
         notifyDataChanged()
     }
 
-    suspend fun deleteEmployee(employee: Employee) {
-        val deletedEmployee = employee.copy(isActive = false, terminateDate = null)
+    suspend fun deleteEmployee(employee: Employee) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val deletedEmployee = employee.copy(isActive = false, terminateDate = now)
         dataSafety.recordDeletion("STAFF", employee.employeeId, employee, "Staff: ${employee.name}")
+        localEmployeeDao.deleteById(employee.employeeId)
         firebaseSync.pushEmployee(deletedEmployee)
         notifyDataChanged()
     }

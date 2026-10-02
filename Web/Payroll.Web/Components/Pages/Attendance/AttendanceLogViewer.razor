@@ -1792,7 +1792,15 @@
         foreach (var p in list)
         {
             bool isDup = false;
-            if (!string.IsNullOrWhiteSpace(p.BiometricID))
+            if (p.LogID > 0 && result.Any(x => x.LogID == p.LogID))
+            {
+                isDup = true;
+            }
+
+            if (!isDup && !string.IsNullOrWhiteSpace(p.BiometricID) &&
+                (p.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                 p.BiometricID.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
+                 Guid.TryParse(p.BiometricID, out _)))
             {
                 if (result.Any(x => x.EmployeeID == p.EmployeeID &&
                                     string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))

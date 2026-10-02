@@ -117,7 +117,14 @@ object AttendancePunchProcessor {
         val deduplicated = mutableListOf<ProcessedPunchItem>()
         for (p in normalized) {
             var isDup = false
-            if (p.biometricId.isNotBlank()) {
+            if (p.id.isNotBlank() && deduplicated.any { it.id == p.id }) {
+                isDup = true
+            }
+
+            if (!isDup && p.biometricId.isNotBlank() &&
+                (p.biometricId.startsWith("AUTO_", ignoreCase = true) ||
+                 p.biometricId.startsWith("MANUAL_", ignoreCase = true) ||
+                 try { java.util.UUID.fromString(p.biometricId); true } catch (_: Exception) { false })) {
                 if (deduplicated.any { it.staffId == p.staffId && it.biometricId.equals(p.biometricId, ignoreCase = true) }) {
                     isDup = true
                 }
@@ -125,7 +132,12 @@ object AttendancePunchProcessor {
 
             if (!isDup) {
                 val matchIdx = deduplicated.indexOfFirst {
-                    it.staffId == p.staffId && it.timestamp == p.timestamp
+                    it.staffId == p.staffId &&
+                    (it.timestamp == p.timestamp ||
+                     (Math.abs(it.timestamp - p.timestamp) <= 120_000L &&
+                      it.tier == PunchSourceTier.GeofenceAuto &&
+                      p.tier == PunchSourceTier.GeofenceAuto &&
+                      isExplicitOutPunch(it.type) == isExplicitOutPunch(p.type)))
                 }
                 if (matchIdx >= 0) {
                     val match = deduplicated[matchIdx]
