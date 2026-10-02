@@ -1225,17 +1225,29 @@ public class GeoLocationService
 
         var device = log.DeviceID?.Trim() ?? string.Empty;
         var biometricId = log.BiometricID?.Trim() ?? string.Empty;
+        var logType = log.LogType?.Trim() ?? string.Empty;
 
+        // Auto geofence punches are FALLBACK only, never authoritative.
         if (device.Equals("GeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
-            biometricId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase))
+            device.Equals("AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+            device.Contains("Geofence", StringComparison.OrdinalIgnoreCase) ||
+            biometricId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) ||
+            biometricId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+            logType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
 
         return
-            device.StartsWith("ZKTeco_", StringComparison.OrdinalIgnoreCase) ||
+            device.StartsWith("ZKTeco", StringComparison.OrdinalIgnoreCase) ||
+            device.StartsWith("Machine", StringComparison.OrdinalIgnoreCase) ||
             device.Equals("MobileWeb", StringComparison.OrdinalIgnoreCase) ||
-            device.Equals("Android", StringComparison.OrdinalIgnoreCase);
+            device.Equals("Android", StringComparison.OrdinalIgnoreCase) ||
+            device.Equals("ManualCorrection", StringComparison.OrdinalIgnoreCase) ||
+            device.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+            biometricId.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
+            logType.Equals("Manual Correction", StringComparison.OrdinalIgnoreCase) ||
+            int.TryParse(device, out _);
     }
 
     /// <summary>

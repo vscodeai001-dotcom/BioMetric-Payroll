@@ -973,7 +973,10 @@ namespace Payroll.Shared.Services
             var pr =
                 _punchProcessor.ProcessPunches(
                     punchesForDay,
-                    day);
+                    day,
+                    scheduleResult.HasShift ? scheduleResult.ShiftStart : null,
+                    scheduleResult.HasShift ? scheduleResult.ShiftEnd : null,
+                    featureSettings);
 
             // ========================================================
             // CURRENT OPEN PUNCH

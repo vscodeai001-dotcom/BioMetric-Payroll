@@ -4579,6 +4579,24 @@ foreach (var point in ordered)
                 }
                 mapNeedsUpdate = true;
                 await InvokeAsync(StateHasChanged);
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await using var db = await DbFactory.CreateDbContextAsync();
+                        var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == 1);
+                        if (existing != null)
+                        {
+                            if (currentOfficeRadius > 0) existing.GeoRadiusMeters = currentOfficeRadius;
+                            if (currentOfficeLatitude != 0) existing.OfficeLatitude = currentOfficeLatitude;
+                            if (currentOfficeLongitude != 0) existing.OfficeLongitude = currentOfficeLongitude;
+                            existing.UseSpeedBasedMarkers = useSpeedBasedMarkers;
+                            await db.SaveChangesAsync();
+                        }
+                    }
+                    catch { }
+                });
             }
         }
         catch (Exception ex)
@@ -5790,11 +5808,29 @@ foreach (var point in ordered)
                 .FirstOrDefaultAsync(
                     s => s.SettingID == 1);
 
+        var radius = company?.GeoRadiusMeters ?? 100;
+        if (currentOfficeRadius > 0 && radius != currentOfficeRadius)
+        {
+            radius = currentOfficeRadius;
+        }
+
+        var lat = company?.OfficeLatitude ?? 0;
+        if (currentOfficeLatitude != 0 && lat == 0)
+        {
+            lat = currentOfficeLatitude;
+        }
+
+        var lon = company?.OfficeLongitude ?? 0;
+        if (currentOfficeLongitude != 0 && lon == 0)
+        {
+            lon = currentOfficeLongitude;
+        }
+
         return (
-            company?.OfficeLatitude ?? 0,
-            company?.OfficeLongitude ?? 0,
-            company?.GeoRadiusMeters ?? 100,
-            company?.UseSpeedBasedMarkers ?? false);
+            lat,
+            lon,
+            radius,
+            company?.UseSpeedBasedMarkers ?? useSpeedBasedMarkers);
     }
 
 

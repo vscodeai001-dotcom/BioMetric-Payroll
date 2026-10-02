@@ -323,7 +323,9 @@ else
     }
 </style>
 
-<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh" />
+<AttendanceRefreshListener OnAttendanceChanged="HandleRealtimeRefresh"
+                           OnGeoSettingsChanged="HandleRealtimeRefresh"
+                           OnApplicationDataChanged="HandleRealtimeRefresh" />
 
 @code {
     private CompanySetting? settings;
@@ -389,6 +391,74 @@ else
             authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "web-admin",
             isSuperAdmin ? "SuperAdmin" : "Admin");
         await LoadTrackingIntervalAsync();
+
+        // Dual SSOT Hydration: Local SQLite already loaded instantaneously (0ms).
+        // Concurrently query Firebase cloud SSOT so that any edits made from Mobile
+        // while Web was closed immediately update SQLite and reactive UI without reload.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var effectiveOwnerUid = firebaseOwnerUid ?? "biometricpayroll";
+                var fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(effectiveOwnerUid, "company_settings", "1");
+                if (fbRecord.HasValue && fbRecord.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var val = fbRecord.Value;
+                    var rad = ReadInt(val, "geoRadiusMeters") ?? ReadInt(val, "GeoRadiusMeters") ?? ReadInt(val, "radius") ?? ReadInt(val, "Radius") ?? 0;
+                    var lat = ReadDouble(val, "officeLatitude") ?? ReadDouble(val, "OfficeLatitude") ?? ReadDouble(val, "latitude") ?? ReadDouble(val, "Latitude") ?? 0;
+                    var lon = ReadDouble(val, "officeLongitude") ?? ReadDouble(val, "OfficeLongitude") ?? ReadDouble(val, "longitude") ?? ReadDouble(val, "Longitude") ?? 0;
+                    var speed = ReadBool(val, "useSpeedBasedMarkers") ?? ReadBool(val, "use_speed_based_markers") ?? false;
+                    var compName = ReadString(val, "companyName") ?? ReadString(val, "CompanyName");
+                    var addr = ReadString(val, "addressLine1") ?? ReadString(val, "AddressLine1");
+                    var city = ReadString(val, "cityStatePincode") ?? ReadString(val, "CityStatePincode");
+
+                    bool changed = false;
+                    if (settings != null)
+                    {
+                        if (rad > 0 && settings.GeoRadiusMeters != rad) { settings.GeoRadiusMeters = rad; changed = true; }
+                        if (lat != 0 && settings.OfficeLatitude != lat) { settings.OfficeLatitude = lat; changed = true; }
+                        if (lon != 0 && settings.OfficeLongitude != lon) { settings.OfficeLongitude = lon; changed = true; }
+                        if (settings.UseSpeedBasedMarkers != speed) { settings.UseSpeedBasedMarkers = speed; changed = true; }
+                        if (!string.IsNullOrWhiteSpace(compName) && settings.CompanyName != compName.Trim()) { settings.CompanyName = compName.Trim(); changed = true; }
+                        if (addr != null && settings.AddressLine1 != addr) { settings.AddressLine1 = addr; changed = true; }
+                        if (city != null && settings.CityStatePincode != city) { settings.CityStatePincode = city; changed = true; }
+                    }
+
+                    if (changed)
+                    {
+                        await using var db = await DbFactory.CreateDbContextAsync();
+                        var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+                        var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
+                        if (existing != null)
+                        {
+                            if (rad > 0) existing.GeoRadiusMeters = rad;
+                            if (lat != 0) existing.OfficeLatitude = lat;
+                            if (lon != 0) existing.OfficeLongitude = lon;
+                            existing.UseSpeedBasedMarkers = speed;
+                            if (!string.IsNullOrWhiteSpace(compName)) existing.CompanyName = compName.Trim();
+                            if (addr != null) existing.AddressLine1 = addr;
+                            if (city != null) existing.CityStatePincode = city;
+                            await db.SaveChangesAsync();
+                        }
+
+                        if (settings != null)
+                        {
+                            await AttendanceRefresh.NotifyGeoSettingsChangedAsync(
+                                settings.OfficeLatitude,
+                                settings.OfficeLongitude,
+                                settings.GeoRadiusMeters,
+                                settings.UseSpeedBasedMarkers);
+                        }
+
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Background Firebase hydration for CompanySettings failed.");
+            }
+        });
     }
 
     private void OpenDeleteCompanyModal()
@@ -522,6 +592,7 @@ else
                         ["pageTransitionEffect"] = settings.PageTransitionEffect
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
+                    await FirebaseRealtime.PublishLocalApplicationChangeAsync(firebaseOwnerUid, "CompanySetting", "MODIFIED", "1", default);
                 }
 
                 if (activeTenant != null && !string.Equals(activeTenant.CompanyName, settings.CompanyName))
@@ -623,6 +694,28 @@ else
         return 30;
     }
 
+    private static int? ReadInt(System.Text.Json.JsonElement? data, string name)
+    {
+        if (!data.HasValue || data.Value.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+        if (data.Value.TryGetProperty(name, out var p))
+        {
+            if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetInt32(out var n)) return n;
+            if (p.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(p.GetString(), out n)) return n;
+        }
+        return null;
+    }
+
+    private static double? ReadDouble(System.Text.Json.JsonElement? data, string name)
+    {
+        if (!data.HasValue || data.Value.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+        if (data.Value.TryGetProperty(name, out var p))
+        {
+            if (p.ValueKind == System.Text.Json.JsonValueKind.Number && p.TryGetDouble(out var d)) return d;
+            if (p.ValueKind == System.Text.Json.JsonValueKind.String && double.TryParse(p.GetString(), System.Globalization.CultureInfo.InvariantCulture, out d)) return d;
+        }
+        return null;
+    }
+
     private static string? ReadString(System.Text.Json.JsonElement? data, string name) =>
         data.HasValue && data.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
         data.Value.TryGetProperty(name, out var p) && p.ValueKind == System.Text.Json.JsonValueKind.String
@@ -631,24 +724,28 @@ else
     private static bool? ReadBool(System.Text.Json.JsonElement? data, string name) =>
         data.HasValue && data.Value.ValueKind == System.Text.Json.JsonValueKind.Object &&
         data.Value.TryGetProperty(name, out var p)
-            ? p.ValueKind == System.Text.Json.JsonValueKind.True ? true : p.ValueKind == System.Text.Json.JsonValueKind.False ? false : null
+            ? p.ValueKind == System.Text.Json.JsonValueKind.True ? true : p.ValueKind == System.Text.Json.JsonValueKind.False ? false : (p.ValueKind == System.Text.Json.JsonValueKind.String && bool.TryParse(p.GetString(), out var b) ? b : null)
             : null;
 
     private async Task HandleRealtimeRefresh()
     {
         try
         {
-            await using var dbContext = await DbFactory.CreateDbContextAsync();
-            settings = await dbContext.CompanySettings
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.SettingID == 1);
-            features = await dbContext.FeatureSettings
-                .AsNoTracking()
-                .FirstOrDefaultAsync(f => f.Id == 1)
-                ?? new FeatureSettings();
+            var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+            var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
 
-            if (settings == null)
-                settings = new CompanySetting();
+            await using var dbContext = await DbFactory.CreateDbContextAsync();
+            var refreshedSettings = await dbContext.CompanySettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
+            var refreshedFeatures = await dbContext.FeatureSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(f => f.Id == targetFeatureId);
+
+            if (refreshedSettings != null)
+                settings = refreshedSettings;
+            if (refreshedFeatures != null)
+                features = refreshedFeatures;
 
             await InvokeAsync(StateHasChanged);
         }

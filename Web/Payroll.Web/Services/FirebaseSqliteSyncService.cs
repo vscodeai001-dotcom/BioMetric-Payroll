@@ -170,6 +170,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
     private static readonly (string EntityName, string FirebaseTable)[] ActiveStreamTables = new[]
     {
         ("AttendancePunch", "attendance_punches"),
+        ("AttendanceLog", "attendance"),
+        ("GeoPunchAudit", "geo_punch_audits"),
         ("LeaveRequest", "leave_requests"),
         ("SalaryAdvance", "advance_payments"),
         ("AttendanceRegularization", "regularizations"),
@@ -247,9 +249,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
                     if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
                     {
-                        var lat = GetDouble(settings.Value, "officeLatitude", "Latitude");
-                        var lon = GetDouble(settings.Value, "officeLongitude", "Longitude");
-                        var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters");
+                        var lat = GetDouble(settings.Value, "officeLatitude", "OfficeLatitude", "latitude", "Latitude");
+                        var lon = GetDouble(settings.Value, "officeLongitude", "OfficeLongitude", "longitude", "Longitude");
+                        var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters", "radius", "Radius");
                         var speed = GetBool(settings.Value, "useSpeedBasedMarkers", "use_speed_based_markers", "UseSpeedBasedMarkers");
                         await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius, speed);
 
@@ -1099,26 +1101,40 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
     private async Task SyncAllTablesAsync(string ownerUid, CancellationToken ct)
     {
-        // BANDWIDTH OPTIMIZATION: Exclude high-volume append-only tables from the
-        // startup bootstrap sync. These tables grow continuously (audit_logs can be
-        // 10 MB+, attendance_punches and geo_punch_audits accumulate all year).
-        // All three are accurately populated in real-time by the SSE delta stream
-        // that starts immediately after this bootstrap. Downloading them as a full
-        // snapshot on every server restart wastes significant bandwidth with no
-        // functional benefit — the SSE stream delivers all future deltas correctly.
+        // Exclude strictly background tracking breadcrumbs and historical logs from bootstrap.
+        // Operational tables (CompanySetting, FeatureSettings, Shop, Employee, AttendancePunch,
+        // AttendanceLog, GeoPunchAudit, LeaveRequest, SalaryAdvance, AttendanceRegularization)
+        // are always synced so that offline edits from mobile or web immediately catch up.
         var skipOnBootstrap = new HashSet<string>(StringComparer.Ordinal)
         {
             "AuditLog",                 // audit_logs         — append-only, large
-            "AttendancePunch",          // attendance_punches — append-only, large
-            "GeoPunchAudit",            // geo_punch_audits   — append-only, large
             "EmployeeLocationHistory",  // tracking/history   — append-only, large
-            "AttendanceLog",            // attendance         — append-only, large
             "EmployeeGpsSession",       // tracking/sessions  — append-only, large
             "PayrollHistory",           // payroll_history    — historical, large
             "SalarySnapshot",           // salary_snapshots   — historical, large
         };
 
-        foreach (var table in Tables)
+        var priorityOrder = new[]
+        {
+            "CompanySetting",
+            "FeatureSettings",
+            "Shop",
+            "Employee",
+            "AttendancePunch",
+            "AttendanceLog",
+            "GeoPunchAudit",
+            "LeaveRequest",
+            "SalaryAdvance",
+            "AttendanceRegularization"
+        };
+
+        var orderedTables = priorityOrder
+            .Where(name => Tables.ContainsKey(name))
+            .Select(name => new KeyValuePair<string, string>(name, Tables[name]))
+            .Concat(Tables.Where(kvp => !priorityOrder.Contains(kvp.Key, StringComparer.Ordinal)))
+            .ToList();
+
+        foreach (var table in orderedTables)
         {
             ct.ThrowIfCancellationRequested();
             if (skipOnBootstrap.Contains(table.Key))
@@ -1128,7 +1144,33 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     "SSE stream will deliver all deltas.", table.Key, table.Value);
                 continue;
             }
-            await SyncTableAsync(table.Key, table.Value, ownerUid, ct);
+            try
+            {
+                var changed = await SyncTableAsync(table.Key, table.Value, ownerUid, ct);
+                if (table.Key.Equals("CompanySetting", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        await using var scope = _scopeFactory.CreateAsyncScope();
+                        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+                        await using var db = await dbFactory.CreateDbContextAsync(ct);
+                        var cs = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1, ct);
+                        if (cs != null)
+                        {
+                            await _refreshService.NotifyGeoSettingsChangedAsync(
+                                cs.OfficeLatitude, cs.OfficeLongitude, cs.GeoRadiusMeters, cs.UseSpeedBasedMarkers);
+                        }
+                    }
+                    catch (Exception notifyEx)
+                    {
+                        _logger.LogWarning(notifyEx, "Failed to broadcast bootstrap geo settings for {OwnerUid}", ownerUid);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to bootstrap sync table {Table} ({FirebaseTable}) for owner {OwnerUid}", table.Key, table.Value, ownerUid);
+            }
         }
     }
 
@@ -1548,7 +1590,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         // problematic/generated-key record cannot collide with another tracked
         // LeaveRequest instance.
 
-        if (entityName.Equals("LeaveRequest", StringComparison.Ordinal) ||
+        if (entityName.Equals("AttendanceLog", StringComparison.Ordinal) ||
+            entityName.Equals("LeaveRequest", StringComparison.Ordinal) ||
             entityName.Equals("AuditLog", StringComparison.Ordinal))
         {
             var isolatedEntityChanged = false;
@@ -2038,6 +2081,20 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     : !string.IsNullOrEmpty(firebasePunchId) ? firebasePunchId
                     : string.Empty;
 
+                if (string.IsNullOrWhiteSpace(deviceId) || deviceId.Equals("Mobile", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (effectiveBiometricId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                        effectiveBiometricId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) ||
+                        rawType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deviceId = "AndroidGeofenceAuto";
+                    }
+                    else if (effectiveBiometricId.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deviceId = "ManualCorrection";
+                    }
+                }
+
                 // 0. Match by BiometricID == Firebase punch key or effectiveBiometricId
                 if (!string.IsNullOrEmpty(firebasePunchId))
                 {
@@ -2064,21 +2121,20 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 if (existingLog == null)
                 {
                     var punchDay = punchTime.Date;
-                    var dayPunches = await db.AttendanceLogs
+                    var candidates = await db.AttendanceLogs
+                        .AsNoTracking()
                         .Where(l => l.EmployeeID == empId && l.PunchTime.Date == punchDay)
                         .ToListAsync(ct);
 
-                    existingLog = dayPunches
+                    var matched = candidates
                         .FirstOrDefault(l =>
                             Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= 60 &&
-                            (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")))
-                        ?? db.ChangeTracker.Entries<AttendanceLog>()
-                            .Select(e => e.Entity)
-                            .FirstOrDefault(l =>
-                                l.EmployeeID == empId &&
-                                l.PunchTime.Date == punchDay &&
-                                Math.Abs((l.PunchTime - punchTime).TotalSeconds) <= 60 &&
-                                (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")));
+                            (string.IsNullOrEmpty(logType) || (l.LogType ?? "").Contains("OUT") == logType.Contains("OUT")));
+
+                    if (matched != null)
+                    {
+                        existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == matched.LogID, ct);
+                    }
                 }
 
                 var isNew = existingLog == null;
@@ -2103,7 +2159,6 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
                 if (isNew)
                 {
-                    if (parsedLogId > 0) targetLog.LogID = parsedLogId;
                     db.AttendanceLogs.Add(targetLog);
                     return true;
                 }

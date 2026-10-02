@@ -43,6 +43,10 @@
     public EventCallback OnBonusChanged { get; set; }
 
 
+    [Parameter]
+    public EventCallback OnApplicationDataChanged { get; set; }
+
+
     // ============================================================
     // SIGNALR JS REFERENCE
     // ============================================================
@@ -123,6 +127,13 @@
 
         try
         {
+            if (OnApplicationDataChanged.HasDelegate)
+            {
+                await InvokeAsync(
+                    () =>
+                        OnApplicationDataChanged.InvokeAsync());
+            }
+
             if (OnAttendanceChanged.HasDelegate)
             {
                 await InvokeAsync(
@@ -340,6 +351,7 @@
                 $"BonusChanged callback failed: {ex}");
         }
     }
+
 
 
     // ============================================================

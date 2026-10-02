@@ -16,6 +16,7 @@
 @using global::Payroll.Web.Components.Pages.Attendance
 
 @inject Payroll.Shared.Services.AttendanceCalculatorService Calculator
+@inject Payroll.Shared.Services.AttendancePunchProcessor PunchProcessor
 @inject IJSRuntime JSRuntime
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject ILogger<AttendanceLogViewer> _logger
@@ -728,6 +729,10 @@
                                 s.ShiftDate <= dEnd)
                         .ToListAsync();
 
+            var featureSettings = await dbContext.FeatureSettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
+
             // ----------------------------------------------------
             // RAW PUNCHES
             //
@@ -924,14 +929,28 @@
                             {
                                 dayPunchLogs = new List<AttendanceLog>();
                             }
-                            var dayPunches = dayPunchLogs.Select(l => l.PunchTime).ToList();
+                            DateTime? sStartDt = sStart.HasValue ? ds.ShiftDate.ToDateTime(sStart.Value) : null;
+                            DateTime? sEndDt = sEnd.HasValue ? ds.ShiftDate.ToDateTime(sEnd.Value) : null;
+                            if (sStartDt.HasValue && sEndDt.HasValue && sEndDt <= sStartDt)
+                            {
+                                sEndDt = sEndDt.Value.AddDays(1);
+                            }
+
+                            var pr = PunchProcessor.ProcessPunches(
+                                dayPunchLogs,
+                                ds.ShiftDate.ToDateTime(TimeOnly.MinValue),
+                                sStartDt,
+                                sEndDt,
+                                featureSettings);
+                            var effectiveLogs = pr.Ordered;
+                            var dayPunches = effectiveLogs.Select(l => l.PunchTime).ToList();
 
                             dto.Punches =
                                 string.Join(
                                     "\n",
-                                    dayPunchLogs.Select(
+                                    effectiveLogs.Select(
                                         l =>
-                                            $"{l.PunchTime:HH:mm:ss}  {l.DeviceID ?? "Unknown"}  #{l.LogID}  {l.LogType}"));
+                                            $"{l.PunchTime:HH:mm:ss}  {(!string.IsNullOrWhiteSpace(l.DeviceID) ? l.DeviceID : (l.BiometricID != null && l.BiometricID.StartsWith("AUTO_") ? "AndroidGeofenceAuto" : "Machine"))}  #{l.LogID}  {l.LogType}"));
 
                             // ------------------------------------------------
                             // BREAKS

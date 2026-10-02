@@ -460,9 +460,9 @@ window.attendanceRefresh = (function () {
             const val = snapshot.val();
             if (!val || typeof val !== 'object') return;
 
-            const lat = Number(val.officeLatitude ?? val.OfficeLatitude ?? 0);
-            const lng = Number(val.officeLongitude ?? val.OfficeLongitude ?? 0);
-            const rad = Number(val.geoRadiusMeters ?? val.GeoRadiusMeters ?? 0);
+            const lat = Number(val.officeLatitude ?? val.OfficeLatitude ?? val.latitude ?? val.Latitude ?? 0);
+            const lng = Number(val.officeLongitude ?? val.OfficeLongitude ?? val.longitude ?? val.Longitude ?? 0);
+            const rad = Number(val.geoRadiusMeters ?? val.GeoRadiusMeters ?? val.radius ?? val.Radius ?? 0);
             const speed = Boolean(val.useSpeedBasedMarkers ?? val.use_speed_based_markers ?? false);
 
             const geoData = {

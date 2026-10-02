@@ -2,48 +2,95 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Payroll.Shared;
+using Payroll.Shared.Data;
 
 namespace Payroll.Shared.Services
 {
+    public enum PunchSourceTier
+    {
+        PhysicalMachine = 1,
+        ManualAdmin = 2,
+        GeofenceAuto = 3
+    }
+
     /// <summary>
-    /// Normalizes and orders attendance punches.
+    /// Normalizes, deduplicates, and resolves attendance punches using a 3-tier priority hierarchy:
+    /// 1. Physical Biometric Machine (ZKTeco, hardware readers) -> Authoritative Hardware
+    /// 2. Manual Admin Overrides & Approved Corrections -> Authoritative Override
+    /// 3. Geofence Auto Punches (Server & Android) -> Dynamic Fallback Only
     ///
-    /// BUSINESS REGION:
-    /// India
-    ///
-    /// BUSINESS TIMEZONE:
-    /// Asia/Kolkata
-    ///
-    /// IMPORTANT:
-    /// PunchTime remains a business-local wall-clock value.
-    /// No UTC conversion is performed.
-    ///
-    /// Attendance calculations are MINUTE BASED.
-    /// Seconds and fractional seconds are ignored.
-    ///
-    /// Example:
-    /// 11:30:19 -> 11:30
-    /// 11:33:52 -> 11:33
-    ///
-    /// Attendance rule:
-    ///   1st punch = IN
-    ///   2nd punch = OUT
-    ///   3rd punch = IN
-    ///   4th punch = OUT
-    ///
-    /// Odd punches are preserved.
-    /// The calculation engine decides how today's open punch
-    /// is handled.
+    /// Hybrid Rules:
+    /// - Non-shift windows (pre-shift and post-shift OT): all valid sessions (machine, manual, or geofence fallback) are preserved.
+    /// - Shift window: geofence auto punches are suppressed to prevent GPS drift from fragmenting the shift.
+    ///   However, physical biometric machine punches inside the shift OVERRIDE manual/continuous coverage to record breaks.
     /// </summary>
     public sealed class AttendancePunchProcessor
     {
+        public static PunchSourceTier GetPunchTier(AttendanceLog log)
+        {
+            if (log == null) return PunchSourceTier.GeofenceAuto;
+
+            var device = log.DeviceID?.Trim() ?? string.Empty;
+            var bioId = log.BiometricID?.Trim() ?? string.Empty;
+            var logType = log.LogType?.Trim() ?? string.Empty;
+
+            // Tier 2: Manual Admin Override or Approved Correction
+            if (device.Equals("ManualCorrection", StringComparison.OrdinalIgnoreCase) ||
+                device.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
+                bioId.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
+                logType.Equals("Manual Correction", StringComparison.OrdinalIgnoreCase))
+            {
+                return PunchSourceTier.ManualAdmin;
+            }
+
+            // Tier 3: Geofence Auto (Server GeofenceAuto, AndroidGeofenceAuto, AUTO_* keys)
+            if (device.Equals("GeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                device.Equals("AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                device.Contains("Geofence", StringComparison.OrdinalIgnoreCase) ||
+                bioId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) ||
+                bioId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                logType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase))
+            {
+                return PunchSourceTier.GeofenceAuto;
+            }
+
+            // Tier 1: Physical Biometric Machine
+            if (device.StartsWith("ZKTeco", StringComparison.OrdinalIgnoreCase) ||
+                device.StartsWith("Machine", StringComparison.OrdinalIgnoreCase) ||
+                int.TryParse(device, out _) ||
+                (!string.IsNullOrEmpty(device) && !device.Equals("MobileWeb", StringComparison.OrdinalIgnoreCase) && !device.Equals("Android", StringComparison.OrdinalIgnoreCase)))
+            {
+                return PunchSourceTier.PhysicalMachine;
+            }
+
+            // Explicit human button punch on mobile or web app
+            return PunchSourceTier.ManualAdmin;
+        }
+
+        public static bool IsExplicitOutPunch(AttendanceLog p)
+        {
+            if (p == null) return false;
+            var t = (p.LogType ?? string.Empty).Trim().ToUpperInvariant();
+            return t.Contains("OUT") || t.Equals("CHECKOUT") || t.Equals("CHECK_OUT") || t.StartsWith("AUTO_OUT");
+        }
+
+        public static bool IsExplicitInPunch(AttendanceLog p)
+        {
+            if (p == null) return false;
+            var t = (p.LogType ?? string.Empty).Trim().ToUpperInvariant();
+            return t.Equals("IN") || t.Equals("CHECKIN") || t.Equals("CHECK_IN") || t.StartsWith("AUTO_IN");
+        }
+
         public (
             List<AttendanceLog> Ordered,
             DateTime? FirstIn,
             DateTime? LastOut)
             ProcessPunches(
                 List<AttendanceLog> punches,
-                DateTime day)
+                DateTime day,
+                DateTime? shiftStart = null,
+                DateTime? shiftEnd = null,
+                FeatureSettings? featureSettings = null)
         {
             if (punches == null || punches.Count == 0)
             {
@@ -53,19 +100,16 @@ namespace Payroll.Shared.Services
                     null);
             }
 
-            // --------------------------------------------------------
-            // Normalize attendance timestamps to MINUTE precision.
-            //
-            // Database values remain untouched.
-            // Only the in-memory calculation copy is normalized.
-            // --------------------------------------------------------
+            // 1. Check feature toggle: If geofencing or auto-punching is disabled, exclude Tier 3 geofence punches
+            bool allowGeofence = featureSettings == null || (featureSettings.EnableGeoFencing && featureSettings.EnableAutomaticGeofencePunching);
 
-            var ordered = punches
+            // 2. Normalize attendance timestamps to MINUTE precision.
+            var normalized = punches
                 .Where(p => p != null)
+                .Where(p => allowGeofence || GetPunchTier(p) != PunchSourceTier.GeofenceAuto)
                 .Select(p =>
                 {
                     var value = p.PunchTime;
-
                     p.PunchTime = new DateTime(
                         value.Year,
                         value.Month,
@@ -74,14 +118,14 @@ namespace Payroll.Shared.Services
                         value.Minute,
                         0,
                         DateTimeKind.Unspecified);
-
                     return p;
                 })
                 .OrderBy(p => p.PunchTime)
+                .ThenBy(p => GetPunchTier(p))
                 .ThenBy(p => p.LogID)
                 .ToList();
 
-            if (ordered.Count == 0)
+            if (normalized.Count == 0)
             {
                 return (
                     new List<AttendanceLog>(),
@@ -89,15 +133,9 @@ namespace Payroll.Shared.Services
                     null);
             }
 
-            // --------------------------------------------------------
-            // Deduplicate punches:
-            // 1. By non-empty BiometricID (UUID / punch key)
-            // 2. By EmployeeID + Minute + Type orientation (IN vs OUT)
-            // This prevents duplicate sync events or multi-touch machine punches
-            // from collapsing IN/OUT pairs into zero-duration micro-pairs.
-            // --------------------------------------------------------
+            // 3. Deduplicate punches by BiometricID and same-minute collisions.
             var deduplicated = new List<AttendanceLog>();
-            foreach (var p in ordered)
+            foreach (var p in normalized)
             {
                 bool isDup = false;
                 if (!string.IsNullOrWhiteSpace(p.BiometricID))
@@ -117,38 +155,14 @@ namespace Payroll.Shared.Services
 
                     if (match != null)
                     {
-                        var t1 = (match.LogType ?? "").ToUpperInvariant();
-                        var t2 = (p.LogType ?? "").ToUpperInvariant();
-                        bool isOut1 = t1.Contains("OUT");
-                        bool isOut2 = t2.Contains("OUT");
-                        if (isOut1 == isOut2)
+                        // Same minute collision: higher priority tier wins
+                        var tierMatch = GetPunchTier(match);
+                        var tierIncoming = GetPunchTier(p);
+                        if (tierIncoming < tierMatch)
                         {
-                            // Same direction at same minute — clear duplicate, drop incoming.
-                            isDup = true;
+                            deduplicated[deduplicated.IndexOf(match)] = p;
                         }
-                        else
-                        {
-                            // Opposite direction at same minute (e.g. geofence OUT + Android IN
-                            // arriving within seconds of each other due to sync race).
-                            // Keep the one whose direction matches the expected alternating
-                            // position (even index = IN, odd index = OUT).
-                            // The matched punch already occupies an index; the incoming punch
-                            // would extend by one. Determine which direction is expected at
-                            // the index the matched punch currently holds.
-                            int matchIndex = deduplicated.IndexOf(match);
-                            bool expectedOutAtMatch = (matchIndex % 2 != 0); // even=IN, odd=OUT
-                            if (expectedOutAtMatch == isOut1)
-                            {
-                                // The already-added punch is correctly positioned — drop incoming.
-                                isDup = true;
-                            }
-                            else
-                            {
-                                // The incoming punch is better positioned — replace the existing one.
-                                deduplicated[matchIndex] = p;
-                                isDup = true; // mark as dup so we don't Add again below
-                            }
-                        }
+                        isDup = true;
                     }
                 }
 
@@ -158,42 +172,140 @@ namespace Payroll.Shared.Services
                 }
             }
 
-            ordered = deduplicated;
+            if (deduplicated.Count == 0)
+            {
+                return (new List<AttendanceLog>(), null, null);
+            }
+
+            // 4. Resolve Active Shift Window [windowStart, windowEnd]
+            DateTime? windowStart = shiftStart;
+            DateTime? windowEnd = shiftEnd;
+
+            // Also check if manual punches define the shift window boundaries
+            var manualIn = deduplicated.FirstOrDefault(p => GetPunchTier(p) == PunchSourceTier.ManualAdmin && IsExplicitInPunch(p));
+            var manualOut = deduplicated.LastOrDefault(p => GetPunchTier(p) == PunchSourceTier.ManualAdmin && IsExplicitOutPunch(p));
+            if (manualIn != null && manualOut != null && manualOut.PunchTime > manualIn.PunchTime)
+            {
+                if (!windowStart.HasValue || manualIn.PunchTime < windowStart.Value)
+                    windowStart = manualIn.PunchTime;
+                if (!windowEnd.HasValue || manualOut.PunchTime > windowEnd.Value)
+                    windowEnd = manualOut.PunchTime;
+            }
+
+            // 5. Shift Zone Filtering:
+            // Inside [windowStart, windowEnd]:
+            // - Geofence auto punches are suppressed to prevent GPS drift from fragmenting working hours.
+            // - Physical machine punches ARE KEPT to record genuine physical breaks or overrides.
+            // Outside [windowStart, windowEnd]:
+            // - Pre-shift and post-shift sessions (including Geofence fallback) are PRESERVED as overtime.
+            var suppressedIds = new HashSet<int>();
+            var suppressedBioIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (windowStart.HasValue && windowEnd.HasValue && windowEnd.Value > windowStart.Value)
+            {
+                var wStart = windowStart.Value;
+                var wEnd = windowEnd.Value;
+
+                foreach (var p in deduplicated)
+                {
+                    if (GetPunchTier(p) == PunchSourceTier.GeofenceAuto)
+                    {
+                        // Strictly inside the shift window: suppress geofence auto punches
+                        // (Allow punches right at or before wStart to serve as early arrival, and after wEnd as late departure)
+                        if (p.PunchTime > wStart && p.PunchTime < wEnd)
+                        {
+                            if (p.LogID > 0) suppressedIds.Add(p.LogID);
+                            if (!string.IsNullOrEmpty(p.BiometricID)) suppressedBioIds.Add(p.BiometricID);
+                        }
+                    }
+                }
+            }
+
+            var survivingPunches = deduplicated
+                .Where(p => !suppressedIds.Contains(p.LogID) &&
+                            (string.IsNullOrEmpty(p.BiometricID) || !suppressedBioIds.Contains(p.BiometricID)))
+                .OrderBy(p => p.PunchTime)
+                .ThenBy(p => GetPunchTier(p))
+                .ThenBy(p => p.LogID)
+                .ToList();
+
+            if (survivingPunches.Count == 0)
+            {
+                survivingPunches = deduplicated;
+            }
+
+            // 6. Dynamic State Machine & Priority Pairing across all zones
+            var ordered = new List<AttendanceLog>();
+            AttendanceLog? pendingIn = null;
+
+            foreach (var p in survivingPunches)
+            {
+                bool isOut = IsExplicitOutPunch(p);
+                bool isIn = IsExplicitInPunch(p);
+                bool isNeutral = !isOut && !isIn;
+
+                if (pendingIn == null)
+                {
+                    if (isOut)
+                    {
+                        // Stray OUT (e.g. overnight completion from previous shift)
+                        ordered.Add(p);
+                    }
+                    else
+                    {
+                        // Valid IN or neutral first punch
+                        pendingIn = p;
+                    }
+                }
+                else
+                {
+                    // Currently expecting an OUT
+                    if (isIn)
+                    {
+                        // Consecutive IN:
+                        // If pendingIn was an early arrival (pre-shift OT) and p is the shift start (e.g. 10:22 vs 10:30),
+                        // preserve the earlier arrival so pre-shift overtime is retained.
+                        if (windowStart.HasValue && pendingIn.PunchTime < windowStart.Value && p.PunchTime >= windowStart.Value && p.PunchTime <= windowStart.Value.AddMinutes(30))
+                        {
+                            // Keep pendingIn (early arrival) — do not overwrite with shift start
+                        }
+                        else
+                        {
+                            var tierPending = GetPunchTier(pendingIn);
+                            var tierIncoming = GetPunchTier(p);
+                            if (tierIncoming < tierPending)
+                            {
+                                // Higher priority tier wins (e.g. Machine beats Manual/Geofence, Manual beats Geofence)
+                                pendingIn = p;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Explicit OUT or neutral second punch -> forms an attendance pair!
+                        ordered.Add(pendingIn);
+                        ordered.Add(p);
+                        pendingIn = null;
+                    }
+                }
+            }
+
+            if (pendingIn != null)
+            {
+                ordered.Add(pendingIn); // Live open punch for today
+            }
 
             if (ordered.Count == 0)
             {
-                return (
-                    new List<AttendanceLog>(),
-                    null,
-                    null);
+                return (new List<AttendanceLog>(), null, null);
             }
 
-            // --------------------------------------------------------
-            // FIRST IN
-            // --------------------------------------------------------
+            DateTime? firstIn = ordered[0].PunchTime;
+            DateTime? lastOut = ordered.Count >= 2 && ordered.Count % 2 == 0
+                ? ordered[^1].PunchTime
+                : null;
 
-            DateTime? firstIn =
-                ordered[0].PunchTime;
-
-            // --------------------------------------------------------
-            // LAST CONFIRMED OUT
-            //
-            // Only an even number of punches has a confirmed OUT.
-            //
-            // Odd punch:
-            // final punch remains an open IN.
-            // --------------------------------------------------------
-
-            DateTime? lastOut =
-                ordered.Count >= 2 &&
-                ordered.Count % 2 == 0
-                    ? ordered[^1].PunchTime
-                    : null;
-
-            return (
-                ordered,
-                firstIn,
-                lastOut);
+            return (ordered, firstIn, lastOut);
         }
     }
 }
