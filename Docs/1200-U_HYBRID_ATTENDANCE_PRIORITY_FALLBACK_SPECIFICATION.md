@@ -364,3 +364,43 @@ When an admin initiates a data wipe from the Web management console:
 | **Payroll.Shared** | .NET 8.0 | `dotnet build "Web\Payroll.Shared\Payroll.Shared.csproj"` | ✅ **0 Errors, 0 Warnings** |
 | **Payroll.Web** | .NET 8.0 | `dotnet build "Web\Payroll.Web\Payroll.Web.csproj"` | ✅ **0 Errors, 0 Warnings** |
 | **Android App** | Kotlin 1.9 / Android SDK 35 | `gradlew.bat compileDebugKotlin` | ✅ **BUILD SUCCESSFUL** (0 Errors) |
+
+---
+
+## 9. 30-Day Probability Scenario Matrix (September 2026 Live Test Suite)
+
+To comprehensively validate all hybrid fallback edge cases, the entire month of September 2026 (30 calendar days) was seeded for **Dinesh** (Emp ID `4`, Biometric `1524`, Scheduled Shift: `10:30 – 16:30`, 6h) and **Nevetha** (Emp ID `3`, Biometric `1003`, Scheduled Shift: `06:00 – 16:00`, 10h).
+
+| Day & Date | Category & Scenario Description | Dinesh Punches & Expected Outcome | Nevetha Punches & Expected Outcome | Expected Status |
+|---|---|---|---|---|
+| **01 (Tue, Sep 01)** | **Pure Machine** (Tier 1 Authority) | `10:30 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **6.0h** | `06:00 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **10.0h** | `Present` |
+| **02 (Wed, Sep 02)** | **Pure Manual** (Tier 2 Admin Override) | `10:30 IN (Manual)`<br>`16:30 OUT (Manual)`<br>Worked: **6.0h** | `06:00 IN (Manual)`<br>`16:00 OUT (Manual)`<br>Worked: **10.0h** | `Present` |
+| **03 (Thu, Sep 03)** | **Pure Geofence Auto** (Tier 3 Fallback) | `10:30 AUTO_IN (Geofence)`<br>`16:30 AUTO_OUT (Geofence)`<br>Worked: **6.0h** | `06:00 AUTO_IN (Geofence)`<br>`16:00 AUTO_OUT (Geofence)`<br>Worked: **10.0h** | `Present` |
+| **04 (Fri, Sep 04)** | **Hybrid**: Machine IN + Geofence OUT | `10:30 IN (Machine)`<br>`16:30 OUT (Geofence fallback)`<br>Worked: **6.0h** | `06:00 IN (Machine)`<br>`16:00 OUT (Geofence fallback)`<br>Worked: **10.0h** | `Present` |
+| **05 (Sat, Sep 05)** | **Hybrid**: Manual IN + Geofence OUT | `10:30 IN (Manual)`<br>`16:30 OUT (Geofence fallback)`<br>Worked: **6.0h** | `06:00 IN (Manual)`<br>`16:00 OUT (Geofence fallback)`<br>Worked: **10.0h** | `Present` |
+| **06 (Sun, Sep 06)** | **Weekly Off** (Sunday) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Weekly Off` |
+| **07 (Mon, Sep 07)** | **Pre-Shift OT**: Early Geofence Arrival | `10:10 IN (Geofence)`<br>`10:30 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **6.0h**, OT: **00:20:00** | `05:40 IN (Geofence)`<br>`06:00 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **10.0h**, OT: **00:20:00** | `Present` |
+| **08 (Tue, Sep 08)** | **Post-Shift OT**: Geofence Fallback Exit | `10:30 IN (Machine)`<br>`16:30 OUT (Machine)`<br>`17:00 IN (Machine)`<br>`18:00 OUT (Geofence)`<br>Worked: **6.0h**, OT: **01:00:00** | `06:00 IN (Machine)`<br>`16:00 OUT (Machine)`<br>`16:30 IN (Machine)`<br>`17:30 OUT (Geofence)`<br>Worked: **10.0h**, OT: **01:00:00** | `Present` |
+| **09 (Wed, Sep 09)** | **Mid-Shift Biometric Break** (1h Lunch) | `10:30 IN (Machine)`<br>`13:00 OUT (Machine)`<br>`14:00 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **5.0h** (1h break recognized) | `06:00 IN (Machine)`<br>`12:00 OUT (Machine)`<br>`13:00 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **9.0h** (1h break recognized) | `Present` |
+| **10 (Thu, Sep 10)** | **Mid-Shift Geofence Exit** (30m Radius Exit) | `10:30 IN (Manual)`<br>`13:00 OUT (Geofence)`<br>`13:30 IN (Geofence)`<br>`16:30 OUT (Manual)`<br>Worked: **5.5h** (30m exit recognized) | `06:00 IN (Manual)`<br>`11:00 OUT (Geofence)`<br>`11:30 IN (Geofence)`<br>`16:00 OUT (Manual)`<br>Worked: **9.5h** (30m exit recognized) | `Present` |
+| **11 (Fri, Sep 11)** | **Noisy GPS Jumps Suppressed** | `10:30 IN (Manual)`<br>3 internal GPS hops (10:45, 11:15, 11:45)<br>`16:30 OUT (Manual)`<br>Worked: **6.0h** (Noise suppressed) | `06:00 IN (Manual)`<br>3 internal GPS hops (07:15, 08:30, 09:00)<br>`16:00 OUT (Manual)`<br>Worked: **10.0h** (Noise suppressed) | `Present` |
+| **12 (Sat, Sep 12)** | **Late Arrival within Grace** (10m Late) | `10:40 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **5.83h**, Lateness: **00:00:00** | `06:10 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **9.83h**, Lateness: **00:00:00** | `Present` |
+| **13 (Sun, Sep 13)** | **Weekly Off** (Sunday) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Weekly Off` |
+| **14 (Mon, Sep 14)** | **Late Arrival Beyond Grace** (45m Penalty) | `11:15 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **5.25h**, Penalty: **00:45:00** | `06:45 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **9.25h**, Penalty: **00:45:00** | `Present` |
+| **15 (Tue, Sep 15)** | **Early Departure** (1h Early Exit) | `10:30 IN (Machine)`<br>`15:30 OUT (Machine)`<br>Worked: **5.0h** | `06:00 IN (Machine)`<br>`15:00 OUT (Machine)`<br>Worked: **9.0h** | `Present` |
+| **16 (Wed, Sep 16)** | **Triple Source Hybrid** (Machine + Manual + GPS) | `10:30 IN (Machine)`<br>`13:00 IN (Geofence - suppressed)`<br>`16:30 OUT (Manual)`<br>Worked: **6.0h** | `06:00 IN (Machine)`<br>`12:40 IN (Geofence - suppressed)`<br>`16:00 OUT (Manual)`<br>Worked: **10.0h** | `Present` |
+| **17 (Thu, Sep 17)** | **Early Midnight Ping** (2m OT) + Shift + Post-OT | `01:42 IN / 01:44 OUT (Geofence)`<br>`10:30 IN / 16:30 OUT (Machine)`<br>`17:00 IN / 18:00 OUT (Machine)`<br>Worked: **6.0h**, OT: **01:02:00** | `01:42 IN / 01:44 OUT (Geofence)`<br>`06:00 IN / 16:00 OUT (Machine)`<br>`16:30 IN / 17:30 OUT (Machine)`<br>Worked: **10.0h**, OT: **01:02:00** | `Present` |
+| **18 (Fri, Sep 18)** | **Missing OUT Punch** (Single IN) | `10:30 IN (Machine)`<br>Worked: **0.0h** (Awaiting OUT) | `06:00 IN (Machine)`<br>Worked: **0.0h** (Awaiting OUT) | `Missing Punch` |
+| **19 (Sat, Sep 19)** | **Duplicate Consecutive INs** | `10:30 IN (Machine)`<br>`11:00 IN (Geofence)`<br>Worked: **0.0h** (Awaiting OUT) | `06:00 IN (Machine)`<br>`06:30 IN (Geofence)`<br>Worked: **0.0h** (Awaiting OUT) | `Missing Punch` |
+| **20 (Sun, Sep 20)** | **Weekly Off** (Sunday) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Weekly Off` |
+| **21 (Mon, Sep 21)** | **Full Day Absent** (Zero Punches) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Absent` |
+| **22 (Tue, Sep 22)** | **Half Day Work** | `10:30 IN (Machine)`<br>`13:30 OUT (Machine)`<br>Worked: **3.0h** (50% shift) | `06:00 IN (Machine)`<br>`11:00 OUT (Machine)`<br>Worked: **5.0h** (50% shift) | `Half Day` |
+| **23 (Wed, Sep 23)** | **Company Holiday** (Festival) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Holiday` |
+| **24 (Thu, Sep 24)** | **Two Biometric Breaks** (Tea & Lunch) | `10:30 IN` • `12:00 OUT` • `12:30 IN`<br>`14:30 OUT` • `15:00 IN` • `16:30 OUT`<br>Worked: **5.0h** (1h break total) | `06:00 IN` • `09:00 OUT` • `09:30 IN`<br>`12:30 OUT` • `13:00 IN` • `16:00 OUT`<br>Worked: **9.0h** (1h break total) | `Present` |
+| **25 (Fri, Sep 25)** | **Rapid Duplicate Punches** (15s double-tap) | `10:30:00 IN (Machine)`<br>`10:30:15 IN (Debounced)`<br>`16:30:00 OUT (Machine)`<br>Worked: **6.0h** | `06:00:00 IN (Machine)`<br>`06:00:15 IN (Debounced)`<br>`16:00:00 OUT (Machine)`<br>Worked: **10.0h** | `Present` |
+| **26 (Sat, Sep 26)** | **Stray Midnight OUT** + Normal Shift | `00:05 OUT (Geofence - stray)`<br>`10:30 IN / 16:30 OUT (Machine)`<br>Worked: **6.0h** | `00:05 OUT (Geofence - stray)`<br>`06:00 IN / 16:00 OUT (Machine)`<br>Worked: **10.0h** | `Present` |
+| **27 (Sun, Sep 27)** | **Weekly Off** (Sunday) | 0 punches. Worked: **0.0h** | 0 punches. Worked: **0.0h** | `Weekly Off` |
+| **28 (Mon, Sep 28)** | **Off-Day Pure Overtime** | `11:00 IN (Machine)`<br>`15:00 OUT (Machine)`<br>Worked: **0.0h**, OT: **04:00:00** | `08:00 IN (Machine)`<br>`14:00 OUT (Machine)`<br>Worked: **0.0h**, OT: **06:00:00** | `Present` |
+| **29 (Tue, Sep 29)** | **Multi-Zone Complex Hybrid** | `10:15 IN (Geofence 15m OT)`<br>`10:30 IN (Machine)`<br>`16:30 OUT (Manual)`<br>`17:00 IN (Machine)`<br>`18:30 OUT (Geofence 1.5h OT)`<br>Worked: **6.0h**, OT: **01:45:00** | `05:45 IN (Geofence 15m OT)`<br>`06:00 IN (Machine)`<br>`16:00 OUT (Manual)`<br>`16:30 IN (Machine)`<br>`17:30 OUT (Geofence 1h OT)`<br>Worked: **10.0h**, OT: **01:15:00** | `Present` |
+| **30 (Wed, Sep 30)** | **Month-End Flawless Standard Shift** | `10:30 IN (Machine)`<br>`16:30 OUT (Machine)`<br>Worked: **6.0h** | `06:00 IN (Machine)`<br>`16:00 OUT (Machine)`<br>Worked: **10.0h** | `Present` |
+
