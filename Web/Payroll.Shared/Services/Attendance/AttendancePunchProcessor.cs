@@ -196,14 +196,41 @@ namespace Payroll.Shared.Services
                     windowEnd = manualOut.PunchTime;
             }
 
-            // 5. Shift Zone Filtering:
-            // When an authoritative session (Tier 1 Machine or Tier 2 Manual) covers the shift
-            // (both authoritative IN and authoritative OUT exist), intermediate GeofenceAuto punches
-            // inside [authIn, authOut] are suppressed to prevent GPS drift from fragmenting working hours.
-            // If NO authoritative OUT exists, a geofence OUT punch serves as the dynamic fallback check-out / early departure.
+            // 5. Shift Zone & Manual Override Filtering:
+            // A. Manual Admin Override:
+            // When an administrative manual correction pair [manualIn, manualOut] exists,
+            // it is an explicit authoritative override of that employee's shift.
+            // All intermediate punches (e.g. erratic biometric scans, partial breaks, or GPS drift)
+            // strictly inside (manualIn.PunchTime, manualOut.PunchTime) are suppressed and invalidated.
             var suppressedIds = new HashSet<int>();
             var suppressedBioIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+            var manualLogs = deduplicated.Where(p => GetPunchTier(p) == PunchSourceTier.ManualAdmin).ToList();
+            var manualIns = manualLogs.Where(IsExplicitInPunch).OrderBy(p => p.PunchTime).ToList();
+            var manualOuts = manualLogs.Where(IsExplicitOutPunch).OrderBy(p => p.PunchTime).ToList();
+
+            if (manualIns.Count > 0 && manualOuts.Count > 0)
+            {
+                var mStart = manualIns.First().PunchTime;
+                var mEnd = manualOuts.Last().PunchTime;
+
+                if (mEnd > mStart)
+                {
+                    foreach (var p in deduplicated)
+                    {
+                        if (GetPunchTier(p) != PunchSourceTier.ManualAdmin && p.PunchTime > mStart && p.PunchTime < mEnd)
+                        {
+                            if (p.LogID > 0) suppressedIds.Add(p.LogID);
+                            if (!string.IsNullOrEmpty(p.BiometricID)) suppressedBioIds.Add(p.BiometricID);
+                        }
+                    }
+                }
+            }
+
+            // B. Authoritative Session (Tier 1 Machine or Tier 2 Manual):
+            // When an authoritative session covers the shift, intermediate GeofenceAuto punches
+            // inside [authIn, authOut] are suppressed to prevent GPS drift from fragmenting working hours.
+            // If NO authoritative OUT exists, a geofence OUT punch serves as the dynamic fallback check-out / early departure.
             var authIn = deduplicated.FirstOrDefault(p => GetPunchTier(p) <= PunchSourceTier.ManualAdmin && IsExplicitInPunch(p));
             var authOut = deduplicated.LastOrDefault(p => GetPunchTier(p) <= PunchSourceTier.ManualAdmin && IsExplicitOutPunch(p));
 
@@ -253,8 +280,25 @@ namespace Payroll.Shared.Services
                 {
                     if (isOut)
                     {
-                        // Stray OUT (e.g. overnight completion from previous shift)
-                        ordered.Add(p);
+                        // Stray / Redundant OUT:
+                        // An OUT punch when pendingIn == null can ONLY be valid if no prior punches have occurred
+                        // for the day (e.g. an overnight shift finishing in the morning before today's shift starts).
+                        // If the employee has already completed an IN->OUT session (ordered.Count > 0), they are ALREADY
+                        // clocked out. Any redundant/consecutive OUT punches without an intervening IN are discarded!
+                        if (ordered.Count == 0)
+                        {
+                            ordered.Add(p);
+                        }
+                        else if (ordered.Count % 2 == 0)
+                        {
+                            // If incoming OUT is a higher authoritative tier than the existing exit punch, upgrade the exit punch.
+                            var lastOutTier = GetPunchTier(ordered[^1]);
+                            var incomingTier = GetPunchTier(p);
+                            if (incomingTier < lastOutTier && p.PunchTime >= ordered[^2].PunchTime)
+                            {
+                                ordered[^1] = p;
+                            }
+                        }
                     }
                     else
                     {

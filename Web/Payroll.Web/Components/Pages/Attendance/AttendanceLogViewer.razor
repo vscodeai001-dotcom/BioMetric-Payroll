@@ -25,6 +25,7 @@
 @inject Payroll.Web.Services.FirebaseAttendanceService FirebaseAttendanceService
 @inject Payroll.Web.Services.FirebaseAttendanceMutationService FirebaseAttendanceMutations
 @inject Payroll.Web.Services.AttendanceProcessingCoordinator AttendanceProcessingCoordinator
+@inject Payroll.Web.Services.AttendanceTestMatrixSeeder MatrixSeeder
 @inject CsvExportService CsvService
 
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
@@ -151,6 +152,12 @@
         Firebase attendance data is temporarily unavailable. Showing the last cached attendance data.
     </div>
 }
+
+<div class="d-flex justify-content-end mb-2 gap-2">
+    <button class="btn btn-sm btn-outline-primary shadow-sm" @onclick="SeedOctoberMatrix" disabled="@isLoading">
+        <i class="bi bi-database-fill-gear me-1"></i> Seed 31-Day October Matrix (Dinesh &amp; Nevetha)
+    </button>
+</div>
 
 <AttendanceLogTable
     Logs="logs"
@@ -1751,6 +1758,7 @@
         IEnumerable<AttendanceLog> punches)
     {
         var raw =
+            "v3_hybrid_logic|" +
             string.Join(
                 "|",
                 punches
@@ -2350,6 +2358,29 @@
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Realtime refresh failed for attendance log viewer.");
+        }
+    }
+
+    private async Task SeedOctoberMatrix()
+    {
+        isLoading = true;
+        try
+        {
+            await MatrixSeeder.SeedOctoberMatrixAsync();
+            startDate = new DateTime(2026, 10, 1);
+            endDate = new DateTime(2026, 10, 31);
+            selectedEmployeeId = 0;
+            await LoadLogs(autoProcessNewPunches: true, forceRecalculate: true);
+            toastService.ShowSuccess("Successfully injected 31-day October matrix for Dinesh & Nevetha!");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to seed October matrix.");
+            toastService.ShowError("Seeding failed: " + ex.Message);
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 }

@@ -145,13 +145,34 @@ object AttendancePunchProcessor {
             return ProcessedPunchesResult(emptyList(), null, null)
         }
 
-        // 3. Shift Zone Filtering:
-        // When an authoritative session (Tier 1 Machine or Tier 2 Manual) covers the shift
-        // (both authoritative IN and authoritative OUT exist), intermediate GeofenceAuto punches
-        // inside [authIn, authOut] are suppressed to prevent GPS drift from fragmenting working hours.
+        // 3. Shift Zone & Manual Override Filtering:
         val suppressedIds = mutableSetOf<String>()
         val suppressedBioIds = mutableSetOf<String>()
 
+        // A. Manual Admin Override:
+        // When an administrative manual correction pair [manualIn, manualOut] exists,
+        // it is an explicit authoritative override of that employee's shift.
+        // All intermediate punches (erratic biometric scans, partial breaks, GPS drift)
+        // strictly inside (manualIn.timestamp, manualOut.timestamp) are suppressed and invalidated.
+        val manualIns = deduplicated.filter { it.tier == PunchSourceTier.ManualAdmin && isExplicitInPunch(it.type) }.sortedBy { it.timestamp }
+        val manualOuts = deduplicated.filter { it.tier == PunchSourceTier.ManualAdmin && isExplicitOutPunch(it.type) }.sortedBy { it.timestamp }
+
+        if (manualIns.isNotEmpty() && manualOuts.isNotEmpty()) {
+            val mStart = manualIns.first().timestamp
+            val mEnd = manualOuts.last().timestamp
+            if (mEnd > mStart) {
+                for (p in deduplicated) {
+                    if (p.tier != PunchSourceTier.ManualAdmin && p.timestamp > mStart && p.timestamp < mEnd) {
+                        if (p.id.isNotBlank()) suppressedIds.add(p.id)
+                        if (p.biometricId.isNotBlank()) suppressedBioIds.add(p.biometricId.lowercase())
+                    }
+                }
+            }
+        }
+
+        // B. Authoritative Session (Tier 1 Machine or Tier 2 Manual):
+        // When an authoritative session covers the shift, intermediate GeofenceAuto punches
+        // inside [authIn, authOut] are suppressed to prevent GPS drift from fragmenting working hours.
         val authIn = deduplicated.firstOrNull { it.tier.priority <= PunchSourceTier.ManualAdmin.priority && isExplicitInPunch(it.type) }
         val authOut = deduplicated.lastOrNull { it.tier.priority <= PunchSourceTier.ManualAdmin.priority && isExplicitOutPunch(it.type) }
 
@@ -188,7 +209,18 @@ object AttendancePunchProcessor {
 
             if (pendingIn == null) {
                 if (isOut) {
-                    ordered.add(p) // Stray OUT
+                    // Stray / Redundant OUT:
+                    // Only valid if no prior punches have occurred today (e.g. overnight completion).
+                    // If an IN->OUT session has completed, employee is ALREADY clocked out. Redundant OUTs are discarded.
+                    if (ordered.isEmpty()) {
+                        ordered.add(p)
+                    } else if (ordered.size % 2 == 0) {
+                        val lastOutTier = ordered.last().tier
+                        val incomingTier = p.tier
+                        if (incomingTier.priority < lastOutTier.priority && p.timestamp >= ordered[ordered.size - 2].timestamp) {
+                            ordered[ordered.size - 1] = p
+                        }
+                    }
                 } else {
                     pendingIn = p // Valid IN
                 }

@@ -465,6 +465,8 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     EmployeeDeletionService>();
 
+builder.Services.AddScoped<AttendanceTestMatrixSeeder>();
+
 builder.Services.AddScoped<ITenantContextService, TenantContextService>();
 builder.Services.AddScoped<TenantContextService>();
 builder.Services.AddScoped<TenantManagementService>();

@@ -77,6 +77,14 @@ public sealed class InternalAttendanceRefreshController : ControllerBase
         return Ok();
     }
 
+    [HttpPost("/api/internal/seed-october-matrix")]
+    [HttpGet("/api/internal/seed-october-matrix")]
+    public async Task<IActionResult> SeedOctoberMatrix([FromServices] AttendanceTestMatrixSeeder seeder)
+    {
+        var count = await seeder.SeedOctoberMatrixAsync();
+        return Ok(new { success = true, seededPunches = count, message = "31-day October test matrix injected successfully for Dinesh and Nevetha." });
+    }
+
     public sealed class GpsSessionEndedRequest
     {
         public int EmployeeId { get; set; }

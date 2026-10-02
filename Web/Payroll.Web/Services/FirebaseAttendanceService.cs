@@ -284,6 +284,7 @@ public sealed class FirebaseAttendanceService
     {
         if (from > to) return new();
 
+        List<AttendanceLog> localPunches = new();
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -299,12 +300,12 @@ public sealed class FirebaseAttendanceService
                 {
                     query = query.Where(x => x.EmployeeID == employeeId.Value);
                 }
-                var localPunches = await query.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToListAsync(ct);
+                localPunches = await query.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToListAsync(ct);
 
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (localPunches.Count > 0 || isOffline)
+                if (isOffline && localPunches.Count > 0)
                 {
                     return localPunches;
                 }
@@ -327,7 +328,10 @@ public sealed class FirebaseAttendanceService
             endUtcMs,
             limitToLast: 10000,
             cancellationToken: ct);
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
+        {
+            return localPunches;
+        }
 
         var result = new List<AttendanceLog>();
         if (json.Value.ValueKind == JsonValueKind.Object)
@@ -349,6 +353,19 @@ public sealed class FirebaseAttendanceService
                 if (row.ValueKind != JsonValueKind.Object) continue;
                 var punch = ParseAttendancePunch(row, fallbackId, from, to, employeeId);
                 if (punch != null) result.Add(punch);
+            }
+        }
+
+        if (localPunches.Count > 0)
+        {
+            var existingKeys = new HashSet<string>(result.Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{r.LogType?.ToUpperInvariant()}"));
+            foreach (var lp in localPunches)
+            {
+                var key = $"{lp.EmployeeID}_{lp.PunchTime:yyyyMMdd_HHmm}_{lp.LogType?.ToUpperInvariant()}";
+                if (existingKeys.Add(key))
+                {
+                    result.Add(lp);
+                }
             }
         }
 
@@ -401,6 +418,7 @@ public sealed class FirebaseAttendanceService
     {
         if (employeeId <= 0 || from > to) return new();
 
+        List<AttendanceLog> localPunches = new();
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -410,7 +428,7 @@ public sealed class FirebaseAttendanceService
                 using var db = await dbFactory.CreateDbContextAsync(ct);
                 var startDt = from.ToDateTime(TimeOnly.MinValue);
                 var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
-                var localPunches = await db.AttendanceLogs.AsNoTracking()
+                localPunches = await db.AttendanceLogs.AsNoTracking()
                     .Where(x => x.EmployeeID == employeeId && x.PunchTime >= startDt && x.PunchTime < endDt)
                     .OrderBy(x => x.PunchTime)
                     .ToListAsync(ct);
@@ -418,7 +436,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (localPunches.Count > 0 || isOffline)
+                if (isOffline && localPunches.Count > 0)
                 {
                     return localPunches;
                 }
@@ -428,7 +446,10 @@ public sealed class FirebaseAttendanceService
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "attendance_punches", "staffId", employeeId, ct);
 
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
+        {
+            return localPunches;
+        }
 
         var result = new List<AttendanceLog>();
         if (json.Value.ValueKind == JsonValueKind.Object)
@@ -450,6 +471,19 @@ public sealed class FirebaseAttendanceService
                 if (row.ValueKind != JsonValueKind.Object) continue;
                 var punch = ParseAttendancePunchForEmployee(row, fallbackId, employeeId, from, to);
                 if (punch != null) result.Add(punch);
+            }
+        }
+
+        if (localPunches.Count > 0)
+        {
+            var existingKeys = new HashSet<string>(result.Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{r.LogType?.ToUpperInvariant()}"));
+            foreach (var lp in localPunches)
+            {
+                var key = $"{lp.EmployeeID}_{lp.PunchTime:yyyyMMdd_HHmm}_{lp.LogType?.ToUpperInvariant()}";
+                if (existingKeys.Add(key))
+                {
+                    result.Add(lp);
+                }
             }
         }
 

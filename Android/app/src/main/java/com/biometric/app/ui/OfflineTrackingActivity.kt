@@ -1035,12 +1035,21 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                         p.timestamp >= (first.timestamp - 120_000L) &&
                         p.timestamp <= (last.timestamp + 120_000L)
             }.map { p ->
+                val isOutside = if (officeLat != 0.0 && officeLng != 0.0 && p.latitude != 0.0) {
+                    calculateDistance(p.latitude, p.longitude, officeLat, officeLng) > officeRadiusMeters
+                } else false
                 OfflinePunchInfo(
                     type = p.type,
                     timestamp = p.timestamp,
                     isSynced = p.syncState == 1,
-                    isOutside = false
+                    isOutside = isOutside
                 )
+            }
+
+            val inRadiusCount = if (officeLat != 0.0 && officeLng != 0.0) {
+                c.count { calculateDistance(it.latitude, it.longitude, officeLat, officeLng) <= officeRadiusMeters }
+            } else {
+                c.count { it.accuracy > 0 }
             }
 
             result.add(
@@ -1054,7 +1063,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     reason = reason,
                     pointsCount = c.size,
                     distanceMeters = dist,
-                    inRadiusCount = c.count { it.accuracy > 0 },
+                    inRadiusCount = inRadiusCount,
                     isSynced = c.all { it.syncState == LocalLocation.SYNCED || it.syncState == LocalLocation.FIREBASE_SYNCED },
                     points = c,
                     punches = punchesInGap
