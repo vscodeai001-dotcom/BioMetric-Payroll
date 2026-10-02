@@ -218,9 +218,12 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 s.checkInTime > 0 && sdf.format(Date(s.checkInTime)) == todayStr
             }.sortedBy { s -> s.checkInTime }
 
+            // Filter punches that have occurred up to current time (avoids future scheduled manual punches breaking real-time state)
+            val pastPunches = todaysPunches.filter { it.timestamp <= nowMs + 60_000L }
+
             // Determine the most recent IN/OUT state using normalised types.
             // Priority: last raw punch from attendance_punches; then infer from sessions.
-            val lastPunch = todaysPunches.lastOrNull()
+            val lastPunch = pastPunches.lastOrNull()
             val attendanceCurrentlyOpen: Boolean = when {
                 lastPunch != null -> isCheckInType(lastPunch.type)
                 todaySessions.isNotEmpty() -> {
@@ -238,63 +241,29 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 return
             }
 
-            // -------------------------------------------------------------------
-            // 5-minute IN guard — prevent a second IN punch within 5 minutes of
-            // any existing IN, regardless of which device created it.
-            //
-            // Uses BOTH Room-persisted punches AND the in-memory lastPunchTimeMs
-            // to handle the race where Room hasn't committed the first punch yet
-            // when a second GPS fix arrives (e.g. 11:33 → 11:34 scenario).
-            // -------------------------------------------------------------------
+            // Directional Debounce Protection:
+            // Prevent duplicate IN punches within 60s of an existing IN.
+            // Prevent duplicate OUT punches within 60s of an existing OUT.
             if (isInside) {
-                val lastInTimeRoom = todaysPunches
+                val lastInTime = pastPunches
                     .filter { isCheckInType(it.type) }
                     .maxOfOrNull { it.timestamp }
-                    ?: todaySessions
-                        .maxOfOrNull { it.checkInTime }
-                        ?: 0L
-                // In-memory guard: lastInPunchTimeMs is set immediately on punch,
-                // before Room async write completes.
-                val lastInTime = maxOf(lastInTimeRoom, lastInPunchTimeMs)
-                if (lastInTime > 0 && (nowMs - lastInTime) < DUAL_PUNCH_GUARD_MS) {
-                    Log.d(TAG, "Dual-IN guard: last IN was ${(nowMs - lastInTime) / 1000}s ago (< 10 min), skipping auto IN for employee $staffIdStr")
+                    ?: lastInPunchTimeMs
+                if (lastInTime > 0 && (nowMs - lastInTime) < DEBOUNCE_MS) {
+                    Log.d(TAG, "Debounce IN: only ${(nowMs - lastInTime) / 1000}s since last IN, skipping duplicate IN")
                     lastEvaluatedInside = true
                     return
                 }
             } else {
-                // -------------------------------------------------------------------
-                // Dual-OUT guard: cross-device safety net.
-                // Prevent duplicate OUT punch within 10 minutes of any existing OUT,
-                // regardless of whether Android or Web server recorded it first.
-                // Re-query Room fresh here so we catch any punch written after mutex
-                // entry (async write lag from previous GPS fix).
-                // -------------------------------------------------------------------
-                val freshPunches = runCatching { localAttendancePunchDao.getAll() }.getOrDefault(emptyList())
-                    .filter { p ->
-                        (p.staffId == staffIdStr || p.staffId.toIntOrNull() == employeeId) &&
-                        (p.date == todayStr || (p.timestamp > 0 && sdf.format(Date(p.timestamp)) == todayStr))
-                    }
-                val lastOutTimeRoom = freshPunches
-                    .filter { isCheckOutType(it.type) && (it.source == "GEOFENCE_AUTO" || it.punchId.startsWith("AUTO_")) }
+                val lastOutTime = pastPunches
+                    .filter { isCheckOutType(it.type) }
                     .maxOfOrNull { it.timestamp }
-                    ?: 0L
-                val lastOutTime = maxOf(lastOutTimeRoom, lastOutPunchTimeMs)
-                if (lastOutTime > 0 && (nowMs - lastOutTime) < DUAL_PUNCH_GUARD_MS) {
-                    Log.d(TAG, "Dual-OUT guard: last OUT was ${(nowMs - lastOutTime) / 1000}s ago (< 10 min), skipping auto OUT for employee $staffIdStr")
+                    ?: lastOutPunchTimeMs
+                if (lastOutTime > 0 && (nowMs - lastOutTime) < DEBOUNCE_MS) {
+                    Log.d(TAG, "Debounce OUT: only ${(nowMs - lastOutTime) / 1000}s since last OUT, skipping duplicate OUT")
                     lastEvaluatedInside = false
                     return
                 }
-            }
-
-            // Debounce check: minimum 60s between punches
-            val lastAnyPunchTime = maxOf(
-                lastPunch?.timestamp?.takeIf { it > 0 } ?: 0L,
-                maxOf(lastInPunchTimeMs, lastOutPunchTimeMs)
-            )
-            val elapsedSinceLast = nowMs - lastAnyPunchTime
-            if (lastAnyPunchTime > 0 && elapsedSinceLast < DEBOUNCE_MS) {
-                Log.d(TAG, "Debounce: only ${elapsedSinceLast}ms since last punch, skipping auto punch")
-                return
             }
 
             val punchType = if (isInside) "IN" else "OUT"

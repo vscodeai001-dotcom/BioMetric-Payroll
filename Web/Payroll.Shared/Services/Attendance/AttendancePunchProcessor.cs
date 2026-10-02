@@ -181,37 +181,42 @@ namespace Payroll.Shared.Services
             DateTime? windowStart = shiftStart;
             DateTime? windowEnd = shiftEnd;
 
-            // Also check if manual punches define the shift window boundaries
+            // Also check if manual punches define or expand the shift window boundaries
             var manualIn = deduplicated.FirstOrDefault(p => GetPunchTier(p) == PunchSourceTier.ManualAdmin && IsExplicitInPunch(p));
             var manualOut = deduplicated.LastOrDefault(p => GetPunchTier(p) == PunchSourceTier.ManualAdmin && IsExplicitOutPunch(p));
-            if (manualIn != null && manualOut != null && manualOut.PunchTime > manualIn.PunchTime)
+
+            if (manualIn != null)
             {
                 if (!windowStart.HasValue || manualIn.PunchTime < windowStart.Value)
                     windowStart = manualIn.PunchTime;
+            }
+            if (manualOut != null)
+            {
                 if (!windowEnd.HasValue || manualOut.PunchTime > windowEnd.Value)
                     windowEnd = manualOut.PunchTime;
             }
 
             // 5. Shift Zone Filtering:
-            // Inside [windowStart, windowEnd]:
-            // - Geofence auto punches are suppressed to prevent GPS drift from fragmenting working hours.
-            // - Physical machine punches ARE KEPT to record genuine physical breaks or overrides.
-            // Outside [windowStart, windowEnd]:
-            // - Pre-shift and post-shift sessions (including Geofence fallback) are PRESERVED as overtime.
+            // When an authoritative session (Tier 1 Machine or Tier 2 Manual) covers the shift
+            // (both authoritative IN and authoritative OUT exist), intermediate GeofenceAuto punches
+            // inside [authIn, authOut] are suppressed to prevent GPS drift from fragmenting working hours.
+            // If NO authoritative OUT exists, a geofence OUT punch serves as the dynamic fallback check-out / early departure.
             var suppressedIds = new HashSet<int>();
             var suppressedBioIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            if (windowStart.HasValue && windowEnd.HasValue && windowEnd.Value > windowStart.Value)
+            var authIn = deduplicated.FirstOrDefault(p => GetPunchTier(p) <= PunchSourceTier.ManualAdmin && IsExplicitInPunch(p));
+            var authOut = deduplicated.LastOrDefault(p => GetPunchTier(p) <= PunchSourceTier.ManualAdmin && IsExplicitOutPunch(p));
+
+            if (authIn != null && authOut != null && authOut.PunchTime > authIn.PunchTime)
             {
-                var wStart = windowStart.Value;
-                var wEnd = windowEnd.Value;
+                var wStart = authIn.PunchTime;
+                var wEnd = authOut.PunchTime;
 
                 foreach (var p in deduplicated)
                 {
                     if (GetPunchTier(p) == PunchSourceTier.GeofenceAuto)
                     {
-                        // Strictly inside the shift window: suppress geofence auto punches
-                        // (Allow punches right at or before wStart to serve as early arrival, and after wEnd as late departure)
+                        // Strictly inside the covered authoritative session: suppress geofence auto punches
                         if (p.PunchTime > wStart && p.PunchTime < wEnd)
                         {
                             if (p.LogID > 0) suppressedIds.Add(p.LogID);

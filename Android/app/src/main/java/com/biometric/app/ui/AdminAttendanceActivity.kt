@@ -17,6 +17,9 @@ import com.biometric.app.R
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.databinding.ActivityAdminAttendanceBinding
 import com.biometric.app.databinding.ItemAdminAttendanceBinding
+import com.biometric.app.domain.attendance.AttendancePunchProcessor
+import com.biometric.app.domain.attendance.ProcessedPunchItem
+import com.biometric.app.domain.attendance.PunchSourceTier
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
@@ -295,20 +298,27 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             val formattedDate = if (dateParsed != null) shiftDateFormat.format(dateParsed) else s.shiftDate
 
             // 1. Direct punches from attendance_punches (SSOT ledger matching Web)
-            val directPunches = allPunches.filter { p ->
+            val matchingPunches = allPunches.filter { p ->
                 val idMatches = p.staffId == s.employeeId.toString() ||
                     p.staffId.toIntOrNull() == s.employeeId ||
                     (emp != null && emp.biometricId.isNotBlank() && p.staffId == emp.biometricId)
                 val dateMatches = p.date == s.shiftDate ||
                     (p.timestamp > 0 && isoDateFormat.format(Date(p.timestamp)) == s.shiftDate)
                 idMatches && dateMatches
-            }.map { p ->
-                Pair(p.timestamp, p.type.ifBlank { "IN" })
             }
 
-            // 2. Only fall back to attendance session table if no direct punches exist
-            val resolvedPunches = if (directPunches.isNotEmpty()) {
-                directPunches
+            val punchItems = if (matchingPunches.isNotEmpty()) {
+                matchingPunches.map { p ->
+                    ProcessedPunchItem(
+                        id = p.punchId,
+                        staffId = p.staffId,
+                        timestamp = p.timestamp,
+                        type = p.type.ifBlank { "IN" },
+                        deviceId = p.deviceId,
+                        biometricId = p.punchId,
+                        source = p.source
+                    )
+                }
             } else {
                 allAttendance.filter { a ->
                     val idMatches = a.employeeId == s.employeeId.toString() ||
@@ -317,17 +327,22 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == s.shiftDate
                     idMatches && dateMatches
                 }.flatMap { a ->
-                    val list = mutableListOf<Pair<Long, String>>()
-                    if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
+                    val list = mutableListOf<ProcessedPunchItem>()
+                    if (a.checkInTime > 0) list.add(ProcessedPunchItem(timestamp = a.checkInTime, type = "IN", deviceId = "ManualCorrection"))
                     val outTime = a.checkOutTime ?: 0L
-                    if (outTime > 0) list.add(Pair(outTime, "OUT"))
+                    if (outTime > 0) list.add(ProcessedPunchItem(timestamp = outTime, type = "OUT", deviceId = "ManualCorrection"))
                     list
                 }
-            }.let { raw -> deduplicatePunchesForDisplay(raw.sortedBy { it.first }) }
+            }
 
-            val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
-                resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
-                    val time = punchTimeFormat.format(Date(timeMs))
+            // Run 3-Tier Hybrid Processor (exact mirror of Web AttendancePunchProcessor)
+            val processed = AttendancePunchProcessor.processPunches(punchItems)
+            val effectivePunches = processed.ordered
+
+            val rawPunchesText = if (effectivePunches.isNotEmpty()) {
+                effectivePunches.joinToString("  •  ") { p ->
+                    val time = punchTimeFormat.format(Date(p.timestamp))
+                    val type = p.type.uppercase()
                     "$time $type"
                 }
             } else {
@@ -344,7 +359,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             // FIX: If daily_summaries still shows "Present" but actual punches are gone (post-wipe
             // stale data scenario), override the status so UI matches reality.
             val effectiveStatus = when {
-                resolvedPunches.isNotEmpty() -> s.status.ifBlank { "Present" }
+                effectivePunches.isNotEmpty() -> s.status.ifBlank { "Present" }
                 s.status.equals("Weekly Off", ignoreCase = true) ||
                 s.status.equals("WeeklyOff", ignoreCase = true) ||
                 s.status.equals("Week Off", ignoreCase = true) -> s.status
@@ -359,7 +374,7 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 date = s.shiftDate,
                 formattedDate = formattedDate,
                 status = effectiveStatus,
-                workedHours = if (resolvedPunches.isEmpty()) 0.0 else s.earnedStandardHours,
+                workedHours = if (effectivePunches.isEmpty()) 0.0 else s.earnedStandardHours,
                 overtimeMinutes = s.totalOvertimeMs / 60000.0,
                 penaltyMinutes = s.totalPenaltyMs / 60000.0,
                 latenessMinutes = s.totalLatenessMs / 60000.0,
@@ -409,17 +424,27 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 if (existingKeys.contains("$empIdInt:$dateStr")) continue
 
                 // Check for direct punches
-                val directPunches = allPunches.filter { p ->
+                val matchingPunches = allPunches.filter { p ->
                     val idMatches = p.staffId == emp.employeeId ||
                         p.staffId.toIntOrNull() == empIdInt ||
                         (emp.biometricId.isNotBlank() && p.staffId == emp.biometricId)
                     val dateMatches = p.date == dateStr ||
                         (p.timestamp > 0 && isoDateFormat.format(Date(p.timestamp)) == dateStr)
                     idMatches && dateMatches
-                }.map { p -> Pair(p.timestamp, p.type.ifBlank { "IN" }) }
+                }
 
-                val resolvedPunches = if (directPunches.isNotEmpty()) {
-                    directPunches
+                val punchItems = if (matchingPunches.isNotEmpty()) {
+                    matchingPunches.map { p ->
+                        ProcessedPunchItem(
+                            id = p.punchId,
+                            staffId = p.staffId,
+                            timestamp = p.timestamp,
+                            type = p.type.ifBlank { "IN" },
+                            deviceId = p.deviceId,
+                            biometricId = p.punchId,
+                            source = p.source
+                        )
+                    }
                 } else {
                     allAttendance.filter { a ->
                         val idMatches = a.employeeId == emp.employeeId ||
@@ -428,25 +453,29 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                         val dateMatches = a.checkInTime > 0 && isoDateFormat.format(Date(a.checkInTime)) == dateStr
                         idMatches && dateMatches
                     }.flatMap { a ->
-                        val list = mutableListOf<Pair<Long, String>>()
-                        if (a.checkInTime > 0) list.add(Pair(a.checkInTime, "IN"))
+                        val list = mutableListOf<ProcessedPunchItem>()
+                        if (a.checkInTime > 0) list.add(ProcessedPunchItem(timestamp = a.checkInTime, type = "IN", deviceId = "ManualCorrection"))
                         val outTime = a.checkOutTime ?: 0L
-                        if (outTime > 0) list.add(Pair(outTime, "OUT"))
+                        if (outTime > 0) list.add(ProcessedPunchItem(timestamp = outTime, type = "OUT", deviceId = "ManualCorrection"))
                         list
                     }
-                }.let { raw -> deduplicatePunchesForDisplay(raw.sortedBy { it.first }) }
+                }
 
-                val rawPunchesText = if (resolvedPunches.isNotEmpty()) {
-                    resolvedPunches.joinToString("  •  ") { (timeMs, type) ->
-                        val time = punchTimeFormat.format(Date(timeMs))
+                val processed = AttendancePunchProcessor.processPunches(punchItems)
+                val effectivePunches = processed.ordered
+
+                val rawPunchesText = if (effectivePunches.isNotEmpty()) {
+                    effectivePunches.joinToString("  •  ") { p ->
+                        val time = punchTimeFormat.format(Date(p.timestamp))
+                        val type = p.type.uppercase()
                         "$time $type"
                     }
                 } else {
                     "No punches recorded"
                 }
 
-                val status = if (resolvedPunches.isNotEmpty()) {
-                    if (resolvedPunches.size % 2 == 1) "Missing Punch" else "Present"
+                val status = if (effectivePunches.isNotEmpty()) {
+                    if (effectivePunches.size % 2 == 1) "Missing Punch" else "Present"
                 } else {
                     "Absent"
                 }
@@ -472,11 +501,11 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
                 var calculatedWorkedMs = 0L
                 var inTime: Long? = null
-                for ((timeMs, type) in resolvedPunches) {
-                    if (type.equals("IN", ignoreCase = true)) {
-                        inTime = timeMs
-                    } else if (type.equals("OUT", ignoreCase = true) && inTime != null) {
-                        calculatedWorkedMs += (timeMs - inTime).coerceAtLeast(0L)
+                for (p in effectivePunches) {
+                    if (p.type.equals("IN", ignoreCase = true)) {
+                        inTime = p.timestamp
+                    } else if (p.type.equals("OUT", ignoreCase = true) && inTime != null) {
+                        calculatedWorkedMs += (p.timestamp - inTime).coerceAtLeast(0L)
                         inTime = null
                     }
                 }

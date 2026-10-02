@@ -16,6 +16,7 @@
 @inject FirebaseAttendanceMutationService FirebaseAttendanceMutations
 @inject AttendanceProcessingCoordinator AttendanceProcessingCoordinator
 @inject AttendanceRefreshService AttendanceRefreshService
+@inject AttendancePunchProcessor PunchProcessor
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Manual Punch Correction</PageTitle>
@@ -122,18 +123,28 @@ else
     }
 
     <div class="list-group shadow-sm">
-        @foreach (var dayInfo in problematicDays.OrderBy(d => d.Date).ThenBy(d => d.EmployeeName))
+        @foreach (var dayInfo in problematicDays.OrderByDescending(d => d.Date).ThenBy(d => d.EmployeeName))
         {
             <div @key="@($"{dayInfo.EmployeeID}_{dayInfo.Date:yyyyMMdd}")" class="list-group-item list-group-item-action mb-0 border-bottom">
                 <div class="d-flex w-100 justify-content-between align-items-center mb-2">
                     <div>
-                        <h6 class="mb-0 fw-bold">@dayInfo.EmployeeName</h6>
-                        <small class="text-muted">@dayInfo.Date.ToString("dddd, dd MMMM yyyy")</small>
+                        <h6 class="mb-0 fw-bold d-inline-flex align-items-center">
+                            @dayInfo.EmployeeName
+                            @if (dayInfo.Date.Date == DateTime.Today)
+                            {
+                                <span class="badge bg-primary ms-2" style="font-size: 0.72rem;">Today</span>
+                            }
+                        </h6>
+                        <small class="text-muted d-block">@dayInfo.Date.ToString("dddd, dd MMMM yyyy")</small>
                     </div>
                     <div class="text-end">
                         @if (dayInfo.Punches.Count == 0)
                         {
                             <span class="badge bg-danger">Missing All Punches</span>
+                        }
+                        else if (dayInfo.HasOutMissing)
+                        {
+                            <span class="badge bg-warning text-dark">Missing OUT Punch</span>
                         }
                         else if (dayInfo.Punches.Count % 2 != 0)
                         {
@@ -151,8 +162,29 @@ else
                     <div class="d-flex flex-wrap gap-2 mb-2 manual-punch-list">
                         @foreach (var log in dayInfo.Punches.OrderBy(p => p.PunchTime))
                         {
+                            var tier = AttendancePunchProcessor.GetPunchTier(log);
+                            var isOut = AttendancePunchProcessor.IsExplicitOutPunch(log);
+                            var tierBadgeClass = tier switch
+                            {
+                                PunchSourceTier.PhysicalMachine => "badge bg-success",
+                                PunchSourceTier.ManualAdmin => "badge bg-primary",
+                                _ => "badge bg-secondary"
+                            };
+                            var tierLabel = tier switch
+                            {
+                                PunchSourceTier.PhysicalMachine => "Machine",
+                                PunchSourceTier.ManualAdmin => "Manual",
+                                _ => "Geofence Auto"
+                            };
+                            var dirBadgeClass = isOut ? "badge bg-danger" : "badge bg-success";
+                            var dirLabel = isOut ? "OUT" : "IN";
+
                             <div class="btn-group btn-group-sm" role="group">
-                                <button type="button" class="btn btn-outline-secondary" disabled>@log.PunchTime.ToString("hh:mm tt")</button>
+                                <button type="button" class="btn btn-outline-secondary d-inline-flex align-items-center gap-1" disabled>
+                                    <span class="fw-semibold">@log.PunchTime.ToString("hh:mm tt")</span>
+                                    <span class="@dirBadgeClass" style="font-size: 0.68rem;">@dirLabel</span>
+                                    <span class="@tierBadgeClass" style="font-size: 0.68rem;">@tierLabel</span>
+                                </button>
                                 <button type="button" class="btn btn-outline-primary" title="Edit" @onclick="() => StartEditingPunch(log)"><i class="bi bi-pencil-fill"></i></button>
                                 <button type="button" class="btn btn-outline-danger" title="Delete" @onclick="() => DeletePunch(log)"><i class="bi bi-trash-fill"></i></button>
                             </div>
@@ -172,8 +204,12 @@ else
                 }
 
                 @* --- Add Single Punch --- *@
-                <div class="input-group input-group-sm mt-2" style="max-width: 300px;">
+                <div class="input-group input-group-sm mt-2" style="max-width: 360px;">
                     <span class="input-group-text">Add Single Punch</span>
+                    <select class="form-select form-select-sm" style="max-width: 80px;" @bind="dayInfo.NewPunchDirection">
+                        <option value="IN">IN</option>
+                        <option value="OUT">OUT</option>
+                    </select>
                     <input type="time" class="form-control" @bind="dayInfo.NewPunchTime" />
                     <button type="button" class="btn btn-outline-success" @onclick="() => AddPunch(dayInfo)" disabled="@(!dayInfo.NewPunchTime.HasValue)">
                         <i class="bi bi-plus-lg"></i>
@@ -230,6 +266,8 @@ else
         public DateTime Date { get; set; }
         public List<AttendanceLog> Punches { get; set; } = new();
         public TimeOnly? NewPunchTime { get; set; }
+        public string NewPunchDirection { get; set; } = "IN";
+        public bool HasOutMissing { get; set; }
 
         // Helper for Quick Add
         public TimeOnly? ShiftStart { get; set; }
@@ -441,11 +479,18 @@ else
                     if ((isWeeklyOff || isHoliday) && punches.Count == 0)
                         continue;
 
-                    // Existing correction rules preserved:
-                    // 0 punches = missing all punches
-                    // odd punches = incomplete/mismatch
-                    // odd punches = incomplete/mismatch
-                    if (punches.Count == 0 || punches.Count % 2 != 0)
+                    // Comprehensive problem detection:
+                    // 1. Missing all punches
+                    // 2. Odd number of punches (e.g. 1, 3)
+                    // 3. Unclosed session (has IN punches but missing OUT punch)
+                    // 4. Stray OUT punch without an IN punch
+                    bool hasIn = punches.Any(p => AttendancePunchProcessor.IsExplicitInPunch(p));
+                    bool hasOut = punches.Any(p => AttendancePunchProcessor.IsExplicitOutPunch(p));
+                    bool isMissingAll = punches.Count == 0;
+                    bool isOdd = punches.Count % 2 != 0;
+                    bool isUnclosed = punches.Count > 0 && (!hasIn || !hasOut || isOdd);
+
+                    if (isMissingAll || isUnclosed)
                     {
                         problems.Add(new ProblemDayInfo
                         {
@@ -454,14 +499,16 @@ else
                             Date = day,
                             Punches = punches,
                             ShiftStart = emp.ShiftStartTime.HasValue ? emp.ShiftStartTime : null,
-                            ShiftEnd = emp.ShiftEndTime.HasValue ? emp.ShiftEndTime : null
+                            ShiftEnd = emp.ShiftEndTime.HasValue ? emp.ShiftEndTime : null,
+                            NewPunchDirection = (hasIn && !hasOut) ? "OUT" : "IN",
+                            HasOutMissing = (hasIn && !hasOut)
                         });
                     }
                 }
             }
 
             problematicDays = problems
-                .OrderBy(p => p.Date)
+                .OrderByDescending(p => p.Date)
                 .ThenBy(p => p.EmployeeName)
                 .ToList();
         }
@@ -711,14 +758,15 @@ else
         // --- END LOCK CHECK ---
 
         var punchDt = dayInfo.Date.Add(dayInfo.NewPunchTime.Value.ToTimeSpan());
+        var punchDir = string.IsNullOrWhiteSpace(dayInfo.NewPunchDirection) ? "IN" : dayInfo.NewPunchDirection.ToUpperInvariant();
         var newLog = new AttendanceLog
         {
             EmployeeID = dayInfo.EmployeeID,
             PunchTime = punchDt,
             DeviceID = "ManualCorrection",
-            LogType = "Manual Correction", // <-- UPDATED LogType
-            BiometricID = $"MANUAL_{dayInfo.EmployeeID}_{punchDt:yyyyMMdd_HHmmss}_{Guid.NewGuid():N}",
-            IsApproved = true // <-- NEW: Set to False
+            LogType = punchDir,
+            BiometricID = $"MANUAL_{dayInfo.EmployeeID}_{punchDt:yyyyMMdd_HHmmss}_{punchDir}_{Guid.NewGuid():N}",
+            IsApproved = true
         };
         try
         {
@@ -733,14 +781,24 @@ else
 
             // --- AUDIT LOG: CREATE ---
             await AuditService.LogAsync("CREATE", "AttendanceLog", newLog.LogID.ToString(),
-                $"Manual punch added at {newLog.PunchTime:HH:mm:ss} for EmpID: {dayInfo.EmployeeID}");
+                $"Manual {punchDir} punch added at {newLog.PunchTime:HH:mm:ss} for EmpID: {dayInfo.EmployeeID}");
             // -------------------------
 
             dayInfo.NewPunchTime = null;
             dayInfo.Punches.Add(newLog);
-            if (dayInfo.Punches.Count > 0 && dayInfo.Punches.Count % 2 == 0)
+            dayInfo.Punches = DeduplicatePunchesForCorrection(dayInfo.Punches.OrderBy(p => p.PunchTime).ToList());
+
+            bool hasIn = dayInfo.Punches.Any(p => AttendancePunchProcessor.IsExplicitInPunch(p));
+            bool hasOut = dayInfo.Punches.Any(p => AttendancePunchProcessor.IsExplicitOutPunch(p));
+            dayInfo.HasOutMissing = hasIn && !hasOut;
+
+            if (dayInfo.Punches.Count > 0 && dayInfo.Punches.Count % 2 == 0 && hasIn && hasOut)
             {
                 problematicDays?.Remove(dayInfo);
+            }
+            else
+            {
+                dayInfo.NewPunchDirection = (hasIn && !hasOut) ? "OUT" : "IN";
             }
             StateHasChanged();
 
@@ -750,7 +808,7 @@ else
             if (!firebasePunchOk)
                 _logger.LogWarning("Manual punch saved to SQL but Firebase projection failed. EmployeeId={EmployeeId}, LogId={LogId}", dayInfo.EmployeeID, newLog.LogID);
 
-            toastService.ShowSuccess("Punch added.");
+            toastService.ShowSuccess($"Manual {punchDir} punch added.");
 
             _ignoreRealtimeUntil = DateTime.UtcNow.AddSeconds(4);
 
@@ -966,15 +1024,21 @@ else
             if (!isDup)
             {
                 var match = result.FirstOrDefault(x => x.EmployeeID == p.EmployeeID &&
-                    Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) < 60);
+                    Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) <= 120);
                 if (match != null)
                 {
-                    var t1 = (match.LogType ?? "").ToUpperInvariant();
-                    var t2 = (p.LogType ?? "").ToUpperInvariant();
-                    bool isOut1 = t1.Contains("OUT");
-                    bool isOut2 = t2.Contains("OUT");
+                    bool isOut1 = AttendancePunchProcessor.IsExplicitOutPunch(match);
+                    bool isOut2 = AttendancePunchProcessor.IsExplicitOutPunch(p);
                     if (isOut1 == isOut2)
+                    {
+                        var tierMatch = AttendancePunchProcessor.GetPunchTier(match);
+                        var tierIncoming = AttendancePunchProcessor.GetPunchTier(p);
+                        if (tierIncoming < tierMatch)
+                        {
+                            result[result.IndexOf(match)] = p;
+                        }
                         isDup = true;
+                    }
                 }
             }
 

@@ -259,7 +259,67 @@ The hybrid engine respects global and company-scoped configuration settings:
 
 ---
 
-## 7. Cross-Platform SSOT & Wiping Architecture
+### Scenario D: Mid-Shift Geofence Exit with Future Scheduled Manual Punch (The 1:08 PM Test)
+- **Employee**: Dinesh / Nevetha
+- **Context**: Admin pre-entered scheduled shift boundaries (`10:30 IN` and `16:30 OUT`). At `13:00`, the current time is inside the shift. The employee physically leaves the premises at `13:08` (outside radius), then returns at `13:14` (inside radius).
+- **The Prior Failure Mode (Root Cause)**:
+  - Android's [`GeofenceAutoPunchCoordinator.kt`](file:///E:/Project/Android%20App%20Projects/BioMetric+Payroll/BioMetric+Payroll/Android/app/src/main/java/com/biometric/app/domain/location/GeofenceAutoPunchCoordinator.kt) naively took `todaysPunches.lastOrNull()`.
+  - Because `16:30 OUT` was in the list, `lastPunch` was evaluated as an `OUT` punch.
+  - The coordinator calculated `attendanceCurrentlyOpen = false` (falsely assuming the employee was already gone for the day!).
+  - When the employee moved outside (`isInside = false`), the system checked `if (isInside == attendanceCurrentlyOpen)` (`false == false`), which evaluated to `true`, **completely suppressing the 13:08 OUT punch**!
+  - When the employee returned inside (`isInside = true`), a blunt 10-minute global lockout blocked the IN punch.
+- **The Resolution Applied**:
+  1. **Real-Time Punch Temporal Filtering**: `GeofenceAutoPunchCoordinator` filters `todaysPunches` to only include past punches:
+     ```kotlin
+     val pastPunches = todaysPunches.filter { it.timestamp <= nowMs + 60_000L }
+     val attendanceCurrentlyOpen = pastPunches.lastOrNull()?.type?.equals("IN", ignoreCase = true) == true
+     ```
+  2. **Directional Debounce**: Replaced the 10-minute lockout with a 60-second threshold for *identical* punch types. Stepping outside immediately triggers `OUT`, and stepping back inside immediately triggers `IN`.
+- **Effective Log & Calculations**:
+  - `10:30` Manual IN
+  - `13:08` GeofenceAuto OUT (Exit premises)
+  - `13:14` GeofenceAuto IN (Return to premises)
+  - `16:30` Manual OUT
+  - **Shift Worked**: `(13:08 - 10:30) + (16:30 - 13:14)` = 2h 38m + 3h 16m = **05:54**
+  - **Break Duration**: `13:08 – 13:14` = **6 minutes**
+
+---
+
+### Scenario E: Three Concurrent Sources (Physical Machine + Admin Manual + Geofence)
+- **Employee**: Nevetha
+- **Punches Recorded**:
+  1. `06:05` Machine IN (Physical scanner at gate)
+  2. `12:40` Geofence IN (GPS transition)
+  3. `15:00` Manual OUT (Admin manual correction)
+- **Hybrid Arbitration**:
+  - Physical machine (Tier 1) at `06:05` is the highest hardware authority and forms the definitive **Arrival**.
+  - Manual correction (Tier 2) at `15:00` forms the authoritative **Departure**.
+  - Geofence punch (Tier 3) at `12:40` falls strictly between the authoritative `(06:05, 15:00)` window. Because both authoritative IN and OUT are present, the intermediate GPS drift is suppressed.
+- **Effective Punches**:
+  ```text
+  06:05:00  ZKTeco_001        IN   (Tier 1 Machine)
+  15:00:00  ManualCorrection  OUT  (Tier 2 Admin)
+  ```
+- **Total Worked**: `06:05 – 15:00` = **08h 55m**.
+
+---
+
+### Scenario F: Unclosed Session / Missing Punch
+- **Employee**: Dinesh
+- **Punches Recorded**:
+  1. `10:30` Manual IN
+  2. `13:14` Geofence IN (Duplicate arrival / drift)
+- **Hybrid Arbitration**:
+  - Consecutive `IN` punches detected. `10:30 Manual IN` has higher authority (Tier 2 vs Tier 3) and is earlier, so `13:14 Geofence IN` is discarded as redundant.
+  - Since no `OUT` punch exists, the session remains open.
+- **Attendance Log Display**:
+  - Status: **Missing Punch** (flagged in yellow/amber badge)
+  - Punches: `10:30 AM IN`
+  - Prompts admin in [`ManualPunchCorrection.razor`](file:///E:/Project/Android%20App%20Projects/BioMetric+Payroll/BioMetric+Payroll/Web/Payroll.Web/Components/Pages/Attendance/ManualPunchCorrection.razor) to add the missing OUT punch with a single click.
+
+---
+
+## 7. Cross-Platform SSOT & 100% Mirroring Architecture
 
 Both Web and Android operate with local database projections backed by **Firebase Realtime Database** as the durable cloud SSOT:
 
@@ -270,13 +330,23 @@ graph TD
     AndroidApp[Android Room Local DB] <-->|Bidirectional Realtime Stream| FirebaseSSOT
     WebCache[Web SQLite Local DB] <-->|Bidirectional Realtime Stream| FirebaseSSOT
     
-    subgraph Data Wiping Flow
-        WipeCommand[Admin Triggers Wipe] --> ClearSQLite[Purge Local SQLite]
-        WipeCommand --> ClearFirebase[Remove nodes under owners/tenantId/attendance]
-        ClearFirebase --> StreamDelete[Realtime Child Removed Event]
-        StreamDelete --> ClearRoom[Android Room Purges Records]
+    subgraph Attendance Calculation Parity
+        WebCache --> WebProcessor[C# AttendancePunchProcessor]
+        AndroidApp --> AndroidProcessor[Kotlin AttendancePunchProcessor]
+        WebProcessor --> WebUI[Web Attendance Log Viewer]
+        AndroidProcessor --> AndroidUI[Android Admin Attendance UI]
     end
 ```
+
+### Complete Mirroring Implementation
+| Feature | Web (.NET 8 Blazor) | Android (Kotlin / Room) | Parity Status |
+|---|---|---|---|
+| **Core Processor** | `AttendancePunchProcessor.cs` | `AttendancePunchProcessor.kt` | ✅ **100% Mirrored** |
+| **Punches Source Tiering** | `GetPunchSourceTier(p)` | `getPunchSourceTier(p)` | ✅ **100% Mirrored** |
+| **Shift Zone Windowing** | `FilterPunchesByShiftWindow(...)` | `filterPunchesByShiftWindow(...)` | ✅ **100% Mirrored** |
+| **Admin UI Presentation** | Displays `processed.Ordered` | Displays `processed.ordered` | ✅ **100% Mirrored** |
+| **Raw Punch Preservation** | Persisted in SQLite & Firebase | Persisted in Room & Firebase | ✅ **Zero Data Loss** |
+| **Realtime Geofence** | `GeoLocationService.cs` | `GeofenceAutoPunchCoordinator.kt` | ✅ **Aligned with past-only filter** |
 
 ### Data Wiping Invariant
 When an admin initiates a data wipe from the Web management console:
@@ -293,4 +363,4 @@ When an admin initiates a data wipe from the Web management console:
 |---|---|---|---|
 | **Payroll.Shared** | .NET 8.0 | `dotnet build "Web\Payroll.Shared\Payroll.Shared.csproj"` | ✅ **0 Errors, 0 Warnings** |
 | **Payroll.Web** | .NET 8.0 | `dotnet build "Web\Payroll.Web\Payroll.Web.csproj"` | ✅ **0 Errors, 0 Warnings** |
-| **Android App** | Kotlin 1.9 / Android SDK 35 | `gradlew.bat compileDebugKotlin` | ✅ **BUILD SUCCESSFUL** |
+| **Android App** | Kotlin 1.9 / Android SDK 35 | `gradlew.bat compileDebugKotlin` | ✅ **BUILD SUCCESSFUL** (0 Errors) |

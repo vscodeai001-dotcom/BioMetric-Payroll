@@ -1,0 +1,109 @@
+The Probability-Based Scenario Matrix
+Category 1: Single-Source Scenarios (Baseline)
+#	Scenario	Punches Recorded	Effective Punches Selected	Worked / Late / OT / Penalty
+1.1	Physical Machine Only	08:00 Machine IN
+16:00 Machine OUT	08:00 Machine IN
+16:00 Machine OUT	Shift: 8h. Lateness: 0. OT: 0.
+Standard hardware truth.
+1.2	Manual Admin Only	08:00 Manual IN
+16:00 Manual OUT	08:00 Manual IN
+16:00 Manual OUT	Shift: 8h. Lateness: 0. OT: 0.
+Admin created or corrected full day.
+1.3	Geofence Auto Only	08:15 Geofence IN
+16:00 Geofence OUT	08:15 Geofence IN
+16:00 Geofence OUT	Fallback activated!
+Shift: 7h 45m. Lateness: 15m. OT: 0.
+Category 2: Shift Override & Priority Conflict Scenarios
+#	Scenario	Punches Recorded	Effective Punches Selected	Explanation & Payroll Impact
+2.1	Manual Overrides Late Geofence IN	08:00 Manual IN (Tier 2)
+08:45 Geofence IN (Tier 3)
+16:00 Geofence OUT (Tier 3)	08:00 Manual IN
+16:00 Geofence OUT	Manual beats Geofence!
+08:45 Geofence IN is discarded. Shift starts at 08:00. Geofence OUT is kept as fallback OUT. Lateness = 0.
+2.2	Machine Overrides Manual & Geofence	07:55 Machine IN (Tier 1)
+08:00 Manual IN (Tier 2)
+08:30 Geofence IN (Tier 3)
+16:00 Machine OUT (Tier 1)	07:55 Machine IN
+16:00 Machine OUT	Machine (Hardware) is supreme.
+Machine 07:55 beats Manual 08:00 and Geofence 08:30.
+2.3	Full Shift Covered by Manual + GPS Drift inside Shift	08:00 Manual IN
+11:30 Geofence OUT (drift)
+11:35 Geofence IN (drift)
+16:00 Manual OUT	08:00 Manual IN
+16:00 Manual OUT	Drift Suppressed!
+Because Manual IN & OUT cover the shift, intermediate geofence bounces inside [08:00, 16:00] are ignored. Full 8h credited.
+Category 3: Mid-Shift Breaks & Leaving Premises
+#	Scenario	Punches Recorded	Effective Punches Selected	Explanation & Payroll Impact
+3.1	Physical Break inside Shift	08:00 Manual IN
+13:00 Machine OUT (Hardware Break)
+13:45 Machine IN (Hardware Return)
+16:00 Manual OUT	08:00 Manual IN
+13:00 Machine OUT
+13:45 Machine IN
+16:00 Manual OUT	Physical Break Preserved!
+Physical machine punches inside shift are NEVER suppressed. 45m break recorded. Worked: 7h 15m.
+3.2	Geofence Exit with NO authoritative OUT (Early Leave)	06:05 Machine IN
+13:08 Geofence OUT (Exit radius)
+(No further punches)	06:05 Machine IN
+13:08 Geofence OUT	Dynamic Fallback OUT!
+Worked: 7h 3m. Early leave penalty applied from 13:08 to 16:00.
+3.3	Geofence Lunch Break (Out & Return)	08:00 Machine IN
+13:00 Geofence OUT (Outside radius)
+14:00 Geofence IN (Back inside)
+17:00 Machine OUT	08:00 Machine IN
+13:00 Geofence OUT
+14:00 Geofence IN
+17:00 Machine OUT	Legitimate Lunch Break!
+Session 1: 08:00–13:00 (5h).
+Break: 1h.
+Session 2: 14:00–17:00 (3h).
+Total Worked: 8h.
+Category 4: Overtime (Pre-Shift & Post-Shift) Scenarios
+#	Scenario	Punches Recorded	Effective Punches Selected	Explanation & Payroll Impact
+4.1	Early Arrival OT via Geofence + Shift via Machine (Shift: 08:00-16:00)	06:00 Geofence IN
+07:50 Geofence OUT
+08:00 Machine IN
+16:00 Machine OUT	06:00 Geofence IN
+07:50 Geofence OUT
+08:00 Machine IN
+16:00 Machine OUT	Pre-shift Overtime Kept!
+Session 1 (06:00-07:50) = 1h 50m Pre-Shift OT.
+Session 2 (08:00-16:00) = 8h Shift.
+Total: 9h 50m.
+4.2	Early Arrival continuous into Shift	07:15 Machine IN
+16:00 Machine OUT	07:15 Machine IN
+16:00 Machine OUT	Pre-shift OT + Shift!
+07:15–08:00: 45m OT.
+08:00–16:00: 8h Shift.
+4.3	Late Stay (Post-Shift OT via Geofence Fallback)	08:00 Machine IN
+16:00 Machine OUT
+16:15 Geofence IN
+18:30 Geofence OUT	08:00 Machine IN
+16:00 Machine OUT
+16:15 Geofence IN
+18:30 Geofence OUT	Post-shift Overtime Kept!
+Shift: 8h.
+Post-shift OT: 2h 15m.
+4.4	Hybrid Complex Day (User's Exact Example)	06:00 Manual IN
+08:05 Geofence OUT
+08:30 Machine IN
+18:40 Geofence OUT	06:00 Manual IN
+08:05 Geofence OUT
+08:30 Machine IN
+18:40 Geofence OUT	Full Hybrid Fallback!
+06:00–08:00: 2h OT.
+08:00–08:05: 5m shift.
+08:05–08:30: 25m late gap.
+08:30–16:00: 7h 30m shift.
+16:00–18:40: 2h 40m post-shift OT.
+Category 5: Missing / Incomplete Punch Scenarios
+#	Scenario	Punches Recorded	Effective Punches Selected	Status & Correction Required
+5.1	Single IN Punch Only	08:00 Machine IN
+(No OUT recorded)	08:00 Machine IN	Missing OUT Punch!
+Shows in Manual Correction as Odd Count (1) with [IN] badge and defaults Add Punch to [OUT].
+5.2	Duplicate Consecutive INs	06:00 Geofence IN
+06:01 Machine IN	06:01 Machine IN	Deduplicated & Upgraded!
+Higher tier (Machine) replaces Geofence within collision window.
+5.3	Single OUT Punch Only (Stray OUT)	16:00 Machine OUT
+(No IN recorded)	16:00 Machine OUT	Missing IN Punch!
+Shows in Manual Correction with [OUT] badge and defaults Add Punch to [IN].
