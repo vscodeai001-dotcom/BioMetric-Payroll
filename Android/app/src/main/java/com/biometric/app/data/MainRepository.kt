@@ -441,58 +441,14 @@ class MainRepository(
 
     suspend fun insertEmployee(employee: Employee) = withContext(Dispatchers.IO) {
         employee.name = StringUtil.toTitleCase(employee.name)
-        val local = LocalEmployee(
-            employeeId = employee.employeeId,
-            shopId = employee.shopId,
-            name = employee.name,
-            role = employee.role,
-            isActive = employee.isActive,
-            salaryType = employee.salaryType,
-            salaryRate = employee.salaryRate,
-            basicSalaryComponent = employee.basicSalaryComponent,
-            hraComponent = employee.hraComponent,
-            daComponent = employee.daComponent,
-            standardHours = employee.standardHours,
-            otRule = employee.otRule,
-            otFlatRate = employee.otFlatRate,
-            otRateMultiplier = employee.otRateMultiplier,
-            salaryCalculationMethod = employee.salaryCalculationMethod,
-            compOffDayOfWeek = employee.compOffDayOfWeek,
-            enablePf = employee.enablePf,
-            enableEsi = employee.enableEsi,
-            tdsRatePercent = employee.tdsRatePercent,
-            syncState = employee.syncState,
-            lastModified = employee.lastModified
-        )
+        val local = employee.toLocal(syncState = employee.syncState, lastModified = System.currentTimeMillis())
         localEmployeeDao.upsert(local)
         firebaseSync.pushEmployee(employee)
         notifyDataChanged()
     }
 
     suspend fun updateEmployee(employee: Employee) = withContext(Dispatchers.IO) {
-        val local = LocalEmployee(
-            employeeId = employee.employeeId,
-            shopId = employee.shopId,
-            name = employee.name,
-            role = employee.role,
-            isActive = employee.isActive,
-            salaryType = employee.salaryType,
-            salaryRate = employee.salaryRate,
-            basicSalaryComponent = employee.basicSalaryComponent,
-            hraComponent = employee.hraComponent,
-            daComponent = employee.daComponent,
-            standardHours = employee.standardHours,
-            otRule = employee.otRule,
-            otFlatRate = employee.otFlatRate,
-            otRateMultiplier = employee.otRateMultiplier,
-            salaryCalculationMethod = employee.salaryCalculationMethod,
-            compOffDayOfWeek = employee.compOffDayOfWeek,
-            enablePf = employee.enablePf,
-            enableEsi = employee.enableEsi,
-            tdsRatePercent = employee.tdsRatePercent,
-            syncState = 0,
-            lastModified = System.currentTimeMillis()
-        )
+        val local = employee.toLocal(syncState = 0, lastModified = System.currentTimeMillis())
         localEmployeeDao.upsert(local)
         firebaseSync.pushEmployee(employee)
         notifyDataChanged()

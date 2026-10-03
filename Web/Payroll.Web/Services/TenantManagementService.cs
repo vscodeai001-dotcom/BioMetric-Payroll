@@ -18,7 +18,7 @@ namespace Payroll.Web.Services
         public string IconEmoji { get; set; } = "🏢";
         public string PlanMode { get; set; } = "Spark"; // "Spark" or "Blaze"
         public bool IsOfflineMode { get; set; } = false; // true = 100% standalone local SQLite DB, false = Firebase Cloud sync
-        public string DeploymentMode { get; set; } = "Online"; // "Online" or "Offline"
+        public string DeploymentMode { get; set; } = "CloudOnly"; // "CloudOnly", "Hybrid", or "Offline"
 
         public string AdminEmail { get; set; } = string.Empty;
         public string AdminPassword { get; set; } = string.Empty;
@@ -866,7 +866,7 @@ namespace Payroll.Web.Services
                     if (fs != null)
                     {
                         fs.IsOfflineMode = false;
-                        fs.DeploymentMode = "Online";
+                        fs.DeploymentMode = "CloudOnly";
                     }
                 }
 

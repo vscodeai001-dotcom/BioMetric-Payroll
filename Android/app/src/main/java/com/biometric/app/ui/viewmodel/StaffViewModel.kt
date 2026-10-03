@@ -228,7 +228,11 @@ class StaffViewModel @Inject constructor(
         }
         viewModelScope.launch {
             try {
-                val empId = UUID.randomUUID().toString()
+                // SSoT sequential integer ID matching Web convention:
+                // Find highest existing numeric ID, increment by 1.
+                val existingEmployees = repository.allEmployeesFlow.value
+                val maxId = existingEmployees.mapNotNull { it.employeeId.toIntOrNull() }.maxOrNull() ?: 0
+                val empId = (maxId + 1).toString()
                 val newEmployee = Employee(
                     employeeId = empId, shopId = sId, name = name, biometricId = bioId, role = role, email = email, phone = phone,
                     salaryType = type, salaryRate = salaryRate, salaryCalculationMethod = calcMethod,

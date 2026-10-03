@@ -580,7 +580,72 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     suspend fun pushShop(shop: Shop) { getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await(); notifyRealtimeChanged("Shop", "MODIFIED") }
-    suspend fun pushEmployee(emp: Employee) { getOwnerRef()?.child("employees")?.child(emp.employeeId)?.setValue(emp)?.await(); notifyRealtimeChanged("Employee", "MODIFIED") }
+    suspend fun pushEmployee(emp: Employee) {
+        val ref = getOwnerRef() ?: return
+        val map = mapOf<String, Any?>(
+            "employeeId" to emp.employeeId,
+            "shopId" to emp.shopId,
+            "name" to emp.name,
+            "phone" to emp.phone,
+            "email" to emp.email,
+            "biometricId" to emp.biometricId,
+            "role" to emp.role,
+            "salaryType" to emp.salaryType,
+            "salaryRate" to emp.salaryRate,
+            "paidLeaveBalance" to emp.paidLeaveBalance,
+            "sickLeaveBalance" to emp.sickLeaveBalance,
+            "salaryCalculationMethod" to emp.salaryCalculationMethod,
+            "shiftStart" to emp.shiftStart,
+            "shiftEnd" to emp.shiftEnd,
+            "shiftMode" to emp.shiftMode,
+            "trackingMode" to emp.trackingMode,
+            "breakHours" to emp.breakHours,
+            "shift2Start" to emp.shift2Start,
+            "shift2End" to emp.shift2End,
+            "weekendShiftStart" to emp.weekendShiftStart,
+            "weekendShiftEnd" to emp.weekendShiftEnd,
+            "weekendBreakHours" to emp.weekendBreakHours,
+            "weekendShift2Start" to emp.weekendShift2Start,
+            "weekendShift2End" to emp.weekendShift2End,
+            "compOffDayOfWeek" to emp.compOffDayOfWeek,
+            "otRule" to emp.otRule,
+            "otFlatRate" to emp.otFlatRate,
+            "otRateMultiplier" to emp.otRateMultiplier,
+            "dailyAllowance" to emp.dailyAllowance,
+            "nightShiftAllowance" to emp.nightShiftAllowance,
+            "allowanceEffectiveDate" to emp.allowanceEffectiveDate,
+            "isActive" to emp.isActive,
+            "isDeleted" to !emp.isActive,
+            "hireDate" to emp.hireDate,
+            "dob" to emp.dob,
+            "terminateDate" to emp.terminateDate,
+            "standardHours" to emp.standardHours,
+            "basicSalaryComponent" to emp.basicSalaryComponent,
+            "hraComponent" to emp.hraComponent,
+            "daComponent" to emp.daComponent,
+            "enableShiftRotation" to emp.enableShiftRotation,
+            "rotationGroup" to emp.rotationGroup,
+            "shiftRotationPattern" to emp.shiftRotationPattern,
+            "createdAt" to emp.createdAt,
+            "isBonusEligibleRule" to emp.isBonusEligibleRule,
+            "isPaidLeaveEligibleRule" to emp.isPaidLeaveEligibleRule,
+            "paidLeaveOnWeekdays" to emp.paidLeaveOnWeekdays,
+            "paidLeaveOnWeekends" to emp.paidLeaveOnWeekends,
+            "bankAccountNumber" to emp.bankAccountNumber,
+            "bankIfscCode" to emp.bankIfscCode,
+            "bankName" to emp.bankName,
+            "uanNumber" to emp.uanNumber,
+            "esiNumber" to emp.esiNumber,
+            "enablePf" to emp.enablePf,
+            "enableEsi" to emp.enableEsi,
+            "tdsRatePercent" to emp.tdsRatePercent,
+            "lastActive" to emp.lastActive,
+            "syncState" to 1,
+            "lastModified" to System.currentTimeMillis()
+        )
+        ref.child("employees").child(emp.employeeId).setValue(map).await()
+        notifyRealtimeChanged("Employee", "MODIFIED", emp.employeeId)
+    }
     suspend fun pushAttendance(att: Attendance) {
         val id = att.attendanceId.ifBlank { return }
         getOwnerRef()?.child("attendance")?.child(id)?.setValue(att)?.await()

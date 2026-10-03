@@ -58,6 +58,7 @@ class TenantSelectionActivity : MotionBaseActivity() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
     @Inject lateinit var localSettingsDao: LocalSettingsDao
+    @Inject lateinit var appDatabase: com.biometric.app.data.AppDatabase
     private val mainViewModel: MainViewModel by viewModels()
 
     private lateinit var adapter: TenantCompanyAdapter
@@ -157,57 +158,34 @@ class TenantSelectionActivity : MotionBaseActivity() {
                 }
 
                 lifecycleScope.launch {
-                    val effectiveList = if (list.isEmpty()) {
-                        // Check local company settings fallback if any
-                        val localCs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
-                        if (localCs != null && localCs.companyName.isNotBlank()) {
-                            val activeTid = sessionStore.firebaseOwnerUid() ?: "tenant_12011"
-                            listOf(
-                                TenantCompany(
-                                    tenantId = activeTid,
-                                    companyName = localCs.companyName,
-                                    companyCode = "12011",
-                                    adminEmail = sessionStore.userEmail(),
-                                    adminName = sessionStore.employeeName(),
-                                    planMode = "Spark",
-                                    isActive = true
-                                )
-                            )
-                        } else {
-                            emptyList()
-                        }
-                    } else {
-                        list
-                    }
-
+                    val effectiveList = list
                     allCompaniesList = effectiveList
                     binding.progressBar.isVisible = false
                     updateKpis(effectiveList)
                     filterAndSubmitList()
+
+                    val currentTenantId = sessionStore.activeTenantId()
+                    if (effectiveList.isEmpty() || (!currentTenantId.isNullOrBlank() && effectiveList.none { it.tenantId == currentTenantId })) {
+                        withContext(Dispatchers.IO) {
+                            appDatabase.clearAllTables()
+                        }
+                        sessionStore.clearActiveTenant()
+                        getSharedPreferences("auth_prefs", MODE_PRIVATE).edit()
+                            .remove("selected_tenant_id")
+                            .remove("selected_tenant_name")
+                            .remove("selected_tenant_code")
+                            .remove("firebase_owner_uid")
+                            .apply()
+                    }
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
                 binding.progressBar.isVisible = false
                 lifecycleScope.launch {
-                    val localCs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
-                    if (localCs != null && localCs.companyName.isNotBlank()) {
-                        val activeTid = sessionStore.firebaseOwnerUid() ?: "tenant_12011"
-                        val fallback = listOf(
-                            TenantCompany(
-                                tenantId = activeTid,
-                                companyName = localCs.companyName,
-                                companyCode = "12011",
-                                adminEmail = sessionStore.userEmail(),
-                                adminName = sessionStore.employeeName(),
-                                planMode = "Spark",
-                                isActive = true
-                            )
-                        )
-                        allCompaniesList = fallback
-                        updateKpis(fallback)
-                        filterAndSubmitList()
-                    }
+                    allCompaniesList = emptyList()
+                    updateKpis(emptyList())
+                    filterAndSubmitList()
                 }
             }
         }

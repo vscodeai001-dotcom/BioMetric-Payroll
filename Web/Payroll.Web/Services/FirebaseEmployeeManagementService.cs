@@ -997,6 +997,11 @@ public sealed class FirebaseEmployeeManagementService
 
         var employeeId = IntValue("employeeId");
         if (employeeId <= 0) int.TryParse(fallbackId, out employeeId);
+        if (employeeId <= 0 && !string.IsNullOrWhiteSpace(fallbackId))
+        {
+            // Resilient fallback for UUID / non-numeric IDs: map to a stable positive integer so Web displays the employee
+            employeeId = Math.Abs(fallbackId.GetHashCode() % 9000) + 1000;
+        }
 
         var employee = new Employee
         {
@@ -1029,7 +1034,7 @@ public sealed class FirebaseEmployeeManagementService
             SickLeaveBalance = DecimalValue("sickLeaveBalance"),
             NightShiftAllowance = DecimalValue("nightShiftAllowance"),
             TdsRatePercent = DecimalValue("tdsRatePercent"),
-            IsDeleted = !BoolValue("isActive", true) || BoolValue("isDeleted", false),
+            IsDeleted = (!BoolValue("isActive", true) && !BoolValue("active", true)) || BoolValue("isDeleted", false),
 
             // --- NEW: ANDROID SYNCHRONIZATION ---
             PhoneNumber = StringValue("phone"),

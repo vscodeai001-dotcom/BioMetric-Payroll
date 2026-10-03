@@ -911,6 +911,8 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         return 0;
     }
 
+    private static decimal GetDecimal(JsonElement element, params string[] names) => (decimal)GetDouble(element, names);
+
     private static bool GetBool(JsonElement element, params string[] names)
     {
         foreach (var name in names)
@@ -1761,6 +1763,30 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 if (user != null) existingSetting.SmtpUser = user;
                 var pass = GetString(child.Value, "smtpPass", "SmtpPass");
                 if (pass != null) existingSetting.SmtpPass = pass;
+
+                var calcMethod = GetString(child.Value, "salaryCalculationMethod", "SalaryCalculationMethod");
+                if (!string.IsNullOrWhiteSpace(calcMethod)) existingSetting.SalaryCalculationMethod = calcMethod;
+                var zkIp = GetString(child.Value, "zktecoIP", "ZktecoIP");
+                if (zkIp != null) existingSetting.ZktecoIP = zkIp;
+                var zkPort = GetInt(child.Value, "zktecoPort", "ZktecoPort");
+                if (zkPort > 0) existingSetting.ZktecoPort = zkPort;
+                var zkNum = GetInt(child.Value, "zktecoMachineNumber", "ZktecoMachineNumber");
+                if (zkNum > 0) existingSetting.ZktecoMachineNumber = zkNum;
+
+                existingSetting.EnablePfEsiSystem = GetBool(child.Value, "enablePfEsiSystem", "EnablePfEsiSystem");
+                existingSetting.EsiWageLimit = GetDecimal(child.Value, "esiWageLimit", "EsiWageLimit");
+                existingSetting.BasicSalaryPercentage = GetDecimal(child.Value, "basicSalaryPercentage", "BasicSalaryPercentage");
+                existingSetting.EmployeePfPercentage = GetDecimal(child.Value, "employeePfPercentage", "EmployeePfPercentage");
+                existingSetting.EmployeeEsiPercentage = GetDecimal(child.Value, "employeeEsiPercentage", "EmployeeEsiPercentage");
+                existingSetting.EmployerPfPercentage = GetDecimal(child.Value, "employerPfPercentage", "EmployerPfPercentage");
+                existingSetting.EmployerEsiPercentage = GetDecimal(child.Value, "employerEsiPercentage", "EmployerEsiPercentage");
+                existingSetting.EnableProfessionalTax = GetBool(child.Value, "enableProfessionalTax", "EnableProfessionalTax");
+                existingSetting.EnableShiftAllowance = GetBool(child.Value, "enableShiftAllowance", "EnableShiftAllowance");
+                existingSetting.EnableLeaveAccrual = GetBool(child.Value, "enableLeaveAccrual", "EnableLeaveAccrual");
+                existingSetting.LeaveAccrualRate = GetDecimal(child.Value, "leaveAccrualRate", "LeaveAccrualRate");
+                existingSetting.EnableSandwichRule = GetBool(child.Value, "enableSandwichRule", "EnableSandwichRule");
+                existingSetting.EnableLeaveManagement = GetBool(child.Value, "enableLeaveManagement", "EnableLeaveManagement");
+                existingSetting.EnableTdsDeduction = GetBool(child.Value, "enableTdsDeduction", "EnableTdsDeduction");
                 break;
             }
 
@@ -1794,14 +1820,31 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 existingFeature.EnableAutomaticGeofencePunching = GetBool(child.Value, "enableAutomaticGeofencePunching", "enable_automatic_geofence_punching", "EnableAutomaticGeofencePunching");
                 existingFeature.EnableSalaryAdvance = GetBool(child.Value, "enableSalaryAdvance", "EnableSalaryAdvance");
                 existingFeature.EnableBonusManagement = GetBool(child.Value, "enableBonusManagement", "EnableBonusManagement");
+                existingFeature.EnableSalaryStructuring = GetBool(child.Value, "enableSalaryStructuring", "EnableSalaryStructuring") || GetBool(child.Value, "enableFlexibleBenefits", "EnableFlexibleBenefits");
+                existingFeature.EmployeeCanViewAdvance = GetBool(child.Value, "employeeCanViewAdvance", "EmployeeCanViewAdvance");
+                existingFeature.EmployeeCanViewBonus = GetBool(child.Value, "employeeCanViewBonus", "EmployeeCanViewBonus");
+                existingFeature.EnableTdsDeduction = GetBool(child.Value, "enableTdsDeduction", "EnableTdsDeduction");
                 existingFeature.EnableLeaveManagement = GetBool(child.Value, "enableLeaveManagement", "EnableLeaveManagement");
                 existingFeature.EnableShiftScheduling = GetBool(child.Value, "enableShiftScheduling", "EnableShiftScheduling");
+                existingFeature.EnableAutoShiftRotation = GetBool(child.Value, "enableAutoShiftRotation", "EnableAutoShiftRotation");
+                existingFeature.EnableShiftAllowance = GetBool(child.Value, "enableShiftAllowance", "EnableShiftAllowance");
+                existingFeature.EnableLeaveAccrual = GetBool(child.Value, "enableLeaveAccrual", "EnableLeaveAccrual");
+                existingFeature.EnableSandwichRule = GetBool(child.Value, "enableSandwichRule", "EnableSandwichRule");
                 existingFeature.EnablePunchCorrection = GetBool(child.Value, "enablePunchCorrection", "EnablePunchCorrection");
+                existingFeature.EnableRegularizationRequest = GetBool(child.Value, "enableRegularizationReq", "EnableRegularizationReq", "enableRegularizationRequest", "EnableRegularizationRequest");
+                existingFeature.EnableEmployeeManagement = GetBool(child.Value, "enableEmployeeManagement", "EnableEmployeeManagement");
+                existingFeature.EnableCompanyReports = GetBool(child.Value, "enableCompanyReports", "EnableCompanyReports");
+                existingFeature.EnableCustomReporting = GetBool(child.Value, "enableCustomReporting", "EnableCustomReporting");
+                existingFeature.EnableStatutoryCompliance = GetBool(child.Value, "enableStatutoryCompliance", "EnableStatutoryCompliance");
+                existingFeature.EnableProfessionalTax = GetBool(child.Value, "enableProfessionalTax", "EnableProfessionalTax");
+                existingFeature.EnableEmailNotifications = GetBool(child.Value, "enableEmailNotifications", "EnableEmailNotifications");
+                existingFeature.EnableInAppNotifications = GetBool(child.Value, "enableInAppNotifications", "EnableInAppNotifications");
+                existingFeature.EnableAuditLog = GetBool(child.Value, "enableAuditLog", "EnableAuditLog");
+                existingFeature.EnableRecycleBin = GetBool(child.Value, "enableRecycleBin", "EnableRecycleBin");
                 existingFeature.EnableTaxDeclarations = GetBool(child.Value, "enableTaxDeclarations", "EnableTaxDeclarations");
                 existingFeature.EnableResignationModule = GetBool(child.Value, "enableResignationModule", "EnableResignationModule");
                 existingFeature.EnableFlexibleBenefits = GetBool(child.Value, "enableFlexibleBenefits", "EnableFlexibleBenefits");
-                existingFeature.EnableCompanyReports = GetBool(child.Value, "enableCompanyReports", "EnableCompanyReports");
-                existingFeature.EnableEmailNotifications = GetBool(child.Value, "enableEmailNotifications", "EnableEmailNotifications");
+                existingFeature.EnableYearEndSummary = GetBool(child.Value, "enableYearEndSummary", "EnableYearEndSummary");
                 existingFeature.AdminCanViewDashboard = GetBool(child.Value, "adminCanViewDashboard", "AdminCanViewDashboard");
                 existingFeature.AdminCanManageEmployees = GetBool(child.Value, "adminCanManageEmployees", "AdminCanManageEmployees");
                 existingFeature.AdminCanViewAttendance = GetBool(child.Value, "adminCanViewAttendance", "AdminCanViewAttendance");
@@ -1810,7 +1853,22 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 existingFeature.AdminCanManageShifts = GetBool(child.Value, "adminCanManageShifts", "AdminCanManageShifts");
                 existingFeature.AdminCanManagePunchApprovals = GetBool(child.Value, "adminCanManagePunchApprovals", "AdminCanManagePunchApprovals");
                 existingFeature.AdminCanViewReports = GetBool(child.Value, "adminCanViewReports", "AdminCanViewReports");
+                existingFeature.AdminCanManageEmployeePermissions = GetBool(child.Value, "adminCanManageEmployeePermissions", "AdminCanManageEmployeePermissions");
                 existingFeature.AdminCanManageFeatureToggles = GetBool(child.Value, "adminCanManageFeatureToggles", "AdminCanManageFeatureToggles");
+                existingFeature.EmployeeCanViewDashboard = GetBool(child.Value, "employeeCanViewDashboard", "EmployeeCanViewDashboard");
+                existingFeature.EmployeeCanViewPayslip = GetBool(child.Value, "employeeCanViewPayslip", "EmployeeCanViewPayslip");
+                existingFeature.EmployeeCanViewAttendance = GetBool(child.Value, "employeeCanViewAttendance", "EmployeeCanViewAttendance");
+                existingFeature.EmployeeCanViewLeave = GetBool(child.Value, "employeeCanViewLeave", "EmployeeCanViewLeave");
+                existingFeature.EmployeeCanViewLeaveHistory = GetBool(child.Value, "employeeCanViewLeaveHistory", "EmployeeCanViewLeaveHistory");
+                existingFeature.EmployeeToolsVisible = GetBool(child.Value, "employeeToolsVisible", "EmployeeToolsVisible");
+                existingFeature.ShowThemeToggle = GetBool(child.Value, "showThemeToggle", "ShowThemeToggle");
+                existingFeature.EmployeeCanViewShifts = GetBool(child.Value, "employeeCanViewShifts", "EmployeeCanViewShifts");
+                existingFeature.EmployeeCanViewResignation = GetBool(child.Value, "employeeCanViewResignation", "EmployeeCanViewResignation");
+                existingFeature.EmployeeCanViewTax = GetBool(child.Value, "employeeCanViewTax", "EmployeeCanViewTax");
+                existingFeature.EmployeeCanViewReports = GetBool(child.Value, "employeeCanViewReports", "EmployeeCanViewReports");
+
+                var plan = GetString(child.Value, "firebasePlanMode", "FirebasePlanMode");
+                if (!string.IsNullOrWhiteSpace(plan)) existingFeature.FirebasePlanMode = plan;
 
                 var depMode = GetString(child.Value, "deploymentMode", "DeploymentMode", "deployment_mode");
                 if (!string.IsNullOrWhiteSpace(depMode))

@@ -31,16 +31,7 @@ class MobileSessionStore @Inject constructor(
     fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
     fun userRole(): String = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         .getString("user_role", "") ?: ""
-    fun firebaseOwnerUid(): String? {
-        val uid = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
-        if (!uid.isNullOrBlank()) return uid
-        if (isLoggedIn()) {
-            val fallback = "biometricpayroll"
-            prefs.edit { putString(KEY_FIREBASE_OWNER_UID, fallback) }
-            return fallback
-        }
-        return null
-    }
+    fun firebaseOwnerUid(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
     fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_ACTIVE, false) && !token().isNullOrBlank()
 
@@ -50,6 +41,8 @@ class MobileSessionStore @Inject constructor(
     fun setFirebaseOwnerUid(uid: String) {
         if (uid.isNotBlank()) {
             prefs.edit { putString(KEY_FIREBASE_OWNER_UID, uid) }
+        } else {
+            prefs.edit { remove(KEY_FIREBASE_OWNER_UID) }
         }
     }
 
@@ -61,7 +54,17 @@ class MobileSessionStore @Inject constructor(
         }
     }
 
-    fun activeCompanyName(): String = prefs.getString(KEY_ACTIVE_TENANT_NAME, null)?.takeIf { it.isNotBlank() } ?: "Sri Diyaa Agencies"
+    fun activeTenantId(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+
+    fun clearActiveTenant() {
+        prefs.edit {
+            remove(KEY_FIREBASE_OWNER_UID)
+            remove(KEY_ACTIVE_TENANT_NAME)
+            remove(KEY_ACTIVE_TENANT_CODE)
+        }
+    }
+
+    fun activeCompanyName(): String = prefs.getString(KEY_ACTIVE_TENANT_NAME, null)?.takeIf { it.isNotBlank() } ?: ""
     fun activeCompanyCode(): String = prefs.getString(KEY_ACTIVE_TENANT_CODE, null)?.takeIf { it.isNotBlank() } ?: ""
 
     fun isOfflineMode(): Boolean = prefs.getBoolean(KEY_IS_OFFLINE_MODE, false)

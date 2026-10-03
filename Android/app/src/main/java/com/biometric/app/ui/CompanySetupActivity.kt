@@ -24,6 +24,7 @@ import com.biometric.app.util.HapticUtil
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.google.gson.Gson
 import dagger.hilt.android.AndroidEntryPoint
@@ -42,6 +43,7 @@ class CompanySetupActivity : MotionBaseActivity() {
     @Inject lateinit var localSettingsDao: LocalSettingsDao
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var sharedViewModel: SharedViewModel
+    @Inject lateinit var appDatabase: com.biometric.app.data.AppDatabase
 
     private var localCompany = LocalCompanySettings()
     private var localFeatures = LocalFeatureSettings()
@@ -330,9 +332,9 @@ class CompanySetupActivity : MotionBaseActivity() {
                 localFeatures.enableCompanyReports = binding.swCompanyReports.isChecked
 
                 localFeatures.isOfflineMode = isOfflineMode
-                localFeatures.deploymentMode = if (isOfflineMode) "Offline" else "Hybrid"
+                localFeatures.deploymentMode = if (isOfflineMode) "Offline" else "CloudOnly"
                 sessionStore.setOfflineMode(isOfflineMode)
-                sessionStore.setDeploymentMode(if (isOfflineMode) "Offline" else "Hybrid")
+                sessionStore.setDeploymentMode(if (isOfflineMode) "Offline" else "CloudOnly")
 
                 // Save into Room
                 withContext(Dispatchers.IO) {
@@ -361,6 +363,17 @@ class CompanySetupActivity : MotionBaseActivity() {
                         // Convert features to Map and push
                         val featureMap = Gson().fromJson(Gson().toJson(localFeatures), Map::class.java)
                         owner.child("feature_settings").child("1").setValue(featureMap).await()
+
+                        // Update tenant metadata in /tenants/{tenantId}
+                        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+                        if (!activeTid.isNullOrBlank()) {
+                            val tenantUpdates = mapOf<String, Any>(
+                                "companyName" to localCompany.companyName,
+                                "deploymentMode" to localFeatures.deploymentMode,
+                                "isOfflineMode" to isOfflineMode
+                            )
+                            FirebaseDatabase.getInstance().getReference("tenants").child(activeTid).updateChildren(tenantUpdates)
+                        }
 
                         firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
                         firebaseSync.notifyRealtimeAfterWrite("FeatureSettings", "MODIFIED")
@@ -405,22 +418,36 @@ class CompanySetupActivity : MotionBaseActivity() {
         binding.loadingOverlay.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
-                // Clear local company settings
-                withContext(Dispatchers.IO) {
-                    localSettingsDao.upsertCompanySettings(LocalCompanySettings(id = 1, companyName = "New Company"))
+                val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+                if (!activeTid.isNullOrBlank()) {
+                    val db = FirebaseDatabase.getInstance()
+                    try {
+                        db.getReference("tenants").child(activeTid).removeValue()
+                        db.getReference("owners").child(activeTid).removeValue()
+                        db.getReference("owner_events").child(activeTid).removeValue()
+                        db.getReference("shops").child(activeTid).removeValue()
+                    } catch (e: Exception) { }
                 }
 
-                // If online, delete owner node or company node in Firebase
-                val owner = firebaseSync.getOwnerRef()
-                if (owner != null) {
-                    runCatching {
-                        owner.child("company_settings").removeValue().await()
-                        firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "DELETED")
-                    }
+                withContext(Dispatchers.IO) {
+                    appDatabase.clearAllTables()
                 }
+
+                sessionStore.clearActiveTenant()
+                getSharedPreferences("auth_prefs", MODE_PRIVATE).edit()
+                    .remove("selected_tenant_id")
+                    .remove("selected_tenant_name")
+                    .remove("selected_tenant_code")
+                    .remove("firebase_owner_uid")
+                    .apply()
 
                 binding.loadingOverlay.visibility = View.GONE
                 Toast.makeText(this@CompanySetupActivity, "✨ Company records wiped.", Toast.LENGTH_LONG).show()
+
+                val intent = Intent(this@CompanySetupActivity, TenantSelectionActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
                 finish()
             } catch (ex: Exception) {
                 binding.loadingOverlay.visibility = View.GONE

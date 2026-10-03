@@ -340,6 +340,13 @@ class FirebaseRoomHydrator @Inject constructor(
                                         Log.d("FirebaseRoomHydrator", "Cleaning up ${staleSynced.size} stale records for $table")
                                         staleSynced.forEach { onDelete(it) }
                                     }
+                                } else {
+                                    // Firebase node has 0 records or was deleted: wipe cached synced records!
+                                    val allStale = existing().filter { it.second != 0 }.map { it.first }
+                                    if (allStale.isNotEmpty()) {
+                                        Log.d("FirebaseRoomHydrator", "Cleaning up ${allStale.size} wiped records for $table")
+                                        allStale.forEach { onDelete(it) }
+                                    }
                                 }
                             }.onFailure { error ->
                                 Log.e("FirebaseRoomHydrator", "Failed to reconcile Room records for $table", error)
@@ -1008,74 +1015,6 @@ class FirebaseRoomHydrator @Inject constructor(
         }
 
     private fun Shop.toLocal() = LocalShop(shopId, name, location, openingDate, isActive, 1)
-    private fun Employee.toLocal() = LocalEmployee(
-        employeeId = employeeId,
-        shopId = shopId,
-        name = name,
-        role = role,
-        isActive = isActive,
-        // Payroll
-        salaryType = salaryType,
-        salaryRate = salaryRate,
-        basicSalaryComponent = basicSalaryComponent,
-        hraComponent = hraComponent,
-        daComponent = daComponent,
-        standardHours = standardHours,
-        salaryCalculationMethod = salaryCalculationMethod,
-        dailyAllowance = dailyAllowance,
-        nightShiftAllowance = nightShiftAllowance,
-        allowanceEffectiveDate = allowanceEffectiveDate,
-        // Shift
-        shiftStart = shiftStart,
-        shiftEnd = shiftEnd,
-        shiftMode = shiftMode,
-        trackingMode = trackingMode,
-        breakHours = breakHours,
-        shift2Start = shift2Start,
-        shift2End = shift2End,
-        weekendShiftStart = weekendShiftStart,
-        weekendShiftEnd = weekendShiftEnd,
-        weekendBreakHours = weekendBreakHours,
-        weekendShift2Start = weekendShift2Start,
-        weekendShift2End = weekendShift2End,
-        compOffDayOfWeek = compOffDayOfWeek,
-        // OT / Rules
-        otRule = otRule,
-        otFlatRate = otFlatRate,
-        otRateMultiplier = otRateMultiplier,
-        // Dates
-        hireDate = hireDate,
-        dob = dob,
-        terminateDate = terminateDate,
-        createdAt = createdAt,
-        // Contact / Identity
-        phone = phone,
-        email = email,
-        biometricId = biometricId,
-        // Leave / Bonus eligibility
-        isBonusEligibleRule = isBonusEligibleRule,
-        isPaidLeaveEligibleRule = isPaidLeaveEligibleRule,
-        paidLeaveOnWeekdays = paidLeaveOnWeekdays,
-        paidLeaveOnWeekends = paidLeaveOnWeekends,
-        paidLeaveBalance = paidLeaveBalance,
-        sickLeaveBalance = sickLeaveBalance,
-        // Shift Rotation
-        enableShiftRotation = enableShiftRotation,
-        rotationGroup = rotationGroup,
-        shiftRotationPattern = shiftRotationPattern,
-        // Statutory / Bank
-        enablePf = enablePf,
-        enableEsi = enableEsi,
-        tdsRatePercent = tdsRatePercent,
-        bankAccountNumber = bankAccountNumber,
-        bankIfscCode = bankIfscCode,
-        bankName = bankName,
-        uanNumber = uanNumber,
-        esiNumber = esiNumber,
-        // Sync
-        syncState = syncState,
-        lastModified = lastModified
-    )
     private fun Attendance.toLocal() = LocalAttendance(attendanceId, employeeId, checkInTime, checkOutTime, 1)
     private fun AdvancePayment.toLocal() = LocalAdvancePayment(advanceId, employeeId, shopId, amount, date, isRecovered, recoveryPaymentId, 1)
     private fun EmployeeHistory.toLocal() = LocalEmployeeHistory(

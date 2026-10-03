@@ -520,6 +520,14 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         if (activeTenantId == "biometricpayroll") {
                             FirebaseDatabase.getInstance().getReference("feature_settings/1").setValue(map).await()
                         }
+
+                        val tenantUpdates = mapOf<String, Any>(
+                            "deploymentMode" to updated.deploymentMode,
+                            "isOfflineMode" to updated.isOfflineMode
+                        )
+                        FirebaseDatabase.getInstance().getReference("tenants").child(activeTenantId).updateChildren(tenantUpdates).await()
+
+                        firebaseSync.notifyRealtimeAfterWrite("FeatureSettings", "MODIFIED")
                     }
                 }
 
@@ -651,7 +659,10 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             "employeeCanViewLeave" to s.employeeCanViewLeave,
             "employeeCanViewLeaveHistory" to s.employeeCanViewLeaveHistory,
             "employeeCanViewResignation" to s.employeeCanViewResignation,
-            "employeeCanViewReports" to s.employeeCanViewReports
+            "employeeCanViewReports" to s.employeeCanViewReports,
+            "isOfflineMode" to s.isOfflineMode,
+            "deploymentMode" to s.deploymentMode,
+            "enableSalaryStructuring" to s.enableFlexibleBenefits
         )
     }
 
