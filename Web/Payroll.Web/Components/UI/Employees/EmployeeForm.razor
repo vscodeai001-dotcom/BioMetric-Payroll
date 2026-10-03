@@ -29,6 +29,10 @@
         <label class="form-label small fw-bold text-primary mb-0">Hire Date <span class="text-danger">*</span></label>
         <input type="date" class="form-control form-control-sm" @bind="HireDate" required />
     </div>
+    <div class="col-md-2">
+        <label class="form-label small fw-bold text-primary mb-0">App Password 🔑</label>
+        <input type="text" class="form-control form-control-sm font-monospace" @bind="Employee.Password" placeholder="Default: 123456" />
+    </div>
 
     @* --- ROW 2: PAYROLL & SHIFT --- *@
     <div class="col-md-12 mt-2">

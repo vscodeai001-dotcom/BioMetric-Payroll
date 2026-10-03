@@ -158,6 +158,9 @@ namespace Payroll.Shared.Data
 
         [NotMapped]
         public bool PaidLeaveOnWeekends { get; set; } = false;
+
+        [NotMapped]
+        public string? Password { get; set; }
         // ------------------------------------------
 
         // --- BANKING DETAILS ---

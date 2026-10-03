@@ -124,9 +124,15 @@ class TenantSelectionActivity : MotionBaseActivity() {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val list = mutableListOf<TenantCompany>()
                 for (child in snapshot.children) {
-                    val tid = child.child("tenantId").getValue(String::class.java) ?: child.key.orEmpty()
-                    val name = child.child("companyName").getValue(String::class.java).orEmpty()
-                    val code = child.child("companyCode").getValue(String::class.java).orEmpty()
+                    val tid = child.child("tenantId").getValue(String::class.java)?.takeIf { it.isNotBlank() } ?: child.key.orEmpty()
+                    val rawName = child.child("companyName").getValue(String::class.java).orEmpty()
+                    val rawCode = child.child("companyCode").getValue(String::class.java).orEmpty()
+                    val code = if (rawCode.isNotBlank()) rawCode else tid.removePrefix("tenant_")
+                    val name = if (rawName.isBlank() || rawName.equals("Your Company Name", ignoreCase = true)) {
+                        child.child("name").getValue(String::class.java)?.takeIf { it.isNotBlank() } ?: "Company $code"
+                    } else {
+                        rawName
+                    }
                     val email = child.child("adminEmail").getValue(String::class.java).orEmpty()
                     val admin = child.child("adminName").getValue(String::class.java).orEmpty()
                     val phone = child.child("adminPhone").getValue(String::class.java)
@@ -165,7 +171,8 @@ class TenantSelectionActivity : MotionBaseActivity() {
                     filterAndSubmitList()
 
                     val currentTenantId = sessionStore.activeTenantId()
-                    if (effectiveList.isEmpty() || (!currentTenantId.isNullOrBlank() && effectiveList.none { it.tenantId == currentTenantId })) {
+                    // Only clear tables if we have a valid non-empty list of tenants from Firebase AND active tenant was deleted
+                    if (effectiveList.isNotEmpty() && !currentTenantId.isNullOrBlank() && effectiveList.none { it.tenantId == currentTenantId }) {
                         withContext(Dispatchers.IO) {
                             appDatabase.clearAllTables()
                         }
@@ -182,10 +189,13 @@ class TenantSelectionActivity : MotionBaseActivity() {
 
             override fun onCancelled(error: DatabaseError) {
                 binding.progressBar.isVisible = false
+                android.util.Log.e("TenantSelectionActivity", "Firebase tenants read cancelled: ${error.message}")
                 lifecycleScope.launch {
-                    allCompaniesList = emptyList()
-                    updateKpis(emptyList())
-                    filterAndSubmitList()
+                    if (allCompaniesList.isEmpty()) {
+                        allCompaniesList = emptyList()
+                        updateKpis(emptyList())
+                        filterAndSubmitList()
+                    }
                 }
             }
         }

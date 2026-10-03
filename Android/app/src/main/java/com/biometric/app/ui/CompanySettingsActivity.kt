@@ -504,17 +504,30 @@ class CompanySettingsActivity : MotionBaseActivity() {
     private fun hydrateFromFirebase(snapshot: DataSnapshot) {
         if (!snapshot.exists()) return
 
-        fun s(k: String): String? = snapshot.child(k).getValue(String::class.java)
-        fun i(k: String): Int? = snapshot.child(k).getValue(Int::class.java)
-            ?: s(k)?.toIntOrNull()
-        fun d(k: String): Double? = snapshot.child(k).getValue(Double::class.java)
-            ?: s(k)?.toDoubleOrNull()
-        fun b(k: String): Boolean? = snapshot.child(k).getValue(Boolean::class.java)
-            ?: s(k)?.toBooleanStrictOrNull()
+        fun num(k: String): Number? {
+            val v = snapshot.child(k).value ?: return null
+            return when (v) {
+                is Number -> v
+                is String -> v.toDoubleOrNull()
+                else -> null
+            }
+        }
+        fun s(k: String): String? = snapshot.child(k).value?.toString()
+        fun i(k: String): Int? = num(k)?.toInt()
+        fun d(k: String): Double? = num(k)?.toDouble()
+        fun b(k: String): Boolean? {
+            val v = snapshot.child(k).value ?: return null
+            return when (v) {
+                is Boolean -> v
+                is Number -> v.toInt() == 1
+                is String -> v.toBooleanStrictOrNull() ?: (v == "1")
+                else -> null
+            }
+        }
 
-        s("companyName")?.let { if (it.isNotBlank()) localCompany.companyName = it }
-        s("addressLine1")?.let { localCompany.addressLine1 = it }
-        s("cityStatePincode")?.let { localCompany.cityStatePincode = it }
+        s("companyName")?.let { if (it.isNotBlank() && !it.equals("Your Company Name", ignoreCase = true)) localCompany.companyName = it }
+        s("addressLine1")?.let { if (!it.equals("Address Line 1", ignoreCase = true)) localCompany.addressLine1 = it }
+        s("cityStatePincode")?.let { if (!it.equals("City, State, Pincode", ignoreCase = true)) localCompany.cityStatePincode = it }
         s("salaryCalculationMethod")?.let { localCompany.salaryCalculationMethod = it }
         i("workDayCutoffHour")?.let { localCompany.workDayCutoffHour = it }
         i("lateGraceMinutes")?.let { localCompany.lateGraceMinutes = it }
@@ -526,6 +539,10 @@ class CompanySettingsActivity : MotionBaseActivity() {
         i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
         i("stayClusterRadiusMeters")?.let { if (it > 0) localCompany.stayClusterRadiusMeters = it }
         (b("useSpeedBasedMarkers") ?: b("use_speed_based_markers"))?.let { localCompany.useSpeedBasedMarkers = it }
+
+        s("zktecoIP")?.let { localCompany.zktecoIP = it }
+        i("zktecoPort")?.let { if (it > 0) localCompany.zktecoPort = it }
+        i("zktecoMachineNumber")?.let { if (it > 0) localCompany.zktecoMachineNumber = it }
 
         // Email Configuration (SSOT real-time sync with Web)
         b("enableEmailNotifications")?.let { localCompany.enableEmailNotifications = it }

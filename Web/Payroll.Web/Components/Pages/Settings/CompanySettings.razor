@@ -391,6 +391,13 @@ else
         }
         if (settings == null) settings = new CompanySetting();
 
+        // 100% SSOT: If settings.CompanyName is blank or default placeholder, sync from activeTenant.CompanyName
+        if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.CompanyName) &&
+            (string.IsNullOrWhiteSpace(settings.CompanyName) || settings.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase)))
+        {
+            settings.CompanyName = activeTenant.CompanyName.Trim();
+        }
+
         firebaseOwnerUid = activeTenant?.TenantId ?? FirebaseRealtime.ResolveOwnerUid(
             authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "web-admin",
             isSuperAdmin ? "SuperAdmin" : "Admin");
@@ -423,9 +430,9 @@ else
                         if (lat != 0 && settings.OfficeLatitude != lat) { settings.OfficeLatitude = lat; changed = true; }
                         if (lon != 0 && settings.OfficeLongitude != lon) { settings.OfficeLongitude = lon; changed = true; }
                         if (settings.UseSpeedBasedMarkers != speed) { settings.UseSpeedBasedMarkers = speed; changed = true; }
-                        if (!string.IsNullOrWhiteSpace(compName) && settings.CompanyName != compName.Trim()) { settings.CompanyName = compName.Trim(); changed = true; }
-                        if (addr != null && settings.AddressLine1 != addr) { settings.AddressLine1 = addr; changed = true; }
-                        if (city != null && settings.CityStatePincode != city) { settings.CityStatePincode = city; changed = true; }
+                        if (!string.IsNullOrWhiteSpace(compName) && !compName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase) && settings.CompanyName != compName.Trim()) { settings.CompanyName = compName.Trim(); changed = true; }
+                        if (addr != null && !addr.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase) && settings.AddressLine1 != addr) { settings.AddressLine1 = addr; changed = true; }
+                        if (city != null && !city.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase) && settings.CityStatePincode != city) { settings.CityStatePincode = city; changed = true; }
                     }
 
                     if (changed)

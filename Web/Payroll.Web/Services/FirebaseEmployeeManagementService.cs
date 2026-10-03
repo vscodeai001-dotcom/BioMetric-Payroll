@@ -597,11 +597,10 @@ public sealed class FirebaseEmployeeManagementService
         }
         catch (FirebaseAuthException ex) when (ex.AuthErrorCode == AuthErrorCode.UserNotFound)
         {
-            // Employee creation must not leave a dead email-only record.
-            // Create a Firebase Auth account with a random temporary password,
-            // then immediately generate a password-reset link. The temporary
-            // password is never stored or returned.
-            var temporaryPassword = CreateTemporaryFirebasePassword();
+            // Employee provisioning: Set configured password or standard default '123456'
+            var initialPassword = !string.IsNullOrWhiteSpace(employee.Password)
+                ? employee.Password.Trim()
+                : "123456";
 
             try
             {
@@ -609,9 +608,9 @@ public sealed class FirebaseEmployeeManagementService
                     new UserRecordArgs
                     {
                         Email = normalizedEmail,
-                        Password = temporaryPassword,
+                        Password = initialPassword,
                         DisplayName = employee.Name,
-                        EmailVerified = false,
+                        EmailVerified = true,
                         Disabled = false
                     },
                     ct);
@@ -647,12 +646,19 @@ public sealed class FirebaseEmployeeManagementService
             },
             ct);
 
-        await auth.UpdateUserAsync(new UserRecordArgs
+        var updateArgs = new UserRecordArgs
         {
             Uid = user.Uid,
             DisplayName = employee.Name,
             Disabled = employee.IsDeleted ? true : user.Disabled
-        }, ct);
+        };
+
+        if (!string.IsNullOrWhiteSpace(employee.Password))
+        {
+            updateArgs.Password = employee.Password.Trim();
+        }
+
+        await auth.UpdateUserAsync(updateArgs, ct);
 
         if (employee.IsDeleted)
         {
@@ -671,6 +677,7 @@ public sealed class FirebaseEmployeeManagementService
                 ["role"] = "STAFF",
                 ["enabled"] = !employee.IsDeleted && !user.Disabled,
                 ["ownerUid"] = OwnerUid,
+                ["password"] = !string.IsNullOrWhiteSpace(employee.Password) ? employee.Password.Trim() : "123456",
                 ["dataLastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             },
             ct);
@@ -719,6 +726,56 @@ public sealed class FirebaseEmployeeManagementService
         return (true, employee.IsDeleted
             ? "Employee Auth account deactivated."
             : "Employee Auth/profile synchronized.");
+    }
+
+    public async Task<(bool Success, string Message)> ResetEmployeePasswordAsync(
+        string emailOrUid,
+        string newPassword,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(emailOrUid))
+            return (false, "Employee identifier is required.");
+
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+            return (false, "Password must be at least 6 characters.");
+
+        var auth = await _firebase.GetFirebaseAuthAsync(ct);
+        if (auth == null)
+            return (false, "Firebase Authentication is not configured.");
+
+        try
+        {
+            UserRecord? user = null;
+            try { user = await auth.GetUserAsync(emailOrUid, ct); }
+            catch
+            {
+                try { user = await auth.GetUserByEmailAsync(emailOrUid, ct); } catch { }
+            }
+
+            if (user == null)
+                return (false, $"Employee Firebase Auth user not found for {emailOrUid}.");
+
+            await auth.UpdateUserAsync(new UserRecordArgs
+            {
+                Uid = user.Uid,
+                Password = newPassword.Trim()
+            }, ct);
+
+            await _firebase.UpdateAsync(
+                new Dictionary<string, object?>
+                {
+                    [$"user_profiles/{user.Uid}/password"] = newPassword.Trim(),
+                    [$"user_profiles/{user.Uid}/dataLastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                },
+                ct);
+
+            return (true, $"Password updated successfully for {user.Email}.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update employee password for {Identifier}", emailOrUid);
+            return (false, $"Failed to update password: {ex.Message}");
+        }
     }
 
     private static string CreateTemporaryFirebasePassword()

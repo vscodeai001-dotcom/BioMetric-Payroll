@@ -122,14 +122,28 @@
 
         @* Card 2: Office Coordinates & Geofencing *@
         <div class="card border rounded-4 shadow-sm h-auto">
-            <div class="card-header bg-transparent border-bottom py-3 px-4 d-flex align-items-center justify-content-between">
+            <div class="card-header bg-transparent border-bottom py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2">
                     <span class="fs-5">📍</span>
                     <h6 class="mb-0 fw-bold text-success">Office Geofence &amp; Location</h6>
                 </div>
-                <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3 py-1 small fw-semibold" @onclick="OpenMapModal">
-                    <i class="bi bi-geo-alt-fill me-1"></i> Open Maps
-                </button>
+                <div class="d-flex align-items-center gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 small fw-semibold" @onclick="FetchAddressFromCoordinates" disabled="@_isFetchingAddress" title="Fetch street address and city from current coordinates">
+                        @if (_isFetchingAddress)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                            <span>Resolving...</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-magic me-1"></i>
+                            <span>Fetch Address from Lat/Lng</span>
+                        }
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3 py-1 small fw-semibold" @onclick="OpenMapModal">
+                        <i class="bi bi-geo-alt-fill me-1"></i> Open Maps
+                    </button>
+                </div>
             </div>
             <div class="card-body p-4">
                 <div class="row g-3">
@@ -679,6 +693,50 @@
             Settings.CityStatePincode = _tempCityStatePincode;
         }
         await CloseMapModal();
+    }
+
+    private bool _isFetchingAddress = false;
+
+    private async Task FetchAddressFromCoordinates()
+    {
+        if (Settings.OfficeLatitude == 0 || Settings.OfficeLongitude == 0)
+        {
+            await JS.InvokeVoidAsync("alert", "Please enter Latitude and Longitude first, or click 'Open Maps' to pick a location.");
+            return;
+        }
+
+        _isFetchingAddress = true;
+        StateHasChanged();
+        try
+        {
+            _dotNetRef?.Dispose();
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("payrollGeofencePicker.reverseGeocodeDirect", Settings.OfficeLatitude, Settings.OfficeLongitude, _dotNetRef);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error reverse geocoding: " + ex.Message);
+        }
+        finally
+        {
+            _isFetchingAddress = false;
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public void OnDirectAddressResolved(string addressLine1, string cityStatePincode)
+    {
+        if (!string.IsNullOrWhiteSpace(addressLine1))
+        {
+            Settings.AddressLine1 = addressLine1;
+        }
+        if (!string.IsNullOrWhiteSpace(cityStatePincode))
+        {
+            Settings.CityStatePincode = cityStatePincode;
+        }
+        _isFetchingAddress = false;
+        StateHasChanged();
     }
 
     public async ValueTask DisposeAsync()

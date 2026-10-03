@@ -8596,6 +8596,52 @@ window.payrollGeofencePicker = {
         }
     },
 
+    reverseGeocodeDirect: async function (lat, lng, dotNetHelper) {
+        try {
+            const resp = await fetch('https://nominatim.openstreetmap.org/reverse?format=json&lat=' + lat + '&lon=' + lng + '&addressdetails=1', {
+                headers: { 'Accept': 'application/json' }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const a = (data && data.address) ? data.address : {};
+
+            const lineParts = [];
+            const premises = a.building || a.house_name || a.office || a.amenity || a.commercial || a.industrial || '';
+            const houseNum = a.house_number || '';
+            const road = a.road || a.pedestrian || a.street || a.residential || a.suburb || a.neighbourhood || '';
+
+            if (premises) lineParts.push(premises);
+            if (houseNum && road) {
+                lineParts.push(houseNum + ' ' + road);
+            } else if (road) {
+                lineParts.push(road);
+            } else if (houseNum) {
+                lineParts.push(houseNum);
+            }
+
+            const addressLine1 = lineParts.join(', ') || (data.display_name ? data.display_name.split(',')[0].trim() : '');
+
+            const cityParts = [];
+            const city = a.city || a.town || a.village || a.suburb || a.county || '';
+            const state = a.state || '';
+            const postcode = a.postcode || '';
+
+            if (city) cityParts.push(city);
+            if (state) cityParts.push(state);
+
+            let cityStatePincode = cityParts.join(', ');
+            if (postcode) {
+                cityStatePincode += (cityStatePincode ? ' - ' : '') + postcode;
+            }
+
+            if (dotNetHelper) {
+                dotNetHelper.invokeMethodAsync('OnDirectAddressResolved', addressLine1, cityStatePincode);
+            }
+        } catch (e) {
+            console.warn("Direct reverse geocode failed", e);
+        }
+    },
+
     processAddressData: function (lat, lng, data) {
         if (!this.dotNetHelper) return;
         const a = (data && data.address) ? data.address : {};

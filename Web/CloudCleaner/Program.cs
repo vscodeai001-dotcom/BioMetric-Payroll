@@ -36,6 +36,34 @@ class Program
 
     static async Task Main(string[] args)
     {
+        if (args.Length >= 3 && args[0] == "--set-password")
+        {
+            var email = args[1];
+            var pass = args[2];
+            if (!File.Exists(ServiceAccountPath))
+            {
+                Console.WriteLine($"Service account not found: {ServiceAccountPath}");
+                return;
+            }
+            var defaultApp = FirebaseAdmin.FirebaseApp.DefaultInstance;
+            if (defaultApp == null)
+            {
+                defaultApp = FirebaseAdmin.FirebaseApp.Create(new FirebaseAdmin.AppOptions
+                {
+                    Credential = GoogleCredential.FromFile(ServiceAccountPath)
+                });
+            }
+            var auth = FirebaseAdmin.Auth.FirebaseAuth.GetAuth(defaultApp);
+            var u = await auth.GetUserByEmailAsync(email);
+            await auth.UpdateUserAsync(new FirebaseAdmin.Auth.UserRecordArgs
+            {
+                Uid = u.Uid,
+                Password = pass
+            });
+            Console.WriteLine($"SUCCESS: Set password for {email} (UID: {u.Uid}) to {pass}");
+            return;
+        }
+
         Console.WriteLine("=========================================================");
         Console.WriteLine("🚀 Firebase Realtime Database Fast Cloud Cleaner");
         Console.WriteLine("   Rule: Keep Employee Master & Settings (Partial Wipe Spec)");

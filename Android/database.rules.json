@@ -2,6 +2,14 @@
   "rules": {
     ".read": false,
     ".write": false,
+    "tenants": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'SuperAdmin' || auth.token.role == 'SUPER_ADMIN' || auth.token.role == 'Admin' || auth.token.role == 'ADMIN' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')",
+      "$tenantId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.token.email == 'prakashshiva368@gmail.com' || auth.token.role == 'SuperAdmin' || auth.token.role == 'SUPER_ADMIN' || auth.token.role == 'Admin' || auth.token.role == 'ADMIN' || auth.token.owner_uid == $tenantId || root.child('user_profiles').child(auth.uid).child('ownerUid').val() == $tenantId || auth.uid == $tenantId || root.child('user_profiles').child(auth.uid).child('role').val() == 'SuperAdmin' || root.child('user_profiles').child(auth.uid).child('role').val() == 'SUPER_ADMIN')"
+      }
+    },
     "employee_sessions": {
       "$uid": {
         ".read": "auth != null && auth.uid == $uid",
