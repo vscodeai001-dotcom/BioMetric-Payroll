@@ -960,17 +960,54 @@
                                 dayPunchLogs,
                                 ds.ShiftDate.ToDateTime(TimeOnly.MinValue),
                                 sStartDt,
-                                sEndDt,
-                                featureSettings);
-                            var effectiveLogs = pr.Ordered;
-                            var dayPunches = effectiveLogs.Select(l => l.PunchTime).ToList();
+                                sEndDt);
+                            var effectiveLogs = (pr.Ordered != null && pr.Ordered.Count > 0) ? pr.Ordered : dayPunchLogs;
+                            var displayLogs = (effectiveLogs != null && effectiveLogs.Count >= dayPunchLogs.Count) ? effectiveLogs : dayPunchLogs;
+                            var dayPunches = displayLogs.Select(l => l.PunchTime).ToList();
 
                             dto.Punches =
                                 string.Join(
                                     "\n",
-                                    effectiveLogs.Select(
+                                    displayLogs.Select(
                                         l =>
                                             $"{l.PunchTime:HH:mm:ss}  {(!string.IsNullOrWhiteSpace(l.DeviceID) ? l.DeviceID : (l.BiometricID != null && l.BiometricID.StartsWith("AUTO_") ? "AndroidGeofenceAuto" : "Machine"))}  #{l.LogID}  {l.LogType}"));
+
+                            // Real-time evaluation of work hours and status directly from SSOT punches
+                            double punchWorkedMinutes = 0;
+                            for (int i = 0; i < displayLogs.Count - 1; i += 2)
+                            {
+                                var span = displayLogs[i + 1].PunchTime - displayLogs[i].PunchTime;
+                                if (span.TotalMinutes > 0)
+                                    punchWorkedMinutes += span.TotalMinutes;
+                            }
+
+                            if (displayLogs.Count > 0)
+                            {
+                                if (punchWorkedMinutes > 0)
+                                {
+                                    var workedHours = (decimal)(punchWorkedMinutes / 60.0);
+                                    if (isWeeklyOffWorked || ds.Status == "Weekly Off" || ds.Status == "Weekly Off (Worked)")
+                                    {
+                                        dto.Status = "Weekly Off (Worked)";
+                                        dto.OvertimeDuration = TimeSpan.FromMinutes(punchWorkedMinutes);
+                                        dto.FinalWorkedHours = workedHours;
+                                        dto.ShiftWorkedDuration = TimeSpan.Zero;
+                                    }
+                                    else
+                                    {
+                                        if (dto.Status == "Absent" || dto.FinalWorkedHours == 0)
+                                        {
+                                            dto.Status = (displayLogs.Count % 2 != 0) ? "Missing Punch" : "Present";
+                                            dto.ShiftWorkedDuration = TimeSpan.FromMinutes(punchWorkedMinutes);
+                                            dto.FinalWorkedHours = workedHours;
+                                        }
+                                    }
+                                }
+                                else if (dto.Status == "Absent")
+                                {
+                                    dto.Status = "Missing Punch";
+                                }
+                            }
 
                             // ------------------------------------------------
                             // BREAKS
@@ -1880,12 +1917,17 @@
             }
 
             if (!isDup && !string.IsNullOrWhiteSpace(p.BiometricID) &&
-                (p.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
-                 p.BiometricID.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
-                 Guid.TryParse(p.BiometricID, out _)))
+                (Guid.TryParse(p.BiometricID, out _) ||
+                 (p.BiometricID.Length > 20 &&
+                  !p.BiometricID.Equals("AUTO_IN", StringComparison.OrdinalIgnoreCase) &&
+                  !p.BiometricID.Equals("AUTO_OUT", StringComparison.OrdinalIgnoreCase) &&
+                  !p.BiometricID.Equals("MANUAL_IN", StringComparison.OrdinalIgnoreCase) &&
+                  !p.BiometricID.Equals("MANUAL_OUT", StringComparison.OrdinalIgnoreCase) &&
+                  !p.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase))))
             {
                 if (result.Any(x => x.EmployeeID == p.EmployeeID &&
-                                    string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))
+                                    string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase) &&
+                                    Math.Abs((x.PunchTime - p.PunchTime).TotalMinutes) < 2))
                 {
                     isDup = true;
                 }

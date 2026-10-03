@@ -634,9 +634,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
         i("workDayCutoffHour")?.let { localCompany.workDayCutoffHour = it }
         i("lateGraceMinutes")?.let { localCompany.lateGraceMinutes = it }
         i("endTimeGraceMinutes")?.let { localCompany.endTimeGraceMinutes = it }
-        d("officeLatitude")?.let { if (it != 0.0) localCompany.officeLatitude = it }
-        d("officeLongitude")?.let { if (it != 0.0) localCompany.officeLongitude = it }
-        i("geoRadiusMeters")?.let { if (it > 0) localCompany.geoRadiusMeters = it }
+        (d("officeLatitude") ?: d("latitude") ?: d("Latitude"))?.let { if (it != 0.0) localCompany.officeLatitude = it }
+        (d("officeLongitude") ?: d("longitude") ?: d("Longitude"))?.let { if (it != 0.0) localCompany.officeLongitude = it }
+        (i("geoRadiusMeters") ?: i("radius") ?: i("geo_radius_meters"))?.let { if (it > 0) localCompany.geoRadiusMeters = it }
         i("autoBackupIntervalHours")?.let { localCompany.autoBackupIntervalHours = it }
         i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
         i("stayClusterRadiusMeters")?.let { if (it > 0) localCompany.stayClusterRadiusMeters = it }
@@ -856,9 +856,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 localCompany.workDayCutoffHour = binding.etGenCutoffHour.text?.toString()?.toIntOrNull() ?: 22
                 localCompany.lateGraceMinutes = binding.etGenLateGrace.text?.toString()?.toIntOrNull() ?: 0
                 localCompany.endTimeGraceMinutes = binding.etGenEarlyGrace.text?.toString()?.toIntOrNull() ?: 0
-                localCompany.officeLatitude = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: 0.0
-                localCompany.officeLongitude = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: 0.0
-                localCompany.geoRadiusMeters = binding.etGenRadius.text?.toString()?.toIntOrNull() ?: 1000
+                localCompany.officeLatitude = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: localCompany.officeLatitude
+                localCompany.officeLongitude = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: localCompany.officeLongitude
+                localCompany.geoRadiusMeters = binding.etGenRadius.text?.toString()?.toIntOrNull() ?: localCompany.geoRadiusMeters.takeIf { it > 0 } ?: 100
 
                 localCompany.zktecoIP = binding.etZktecoIp.text?.toString()?.trim()
                 localCompany.zktecoPort = binding.etZktecoPort.text?.toString()?.toIntOrNull() ?: 4370

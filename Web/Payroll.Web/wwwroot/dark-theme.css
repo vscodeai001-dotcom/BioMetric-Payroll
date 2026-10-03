@@ -1378,3 +1378,27 @@ body.dark .status-pill-secondary {
     border-color: rgba(148, 163, 184, 0.3) !important;
 }
 
+/* Raw Punch Inspector / Punch Audit Hub Dark Mode Nav-pills and Tabs */
+body.dark .hub-nav-pills,
+[data-bs-theme="dark"] .hub-nav-pills {
+    background: #1b222c !important;
+    border: 1px solid #344150 !important;
+}
+
+body.dark .hub-nav-pills .nav-link,
+[data-bs-theme="dark"] .hub-nav-pills .nav-link {
+    color: #94a3b8 !important;
+}
+
+body.dark .hub-nav-pills .nav-link:hover:not(.active),
+[data-bs-theme="dark"] .hub-nav-pills .nav-link:hover:not(.active) {
+    color: #f1f5f9 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+
+body.dark .hub-nav-pills .nav-link.active,
+[data-bs-theme="dark"] .hub-nav-pills .nav-link.active {
+    background-color: #3b82f6 !important;
+    color: #ffffff !important;
+}
+

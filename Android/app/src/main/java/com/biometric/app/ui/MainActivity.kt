@@ -2079,6 +2079,10 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, AdminAttendanceActivity::class.java))
         }
+        menus.rowRawPunchInspector.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, RawPunchInspectorActivity::class.java))
+        }
         menus.rowCompanyReport.setOnClickListener {
             HapticUtil.vibrateClick(it)
             startActivity(Intent(this, ReportCenterActivity::class.java))

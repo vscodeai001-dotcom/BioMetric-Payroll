@@ -41,6 +41,7 @@ public sealed class FirebaseAttendanceService
     {
         if (from > to) return new();
 
+        List<DailySummary> localList = new();
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -48,7 +49,7 @@ public sealed class FirebaseAttendanceService
             if (dbFactory != null)
             {
                 using var db = await dbFactory.CreateDbContextAsync(ct);
-                var localList = await db.DailySummaries.AsNoTracking()
+                localList = await db.DailySummaries.AsNoTracking()
                     .Where(x => x.ShiftDate >= from && x.ShiftDate <= to)
                     .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
                     .ToListAsync(ct);
@@ -56,7 +57,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (localList.Count > 0 || isOffline)
+                if (isOffline)
                 {
                     return localList
                         .GroupBy(x => (x.EmployeeID, x.ShiftDate))
@@ -68,7 +69,14 @@ public sealed class FirebaseAttendanceService
         }
 
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, "daily_summaries", ct);
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
+        {
+            return localList
+                .GroupBy(x => (x.EmployeeID, x.ShiftDate))
+                .Select(g => g.OrderByDescending(s => s.EarnedStandardHours).ThenByDescending(s => s.SummaryID).First())
+                .OrderBy(x => x.ShiftDate).ThenBy(x => x.EmployeeID)
+                .ToList();
+        }
 
         var result = new List<DailySummary>();
         if (json.Value.ValueKind == JsonValueKind.Object)
@@ -90,6 +98,18 @@ public sealed class FirebaseAttendanceService
                 if (row.ValueKind != JsonValueKind.Object) continue;
                 var summary = ParseDailySummary(row, fallbackId, from, to);
                 if (summary != null) result.Add(summary);
+            }
+        }
+
+        if (localList.Count > 0)
+        {
+            var existingKeys = new HashSet<(int EmployeeID, DateOnly ShiftDate)>(result.Select(r => (r.EmployeeID, r.ShiftDate)));
+            foreach (var ls in localList)
+            {
+                if (existingKeys.Add((ls.EmployeeID, ls.ShiftDate)))
+                {
+                    result.Add(ls);
+                }
             }
         }
 

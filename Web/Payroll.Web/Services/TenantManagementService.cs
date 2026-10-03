@@ -130,24 +130,7 @@ namespace Payroll.Web.Services
                         _logger.LogInformation("Seeded default primary tenant {TenantId} ({CompanyName})", tenant.TenantId, tenant.CompanyName);
                     }
                 }
-                else
-                {
-                    // Detect and repair any accidental name collision between primary and secondary tenants
-                    var secondaryTenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId != TenantContextService.DefaultTenantId);
-                    if (primaryTenant != null && secondaryTenant != null && string.Equals(primaryTenant.CompanyName, secondaryTenant.CompanyName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        primaryTenant.CompanyName = "Yes company";
-                        var setting1 = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
-                        if (setting1 != null)
-                        {
-                            setting1.CompanyName = "Yes company";
-                        }
-                        await db.SaveChangesAsync();
-                        _logger.LogInformation("Restored primary tenant {TenantId} to 'Yes company' after collision with tenant {SecondaryId}", primaryTenant.TenantId, secondaryTenant.TenantId);
-                    }
-                }
-
-                // Ensure every tenant has their initial company settings node in Firebase
+                // Ensure every tenant has their company settings node in Firebase hydrated and in sync
                 var allTenants = await db.CompanyTenants.ToListAsync();
                 foreach (var t in allTenants)
                 {
@@ -160,10 +143,10 @@ namespace Payroll.Web.Services
                             {
                                 SettingID = t.CompanySettingId,
                                 CompanyName = t.CompanyName,
-                                AddressLine1 = "Office Location",
+                                AddressLine1 = "",
                                 CityStatePincode = "",
-                                OfficeLatitude = 11.9416,
-                                OfficeLongitude = 79.8083,
+                                OfficeLatitude = 0.0,
+                                OfficeLongitude = 0.0,
                                 GeoRadiusMeters = 100,
                                 WorkDayCutoffHour = 22,
                                 LateGraceMinutes = 15,
@@ -190,6 +173,25 @@ namespace Payroll.Web.Services
                             };
                             await _firebase.SetAsync($"owners/{t.TenantId}/company_settings/1", compPayload, default);
                             _logger.LogInformation("Synchronized initial company setting for tenant {TenantId} to Firebase.", t.TenantId);
+                        }
+                        else if (existingFb.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        {
+                            // If Firebase already has saved settings, hydrate SQLite from Firebase SSOT
+                            var fb = existingFb.Value;
+                            if (fb.TryGetProperty("companyName", out var cn) && !string.IsNullOrWhiteSpace(cn.GetString()) && !cn.GetString()!.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase))
+                            {
+                                cs.CompanyName = cn.GetString()!.Trim();
+                                if (!string.IsNullOrWhiteSpace(t.CompanyName) && !t.CompanyName.Equals(cs.CompanyName))
+                                {
+                                    t.CompanyName = cs.CompanyName;
+                                }
+                            }
+                            if (fb.TryGetProperty("addressLine1", out var a1) && a1.GetString() is string sA1 && !sA1.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase)) cs.AddressLine1 = sA1.Trim();
+                            if (fb.TryGetProperty("cityStatePincode", out var csp) && csp.GetString() is string sCsp && !sCsp.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase)) cs.CityStatePincode = sCsp.Trim();
+                            if (fb.TryGetProperty("officeLatitude", out var lat) && lat.TryGetDouble(out var dLat) && dLat != 0.0) cs.OfficeLatitude = dLat;
+                            if (fb.TryGetProperty("officeLongitude", out var lon) && lon.TryGetDouble(out var dLon) && dLon != 0.0) cs.OfficeLongitude = dLon;
+                            if (fb.TryGetProperty("geoRadiusMeters", out var rad) && rad.TryGetInt32(out var iRad) && iRad > 0) cs.GeoRadiusMeters = iRad;
+                            await db.SaveChangesAsync();
                         }
                     }
                     catch (Exception exSync)

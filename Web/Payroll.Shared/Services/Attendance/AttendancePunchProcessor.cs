@@ -100,8 +100,9 @@ namespace Payroll.Shared.Services
                     null);
             }
 
-            // 1. Check feature toggle: If geofencing or auto-punching is disabled, exclude Tier 3 geofence punches
-            bool allowGeofence = featureSettings == null || (featureSettings.EnableGeoFencing && featureSettings.EnableAutomaticGeofencePunching);
+            // 1. Check feature toggle: All existing ledger punches are valid for evaluation.
+            // Feature toggle controls real-time generation, but recorded punches must always be evaluated.
+            bool allowGeofence = true;
 
             // 2. Normalize attendance timestamps to MINUTE precision.
             var normalized = punches
@@ -144,12 +145,17 @@ namespace Payroll.Shared.Services
                 }
 
                 if (!isDup && !string.IsNullOrWhiteSpace(p.BiometricID) &&
-                    (p.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
-                     p.BiometricID.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase) ||
-                     Guid.TryParse(p.BiometricID, out _)))
+                    (Guid.TryParse(p.BiometricID, out _) ||
+                     (p.BiometricID.Length > 20 &&
+                      !p.BiometricID.Equals("AUTO_IN", StringComparison.OrdinalIgnoreCase) &&
+                      !p.BiometricID.Equals("AUTO_OUT", StringComparison.OrdinalIgnoreCase) &&
+                      !p.BiometricID.Equals("MANUAL_IN", StringComparison.OrdinalIgnoreCase) &&
+                      !p.BiometricID.Equals("MANUAL_OUT", StringComparison.OrdinalIgnoreCase) &&
+                      !p.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase))))
                 {
                     if (deduplicated.Any(x => x.EmployeeID == p.EmployeeID &&
-                                              string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase)))
+                                              string.Equals(x.BiometricID, p.BiometricID, StringComparison.OrdinalIgnoreCase) &&
+                                              Math.Abs((x.PunchTime - p.PunchTime).TotalMinutes) < 2))
                     {
                         isDup = true;
                     }

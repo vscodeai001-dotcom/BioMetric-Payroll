@@ -677,13 +677,14 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun DataSnapshot.toLocalCompanySettings() = LocalCompanySettings(
         id = 1,
-        companyName = s("companyName") ?: "",
-        addressLine1 = s("addressLine1") ?: "",
-        cityStatePincode = s("cityStatePincode") ?: "",
+        companyName = s("companyName")?.takeIf { it.isNotBlank() && !it.equals("Your Company Name", ignoreCase = true) }
+            ?: sessionStore.activeCompanyName().takeIf { it.isNotBlank() } ?: "",
+        addressLine1 = s("addressLine1")?.takeIf { !it.equals("Address Line 1", ignoreCase = true) } ?: "",
+        cityStatePincode = s("cityStatePincode")?.takeIf { !it.equals("City, State, Pincode", ignoreCase = true) } ?: "",
         salaryCalculationMethod = s("salaryCalculationMethod") ?: "Days in Month",
-        officeLatitude = d("officeLatitude"),
-        officeLongitude = d("officeLongitude"),
-        geoRadiusMeters = i("geoRadiusMeters").takeIf { it > 0 } ?: 1000,
+        officeLatitude = d("officeLatitude").takeIf { it != 0.0 } ?: (d("latitude").takeIf { it != 0.0 } ?: 0.0),
+        officeLongitude = d("officeLongitude").takeIf { it != 0.0 } ?: (d("longitude").takeIf { it != 0.0 } ?: 0.0),
+        geoRadiusMeters = (i("geoRadiusMeters") ?: i("radius") ?: i("geo_radius_meters")).takeIf { it > 0 } ?: 100,
         zktecoIP = s("zktecoIP"),
         zktecoPort = i("zktecoPort").takeIf { it > 0 } ?: 4370,
         zktecoMachineNumber = i("zktecoMachineNumber").takeIf { it > 0 } ?: 1,
