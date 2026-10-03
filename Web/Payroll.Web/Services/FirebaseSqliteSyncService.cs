@@ -954,10 +954,11 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         var source = GetString(data.Value, "source") ?? "Remote";
         var timestamp = GetLong(data.Value, "timestamp");
 
-        if (timestamp > 0 && timestamp < _serviceStartTimeEpochMs)
+        if (timestamp > 0 && timestamp <= _lastProcessedWipeEpochMs)
             return;
 
-        if (timestamp > 0 && timestamp <= _lastProcessedWipeEpochMs)
+        // Allow wipe events up to 15 minutes before startup to account for clock skew between mobile and server
+        if (timestamp > 0 && timestamp < (_serviceStartTimeEpochMs - 900_000L))
             return;
 
         _lastProcessedWipeEpochMs = timestamp;
@@ -1809,8 +1810,20 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 existingFeature.AdminCanManageShifts = GetBool(child.Value, "adminCanManageShifts", "AdminCanManageShifts");
                 existingFeature.AdminCanManagePunchApprovals = GetBool(child.Value, "adminCanManagePunchApprovals", "AdminCanManagePunchApprovals");
                 existingFeature.AdminCanViewReports = GetBool(child.Value, "adminCanViewReports", "AdminCanViewReports");
-                existingFeature.AdminCanManageEmployeePermissions = GetBool(child.Value, "adminCanManageEmployeePermissions", "AdminCanManageEmployeePermissions");
                 existingFeature.AdminCanManageFeatureToggles = GetBool(child.Value, "adminCanManageFeatureToggles", "AdminCanManageFeatureToggles");
+
+                var depMode = GetString(child.Value, "deploymentMode", "DeploymentMode", "deployment_mode");
+                if (!string.IsNullOrWhiteSpace(depMode))
+                {
+                    existingFeature.DeploymentMode = depMode.Equals("Online", StringComparison.OrdinalIgnoreCase) ? "CloudOnly" : depMode;
+                }
+                existingFeature.IsOfflineMode = GetBool(child.Value, "isOfflineMode", "IsOfflineMode", "is_offline_mode");
+
+                if (tenant != null)
+                {
+                    tenant.DeploymentMode = existingFeature.DeploymentMode;
+                    tenant.IsOfflineMode = existingFeature.IsOfflineMode;
+                }
                 break;
             }
 

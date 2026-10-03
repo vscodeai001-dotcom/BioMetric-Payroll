@@ -75,6 +75,201 @@
                 android:orientation="vertical"
                 android:visibility="visible">
 
+                <!-- Top Row: Setup New Company Button -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="⚙️ Deployment Architecture"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="@color/colorPrimary"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnLaunchCompanySetup"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="✨ Create / Setup Company"
+                        android:textSize="11sp"
+                        app:cornerRadius="18dp"
+                        android:paddingHorizontal="12dp" />
+                </LinearLayout>
+
+                <!-- Architecture & Deployment Mode Card -->
+                <com.google.android.material.card.MaterialCardView
+                    style="@style/Widget.App.CardView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="16dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="2dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="12dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Select Synchronization Mode:"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tvDeploymentModeBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:paddingHorizontal="10dp"
+                                android:paddingVertical="4dp"
+                                android:text="🌐 Cloud + Local"
+                                android:textColor="@color/blue_900"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:background="@drawable/badge_rounded_blue" />
+                        </LinearLayout>
+
+                        <!-- 3 Cards: Hybrid, Cloud Only, Offline -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <!-- Option 1: Hybrid (Cloud + Local) -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/cardModeHybrid"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="4dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                app:cardCornerRadius="12dp"
+                                app:cardElevation="0dp"
+                                app:strokeColor="@color/colorPrimary"
+                                app:strokeWidth="2dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="8dp">
+
+                                    <TextView
+                                        android:id="@+id/tvModeHybridTitle"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="🌐 Hybrid"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="Cloud + Local"
+                                        android:textColor="@color/text_secondary"
+                                        android:textSize="9sp" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <!-- Option 2: Cloud Only -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/cardModeCloudOnly"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginHorizontal="4dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                app:cardCornerRadius="12dp"
+                                app:cardElevation="0dp"
+                                app:strokeColor="@color/outline_variant"
+                                app:strokeWidth="1dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="8dp">
+
+                                    <TextView
+                                        android:id="@+id/tvModeCloudTitle"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="☁️ Cloud"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="Pure Cloud Only"
+                                        android:textColor="@color/text_secondary"
+                                        android:textSize="9sp" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <!-- Option 3: Offline Standalone -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/cardModeOffline"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="4dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                app:cardCornerRadius="12dp"
+                                app:cardElevation="0dp"
+                                app:strokeColor="@color/outline_variant"
+                                app:strokeWidth="1dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="8dp">
+
+                                    <TextView
+                                        android:id="@+id/tvModeOfflineTitle"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="📴 Offline"
+                                        android:textSize="11sp"
+                                        android:textStyle="bold" />
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:text="Local Room DB"
+                                        android:textColor="@color/text_secondary"
+                                        android:textSize="9sp" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
                 <!-- Company Details Card -->
                 <TextView
                     android:layout_width="wrap_content"

@@ -90,4 +90,11 @@
     <color name="dashboard_tools_bg">#F1F5F9</color>
     <color name="dashboard_tools_stroke">#CBD5E1</color>
     <color name="dashboard_tools_icon_bg">#E2E8F0</color>
+
+    <!-- ══ Raw Punch Inspector Colors ══ -->
+    <color name="punch_accepted_color">#10B981</color>   <!-- Emerald 500 -->
+    <color name="punch_suppressed_color">#EF4444</color> <!-- Red 500 -->
+    <color name="punch_in_color">#10B981</color>         <!-- Green for IN -->
+    <color name="punch_out_color">#F97316</color>        <!-- Orange for OUT -->
+    <color name="grey_500">#6B7280</color>
 </resources>

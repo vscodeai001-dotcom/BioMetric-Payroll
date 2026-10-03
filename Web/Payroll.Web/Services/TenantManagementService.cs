@@ -47,6 +47,7 @@ namespace Payroll.Web.Services
         private readonly RoleManager<IdentityRole> _roleManager;
         private readonly FirebaseRealtimeService _firebase;
         private readonly AttendanceRefreshService _refreshService;
+        private readonly ITenantContextService _tenantContext;
         private readonly ILogger<TenantManagementService> _logger;
 
         public TenantManagementService(
@@ -55,6 +56,7 @@ namespace Payroll.Web.Services
             RoleManager<IdentityRole> roleManager,
             FirebaseRealtimeService firebase,
             AttendanceRefreshService refreshService,
+            ITenantContextService tenantContext,
             ILogger<TenantManagementService> logger)
         {
             _dbFactory = dbFactory;
@@ -62,6 +64,7 @@ namespace Payroll.Web.Services
             _roleManager = roleManager;
             _firebase = firebase;
             _refreshService = refreshService;
+            _tenantContext = tenantContext;
             _logger = logger;
         }
 
@@ -95,41 +98,43 @@ namespace Payroll.Web.Services
 
                 await AppDbContext.EnsureSqliteSchemaUpdatedAsync(db);
 
+                var anyTenants = await db.CompanyTenants.AnyAsync();
                 var primaryTenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId == TenantContextService.DefaultTenantId);
-                if (primaryTenant == null)
+                if (primaryTenant == null && !anyTenants)
                 {
                     var defaultCompany = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
-                    var companyName = defaultCompany?.CompanyName;
-                    if (string.IsNullOrWhiteSpace(companyName) || companyName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+                    var companyName = defaultCompany?.CompanyName?.Trim();
+                    // Do NOT auto-seed if the company was explicitly deleted or empty
+                    if (!string.IsNullOrWhiteSpace(companyName) &&
+                        !companyName.Equals("Testing", StringComparison.OrdinalIgnoreCase) &&
+                        !companyName.Equals("New Company", StringComparison.OrdinalIgnoreCase))
                     {
-                        companyName = "Yes company";
+                        var tenant = new CompanyTenant
+                        {
+                            TenantId = TenantContextService.DefaultTenantId,
+                            CompanyName = companyName,
+                            CompanyCode = "PRIMARY",
+                            AdminEmail = FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail,
+                            AdminName = "Super Administrator",
+                            AdminPhone = "",
+                            IconEmoji = "🏢",
+                            PlanMode = "Spark",
+                            IsActive = true,
+                            CreatedAtUtc = DateTime.UtcNow,
+                            CompanySettingId = 1,
+                            FeatureSettingsId = 1
+                        };
+
+                        db.CompanyTenants.Add(tenant);
+                        await db.SaveChangesAsync();
+                        _logger.LogInformation("Seeded default primary tenant {TenantId} ({CompanyName})", tenant.TenantId, tenant.CompanyName);
                     }
-
-                    var tenant = new CompanyTenant
-                    {
-                        TenantId = TenantContextService.DefaultTenantId,
-                        CompanyName = companyName,
-                        CompanyCode = "PRIMARY",
-                        AdminEmail = FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail,
-                        AdminName = "Super Administrator",
-                        AdminPhone = "",
-                        IconEmoji = "🏢",
-                        PlanMode = "Spark",
-                        IsActive = true,
-                        CreatedAtUtc = DateTime.UtcNow,
-                        CompanySettingId = 1,
-                        FeatureSettingsId = 1
-                    };
-
-                    db.CompanyTenants.Add(tenant);
-                    await db.SaveChangesAsync();
-                    _logger.LogInformation("Seeded default primary tenant {TenantId} ({CompanyName})", tenant.TenantId, tenant.CompanyName);
                 }
                 else
                 {
                     // Detect and repair any accidental name collision between primary and secondary tenants
                     var secondaryTenant = await db.CompanyTenants.FirstOrDefaultAsync(t => t.TenantId != TenantContextService.DefaultTenantId);
-                    if (secondaryTenant != null && string.Equals(primaryTenant.CompanyName, secondaryTenant.CompanyName, StringComparison.OrdinalIgnoreCase))
+                    if (primaryTenant != null && secondaryTenant != null && string.Equals(primaryTenant.CompanyName, secondaryTenant.CompanyName, StringComparison.OrdinalIgnoreCase))
                     {
                         primaryTenant.CompanyName = "Yes company";
                         var setting1 = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == 1);
@@ -310,7 +315,7 @@ namespace Payroll.Web.Services
             features.Id = maxFeatureId + 1;
             features.FirebasePlanMode = request.PlanMode;
             features.IsOfflineMode = isOffline;
-            features.DeploymentMode = isOffline ? "Offline" : "Online";
+            features.DeploymentMode = isOffline ? "Offline" : "CloudOnly";
             db.FeatureSettings.Add(features);
             await db.SaveChangesAsync();
 
@@ -327,7 +332,7 @@ namespace Payroll.Web.Services
                 IconEmoji = string.IsNullOrWhiteSpace(request.IconEmoji) ? "🏢" : request.IconEmoji.Trim(),
                 PlanMode = request.PlanMode,
                 IsOfflineMode = isOffline,
-                DeploymentMode = isOffline ? "Offline" : "Online",
+                DeploymentMode = isOffline ? "Offline" : "CloudOnly",
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow,
                 CompanySettingId = companySetting.SettingID,
@@ -516,6 +521,10 @@ namespace Payroll.Web.Services
             existing.IconEmoji = string.IsNullOrWhiteSpace(updated.IconEmoji) ? "🏢" : updated.IconEmoji.Trim();
             existing.PlanMode = updated.PlanMode;
             existing.IsActive = updated.IsActive;
+            existing.DeploymentMode = string.Equals(updated.DeploymentMode, "Online", StringComparison.OrdinalIgnoreCase) 
+                ? "CloudOnly" 
+                : (string.IsNullOrWhiteSpace(updated.DeploymentMode) ? "CloudOnly" : updated.DeploymentMode);
+            existing.IsOfflineMode = updated.IsOfflineMode;
 
             // Keep CompanySettings in sync
             var cs = await db.CompanySettings.FirstOrDefaultAsync(c => c.SettingID == existing.CompanySettingId);
@@ -537,7 +546,9 @@ namespace Payroll.Web.Services
                     ["adminPhone"] = existing.AdminPhone,
                     ["iconEmoji"] = existing.IconEmoji,
                     ["planMode"] = existing.PlanMode,
-                    ["isActive"] = existing.IsActive
+                    ["isActive"] = existing.IsActive,
+                    ["deploymentMode"] = existing.DeploymentMode,
+                    ["isOfflineMode"] = existing.IsOfflineMode
                 };
                 await _firebase.UpdateAsync(new Dictionary<string, object?>
                 {
@@ -580,7 +591,7 @@ namespace Payroll.Web.Services
 
             var isOffline = newSettings.IsOfflineMode || string.Equals(newSettings.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase);
             tenant.IsOfflineMode = isOffline;
-            tenant.DeploymentMode = isOffline ? "Offline" : "Online";
+            tenant.DeploymentMode = isOffline ? "Offline" : (string.Equals(newSettings.DeploymentMode, "Online", StringComparison.OrdinalIgnoreCase) ? "CloudOnly" : newSettings.DeploymentMode);
 
             await db.SaveChangesAsync();
 
@@ -890,7 +901,8 @@ namespace Payroll.Web.Services
                     _logger.LogWarning(idEx, "Warning while purging employee identity users");
                 }
 
-                // 5. Invalidate global caches
+                // 5. Invalidate global caches & clear active tenant
+                await _tenantContext.ClearActiveTenantAsync();
                 await _refreshService.NotifyGlobalRefreshAsync($"COMPANY_DELETED:{effectiveTenantId}");
 
                 _logger.LogInformation("Company {CompanyName} ({TenantId}) deleted successfully from Cloud and Local DB.",

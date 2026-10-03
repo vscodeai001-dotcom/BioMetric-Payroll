@@ -59,5 +59,7 @@ data class LocalFeatureSettings(
     var adminCanManagePunchApprovals: Boolean = true,
     var adminCanManageFeatureToggles: Boolean = false,
     var firebasePlanMode: String = "Spark",
+    var isOfflineMode: Boolean = false,
+    var deploymentMode: String = "CloudOnly",
     val syncState: Int = 1
 )

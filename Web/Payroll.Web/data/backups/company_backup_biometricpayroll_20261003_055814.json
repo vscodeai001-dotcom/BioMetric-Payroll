@@ -1,0 +1,15 @@
+{
+  "Version": "1.0",
+  "ExportedAtUtc": "2026-10-03T05:58:14.2437748Z",
+  "TenantId": "biometricpayroll",
+  "CompanyName": "Yes company",
+  "AdminEmail": "prakashshiva368@gmail.com",
+  "EmployeeCount": 0,
+  "Employees": [],
+  "AttendanceLogs": [],
+  "GeoPunchAudits": [],
+  "ShiftSchedules": [],
+  "LeaveRequests": [],
+  "SalaryAdvances": [],
+  "PayrollHistory": []
+}

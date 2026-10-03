@@ -68,20 +68,65 @@ class MainRepository(
         name = name,
         role = role,
         isActive = isActive,
+        // Payroll
         salaryType = salaryType,
         salaryRate = salaryRate,
         basicSalaryComponent = basicSalaryComponent,
         hraComponent = hraComponent,
         daComponent = daComponent,
         standardHours = standardHours,
+        salaryCalculationMethod = salaryCalculationMethod,
+        dailyAllowance = dailyAllowance,
+        nightShiftAllowance = nightShiftAllowance,
+        allowanceEffectiveDate = allowanceEffectiveDate,
+        // Shift
+        shiftStart = shiftStart,
+        shiftEnd = shiftEnd,
+        shiftMode = shiftMode,
+        trackingMode = trackingMode,
+        breakHours = breakHours,
+        shift2Start = shift2Start,
+        shift2End = shift2End,
+        weekendShiftStart = weekendShiftStart,
+        weekendShiftEnd = weekendShiftEnd,
+        weekendBreakHours = weekendBreakHours,
+        weekendShift2Start = weekendShift2Start,
+        weekendShift2End = weekendShift2End,
+        compOffDayOfWeek = compOffDayOfWeek,
+        // OT / Rules
         otRule = otRule,
         otFlatRate = otFlatRate,
         otRateMultiplier = otRateMultiplier,
-        salaryCalculationMethod = salaryCalculationMethod,
-        compOffDayOfWeek = compOffDayOfWeek,
+        // Dates
+        hireDate = hireDate,
+        dob = dob,
+        terminateDate = terminateDate,
+        createdAt = createdAt,
+        // Contact / Identity
+        phone = phone,
+        email = email,
+        biometricId = biometricId,
+        // Leave / Bonus eligibility
+        isBonusEligibleRule = isBonusEligibleRule,
+        isPaidLeaveEligibleRule = isPaidLeaveEligibleRule,
+        paidLeaveOnWeekdays = paidLeaveOnWeekdays,
+        paidLeaveOnWeekends = paidLeaveOnWeekends,
+        paidLeaveBalance = paidLeaveBalance,
+        sickLeaveBalance = sickLeaveBalance,
+        // Shift Rotation
+        enableShiftRotation = enableShiftRotation,
+        rotationGroup = rotationGroup,
+        shiftRotationPattern = shiftRotationPattern,
+        // Statutory / Bank
         enablePf = enablePf,
         enableEsi = enableEsi,
         tdsRatePercent = tdsRatePercent,
+        bankAccountNumber = bankAccountNumber,
+        bankIfscCode = bankIfscCode,
+        bankName = bankName,
+        uanNumber = uanNumber,
+        esiNumber = esiNumber,
+        // Sync
         syncState = syncState,
         lastModified = lastModified
     )
@@ -377,7 +422,7 @@ class MainRepository(
     fun getShopEmployees(shopId: String?): Flow<List<Employee>> {
         return allEmployeesFlow.map { employees ->
             if (shopId.isNullOrEmpty()) employees
-            else employees.filter { it.shopId == shopId }
+            else employees.filter { it.shopId == shopId || it.shopId.isNullOrEmpty() }
         }
     }
 

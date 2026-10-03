@@ -56,7 +56,7 @@ namespace Payroll.Shared.Data
 
         [MaxLength(20)]
         [Column("deployment_mode")]
-        public string DeploymentMode { get; set; } = "Online"; // "Online" or "Offline"
+        public string DeploymentMode { get; set; } = "CloudOnly"; // "CloudOnly", "Hybrid", or "Offline"
 
         [Column("is_active")]
         public bool IsActive { get; set; } = true;

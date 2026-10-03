@@ -62,6 +62,7 @@ class WebParityHubActivity : MotionBaseActivity() {
             Module("ATTENDANCE", "📝", "Regularization Approval", "Attendance regularization workflow") { Intent(this, RegularizationActivity::class.java) },
             Module("ATTENDANCE", "📴", "Offline Tracking Details", "Temporary queued GPS delivery") { Intent(this, OfflineTrackingActivity::class.java) },
             Module("ATTENDANCE", "🗺️", "Location Tracking History", "GPS history and route replay") { Intent(this, RouteReplayActivity::class.java) },
+            Module("ATTENDANCE", "🛰️", "Raw Punch Inspector", "3-tier telemetry audit hub") { Intent(this, RawPunchInspectorActivity::class.java) },
 
             // ADMIN & SETTINGS
             Module("ADMIN & SETTINGS", "👥", "Employee Records", "Employees • CRUD • details") { Intent(this, StaffActivity::class.java) },

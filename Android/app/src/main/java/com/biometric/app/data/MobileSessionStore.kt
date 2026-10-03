@@ -47,6 +47,29 @@ class MobileSessionStore @Inject constructor(
     fun isReliabilitySetupDone(): Boolean = prefs.getBoolean(KEY_RELIABILITY_DONE, false)
     fun setReliabilitySetupDone(done: Boolean) { prefs.edit { putBoolean(KEY_RELIABILITY_DONE, done) } }
 
+    fun setFirebaseOwnerUid(uid: String) {
+        if (uid.isNotBlank()) {
+            prefs.edit { putString(KEY_FIREBASE_OWNER_UID, uid) }
+        }
+    }
+
+    fun saveActiveTenant(tenantId: String, name: String, code: String) {
+        prefs.edit {
+            putString(KEY_FIREBASE_OWNER_UID, tenantId)
+            putString(KEY_ACTIVE_TENANT_NAME, name)
+            putString(KEY_ACTIVE_TENANT_CODE, code)
+        }
+    }
+
+    fun activeCompanyName(): String = prefs.getString(KEY_ACTIVE_TENANT_NAME, null)?.takeIf { it.isNotBlank() } ?: "Sri Diyaa Agencies"
+    fun activeCompanyCode(): String = prefs.getString(KEY_ACTIVE_TENANT_CODE, null)?.takeIf { it.isNotBlank() } ?: ""
+
+    fun isOfflineMode(): Boolean = prefs.getBoolean(KEY_IS_OFFLINE_MODE, false)
+    fun setOfflineMode(offline: Boolean) { prefs.edit { putBoolean(KEY_IS_OFFLINE_MODE, offline) } }
+
+    fun deploymentMode(): String = prefs.getString(KEY_DEPLOYMENT_MODE, "CloudOnly") ?: "CloudOnly"
+    fun setDeploymentMode(mode: String) { prefs.edit { putString(KEY_DEPLOYMENT_MODE, mode) } }
+
     private val syncStatePrefs get() = context.getSharedPreferences("app_sync_state", Context.MODE_PRIVATE)
 
     fun lastProcessedWipeTimestamp(): Long = syncStatePrefs.getLong("last_processed_wipe_timestamp", 0L)
@@ -117,6 +140,10 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_ACTIVE = "active"
         private const val KEY_GPS_SESSION = "gps_session_id"
         private const val KEY_RELIABILITY_DONE = "reliability_setup_done"
+        private const val KEY_IS_OFFLINE_MODE = "is_offline_mode"
+        private const val KEY_DEPLOYMENT_MODE = "deployment_mode"
+        private const val KEY_ACTIVE_TENANT_NAME = "active_tenant_name"
+        private const val KEY_ACTIVE_TENANT_CODE = "active_tenant_code"
         private const val KEY_SAVED_AUTH_EMAIL = "saved_auth_email"
         private const val KEY_SAVED_AUTH_PASS = "saved_auth_pass"
     }

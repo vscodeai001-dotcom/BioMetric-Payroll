@@ -140,6 +140,7 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     }
 
     suspend fun evaluateAutoPunch(location: Location) {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) return
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0) return
         lastLocation = location

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bottom_sheet_rounded_bg"
+    android:paddingBottom="24dp">
+
+    <!-- Handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="16dp"
+        android:background="#CBD5E1" />
+
+    <!-- Header row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="20dp"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvInspectEmployee"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="👤 Employee"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#1E1B4B" />
+
+        <Button
+            android:id="@+id/btnInspectClose"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="✕ Close"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#F1F5F9" android:layout_marginBottom="12dp" />
+
+    <!-- Metadata grid -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp">
+
+        <!-- Row: Role, Date -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Role" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectRole" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Staff" android:textSize="14sp" android:textColor="#1E1B4B" android:textStyle="bold" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Punch Date" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectDate" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="14sp" android:textColor="#1E1B4B" android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Row: Time, Direction -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Punch Time" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectTime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="22sp" android:textColor="#1E1B4B" android:textStyle="bold" android:fontFamily="monospace" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Direction" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectDirection" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="16sp" android:textColor="#1E1B4B" android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Row: Tier, Result -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="12dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Source Tier" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectTier" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="13sp" android:textColor="#1E1B4B" android:textStyle="bold" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Evaluation Result" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectResult" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="16sp" android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Divider -->
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#F1F5F9" android:layout_marginBottom="10dp" />
+
+        <!-- Rule Category + Reason -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🛡️ Rule Category" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" android:layout_marginBottom="2dp" />
+        <TextView android:id="@+id/tvInspectCategory" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="13sp" android:textStyle="bold" android:textColor="#4B5563" android:layout_marginBottom="10dp" />
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📋 Hybrid Rule Reason" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" android:layout_marginBottom="2dp" />
+        <TextView android:id="@+id/tvInspectReason" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="—" android:textSize="13sp" android:textColor="#374151" android:background="#F9FAFB" android:padding="10dp" android:lineSpacingMultiplier="1.3" android:layout_marginBottom="10dp" />
+
+        <!-- Divider -->
+        <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#F1F5F9" android:layout_marginBottom="10dp" />
+
+        <!-- Device / Biometric IDs -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="10dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🖥 Device ID" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectDeviceId" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="12sp" android:fontFamily="monospace" android:textColor="#4B5563" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🆔 Biometric ID" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectBioId" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="12sp" android:fontFamily="monospace" android:textColor="#4B5563" android:maxLines="2" android:ellipsize="end" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- GPS Coordinates -->
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📌 GPS Coordinates" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" android:layout_marginBottom="2dp" />
+        <TextView android:id="@+id/tvInspectCoords" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="12sp" android:fontFamily="monospace" android:textColor="#4B5563" android:layout_marginBottom="6dp" />
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📏 Geofence Distance" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectDistance" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="12sp" android:textColor="#4B5563" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔢 Sequence #" android:textSize="11sp" android:textColor="#9CA3AF" android:textStyle="bold" />
+                <TextView android:id="@+id/tvInspectSequence" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="—" android:textSize="12sp" android:fontFamily="monospace" android:textColor="#4B5563" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

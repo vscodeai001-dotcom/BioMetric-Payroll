@@ -89,8 +89,8 @@ class StaffViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            repository.allShopsFlow.firstOrNull()?.let { shops ->
-                if (_shopId.value == null && shops.isNotEmpty()) {
+            repository.allShopsFlow.collectLatest { shops ->
+                if (_shopId.value.isNullOrBlank() && shops.isNotEmpty()) {
                     _shopId.value = shops.first().shopId
                 }
             }
@@ -167,10 +167,10 @@ class StaffViewModel @Inject constructor(
 
     fun setSelectedDay(cal: Calendar) { _selectedDay.value = cal }
 
-    private val _isHolidaysLoading = MutableStateFlow(value = true)
+    private val _isHolidaysLoading = MutableStateFlow(value = false)
     val isHolidaysLoading = _isHolidaysLoading.asStateFlow()
 
-    fun getClosedDays(shopId: String, start: Long, end: Long): Flow<List<ShopClosedDay>> =
+    fun getClosedDays(shopId: String?, start: Long, end: Long): Flow<List<ShopClosedDay>> =
         repository.getClosedDays(shopId, start, end)
             .onStart { _isHolidaysLoading.value = true }
             .onEach { _isHolidaysLoading.value = false }
@@ -207,9 +207,24 @@ class StaffViewModel @Inject constructor(
         bonusEligible: Boolean, plEligible: Boolean,
         plWeekdays: Boolean = true, plWeekends: Boolean = false,
     ): Boolean {
-        val sId = _shopId.value ?: run {
-            Log.e("StaffViewModel", "Cannot add employee: No shop selected")
-            return false
+        val sId = _shopId.value?.takeIf { it.isNotBlank() } ?: run {
+            val existingShops = repository.allShopsFlow.value
+            val resolved = if (existingShops.isNotEmpty()) {
+                existingShops.first().shopId
+            } else {
+                val defaultShopId = "shop_default"
+                val defaultShop = Shop(
+                    shopId = defaultShopId,
+                    name = "Main Branch",
+                    location = "Head Office",
+                    openingDate = System.currentTimeMillis(),
+                    isActive = true
+                )
+                viewModelScope.launch { repository.insertShop(defaultShop) }
+                defaultShopId
+            }
+            _shopId.value = resolved
+            resolved
         }
         viewModelScope.launch {
             try {

@@ -77,6 +77,9 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     fun getOwnerRef(): DatabaseReference? {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
+            return null
+        }
         val uid = getOwnerUid() ?: return null
         return database.child("owners").child(uid)
     }
@@ -653,6 +656,7 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     suspend fun pushTrackingSessionStarted(employeeId: Int, sessionId: String): Boolean {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) return false
         if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
         val ref = getGlobalRef().child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
@@ -805,6 +809,7 @@ class FirebaseSyncManager @Inject constructor(
         isOffline: Boolean = false,
         recordHistory: Boolean = true
     ): Boolean {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) return false
         if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank() || sequence <= 0L) return false
 
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false

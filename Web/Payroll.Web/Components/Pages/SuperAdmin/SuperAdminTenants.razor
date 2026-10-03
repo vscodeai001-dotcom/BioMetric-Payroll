@@ -1150,7 +1150,6 @@ else
             isSuperAdmin = await TenantContext.IsSuperAdminAsync();
             if (isSuperAdmin)
             {
-                await TenantManager.EnsureDefaultTenantSeededAsync();
                 allTenants = await TenantManager.GetAllTenantsAsync();
                 activeTenant = await TenantContext.GetActiveTenantAsync();
             }

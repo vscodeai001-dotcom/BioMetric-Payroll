@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/cardPunchItem"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:clickable="true"
+    android:focusable="true"
+    app:cardCornerRadius="14dp"
+    app:cardElevation="3dp"
+    app:cardBackgroundColor="#FFFFFF"
+    app:strokeWidth="3dp"
+    app:strokeColor="#E0E7FF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <!-- Row 1: Time / Date + Direction Badge + Inspect button -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <!-- Timestamp block -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvPunchTimestamp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="00:00:00"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace"
+                    android:textColor="#1E1B4B" />
+
+                <TextView
+                    android:id="@+id/tvPunchDate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="01-Jan-2026"
+                    android:textSize="11sp"
+                    android:textColor="#6B7280" />
+            </LinearLayout>
+
+            <!-- Direction badge -->
+            <TextView
+                android:id="@+id/tvPunchDirection"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📥 IN"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:background="@drawable/badge_bg_green"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="4dp"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Inspect button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnInspectPunch"
+                style="@style/Widget.Material3.Button.OutlinedButton.Icon"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:insetLeft="0dp"
+                android:insetRight="0dp"
+                android:contentDescription="Inspect punch"
+                app:icon="@drawable/ic_info"
+                app:iconSize="18dp"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:strokeColor="@color/colorPrimary" />
+        </LinearLayout>
+
+        <!-- Row 2: Employee avatar + name / meta -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <!-- Avatar circle -->
+            <TextView
+                android:id="@+id/tvPunchAvatar"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:text="?"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:gravity="center"
+                android:background="@drawable/bg_circle_avatar"
+                android:layout_marginEnd="10dp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvPunchEmpName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Employee Name"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#1E1B4B"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/tvPunchEmpMeta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ID: #1  •  Staff"
+                    android:textSize="11sp"
+                    android:textColor="#9CA3AF" />
+            </LinearLayout>
+
+            <!-- Source Tier badge -->
+            <TextView
+                android:id="@+id/tvPunchTier"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📟 Physical Machine"
+                android:textSize="10sp"
+                android:textColor="#1D4ED8"
+                android:background="@drawable/badge_bg_blue_light"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp"
+                android:maxLines="1" />
+        </LinearLayout>
+
+        <!-- Row 3: Device ID | Result -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <TextView
+                android:id="@+id/tvPunchDeviceId"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🖥 Terminal | 🆔 —"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:textColor="#6B7280"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/tvPunchResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✅ VALID"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/green" />
+        </LinearLayout>
+
+        <!-- Row 4: Reason -->
+        <TextView
+            android:id="@+id/tvPunchReason"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Accepted: Primary shift clock-in"
+            android:textSize="11sp"
+            android:textColor="#4B5563"
+            android:background="#F9FAFB"
+            android:padding="8dp"
+            android:fontFamily="sans-serif-light"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

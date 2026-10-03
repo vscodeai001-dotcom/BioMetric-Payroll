@@ -212,6 +212,6 @@ namespace Payroll.Shared.Data
         public bool IsOfflineMode { get; set; } = false;
 
         [Column("deployment_mode")]
-        public string DeploymentMode { get; set; } = "Online"; // "Online" or "Offline"
+        public string DeploymentMode { get; set; } = "CloudOnly"; // "CloudOnly", "Hybrid", or "Offline"
     }
 }

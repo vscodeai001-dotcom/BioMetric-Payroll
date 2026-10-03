@@ -47,11 +47,69 @@ object DatabaseModule {
     @Singleton
     @Suppress("DEPRECATION")
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase {
+        val migration24To25 = object : androidx.room.migration.Migration(24, 25) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Expand local_employees: add all fields that were missing.
+                // Using safe ADD COLUMN (SQLite ignores columns that already exist via try/catch).
+                val newColumns = listOf(
+                    "salaryCalculationMethod TEXT NOT NULL DEFAULT 'Days in Month'",
+                    "dailyAllowance REAL NOT NULL DEFAULT 0.0",
+                    "nightShiftAllowance REAL NOT NULL DEFAULT 0.0",
+                    "allowanceEffectiveDate INTEGER NOT NULL DEFAULT 0",
+                    "shiftStart TEXT NOT NULL DEFAULT '10:00'",
+                    "shiftEnd TEXT NOT NULL DEFAULT '22:00'",
+                    "shiftMode TEXT NOT NULL DEFAULT 'SINGLE_DAY'",
+                    "trackingMode TEXT NOT NULL DEFAULT '24/7'",
+                    "breakHours REAL NOT NULL DEFAULT 0.0",
+                    "shift2Start TEXT",
+                    "shift2End TEXT",
+                    "weekendShiftStart TEXT",
+                    "weekendShiftEnd TEXT",
+                    "weekendBreakHours REAL",
+                    "weekendShift2Start TEXT",
+                    "weekendShift2End TEXT",
+                    "compOffDayOfWeek INTEGER",
+                    "otRule TEXT NOT NULL DEFAULT 'No Overtime'",
+                    "otFlatRate REAL NOT NULL DEFAULT 0.0",
+                    "otRateMultiplier REAL NOT NULL DEFAULT 1.0",
+                    "hireDate INTEGER NOT NULL DEFAULT 0",
+                    "dob INTEGER",
+                    "terminateDate INTEGER",
+                    "createdAt INTEGER NOT NULL DEFAULT 0",
+                    "phone TEXT NOT NULL DEFAULT ''",
+                    "email TEXT",
+                    "biometricId TEXT NOT NULL DEFAULT ''",
+                    "isBonusEligibleRule INTEGER NOT NULL DEFAULT 1",
+                    "isPaidLeaveEligibleRule INTEGER NOT NULL DEFAULT 1",
+                    "paidLeaveOnWeekdays INTEGER NOT NULL DEFAULT 1",
+                    "paidLeaveOnWeekends INTEGER NOT NULL DEFAULT 0",
+                    "paidLeaveBalance REAL NOT NULL DEFAULT 0.0",
+                    "sickLeaveBalance REAL NOT NULL DEFAULT 0.0",
+                    "enableShiftRotation INTEGER NOT NULL DEFAULT 0",
+                    "rotationGroup TEXT",
+                    "shiftRotationPattern TEXT",
+                    "bankAccountNumber TEXT",
+                    "bankIfscCode TEXT",
+                    "bankName TEXT",
+                    "uanNumber TEXT",
+                    "esiNumber TEXT",
+                    "lastModified INTEGER NOT NULL DEFAULT 0"
+                )
+                newColumns.forEach { colDef ->
+                    try {
+                        db.execSQL("ALTER TABLE local_employees ADD COLUMN $colDef")
+                    } catch (_: Exception) {
+                        // Column already exists — safe to ignore
+                    }
+                }
+            }
+        }
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             "biometric_payroll.db"
         )
+            .addMigrations(migration24To25)
             .fallbackToDestructiveMigration(true)
             .build()
     }

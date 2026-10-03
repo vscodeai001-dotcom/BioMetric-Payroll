@@ -35,6 +35,14 @@ class SharedViewModel @Inject constructor(
     val allAttendancePunches: StateFlow<List<AttendancePunch>> = repository.allAttendancePunchesFlow
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Reactive mirror of company settings from Room (hydrated from Firebase SSOT). */
+    val companySettings: StateFlow<LocalCompanySettings?> = repository.companySettingsFlow
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
+    /** Reactive mirror of feature settings from Room (hydrated from Firebase SSOT). */
+    val featureSettings: StateFlow<LocalFeatureSettings?> = repository.featureSettingsFlow
+        .stateIn(scope, SharingStarted.Eagerly, null)
+
     val allDailySummaries: StateFlow<List<LocalDailySummary>> = repository.allDailySummariesFlow
         .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 

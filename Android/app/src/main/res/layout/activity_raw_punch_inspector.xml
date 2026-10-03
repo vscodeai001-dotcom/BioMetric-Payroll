@@ -1,0 +1,468 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F8F9FE"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- ═══ Toolbar ═══ -->
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbarRawPunch"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/colorPrimary"
+            android:elevation="6dp"
+            app:title="🛰 Raw Punch Inspector"
+            app:titleTextColor="#FFFFFF"
+            app:navigationIcon="@drawable/ic_back"
+            app:navigationIconTint="#FFFFFF" />
+
+        <!-- ═══ Header Banner ═══ -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_margin="12dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="4dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:text="🛰️"
+                        android:textSize="28sp"
+                        android:gravity="center" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:layout_marginStart="12dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Raw Punch Inspector"
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="#1E1B4B" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Multi-Mode Hub  •  Enterprise Telemetry"
+                            android:textSize="12sp"
+                            android:textColor="#6B7280" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📟 Physical  •  ✍️ Manual  •  📍 Geofence"
+                            android:textSize="11sp"
+                            android:textColor="#9CA3AF"
+                            android:layout_marginTop="2dp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Action Buttons Row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="12dp"
+                    android:gravity="end">
+
+                    <Button
+                        android:id="@+id/btnOctMatrix"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="🧪 Oct Matrix"
+                        android:textSize="11sp"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btnExportCsv"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="📥 Export CSV"
+                        android:textSize="11sp"
+                        android:enabled="false"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btnRefreshTelemetry"
+                        style="@style/Widget.Material3.Button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="🔄 Refresh"
+                        android:textSize="11sp"
+                        android:backgroundTint="@color/colorPrimary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ═══ KPI Cards Row 1: Total / Accepted / Suppressed ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginBottom="4dp">
+
+            <!-- Total Raw Punches -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#E0E7FF"
+                app:strokeWidth="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="All Punches" android:textSize="10sp" android:textColor="#6B7280" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📊" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiTotalCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="24sp" android:textStyle="bold" android:textColor="#1E1B4B" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="100% captured" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Accepted -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="2dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#D1FAE5"
+                app:strokeWidth="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Accepted" android:textSize="10sp" android:textColor="@color/green" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="✅" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiAcceptedCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="24sp" android:textStyle="bold" android:textColor="@color/green" />
+                    <TextView android:id="@+id/tvKpiAcceptedPct" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0% acceptance" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Suppressed -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#FEE2E2"
+                app:strokeWidth="2dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Suppressed" android:textSize="10sp" android:textColor="@color/red" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🚫" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiSuppressedCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="24sp" android:textStyle="bold" android:textColor="@color/red" />
+                    <TextView android:id="@+id/tvKpiSuppressedPct" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0% suppressed" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <!-- ═══ KPI Cards Row 2: Tier breakdown ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginBottom="8dp">
+
+            <!-- Physical Machine -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#DBEAFE"
+                app:strokeWidth="2dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Physical" android:textSize="10sp" android:textColor="@color/blue" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📟" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiPhysicalCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/blue" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tier 1 Hardware" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Manual Correction -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="2dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#FEF3C7"
+                app:strokeWidth="2dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Manual" android:textSize="10sp" android:textColor="@color/amber" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="✍️" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiManualCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/amber" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tier 2 Overrides" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- Auto Geofence -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="3dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:strokeColor="#E0E7FF"
+                app:strokeWidth="2dp">
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="10dp">
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="Geofence" android:textSize="10sp" android:textColor="@color/colorPrimary" />
+                        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📍" android:textSize="14sp" />
+                    </LinearLayout>
+                    <TextView android:id="@+id/tvKpiGeoCount" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0" android:textSize="20sp" android:textStyle="bold" android:textColor="@color/colorPrimary" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tier 3 Dynamic GPS" android:textSize="9sp" android:textColor="#9CA3AF" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
+        <!-- ═══ Filter Station ═══ -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginBottom="8dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="4dp"
+            app:cardBackgroundColor="#FFFFFF">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🔧 Filter Station"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#1E1B4B"
+                    android:layout_marginBottom="10dp" />
+
+                <!-- Date Row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:hint="📅 Start Date"
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etStartDate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:focusable="false"
+                            android:clickable="true"
+                            android:cursorVisible="false"
+                            android:textSize="13sp" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="6dp"
+                        android:hint="📅 End Date"
+                        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/etEndDate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:focusable="false"
+                            android:clickable="true"
+                            android:cursorVisible="false"
+                            android:textSize="13sp" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+
+                <!-- Employee Spinner -->
+                <Spinner
+                    android:id="@+id/spEmployee"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:background="@drawable/spinner_bg"
+                    android:layout_marginBottom="8dp"
+                    android:padding="8dp" />
+
+                <!-- Search box -->
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="🔍 Search telemetry (employee, device, reason...)"
+                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox.Dense"
+                    android:layout_marginBottom="10dp">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etSearchTelemetry"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="text"
+                        android:textSize="13sp" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- Mode chips -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📡 Source Mode" android:textSize="11sp" android:textColor="#6B7280" android:textStyle="bold" android:layout_marginBottom="4dp" />
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chipGroupMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true"
+                    app:selectionRequired="false"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.chip.Chip android:id="@+id/chipModeAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="All Modes" style="@style/Widget.MaterialComponents.Chip.Filter" android:checked="true" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipModePhysical" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📟 Physical" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipModeManual" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="✍️ Manual" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipModeGeo" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📍 Geofence" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Status chips -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔦 Result Status" android:textSize="11sp" android:textColor="#6B7280" android:textStyle="bold" android:layout_marginBottom="4dp" />
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chipGroupStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true"
+                    app:selectionRequired="false"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.chip.Chip android:id="@+id/chipStatusAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="All Status" style="@style/Widget.MaterialComponents.Chip.Filter" android:checked="true" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipStatusAccepted" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="✅ Accepted" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipStatusSuppressed" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🚫 Suppressed" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Direction chips -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="↕️ Direction" android:textSize="11sp" android:textColor="#6B7280" android:textStyle="bold" android:layout_marginBottom="4dp" />
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chipGroupDirection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true"
+                    app:selectionRequired="false"
+                    android:layout_marginBottom="8dp">
+                    <com.google.android.material.chip.Chip android:id="@+id/chipDirectionAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="All" style="@style/Widget.MaterialComponents.Chip.Filter" android:checked="true" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipDirectionIn" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📥 IN" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipDirectionOut" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="📤 OUT" style="@style/Widget.MaterialComponents.Chip.Filter" app:chipMinHeight="32dp" />
+                </com.google.android.material.chip.ChipGroup>
+
+                <!-- Quick date range chips -->
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⚡ Quick Range" android:textSize="11sp" android:textColor="#6B7280" android:textStyle="bold" android:layout_marginBottom="4dp" />
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/chipGroupQuickRange"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:singleSelection="true"
+                    app:selectionRequired="false">
+                    <com.google.android.material.chip.Chip android:id="@+id/chipQuickToday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Today" style="@style/Widget.MaterialComponents.Chip.Action" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipQuickYesterday" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Yesterday" style="@style/Widget.MaterialComponents.Chip.Action" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipQuickLast7" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Last 7 Days" style="@style/Widget.MaterialComponents.Chip.Action" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipQuickLast30" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Last 30 Days" style="@style/Widget.MaterialComponents.Chip.Action" app:chipMinHeight="32dp" />
+                    <com.google.android.material.chip.Chip android:id="@+id/chipQuickOctMatrix" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🧪 Oct 2026" style="@style/Widget.MaterialComponents.Chip.Action" app:chipMinHeight="32dp" />
+                </com.google.android.material.chip.ChipGroup>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ═══ SwipeRefresh + RecyclerView ═══ -->
+        <ProgressBar
+            android:id="@+id/progressRawPunch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_margin="12dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/tvRawPunchEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="🛰️ No telemetry data found for the selected filters.\nTry adjusting date range or employee filter."
+            android:gravity="center"
+            android:textSize="14sp"
+            android:textColor="#9CA3AF"
+            android:padding="32dp"
+            android:visibility="gone" />
+
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/swipeRefreshRawPunch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvRawPunches"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="24dp"
+                android:nestedScrollingEnabled="false"
+                android:clipToPadding="false" />
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    </LinearLayout>
+</ScrollView>

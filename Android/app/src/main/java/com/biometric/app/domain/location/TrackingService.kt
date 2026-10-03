@@ -115,6 +115,12 @@ class TrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
+            Log.w("TrackingService", "Standalone Local mode is active. TrackingService disabled.")
+            stopSelf()
+            return
+        }
+
         // Defensive role boundary. TrackingService may be invoked by recovery after Admin login.
         if (!isEmployeeTrackingRole()) {
             Log.w(
@@ -125,7 +131,7 @@ class TrackingService : Service() {
             stopSelf()
             return
         }
-fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
         offlineMonitor.start()
         offlineMonitor.record(OfflineTrackingMonitor.SERVICE_RECOVERED, OfflineTrackingMonitor.INFO, "Tracking service initialized/recovered")
@@ -139,6 +145,11 @@ fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
+            Log.w("TrackingService", "Standalone Local mode is active. Rejecting start request.")
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         
         if (!isEmployeeTrackingRole()) {
             Log.w(

@@ -2,6 +2,90 @@
 @inject IJSRuntime JS
 @implements IAsyncDisposable
 
+@* Top Section: Operation & Deployment Mode *@
+<div class="card border rounded-4 shadow-sm bg-body mb-4">
+    <div class="card-header bg-transparent border-bottom py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+            <span class="fs-5">⚙️</span>
+            <div>
+                <h6 class="mb-0 fw-bold text-primary">System Operation &amp; Deployment Architecture</h6>
+                <small class="text-muted">Select how data is synchronized and stored across Web and Mobile devices.</small>
+            </div>
+        </div>
+        @{
+            bool isOffline = Features?.IsOfflineMode == true || string.Equals(Features?.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase);
+            bool isHybrid = !isOffline && string.Equals(Features?.DeploymentMode, "Hybrid", StringComparison.OrdinalIgnoreCase);
+            bool isCloudOnly = !isOffline && !isHybrid;
+        }
+        <span class="badge @(isOffline ? "bg-dark text-white border" : isCloudOnly ? "bg-info text-white" : "bg-primary text-white") rounded-pill px-3 py-2 fw-semibold">
+            @(isOffline ? "📴 Standalone Local DB" : isCloudOnly ? "☁️ Cloud Only Mode" : "🌐 Cloud + Local (Hybrid Sync)")
+        </span>
+    </div>
+    <div class="card-body p-4">
+        <div class="row g-3">
+            @* 1. Cloud + Local (Hybrid Sync) *@
+            <div class="col-12 col-md-4">
+                <div class="card p-3 border-2 @(isHybrid ? "border-primary bg-primary text-white shadow-sm" : "border-light-subtle bg-body-tertiary") rounded-3 h-100"
+                     style="cursor: pointer; transition: all 0.2s ease;"
+                     @onclick='() => PromptDeploymentMode(false, "Hybrid")'>
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <strong class="d-flex align-items-center gap-2">
+                            <span>🌐 Cloud + Local (Hybrid)</span>
+                        </strong>
+                        @if (isHybrid)
+                        {
+                            <i class="bi bi-check-circle-fill text-white fs-5"></i>
+                        }
+                    </div>
+                    <small class="@(isHybrid ? "text-white-50" : "text-muted")">
+                        Dual SSOT: Real-time Firebase Cloud sync with local SQLite fallback. Automatic offline caching &amp; resync.
+                    </small>
+                </div>
+            </div>
+
+            @* 2. Cloud Only *@
+            <div class="col-12 col-md-4">
+                <div class="card p-3 border-2 @(isCloudOnly ? "border-info bg-info text-white shadow-sm" : "border-light-subtle bg-body-tertiary") rounded-3 h-100"
+                     style="cursor: pointer; transition: all 0.2s ease;"
+                     @onclick='() => PromptDeploymentMode(false, "CloudOnly")'>
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <strong class="d-flex align-items-center gap-2">
+                            <span>☁️ Direct Cloud Only</span>
+                        </strong>
+                        @if (isCloudOnly)
+                        {
+                            <i class="bi bi-check-circle-fill text-white fs-5"></i>
+                        }
+                    </div>
+                    <small class="@(isCloudOnly ? "text-white-50" : "text-muted")">
+                        Pure Cloud: All reads and writes go directly to Firebase Realtime Database. Zero local SQLite storage needed. (Default)
+                    </small>
+                </div>
+            </div>
+
+            @* 3. Standalone Local (Offline) *@
+            <div class="col-12 col-md-4">
+                <div class="card p-3 border-2 @(isOffline ? "border-dark bg-dark text-white shadow-sm" : "border-light-subtle bg-body-tertiary") rounded-3 h-100"
+                     style="cursor: pointer; transition: all 0.2s ease;"
+                     @onclick='() => PromptDeploymentMode(true, "Offline")'>
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <strong class="d-flex align-items-center gap-2">
+                            <span>📴 Standalone Local</span>
+                        </strong>
+                        @if (isOffline)
+                        {
+                            <i class="bi bi-check-circle-fill text-warning fs-5"></i>
+                        }
+                    </div>
+                    <small class="@(isOffline ? "text-white-50" : "text-muted")">
+                        100% Offline: Operates strictly within local SQLite database. No internet or Firebase cloud account required.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4">
     @* Left Column: Company Profile, Office Geofence & Hardware *@
     <div class="col-lg-6 d-flex flex-column gap-3">
@@ -373,10 +457,119 @@
     </div>
 }
 
+@* Deployment Mode Caution & Protection Modal *@
+@if (_showModeCautionModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.65); z-index: 1060;" role="dialog">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg rounded-4">
+                <div class="modal-header @(_targetIsOffline ? "bg-dark text-white" : _targetMode == "CloudOnly" ? "bg-info text-white" : "bg-primary text-white") border-0 py-3 px-4">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="fs-4">@(_targetIsOffline ? "📴" : _targetMode == "CloudOnly" ? "☁️" : "🌐")</span>
+                        <h6 class="modal-title fw-bold mb-0">Confirm Synchronization Mode Change</h6>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="() => _showModeCautionModal = false"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
+                        <i class="bi bi-shield-check fs-4 text-warning"></i>
+                        <div>
+                            <strong>Zero Data Loss Protection Active:</strong>
+                            <div class="small">All existing employees, punches, settings, and payroll calculations remain 100% preserved.</div>
+                        </div>
+                    </div>
+
+                    @if (_targetIsOffline)
+                    {
+                        <p class="mb-2 text-secondary">
+                            You are switching to <strong>📴 Standalone Local Mode</strong>:
+                        </p>
+                        <ul class="small text-muted mb-3">
+                            <li>All cloud networking, Firebase listeners, and background sync are suspended.</li>
+                            <li>Live GPS tracking and geofencing UI elements will be hidden across the system.</li>
+                            <li>Application will operate strictly using the local SQLite database.</li>
+                        </ul>
+                    }
+                    else if (_targetMode == "CloudOnly")
+                    {
+                        <p class="mb-2 text-secondary">
+                            You are switching to <strong>☁️ Direct Cloud Only Mode</strong>:
+                        </p>
+                        <ul class="small text-muted mb-3">
+                            <li>Operations synchronize directly with Firebase Realtime Database in real-time.</li>
+                            <li>Instant multi-device mirroring between Web and Android.</li>
+                            <li>Zero local database overhead or storage footprint required.</li>
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="mb-2 text-secondary">
+                            You are switching to <strong>🌐 Cloud + Local (Hybrid Sync) Mode</strong>:
+                        </p>
+                        <ul class="small text-muted mb-3">
+                            <li>Dual SSOT architecture: Real-time Firebase cloud sync with local SQLite fallback.</li>
+                            <li>Automatic offline queueing with automatic background resync upon network recovery.</li>
+                        </ul>
+                    }
+                    <p class="small text-muted mb-0">Click <strong>Confirm &amp; Apply</strong> to switch architecture.</p>
+                </div>
+                <div class="modal-footer border-0 bg-body-tertiary px-4 py-3 d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" @onclick="CancelDeploymentMode">Cancel</button>
+                    <button type="button" class="btn btn-sm btn-success rounded-pill px-4 fw-bold shadow-sm" @onclick="ConfirmDeploymentMode">
+                        <i class="bi bi-check-circle-fill me-1"></i> Confirm &amp; Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public CompanySetting Settings { get; set; } = new();
+    [Parameter] public FeatureSettings? Features { get; set; }
     [Parameter] public int TrackingIntervalSeconds { get; set; } = 30;
     [Parameter] public EventCallback<int> TrackingIntervalSecondsChanged { get; set; }
+
+    private bool _showModeCautionModal = false;
+    private bool _targetIsOffline = false;
+    private string _targetMode = "CloudOnly";
+    private string _previousMode = "CloudOnly";
+    private bool _previousIsOffline = false;
+
+    private void PromptDeploymentMode(bool isOffline, string mode)
+    {
+        if (Features != null)
+        {
+            _previousIsOffline = Features.IsOfflineMode;
+            _previousMode = string.Equals(Features.DeploymentMode, "Online", StringComparison.OrdinalIgnoreCase) ? "CloudOnly" : (Features.DeploymentMode ?? "CloudOnly");
+            Features.IsOfflineMode = isOffline;
+            Features.DeploymentMode = mode;
+        }
+
+        _targetIsOffline = isOffline;
+        _targetMode = mode;
+        _showModeCautionModal = true;
+    }
+
+    private void CancelDeploymentMode()
+    {
+        if (Features != null)
+        {
+            Features.IsOfflineMode = _previousIsOffline;
+            Features.DeploymentMode = _previousMode;
+        }
+        _showModeCautionModal = false;
+    }
+
+    private void ConfirmDeploymentMode()
+    {
+        if (Features != null)
+        {
+            Features.IsOfflineMode = _targetIsOffline;
+            Features.DeploymentMode = _targetMode;
+        }
+        _showModeCautionModal = false;
+    }
 
     private bool _showMapModal = false;
     private bool _isSearching = false;

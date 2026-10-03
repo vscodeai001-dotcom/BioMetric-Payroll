@@ -68,11 +68,15 @@ class CompanySetupActivity : MotionBaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val forwardIntent = Intent(this, CompanySettingsActivity::class.java).apply {
-            intent.extras?.let { putExtras(it) }
-        }
-        startActivity(forwardIntent)
-        finish()
+        binding = ActivityCompanySetupBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        setupToolbar()
+        setupDropdowns()
+        setupModeSelectors()
+        setupListeners()
+        observeProfile()
+        loadInitialData()
     }
 
     private fun setupToolbar() {
@@ -324,6 +328,11 @@ class CompanySetupActivity : MotionBaseActivity() {
                 localFeatures.enableResignationModule = binding.swResignationModule.isChecked
                 localFeatures.enableFlexibleBenefits = binding.swFlexibleBenefits.isChecked
                 localFeatures.enableCompanyReports = binding.swCompanyReports.isChecked
+
+                localFeatures.isOfflineMode = isOfflineMode
+                localFeatures.deploymentMode = if (isOfflineMode) "Offline" else "Hybrid"
+                sessionStore.setOfflineMode(isOfflineMode)
+                sessionStore.setDeploymentMode(if (isOfflineMode) "Offline" else "Hybrid")
 
                 // Save into Room
                 withContext(Dispatchers.IO) {

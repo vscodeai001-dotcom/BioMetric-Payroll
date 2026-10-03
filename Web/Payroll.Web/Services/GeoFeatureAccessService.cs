@@ -35,18 +35,9 @@ public sealed class GeoFeatureAccessService
         }
 
         // ---------------------------------------------------------
-        // SUPERADMIN OVERRIDE
+        // STANDALONE LOCAL / OFFLINE MODE OVERRIDE
+        // In Standalone Local mode, all GPS tracking, geofence, and maps are disabled
         // ---------------------------------------------------------
-
-        if (user.IsInRole("SuperAdmin"))
-        {
-            return true;
-        }
-
-        // ---------------------------------------------------------
-        // NORMAL FEATURE TOGGLE
-        // ---------------------------------------------------------
-
         await using var db =
             await _dbFactory.CreateDbContextAsync();
 
@@ -54,6 +45,20 @@ public sealed class GeoFeatureAccessService
             await db.FeatureSettings
                 .AsNoTracking()
                 .FirstOrDefaultAsync(f => f.Id == 1);
+
+        if (settings?.IsOfflineMode == true || string.Equals(settings?.DeploymentMode, "Offline", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // ---------------------------------------------------------
+        // SUPERADMIN OVERRIDE
+        // ---------------------------------------------------------
+
+        if (user.IsInRole("SuperAdmin"))
+        {
+            return true;
+        }
 
         return settings?.EnableGeoFencing == true;
     }

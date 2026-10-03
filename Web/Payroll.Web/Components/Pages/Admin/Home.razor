@@ -9,6 +9,8 @@
 @inject AuthenticationStateProvider AuthState
 @inject GeoFeatureAccessService GeoAccess
 @inject FirebaseAdminDashboardService FirebaseDashboard
+@inject IAppModeService AppMode
+@inject IDbContextFactory<AppDbContext> DbFactory
 @using global::Payroll.Web.Components.UI.Attendance
 @attribute [Authorize]
 @implements IAsyncDisposable
@@ -245,7 +247,7 @@ else
             </div>
         </div>
 
-        @if ((userIsSuperAdmin || userIsAdmin) && geoFeatureAvailable)
+        @if (!isOfflineMode && (userIsSuperAdmin || userIsAdmin) && geoFeatureAvailable)
         {
             <div class="mb-4">
                 <Payroll.Web.Components.UI.Attendance.LiveStaffLocationPanel />
@@ -375,6 +377,7 @@ else
     private FeatureSettings? settings { get; set; }
 
     private bool isLoaded = false;
+    private bool isOfflineMode = false;
     private bool geoFeatureAvailable;
     private bool userIsSuperAdmin = false;
     private bool userIsAdmin = false;
@@ -413,13 +416,13 @@ else
             }
 
             // ---------------------------------------------------------
-            // GEO-FENCING
+            // OFFLINE / STANDALONE LOCAL & GEO-FENCING
             //
             // IMPORTANT:
-            // Admin/SuperAdmin may see the Live Staff Location panel when
-            // Geo-Fencing is enabled. Employee is redirected above.
+            // In Standalone Local mode, all GPS tracking, geofence, and maps are disabled.
             // ---------------------------------------------------------
-            if (user.IsInRole("Admin") || userIsSuperAdmin)
+            isOfflineMode = await AppMode.IsOfflineModeAsync();
+            if (!isOfflineMode && (user.IsInRole("Admin") || userIsSuperAdmin))
             {
                 geoFeatureAvailable = await GeoAccess.IsEnabledAsync();
             }
@@ -441,6 +444,34 @@ else
     {
         try
         {
+            if (isOfflineMode)
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var today = DateOnly.FromDateTime(DateTime.Today);
+                var employees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).ToListAsync();
+                totalEmployees = employees.Count;
+                activeEmployees = employees.Count(e => e.TerminationDate == null || e.TerminationDate > today);
+                
+                var startOfToday = today.ToDateTime(TimeOnly.MinValue);
+                var endOfToday = today.AddDays(1).ToDateTime(TimeOnly.MinValue);
+                var todayPunches = await db.AttendanceLogs.AsNoTracking()
+                    .Where(a => a.PunchTime >= startOfToday && a.PunchTime < endOfToday && a.EmployeeID.HasValue)
+                    .Select(a => a.EmployeeID!.Value)
+                    .Distinct()
+                    .CountAsync();
+                presentToday = todayPunches;
+                absentTodayEst = Math.Max(0, activeEmployees - presentToday);
+
+                var advances = await db.SalaryAdvances.AsNoTracking()
+                    .Where(a => a.PayrollID_Paid == null)
+                    .OrderByDescending(a => a.AdvanceDate)
+                    .ToListAsync();
+                totalUnpaidAdvanceAmount = advances.Sum(a => a.Amount);
+                employeeList = employees.Select(e => new Employee { EmployeeID = e.EmployeeID, Name = e.Name }).ToList();
+                unpaidAdvances = advances.Take(10).ToList();
+                return;
+            }
+
             var authState = await AuthState.GetAuthenticationStateAsync();
             var actorUid = authState.User.FindFirst("sub")?.Value
                            ?? authState.User.FindFirst("user_id")?.Value

@@ -9,6 +9,7 @@ import android.widget.EditText
 import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
+import com.biometric.app.R
 import com.biometric.app.data.dao.LocalSettingsDao
 import com.biometric.app.data.entity.LocalCompanySettings
 import com.biometric.app.data.repository.TrackingConfigurationRepository
@@ -42,6 +43,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
     @Inject lateinit var autoPunchCoordinator: GeofenceAutoPunchCoordinator
 
     private var localCompany = LocalCompanySettings()
+    private var localFeatures = com.biometric.app.data.entity.LocalFeatureSettings()
+    private var currentDeploymentMode = "CloudOnly"
+    private var isOfflineMode = false
     private var trackingIntervalSeconds = 30
     private var isSuperAdmin = false
 
@@ -105,6 +109,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         setupTabs()
         setupDropdowns()
         setupListeners()
+        setupDeploymentModeSelectors()
         observeProfile()
         observeCompanySettings()
         loadInitialData()
@@ -210,6 +215,111 @@ class CompanySettingsActivity : MotionBaseActivity() {
         binding.btnDeleteCompanySettings.setOnClickListener {
             HapticUtil.vibrateClick(it)
             showDeleteCompanyDialog()
+        }
+    }
+
+    private fun setupDeploymentModeSelectors() {
+        updateDeploymentModeUi(currentDeploymentMode, isOfflineMode)
+
+        binding.cardModeHybrid.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            promptDeploymentMode("Hybrid", false)
+        }
+
+        binding.cardModeCloudOnly.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            promptDeploymentMode("CloudOnly", false)
+        }
+
+        binding.cardModeOffline.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            promptDeploymentMode("Offline", true)
+        }
+
+        binding.btnLaunchCompanySetup.setOnClickListener {
+            HapticUtil.vibrateClick(it)
+            startActivity(Intent(this, CompanySetupActivity::class.java))
+        }
+    }
+
+    private fun promptDeploymentMode(mode: String, offline: Boolean) {
+        if (currentDeploymentMode.equals(mode, ignoreCase = true) && isOfflineMode == offline) return
+
+        val (title, message) = when {
+            offline || mode.equals("Offline", ignoreCase = true) -> {
+                "📴 Switch to Standalone Local Mode?" to
+                "All cloud networking, Firebase synchronization, and GPS/map tracking will be paused.\n\n🛡️ Data Loss Protection: All your existing staff, attendance, and payroll records remain 100% safely preserved on this device.\n\nDo you want to switch to Standalone Local?"
+            }
+            mode.equals("CloudOnly", ignoreCase = true) -> {
+                "☁️ Switch to Pure Cloud Only Mode?" to
+                "The application will read and write directly to Firebase Cloud in real-time.\n\n🛡️ Data Loss Protection: All records are secured in the cloud. Zero local storage dependency.\n\nDo you want to switch to Pure Cloud Only?"
+            }
+            else -> {
+                "🌐 Switch to Cloud + Local Hybrid Mode?" to
+                "Two-way synchronization between local Room DB and Firebase Cloud will be active with offline queuing.\n\n🛡️ Data Loss Protection: Data seamlessly mirrors in both directions.\n\nDo you want to switch to Hybrid Sync?"
+            }
+        }
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("Confirm Switch") { _, _ ->
+                selectDeploymentMode(mode, offline)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun selectDeploymentMode(mode: String, offline: Boolean) {
+        currentDeploymentMode = mode
+        isOfflineMode = offline
+        localFeatures.deploymentMode = mode
+        localFeatures.isOfflineMode = offline
+        updateDeploymentModeUi(mode, offline)
+    }
+
+    private fun updateDeploymentModeUi(mode: String, offline: Boolean) {
+        val primaryColor = androidx.core.content.ContextCompat.getColor(this, R.color.colorPrimary)
+        val outlineColor = androidx.core.content.ContextCompat.getColor(this, R.color.outline_variant)
+        val surfaceColor = androidx.core.content.ContextCompat.getColor(this, R.color.colorSurface)
+
+        binding.cardModeHybrid.strokeColor = outlineColor
+        binding.cardModeHybrid.strokeWidth = 2
+        binding.cardModeHybrid.setCardBackgroundColor(surfaceColor)
+
+        binding.cardModeCloudOnly.strokeColor = outlineColor
+        binding.cardModeCloudOnly.strokeWidth = 2
+        binding.cardModeCloudOnly.setCardBackgroundColor(surfaceColor)
+
+        binding.cardModeOffline.strokeColor = outlineColor
+        binding.cardModeOffline.strokeWidth = 2
+        binding.cardModeOffline.setCardBackgroundColor(surfaceColor)
+
+        when {
+            offline || mode.equals("Offline", ignoreCase = true) -> {
+                binding.cardModeOffline.strokeColor = primaryColor
+                binding.cardModeOffline.strokeWidth = 4
+                binding.cardModeOffline.setCardBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.grey_light))
+                binding.tvDeploymentModeBadge.text = "📴 Standalone Local"
+                binding.tvDeploymentModeBadge.setBackgroundResource(R.drawable.badge_rounded_grey)
+                binding.tvDeploymentModeBadge.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.text_primary))
+            }
+            mode.equals("CloudOnly", ignoreCase = true) || mode.equals("Online", ignoreCase = true) -> {
+                binding.cardModeCloudOnly.strokeColor = primaryColor
+                binding.cardModeCloudOnly.strokeWidth = 4
+                binding.cardModeCloudOnly.setCardBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.blue_light))
+                binding.tvDeploymentModeBadge.text = "☁️ Pure Cloud Only"
+                binding.tvDeploymentModeBadge.setBackgroundResource(R.drawable.badge_rounded_blue)
+                binding.tvDeploymentModeBadge.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.blue_900))
+            }
+            else -> {
+                binding.cardModeHybrid.strokeColor = primaryColor
+                binding.cardModeHybrid.strokeWidth = 4
+                binding.cardModeHybrid.setCardBackgroundColor(androidx.core.content.ContextCompat.getColor(this, R.color.blue_light))
+                binding.tvDeploymentModeBadge.text = "🌐 Cloud + Local (Hybrid)"
+                binding.tvDeploymentModeBadge.setBackgroundResource(R.drawable.badge_rounded_blue)
+                binding.tvDeploymentModeBadge.setTextColor(androidx.core.content.ContextCompat.getColor(this, R.color.blue_900))
+            }
         }
     }
 
@@ -327,6 +437,19 @@ class CompanySettingsActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             val cs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
             if (cs != null) localCompany = cs
+
+            val fs = withContext(Dispatchers.IO) { localSettingsDao.getFeatureSettings() }
+            if (fs != null) {
+                localFeatures = fs
+                currentDeploymentMode = fs.deploymentMode.ifBlank { sessionStore.deploymentMode().ifBlank { "CloudOnly" } }
+                isOfflineMode = fs.isOfflineMode || currentDeploymentMode.equals("Offline", ignoreCase = true)
+                sessionStore.setOfflineMode(isOfflineMode)
+                sessionStore.setDeploymentMode(currentDeploymentMode)
+            } else {
+                currentDeploymentMode = sessionStore.deploymentMode().ifBlank { "CloudOnly" }
+                isOfflineMode = sessionStore.isOfflineMode() || currentDeploymentMode.equals("Offline", ignoreCase = true)
+            }
+            updateDeploymentModeUi(currentDeploymentMode, isOfflineMode)
 
             // Load tracking config
             val config = trackingConfiguration.load()
@@ -628,14 +751,19 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 val selectedMarkerLabel = binding.spinnerMarkerStyle.text?.toString()
                 localCompany.useSpeedBasedMarkers = markerStyleLabels.find { it.first == selectedMarkerLabel }?.second ?: false
 
-                // Save into Room (with updated backup interval & stay settings)
+                // Save into Room (with updated backup interval, stay settings, and features)
+                localFeatures.isOfflineMode = isOfflineMode
+                localFeatures.deploymentMode = currentDeploymentMode
+                sessionStore.setOfflineMode(isOfflineMode)
+                sessionStore.setDeploymentMode(currentDeploymentMode)
                 withContext(Dispatchers.IO) {
                     localSettingsDao.upsertCompanySettings(localCompany)
+                    localSettingsDao.upsertFeatureSettings(localFeatures)
                 }
 
                 // If online, sync to Firebase Realtime Database
                 val owner = firebaseSync.getOwnerRef()
-                if (owner != null) {
+                if (owner != null && !isOfflineMode) {
                     runCatching {
                         val companyPayload = mapOf(
                             "companyName" to localCompany.companyName,
@@ -699,7 +827,12 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             user?.updatePassword(adminPass)?.await()
                         }
 
+                        val featureMap = com.google.gson.Gson().fromJson(com.google.gson.Gson().toJson(localFeatures), Map::class.java)
+                        @Suppress("UNCHECKED_CAST")
+                        owner.child("feature_settings").child("1").setValue(featureMap as Map<String, Any>).await()
+
                         firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
+                        firebaseSync.notifyRealtimeAfterWrite("FeatureSettings", "MODIFIED")
                     }
                 }
 

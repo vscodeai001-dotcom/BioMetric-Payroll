@@ -1127,6 +1127,14 @@ class EmployeeHomeActivity : MotionBaseActivity() {
     private fun updateRangeStatus() {
         val b = _binding ?: return
 
+        val isOffline = sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)
+        if (isOffline) {
+            b.tvRangeStatus.text = "Offline Mode • Manual Punch Ready 🏢"
+            b.btnPunch.isEnabled = true
+            b.btnPunch.visibility = View.VISIBLE
+            return
+        }
+
         if (currentLat == 0.0 || currentLon == 0.0) {
             b.tvRangeStatus.text = "Locating device... 🛰️"
             b.btnPunch.isEnabled = false
@@ -1379,6 +1387,17 @@ class EmployeeHomeActivity : MotionBaseActivity() {
 
     private fun applyFeatureHierarchy(data: EmployeeDashboardResponse) {
         _binding?.let { b ->
+            val isOffline = sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)
+            if (isOffline) {
+                b.cvMapContainer.visibility = View.GONE
+                b.llLiveStatus.visibility = View.GONE
+                b.tvTrackingStatus.text = "📴 Standalone Local Mode (100% Offline Database)"
+                b.btnPunch.visibility = View.VISIBLE
+                b.btnPunch.isEnabled = true
+                stopService(Intent(this, TrackingService::class.java).apply { action = TrackingService.ACTION_STOP })
+                return
+            }
+
             // 1. Geo-Fencing (Master GPS Switch)
             if (data.enableGeoFencing) {
                 b.cvMapContainer.visibility = View.VISIBLE

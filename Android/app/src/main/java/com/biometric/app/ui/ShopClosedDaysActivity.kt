@@ -56,13 +56,19 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
         applyWindowInsets(binding.clShopClosedDaysRoot, binding.appBar)
 
         shopId = intent.getStringExtra("SHOP_ID")
+            ?: sharedViewModel.selectedShop.value?.shopId
+            ?: mainViewModel.allShops.value.firstOrNull()?.shopId
         shopId?.let { viewModel.setShop(it) }
-        val shopName = intent.getStringExtra("SHOP_NAME") ?: "Shop"
+        val shopName = intent.getStringExtra("SHOP_NAME")
+            ?: sharedViewModel.selectedShop.value?.name
+            ?: mainViewModel.allShops.value.firstOrNull()?.name
+            ?: "All Shops"
         
         setupToolbar(shopName)
         
         setupUI()
         observeViewModel()
+        refreshData()
     }
 
     private fun setupToolbar(shopName: String) {
@@ -97,6 +103,13 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
     }
 
     private fun observeViewModel() {
+        // Fallback safety watchdog: Dismiss loader after 1.5s maximum to prevent any black/loading freeze
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(1500)
+            PremiumLoader.hide(binding.brewingLoader)
+            binding.contentLayout.visibility = View.VISIBLE
+        }
+
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
@@ -113,12 +126,26 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
                     }
                 }
                 launch {
+                    sharedViewModel.allShops.collectLatest { shops ->
+                        if (shopId == null && shops.isNotEmpty()) {
+                            val firstShop = shops.first()
+                            shopId = firstShop.shopId
+                            sharedViewModel.setSelectedShop(firstShop)
+                            setupDualHeader(binding.toolbar, firstShop.name, "Holiday Management")
+                            viewModel.setShop(firstShop.shopId)
+                            refreshData()
+                        }
+                    }
+                }
+                launch {
                     sharedViewModel.selectedShop.collectLatest { shop ->
                         shop?.let {
-                            shopId = it.shopId
-                            setupDualHeader(binding.toolbar, it.name, "Holiday Management")
-                            viewModel.setShop(it.shopId)
-                            refreshData()
+                            if (shopId != it.shopId) {
+                                shopId = it.shopId
+                                setupDualHeader(binding.toolbar, it.name, "Holiday Management")
+                                viewModel.setShop(it.shopId)
+                                refreshData()
+                            }
                         }
                     }
                 }
@@ -133,7 +160,7 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
     }
 
     private fun refreshData() {
-        val currentShopId = shopId ?: return
+        val currentShopId = shopId
         binding.tvSelectedYear.text = selectedYear.toString()
 
         val startCal = Calendar.getInstance()
@@ -152,15 +179,15 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
 
         lifecycleScope.launch {
             viewModel.getClosedDays(currentShopId, start, end).collectLatest { allDays ->
-                // Loading flag fix: stop loading once results arrive
-                // Note: in observeViewModel I need to make sure we don't hide loader too early if this is still pending
+                PremiumLoader.hide(binding.brewingLoader)
+                binding.contentLayout.visibility = View.VISIBLE
 
                 val currentYear = Calendar.getInstance().get(Calendar.YEAR)
                 val currentMonth = Calendar.getInstance().get(Calendar.MONTH)
 
                 val monthNames = arrayOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
                 
-                val monthLimit = if (selectedYear < currentYear) 11 else if (selectedYear == currentYear) currentMonth else -1
+                val monthLimit = if (selectedYear < currentYear) 11 else if (selectedYear == currentYear) currentMonth else 11
                 
                 val monthGroups = mutableListOf<MonthData>()
                 for (i in 0..monthLimit) {
@@ -220,7 +247,10 @@ class ShopClosedDaysActivity : MotionBaseActivity() {
     }
 
     private fun showAddClosedDayDialog() {
-        val currentShopId = shopId ?: return
+        val currentShopId = shopId
+            ?: sharedViewModel.selectedShop.value?.shopId
+            ?: mainViewModel.allShops.value.firstOrNull()?.shopId
+            ?: "default_shop"
         val view = layoutInflater.inflate(R.layout.dialog_add_closed_day, null)
         val etReason = view.findViewById<EditText>(R.id.etReason)
         val cbPaySalary = view.findViewById<CheckBox>(R.id.cbPaySalary)

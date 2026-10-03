@@ -73,6 +73,14 @@ class BiometricApplication : Application(), Configuration.Provider {
         val realtimeScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
         fun startRealtimeInfrastructure() {
+            if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
+                Log.i("BiometricApplication", "Standalone Local mode is active. Realtime cloud listeners are disabled.")
+                runCatching { signalRManager.stop() }
+                runCatching { firebaseReconnectCoordinator.stop() }
+                runCatching { firebaseRoomHydrator.stop() }
+                runCatching { adminRealtimeCoordinator.stop() }
+                return
+            }
             if (!sessionStore.isLoggedIn() || FirebaseAuth.getInstance().currentUser == null) return
             val role = sessionStore.userRole().trim().uppercase()
             val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")

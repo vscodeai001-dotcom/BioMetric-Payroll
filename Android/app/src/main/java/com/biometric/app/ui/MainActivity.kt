@@ -130,6 +130,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
     @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
     @Inject lateinit var firebaseAuthTokenManager: FirebaseAuthTokenManager
     @Inject lateinit var osrmApi: OsrmApiService
+    @Inject lateinit var localSettingsDao: com.biometric.app.data.dao.LocalSettingsDao
 
     private val markers = mutableMapOf<Int, Marker>()
     private val roadLines = mutableMapOf<Int, Polyline>()
@@ -197,38 +198,68 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = null
-        val headers = setupDualHeader(binding.toolbar, "Dashboard Overview 🏢", "Real-time Operations 🛡️")
+
+        val initialCompanyName = intent.getStringExtra("COMPANY_NAME")
+            ?: sessionStore.activeCompanyName()
+        val initialCompanyCode = intent.getStringExtra("COMPANY_CODE")
+            ?: sessionStore.activeCompanyCode()
+
+        val headers = setupDualHeader(binding.toolbar, "$initialCompanyName 🏢", "Real-time Operations • Code: ${initialCompanyCode.ifBlank { "ACTIVE" }}")
         headers.btnShop?.visibility = View.GONE
         tvLastSynced = headers.status
         tvLastSynced?.visibility = View.VISIBLE
+
+        lifecycleScope.launch {
+            localSettingsDao.getCompanySettingsFlow().collectLatest { cs ->
+                if (cs != null && cs.companyName.isNotBlank()) {
+                    val code = sessionStore.activeCompanyCode().ifBlank { "ACTIVE" }
+                    val tvLine1 = binding.toolbar.findViewById<android.widget.TextView>(R.id.tvHeaderLine1)
+                    val tvLine2 = binding.toolbar.findViewById<android.widget.TextView>(R.id.tvHeaderLine2)
+                    tvLine1?.text = "${cs.companyName} 🏢"
+                    tvLine2?.text = "Real-time Operations • Code: $code"
+                }
+            }
+        }
 
         setupListeners()
         setupSwipeRefresh()
         observeViewModel()
 
         lifecycleScope.launch {
+            val isOffline = sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)
+
             // High-priority UI components first
             delay(500)
-            viewModel.startRealtimeSync()
+            if (!isOffline) {
+                viewModel.startRealtimeSync()
+            }
             applyRolePermissions()
 
             // Map next
-            delay(1200)
-            setupRealTimeSync()
-            setupAdminMap()
-            setupAdminFilters()
-            setupAdminSelectedEmployeeRail()
+            if (!isOffline) {
+                delay(1200)
+                setupRealTimeSync()
+                setupAdminMap()
+                setupAdminFilters()
+                setupAdminSelectedEmployeeRail()
 
-            // Firebase realtime source: listeners remain active without manual refresh.
-            delay(2000)
-            viewModel.triggerRefresh()
+                // Firebase realtime source: listeners remain active without manual refresh.
+                delay(2000)
+                viewModel.triggerRefresh()
+            } else {
+                _binding?.let { b ->
+                    b.cvLiveMapCard.visibility = View.GONE
+                }
+            }
 
             // Low-priority animations last
             findViewById<LottieAnimationView>(R.id.backgroundParticles)?.let {
                 it.visibility = View.VISIBLE
                 it.playAnimation()
             }
-            binding.liveDotAdmin.startAnimation(AnimationUtils.loadAnimation(this@MainActivity, R.anim.pulse))
+            if (!isOffline) {
+                binding.liveDotAdmin.startAnimation(AnimationUtils.loadAnimation(this@MainActivity, R.anim.pulse))
+            }
         }
 
         if (driveManager.isUserSignedIn()) {
@@ -1808,8 +1839,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     menus.rowPunchCorrection.isVisible = isSuperAdmin || s.enablePunchCorrection
                     menus.rowPunchApprovals.isVisible = isSuperAdmin || (s.enablePunchCorrection && s.adminCanManagePunchApprovals)
                     menus.rowRegularizationApproval.isVisible = isSuperAdmin || s.enableRegularizationRequest
-                    menus.rowOfflineTracking.isVisible = isSuperAdmin || s.enableGeoFencing
-                    menus.rowLocationHistory.isVisible = isSuperAdmin || s.enableGeoFencing
+                    val isOffline = sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)
+                    menus.rowOfflineTracking.isVisible = !isOffline && (isSuperAdmin || s.enableGeoFencing)
+                    menus.rowLocationHistory.isVisible = !isOffline && (isSuperAdmin || s.enableGeoFencing)
 
                     // 3. Admin & Settings Section
                     menus.rowEmployeeRecords.isVisible = isSuperAdmin || (s.enableEmployeeManagement && s.adminCanManageEmployees)
@@ -1830,7 +1862,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     invalidateOptionsMenu()
 
                     // Map Visibility
-                    b.cvLiveMapCard.isVisible = isSuperAdmin || (s.enableGeoFencing && s.adminCanViewAttendance)
+                    b.cvLiveMapCard.isVisible = !isOffline && (isSuperAdmin || (s.enableGeoFencing && s.adminCanViewAttendance))
                 }
             }
         }
