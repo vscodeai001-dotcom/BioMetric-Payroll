@@ -218,6 +218,20 @@ class CompanySettingsActivity : MotionBaseActivity() {
             HapticUtil.vibrateClick(it)
             showDeleteCompanyDialog()
         }
+
+        val latLngWatcher = View.OnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val lat = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: 0.0
+                val lng = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: 0.0
+                if (lat != 0.0 && lng != 0.0 && (lat != localCompany.officeLatitude || lng != localCompany.officeLongitude)) {
+                    localCompany.officeLatitude = lat
+                    localCompany.officeLongitude = lng
+                    autoFetchAddressFromCoordinates(lat, lng, false)
+                }
+            }
+        }
+        binding.etGenLatitude.onFocusChangeListener = latLngWatcher
+        binding.etGenLongitude.onFocusChangeListener = latLngWatcher
     }
 
     private fun setupDeploymentModeSelectors() {
@@ -340,6 +354,111 @@ class CompanySettingsActivity : MotionBaseActivity() {
         }
     }
 
+    private fun autoFetchAddressFromCoordinates(lat: Double, lng: Double, showToast: Boolean = false) {
+        if (lat == 0.0 || lng == 0.0) return
+        lifecycleScope.launch(Dispatchers.IO) {
+            var line1 = ""
+            var cityStatePin = ""
+            try {
+                if (android.location.Geocoder.isPresent()) {
+                    val geocoder = android.location.Geocoder(this@CompanySettingsActivity, java.util.Locale.getDefault())
+                    @Suppress("DEPRECATION")
+                    val addresses = geocoder.getFromLocation(lat, lng, 1)
+                    if (!addresses.isNullOrEmpty()) {
+                        val addr = addresses[0]
+                        line1 = addr.thoroughfare ?: addr.subLocality ?: addr.featureName ?: ""
+                        val city = addr.locality ?: addr.subAdminArea ?: ""
+                        val state = addr.adminArea ?: ""
+                        val pin = addr.postalCode ?: ""
+                        cityStatePin = buildString {
+                            if (city.isNotBlank()) append(city)
+                            if (state.isNotBlank()) {
+                                if (isNotEmpty()) append(", ")
+                                append(state)
+                            }
+                            if (pin.isNotBlank()) {
+                                if (isNotEmpty()) append(" - ")
+                                append(pin)
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // OpenStreetMap Nominatim Fallback if Geocoder returned empty
+            if (line1.isBlank() && cityStatePin.isBlank()) {
+                try {
+                    val url = java.net.URL("https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&addressdetails=1")
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.setRequestProperty("User-Agent", "BioMetricPayroll-Android/1.0")
+                    conn.setRequestProperty("Accept", "application/json")
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    if (conn.responseCode == 200) {
+                        val jsonStr = conn.inputStream.bufferedReader().use { it.readText() }
+                        val json = org.json.JSONObject(jsonStr)
+                        val addrObj = json.optJSONObject("address")
+                        if (addrObj != null) {
+                            val premises = addrObj.optString("building", "")
+                                .ifBlank { addrObj.optString("office", "") }
+                                .ifBlank { addrObj.optString("amenity", "") }
+                            val road = addrObj.optString("road", "")
+                                .ifBlank { addrObj.optString("suburb", "") }
+                            val houseNum = addrObj.optString("house_number", "")
+                            line1 = when {
+                                premises.isNotBlank() && road.isNotBlank() -> "$premises, $road"
+                                road.isNotBlank() && houseNum.isNotBlank() -> "$houseNum $road"
+                                road.isNotBlank() -> road
+                                premises.isNotBlank() -> premises
+                                else -> json.optString("display_name", "").split(",").firstOrNull()?.trim().orEmpty()
+                            }
+                            val city = addrObj.optString("city", "")
+                                .ifBlank { addrObj.optString("town", "") }
+                                .ifBlank { addrObj.optString("village", "") }
+                                .ifBlank { addrObj.optString("county", "") }
+                            val state = addrObj.optString("state", "")
+                            val pin = addrObj.optString("postcode", "")
+                            cityStatePin = buildString {
+                                if (city.isNotBlank()) append(city)
+                                if (state.isNotBlank()) {
+                                    if (isNotEmpty()) append(", ")
+                                    append(state)
+                                }
+                                if (pin.isNotBlank()) {
+                                    if (isNotEmpty()) append(" - ")
+                                    append(pin)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            if (line1.isNotBlank() || cityStatePin.isNotBlank()) {
+                withContext(Dispatchers.Main) {
+                    if (line1.isNotBlank()) {
+                        localCompany.addressLine1 = line1
+                        binding.etGenAddressLine1.setText(line1)
+                    }
+                    if (cityStatePin.isNotBlank()) {
+                        localCompany.cityStatePincode = cityStatePin
+                        binding.etGenCityStatePincode.setText(cityStatePin)
+                    }
+                    if (showToast) {
+                        Toast.makeText(this@CompanySettingsActivity, "Location and address resolved!", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                withContext(Dispatchers.IO) {
+                    localSettingsDao.upsertCompanySettings(localCompany)
+                    firebaseSync.getOwnerRef()?.child("company_settings")?.child("1")?.apply {
+                        if (line1.isNotBlank()) child("addressLine1").setValue(line1)
+                        if (cityStatePin.isNotBlank()) child("cityStatePincode").setValue(cityStatePin)
+                    }
+                }
+            }
+        }
+    }
+
     private fun fetchCurrentLocationAndAddress() {
         val hasFine = androidx.core.content.ContextCompat.checkSelfPermission(
             this, android.Manifest.permission.ACCESS_FINE_LOCATION
@@ -362,42 +481,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
             if (loc != null) {
                 binding.etGenLatitude.setText(loc.latitude.toString())
                 binding.etGenLongitude.setText(loc.longitude.toString())
-                lifecycleScope.launch(Dispatchers.IO) {
-                    try {
-                        if (android.location.Geocoder.isPresent()) {
-                            val geocoder = android.location.Geocoder(this@CompanySettingsActivity, java.util.Locale.getDefault())
-                            @Suppress("DEPRECATION")
-                            val addresses = geocoder.getFromLocation(loc.latitude, loc.longitude, 1)
-                            if (!addresses.isNullOrEmpty()) {
-                                val addr = addresses[0]
-                                val line1 = addr.thoroughfare ?: addr.subLocality ?: addr.featureName ?: ""
-                                val city = addr.locality ?: addr.subAdminArea ?: ""
-                                val state = addr.adminArea ?: ""
-                                val pin = addr.postalCode ?: ""
-                                val cityStatePin = buildString {
-                                    if (city.isNotBlank()) append(city)
-                                    if (state.isNotBlank()) {
-                                        if (isNotEmpty()) append(", ")
-                                        append(state)
-                                    }
-                                    if (pin.isNotBlank()) {
-                                        if (isNotEmpty()) append(" - ")
-                                        append(pin)
-                                    }
-                                }
-                                withContext(Dispatchers.Main) {
-                                    if (line1.isNotBlank()) binding.etGenAddressLine1.setText(line1)
-                                    if (cityStatePin.isNotBlank()) binding.etGenCityStatePincode.setText(cityStatePin)
-                                    Toast.makeText(this@CompanySettingsActivity, "Location and address captured!", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@CompanySettingsActivity, "GPS coordinates captured!", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
+                localCompany.officeLatitude = loc.latitude
+                localCompany.officeLongitude = loc.longitude
+                autoFetchAddressFromCoordinates(loc.latitude, loc.longitude, true)
             } else {
                 Toast.makeText(this, "Could not acquire GPS fix. Please ensure device location is enabled.", Toast.LENGTH_SHORT).show()
             }
@@ -439,6 +525,22 @@ class CompanySettingsActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             val cs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
             if (cs != null) localCompany = cs
+
+            val activeTenantName = sessionStore.activeCompanyName().ifBlank {
+                getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("selected_tenant_name", "").orEmpty()
+            }.ifBlank { intent.getStringExtra("TENANT_NAME").orEmpty() }
+
+            if (localCompany.companyName.isBlank() || localCompany.companyName.equals("Your Company Name", ignoreCase = true)) {
+                if (activeTenantName.isNotBlank() && !activeTenantName.equals("Your Company Name", ignoreCase = true)) {
+                    localCompany.companyName = activeTenantName
+                }
+            }
+            if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) {
+                localCompany.addressLine1 = ""
+            }
+            if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) {
+                localCompany.cityStatePincode = ""
+            }
 
             val fs = withContext(Dispatchers.IO) { localSettingsDao.getFeatureSettings() }
             if (fs != null) {
@@ -566,17 +668,59 @@ class CompanySettingsActivity : MotionBaseActivity() {
         d("leaveAccrualRate")?.let { localCompany.leaveAccrualRate = it }
         b("enableSandwichRule")?.let { localCompany.enableSandwichRule = it }
 
+        val activeTenantName = sessionStore.activeCompanyName().ifBlank {
+            getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("selected_tenant_name", "").orEmpty()
+        }.ifBlank { intent.getStringExtra("TENANT_NAME").orEmpty() }
+
+        if (localCompany.companyName.isBlank() || localCompany.companyName.equals("Your Company Name", ignoreCase = true)) {
+            if (activeTenantName.isNotBlank() && !activeTenantName.equals("Your Company Name", ignoreCase = true)) {
+                localCompany.companyName = activeTenantName
+            }
+        }
+        if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) {
+            localCompany.addressLine1 = ""
+        }
+        if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) {
+            localCompany.cityStatePincode = ""
+        }
+
         lifecycleScope.launch(Dispatchers.IO) {
             localSettingsDao.upsertCompanySettings(localCompany)
         }
         populateUi()
+
+        if ((localCompany.addressLine1.isBlank() || localCompany.cityStatePincode.isBlank()) &&
+            localCompany.officeLatitude != 0.0 && localCompany.officeLongitude != 0.0) {
+            autoFetchAddressFromCoordinates(localCompany.officeLatitude, localCompany.officeLongitude, false)
+        }
     }
 
     private fun populateUi() {
+        val activeTenantName = sessionStore.activeCompanyName().ifBlank {
+            getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("selected_tenant_name", "").orEmpty()
+        }.ifBlank { intent.getStringExtra("TENANT_NAME").orEmpty() }
+
+        if (localCompany.companyName.isBlank() || localCompany.companyName.equals("Your Company Name", ignoreCase = true)) {
+            if (activeTenantName.isNotBlank() && !activeTenantName.equals("Your Company Name", ignoreCase = true)) {
+                localCompany.companyName = activeTenantName
+            }
+        }
+        if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) {
+            localCompany.addressLine1 = ""
+        }
+        if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) {
+            localCompany.cityStatePincode = ""
+        }
+
         // Tab 1: General & Rules
-        binding.etGenCompanyName.setText(localCompany.companyName)
-        binding.etGenAddressLine1.setText(localCompany.addressLine1)
-        binding.etGenCityStatePincode.setText(localCompany.cityStatePincode)
+        binding.etGenCompanyName.setText(if (localCompany.companyName.equals("Your Company Name", ignoreCase = true)) "" else localCompany.companyName)
+        binding.etGenAddressLine1.setText(if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) "" else localCompany.addressLine1)
+        binding.etGenCityStatePincode.setText(if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) "" else localCompany.cityStatePincode)
+
+        if ((binding.etGenAddressLine1.text.isNullOrBlank() || binding.etGenCityStatePincode.text.isNullOrBlank()) &&
+            localCompany.officeLatitude != 0.0 && localCompany.officeLongitude != 0.0) {
+            autoFetchAddressFromCoordinates(localCompany.officeLatitude, localCompany.officeLongitude, false)
+        }
 
         val methodIdx = salaryCalcMethods.indexOf(localCompany.salaryCalculationMethod)
         if (methodIdx >= 0) {

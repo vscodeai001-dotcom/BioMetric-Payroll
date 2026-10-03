@@ -389,13 +389,32 @@ else
             _logger.LogError(ex, "Error loading settings.");
             toastService.ShowError($"Error loading settings: {ex.Message}");
         }
-        if (settings == null) settings = new CompanySetting();
-
+        settings ??= new CompanySetting();
         // 100% SSOT: If settings.CompanyName is blank or default placeholder, sync from activeTenant.CompanyName
-        if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.CompanyName) &&
-            (string.IsNullOrWhiteSpace(settings.CompanyName) || settings.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase)))
+        if (string.IsNullOrWhiteSpace(settings.CompanyName) || settings.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase))
         {
-            settings.CompanyName = activeTenant.CompanyName.Trim();
+            if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.CompanyName) && !activeTenant.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase))
+            {
+                settings.CompanyName = activeTenant.CompanyName.Trim();
+            }
+            else
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var realTenant = await db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefaultAsync();
+                if (realTenant != null && !string.IsNullOrWhiteSpace(realTenant.CompanyName) && !realTenant.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.CompanyName = realTenant.CompanyName.Trim();
+                }
+            }
+        }
+
+        if (settings.AddressLine1 != null && settings.AddressLine1.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.AddressLine1 = "";
+        }
+        if (settings.CityStatePincode != null && settings.CityStatePincode.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.CityStatePincode = "";
         }
 
         firebaseOwnerUid = activeTenant?.TenantId ?? FirebaseRealtime.ResolveOwnerUid(

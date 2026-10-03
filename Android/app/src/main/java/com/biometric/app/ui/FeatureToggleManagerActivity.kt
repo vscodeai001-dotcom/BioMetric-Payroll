@@ -26,7 +26,11 @@ import com.biometric.app.util.HapticUtil
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.AndroidEntryPoint
@@ -82,6 +86,9 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     private var activeCompanyCode = "PRIMARY"
     private var isUserSuperAdmin = false
 
+    private var featureSettingsRef: DatabaseReference? = null
+    private var featureSettingsListener: ValueEventListener? = null
+
     private data class TabEntry(val title: String, val index: Int)
     private val activeTabs = mutableListOf<TabEntry>()
 
@@ -107,6 +114,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
 
         loadSettings()
         loadBackups()
+        observeLocalFeatureSettings()
     }
 
     private fun setupToolbar() {
@@ -297,6 +305,125 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     override fun onResume() {
         super.onResume()
         loadSettings()
+        setupRealtimeFirebaseListener()
+    }
+
+    private fun setupRealtimeFirebaseListener() {
+        val owner = firebaseSync.getOwnerRef() ?: return
+        val ref = owner.child("feature_settings").child("1")
+        if (featureSettingsRef == ref && featureSettingsListener != null) return
+
+        featureSettingsListener?.let { featureSettingsRef?.removeEventListener(it) }
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (!snapshot.exists() || isSaving) return
+                hydrateFromFirebase(snapshot)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        ref.addValueEventListener(listener)
+        featureSettingsRef = ref
+        featureSettingsListener = listener
+    }
+
+    private fun hydrateFromFirebase(snapshot: DataSnapshot) {
+        fun b(k: String, def: Boolean = false): Boolean {
+            val v = snapshot.child(k).value ?: return def
+            return when (v) {
+                is Boolean -> v
+                is Number -> v.toInt() == 1
+                is String -> v.equals("true", ignoreCase = true) || v == "1"
+                else -> def
+            }
+        }
+        fun s(k: String): String? = snapshot.child(k).value?.toString()
+
+        val fs = LocalFeatureSettings(
+            id = 1,
+            enableEmployeeManagement = b("enableEmployeeManagement", true),
+            enablePayroll = b("enablePayroll", true),
+            enableAttendance = b("enableAttendance", true),
+            enableLeaveManagement = b("enableLeaveManagement", true),
+            enableSalaryAdvance = b("enableSalaryAdvance", true),
+            enableBonusManagement = b("enableBonusManagement", true),
+            enableProfessionalTax = b("enableProfessionalTax", true),
+            enableStatutoryCompliance = b("enableStatutoryCompliance", true),
+            enableEmailNotifications = b("enableEmailNotifications", true),
+            enableInAppNotifications = b("enableInAppNotifications", true),
+            enableCustomReporting = b("enableCustomReporting", true),
+            enableCompanyReports = b("enableCompanyReports", true),
+            enableAuditLog = b("enableAuditLog", true),
+            enableRecycleBin = b("enableRecycleBin", true),
+            enableGeoFencing = b("enableGeoFencing"),
+            enableAutomaticGeofencePunching = b("enableAutomaticGeofencePunching"),
+            enableDualAttendance = b("enableDualAttendance"),
+            enablePunchCorrection = b("enablePunchCorrection"),
+            enableRegularizationReq = b("enableRegularizationReq"),
+            enableResignationModule = b("enableResignationModule"),
+            enableYearEndSummary = b("enableYearEndSummary"),
+            enableTaxDeclarations = b("enableTaxDeclarations"),
+            enableFlexibleBenefits = b("enableFlexibleBenefits"),
+            enableTdsDeduction = b("enableTdsDeduction"),
+            enableAutoShiftRotation = b("enableAutoShiftRotation"),
+            enableShiftScheduling = b("enableShiftScheduling"),
+            enableShiftAllowance = b("enableShiftAllowance"),
+            enableSandwichRule = b("enableSandwichRule"),
+            enableLeaveAccrual = b("enableLeaveAccrual"),
+            showThemeToggle = b("showThemeToggle", true),
+            employeeToolsVisible = b("employeeToolsVisible", true),
+            employeeCanViewDashboard = b("employeeCanViewDashboard", true),
+            employeeCanViewAttendance = b("employeeCanViewAttendance", true),
+            employeeCanViewLeave = b("employeeCanViewLeave", true),
+            employeeCanViewLeaveHistory = b("employeeCanViewLeaveHistory", true),
+            employeeCanViewAdvance = b("employeeCanViewAdvance", true),
+            employeeCanViewBonus = b("employeeCanViewBonus", true),
+            employeeCanViewTax = b("employeeCanViewTax", true),
+            employeeCanViewPayslip = b("employeeCanViewPayslip", true),
+            employeeCanViewResignation = b("employeeCanViewResignation", true),
+            employeeCanViewReports = b("employeeCanViewReports", true),
+            employeeCanViewShifts = b("employeeCanViewShifts", true),
+            adminCanViewDashboard = b("adminCanViewDashboard", true),
+            adminCanViewAttendance = b("adminCanViewAttendance", true),
+            adminCanManageShifts = b("adminCanManageShifts", true),
+            adminCanRunPayroll = b("adminCanRunPayroll", true),
+            adminCanViewReports = b("adminCanViewReports", true),
+            adminCanManageEmployees = b("adminCanManageEmployees", true),
+            adminCanEditSettings = b("adminCanEditSettings", true),
+            adminCanManageEmployeePermissions = b("adminCanManageEmployeePermissions", true),
+            adminCanManagePunchApprovals = b("adminCanManagePunchApprovals", true),
+            adminCanManageFeatureToggles = b("adminCanManageFeatureToggles", false) || b("admin_can_manage_feature_toggles", false),
+            firebasePlanMode = s("firebasePlanMode") ?: s("firebase_plan_mode") ?: "Spark",
+            isOfflineMode = b("isOfflineMode") ?: b("is_offline_mode") ?: false,
+            deploymentMode = s("deploymentMode") ?: s("deployment_mode") ?: "CloudOnly",
+            syncState = 1
+        )
+
+        currentSettings = fs
+        setupTabs(fs)
+        populateUI(fs)
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            localSettingsDao.upsertFeatureSettings(fs)
+        }
+    }
+
+    private fun observeLocalFeatureSettings() {
+        lifecycleScope.launch {
+            localSettingsDao.getFeatureSettingsFlow().collect { local ->
+                if (local != null && !isSaving) {
+                    currentSettings = local
+                    setupTabs(local)
+                    populateUI(local)
+                }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        featureSettingsListener?.let { featureSettingsRef?.removeEventListener(it) }
+        featureSettingsListener = null
+        featureSettingsRef = null
     }
 
     private fun loadSettings() {

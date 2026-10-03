@@ -56,11 +56,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                // BANDWIDTH & SPEED OPTIMIZATION: Return from local SQLite instantly if available.
-                // If local database has records, an empty range means no records exist for that range,
-                // so we do not download the entire historical Firebase table.
-                var hasAnyLocal = await db.DailySummaries.AnyAsync(ct);
-                if (localList.Count > 0 || isOffline || hasAnyLocal)
+                if (localList.Count > 0 || isOffline)
                 {
                     return localList
                         .GroupBy(x => (x.EmployeeID, x.ShiftDate))
@@ -178,8 +174,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                var hasAnyLocal = await db.DailySummaries.AnyAsync(ct);
-                if (localList.Count > 0 || isOffline || hasAnyLocal)
+                if (localList.Count > 0 || isOffline)
                 {
                     return localList
                         .GroupBy(x => (x.EmployeeID, x.ShiftDate))

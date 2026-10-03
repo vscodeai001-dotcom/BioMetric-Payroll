@@ -151,14 +151,14 @@
                         <label class="form-label small fw-bold text-secondary">Latitude</label>
                         <div class="input-group input-group-sm">
                             <span class="input-group-text bg-body-tertiary">🌐</span>
-                            <input type="number" step="any" class="form-control rounded-end-3" @bind="Settings.OfficeLatitude" placeholder="12.9716" />
+                            <input type="number" step="any" class="form-control rounded-end-3" @bind="Settings.OfficeLatitude" @bind:after="OnCoordinatesChanged" placeholder="12.9716" />
                         </div>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label small fw-bold text-secondary">Longitude</label>
                         <div class="input-group input-group-sm">
                             <span class="input-group-text bg-body-tertiary">🌐</span>
-                            <input type="number" step="any" class="form-control rounded-end-3" @bind="Settings.OfficeLongitude" placeholder="80.2437" />
+                            <input type="number" step="any" class="form-control rounded-end-3" @bind="Settings.OfficeLongitude" @bind:after="OnCoordinatesChanged" placeholder="80.2437" />
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -593,6 +593,45 @@
     private string _tempAddressLine1 = "";
     private string _tempCityStatePincode = "";
     private DotNetObjectReference<GeneralTab>? _dotNetRef;
+    private bool _hasAutoResolvedAddress = false;
+
+    protected override void OnParametersSet()
+    {
+        if (Settings.AddressLine1 != null && Settings.AddressLine1.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.AddressLine1 = "";
+        }
+        if (Settings.CityStatePincode != null && Settings.CityStatePincode.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.CityStatePincode = "";
+        }
+        if (Settings.CompanyName != null && Settings.CompanyName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.CompanyName = "";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_hasAutoResolvedAddress)
+        {
+            if (Settings.OfficeLatitude != 0 && Settings.OfficeLongitude != 0 &&
+                (string.IsNullOrWhiteSpace(Settings.AddressLine1) || Settings.AddressLine1.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase) ||
+                 string.IsNullOrWhiteSpace(Settings.CityStatePincode) || Settings.CityStatePincode.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase)))
+            {
+                _hasAutoResolvedAddress = true;
+                await FetchAddressFromCoordinates();
+            }
+        }
+    }
+
+    private async Task OnCoordinatesChanged()
+    {
+        if (Settings.OfficeLatitude != 0 && Settings.OfficeLongitude != 0)
+        {
+            await FetchAddressFromCoordinates();
+        }
+    }
 
     private async Task OnTrackingIntervalChanged(ChangeEventArgs e)
     {

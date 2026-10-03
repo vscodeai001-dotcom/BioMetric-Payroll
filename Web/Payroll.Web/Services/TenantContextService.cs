@@ -109,6 +109,18 @@ namespace Payroll.Web.Services
                     return _superAdminSelectedTenantId;
                 }
 
+                try
+                {
+                    await using var db = await _dbFactory.CreateDbContextAsync();
+                    var firstTenant = await db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefaultAsync();
+                    if (firstTenant != null)
+                    {
+                        _superAdminSelectedTenantId = firstTenant.TenantId;
+                        return _superAdminSelectedTenantId;
+                    }
+                }
+                catch { }
+
                 return DefaultTenantId;
             }
 
@@ -127,11 +139,11 @@ namespace Payroll.Web.Services
             var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
             var userEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
 
-            await using var db = await _dbFactory.CreateDbContextAsync();
+            await using var dbContext = await _dbFactory.CreateDbContextAsync();
 
             if (!string.IsNullOrWhiteSpace(userId) || !string.IsNullOrWhiteSpace(userEmail))
             {
-                var tenant = await db.CompanyTenants
+                var tenant = await dbContext.CompanyTenants
                     .AsNoTracking()
                     .FirstOrDefaultAsync(t => (userId != null && t.AdminUserId == userId) ||
                                               (userEmail != null && t.AdminEmail.ToLower() == userEmail.ToLower()));
@@ -224,7 +236,15 @@ namespace Payroll.Web.Services
                 .AsNoTracking()
                 .FirstOrDefaultAsync(t => t.TenantId == activeId);
 
-            if (tenant == null && activeId == DefaultTenantId)
+            if (tenant == null)
+            {
+                tenant = await db.CompanyTenants
+                    .AsNoTracking()
+                    .OrderByDescending(t => t.IsActive)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (tenant == null)
             {
                 // Fallback default tenant object
                 return new CompanyTenant
@@ -255,9 +275,9 @@ namespace Payroll.Web.Services
                 .ThenBy(t => t.CompanyName)
                 .ToListAsync();
 
-            if (!list.Any(t => t.TenantId == DefaultTenantId))
+            if (list.Count == 0)
             {
-                list.Insert(0, new CompanyTenant
+                list.Add(new CompanyTenant
                 {
                     Id = 1,
                     TenantId = DefaultTenantId,

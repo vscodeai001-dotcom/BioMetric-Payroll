@@ -277,3 +277,32 @@
     background: #111317 !important;
     border-color: #262a30 !important;
 }
+
+:global([data-theme="dark"]) .hub-nav-pills,
+:global([data-bs-theme="dark"]) .hub-nav-pills,
+:global(body.dark) .hub-nav-pills {
+    background: #1e222b !important;
+    border-color: #2e3440 !important;
+}
+
+:global([data-theme="dark"]) .hub-nav-pills .nav-link,
+:global([data-bs-theme="dark"]) .hub-nav-pills .nav-link,
+:global(body.dark) .hub-nav-pills .nav-link {
+    color: #94a3b8 !important;
+}
+
+:global([data-theme="dark"]) .hub-nav-pills .nav-link:hover,
+:global([data-bs-theme="dark"]) .hub-nav-pills .nav-link:hover,
+:global(body.dark) .hub-nav-pills .nav-link:hover {
+    color: #f1f5f9 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+}
+
+:global([data-theme="dark"]) .hub-nav-pills .nav-link.active,
+:global([data-bs-theme="dark"]) .hub-nav-pills .nav-link.active,
+:global(body.dark) .hub-nav-pills .nav-link.active {
+    background-color: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
+}
+

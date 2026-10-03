@@ -64,6 +64,77 @@ class Program
             return;
         }
 
+        if (args.Length >= 2 && args[0] == "--resolve-and-update-settings")
+        {
+            var tenantId = args[1];
+            var lat = 11.936607491456765;
+            var lon = 79.78181299443752;
+            using var geoHttp = new HttpClient();
+            geoHttp.DefaultRequestHeaders.UserAgent.ParseAdd("BioMetricPayroll-Admin/1.0 (admin@sridiyaa.com)");
+            var geoRes = await geoHttp.GetStringAsync($"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&addressdetails=1");
+            using var doc = JsonDocument.Parse(geoRes);
+            var root = doc.RootElement;
+            var addrObj = root.GetProperty("address");
+
+            string premises = addrObj.TryGetProperty("building", out var bld) ? bld.GetString() ?? "" :
+                              addrObj.TryGetProperty("office", out var ofc) ? ofc.GetString() ?? "" :
+                              addrObj.TryGetProperty("amenity", out var amn) ? amn.GetString() ?? "" : "";
+            string road = addrObj.TryGetProperty("road", out var rd) ? rd.GetString() ?? "" :
+                          addrObj.TryGetProperty("suburb", out var sb) ? sb.GetString() ?? "" : "";
+            string houseNum = addrObj.TryGetProperty("house_number", out var hn) ? hn.GetString() ?? "" : "";
+
+            string line1 = !string.IsNullOrWhiteSpace(premises) && !string.IsNullOrWhiteSpace(road) ? $"{premises}, {road}" :
+                           !string.IsNullOrWhiteSpace(houseNum) && !string.IsNullOrWhiteSpace(road) ? $"{houseNum} {road}" :
+                           !string.IsNullOrWhiteSpace(road) ? road :
+                           !string.IsNullOrWhiteSpace(premises) ? premises :
+                           root.GetProperty("display_name").GetString()?.Split(',')[0].Trim() ?? "";
+
+            string city = addrObj.TryGetProperty("city", out var ct) ? ct.GetString() ?? "" :
+                          addrObj.TryGetProperty("town", out var tw) ? tw.GetString() ?? "" :
+                          addrObj.TryGetProperty("village", out var vl) ? vl.GetString() ?? "" :
+                          addrObj.TryGetProperty("county", out var co) ? co.GetString() ?? "" : "";
+            string state = addrObj.TryGetProperty("state", out var st) ? st.GetString() ?? "" : "";
+            string pin = addrObj.TryGetProperty("postcode", out var pc) ? pc.GetString() ?? "" : "";
+
+            var cityParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(city)) cityParts.Add(city);
+            if (!string.IsNullOrWhiteSpace(state)) cityParts.Add(state);
+            string cityStatePin = string.Join(", ", cityParts);
+            if (!string.IsNullOrWhiteSpace(pin)) cityStatePin += $" - {pin}";
+
+            Console.WriteLine($"Resolved: Line1='{line1}', CityStatePin='{cityStatePin}'");
+
+            var cred = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var tok = await cred.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var fbHttp = new HttpClient();
+            var payload = new Dictionary<string, object>
+            {
+                ["companyName"] = "Sri Diyaa Agencies",
+                ["addressLine1"] = line1,
+                ["cityStatePincode"] = cityStatePin,
+                ["officeLatitude"] = lat,
+                ["officeLongitude"] = lon,
+                ["geoRadiusMeters"] = 500
+            };
+            var req = new HttpRequestMessage(HttpMethod.Patch, $"{DatabaseUrl}/owners/{tenantId}/company_settings/1.json")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json")
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tok);
+            var res = await fbHttp.SendAsync(req);
+            Console.WriteLine($"Firebase Update Status: {res.StatusCode}");
+
+            var tenantReq = new HttpRequestMessage(HttpMethod.Patch, $"{DatabaseUrl}/tenants/{tenantId}.json")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new Dictionary<string, object> { ["companyName"] = "Sri Diyaa Agencies" }), System.Text.Encoding.UTF8, "application/json")
+            };
+            tenantReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", tok);
+            await fbHttp.SendAsync(tenantReq);
+            Console.WriteLine("Tenant metadata synced successfully!");
+            return;
+        }
+
         Console.WriteLine("=========================================================");
         Console.WriteLine("🚀 Firebase Realtime Database Fast Cloud Cleaner");
         Console.WriteLine("   Rule: Keep Employee Master & Settings (Partial Wipe Spec)");

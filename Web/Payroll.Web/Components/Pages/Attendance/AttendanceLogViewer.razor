@@ -606,36 +606,71 @@
             }
 
             // ----------------------------------------------------
-            // AUTOMATIC NEW-PUNCH PROCESSING
+            // RAW PUNCHES (Firebase SSOT first, unified with SQLite)
             // ----------------------------------------------------
-            //
-            // IMPORTANT:
-            //
-            // This does NOT replace ReprocessAttendance().
-            //
-            // It only checks whether raw attendance punches have changed.
-            //
-            // Example:
-            //
-            // 11:30
-            // 11:33
-            // 11:34
-            //
-            // already processed
-            //      ↓
-            // NO calculation
-            //
-            // New punch:
-            //
-            // 11:30
-            // 11:33
-            // 11:34
-            // 17:27
-            //
-            // fingerprint changed
-            //      ↓
-            // calculate ONLY that employee/date
-            //
+
+            List<AttendanceLog> relevantLogs = new();
+            var cacheKey = BuildAttendanceCacheKey(dStart, dEnd, selectedEmployeeId);
+            try
+            {
+                relevantLogs = await FirebaseAttendanceService.GetAttendancePunchesAsync(
+                    dStart,
+                    dEnd,
+                    selectedEmployeeId > 0 ? selectedEmployeeId : null);
+            }
+            catch (Exception firebasePunchEx)
+            {
+                if (!_attendanceCacheReady)
+                    throw;
+
+                var cached = await ReadAttendanceCacheAsync(cacheKey);
+                if (cached is null)
+                    throw;
+
+                relevantLogs = cached.AttendanceLogs;
+                _showingCachedAttendance = true;
+                _logger.LogWarning(firebasePunchEx,
+                    "Firebase attendance punch read failed. Using cached attendance data for {CacheKey}.", cacheKey);
+            }
+
+            // Sync any newly fetched punches from Firebase SSOT into SQLite dbContext.AttendanceLogs
+            if (relevantLogs.Count > 0)
+            {
+                var existingLogIds = (await dbContext.AttendanceLogs
+                    .Where(p => p.PunchTime >= dStart.ToDateTime(TimeOnly.MinValue) && p.PunchTime < queryEndExclusive)
+                    .Select(p => p.LogID)
+                    .ToListAsync())
+                    .ToHashSet();
+
+                bool addedPunches = false;
+                foreach (var p in relevantLogs)
+                {
+                    if (p.LogID > 0 && !existingLogIds.Contains(p.LogID))
+                    {
+                        dbContext.AttendanceLogs.Add(new AttendanceLog
+                        {
+                            LogID = p.LogID,
+                            EmployeeID = p.EmployeeID,
+                            PunchTime = p.PunchTime,
+                            LogType = p.LogType,
+                            BiometricID = p.BiometricID,
+                            DeviceID = p.DeviceID,
+                            IsApproved = p.IsApproved,
+                            Latitude = p.Latitude,
+                            Longitude = p.Longitude
+                        });
+                        existingLogIds.Add(p.LogID);
+                        addedPunches = true;
+                    }
+                }
+                if (addedPunches)
+                {
+                    await dbContext.SaveChangesAsync();
+                }
+            }
+
+            // ----------------------------------------------------
+            // AUTOMATIC NEW-PUNCH PROCESSING
             // ----------------------------------------------------
 
             if (autoProcessNewPunches &&
@@ -648,7 +683,8 @@
                     dStart,
                     dEnd,
                     queryEndExclusive,
-                    forceRecalculate);
+                    forceRecalculate,
+                    relevantLogs);
             }
 
             // ----------------------------------------------------
@@ -656,7 +692,6 @@
             // ----------------------------------------------------
 
             List<DailySummary> data = new();
-            var cacheKey = BuildAttendanceCacheKey(dStart, dEnd, selectedEmployeeId);
             try
             {
                 data = selectedEmployeeId > 0
@@ -681,6 +716,20 @@
             if (selectedEmployeeId > 0)
             {
                 data = data.Where(ds => ds.EmployeeID == selectedEmployeeId).ToList();
+            }
+
+            // Merge with local SQLite summaries so newly calculated summaries are immediately visible
+            var localSummaries = await dbContext.DailySummaries.AsNoTracking()
+                .Where(s => s.ShiftDate >= dStart && s.ShiftDate <= dEnd && (selectedEmployeeId <= 0 || s.EmployeeID == selectedEmployeeId))
+                .ToListAsync();
+
+            var dataKeys = new HashSet<(int EmployeeID, DateOnly ShiftDate)>(data.Select(d => (d.EmployeeID, d.ShiftDate)));
+            foreach (var ls in localSummaries)
+            {
+                if (dataKeys.Add((ls.EmployeeID, ls.ShiftDate)))
+                {
+                    data.Add(ls);
+                }
             }
 
             // Deduplicate by (EmployeeID, ShiftDate): Firebase may return multiple entries
@@ -739,42 +788,6 @@
             var featureSettings = await dbContext.FeatureSettings
                 .AsNoTracking()
                 .FirstOrDefaultAsync();
-
-            // ----------------------------------------------------
-            // RAW PUNCHES
-            //
-            // IMPORTANT:
-            // PunchTime is treated as existing business-local
-            // attendance time.
-            //
-            // Do NOT add/subtract 5:30 here.
-            // ----------------------------------------------------
-
-            List<AttendanceLog> relevantLogs;
-            try
-            {
-                relevantLogs =
-                    employeeIds.Count == 0
-                        ? new List<AttendanceLog>()
-                        : await FirebaseAttendanceService.GetAttendancePunchesAsync(
-                            dStart,
-                            dEnd,
-                            selectedEmployeeId > 0 ? selectedEmployeeId : null);
-            }
-            catch (Exception firebasePunchEx)
-            {
-                if (!_attendanceCacheReady)
-                    throw;
-
-                var cached = await ReadAttendanceCacheAsync(cacheKey);
-                if (cached is null)
-                    throw;
-
-                relevantLogs = cached.AttendanceLogs;
-                _showingCachedAttendance = true;
-                _logger.LogWarning(firebasePunchEx,
-                    "Firebase attendance punch read failed. Using cached attendance data for {CacheKey}.", cacheKey);
-            }
 
             if (employeeIds.Count > 0)
             {
@@ -1067,33 +1080,81 @@
                         })
                     .DistinctBy(
                         x => (x.EmployeeID, x.Date))
-                    .OrderByDescending(
-                        x => x.Date)
-                    .ThenBy(
-                        x => x.EmployeeName)
                     .ToList();
+
+            var existingLogKeys = logs.Select(l => (l.EmployeeID, l.Date)).ToHashSet();
+            foreach (var kvp in punchesByEmpDate)
+            {
+                var (empId, pDate) = kvp.Key;
+                if (existingLogKeys.Contains((empId, pDate))) continue;
+
+                activeEmpMap.TryGetValue(empId, out var emp);
+                schedMap.TryGetValue((empId, pDate), out var scheduleOverride);
+
+                TimeOnly? sStart = scheduleOverride?.StartTime ?? emp?.ShiftStartTime;
+                TimeOnly? sEnd = scheduleOverride?.EndTime ?? emp?.ShiftEndTime;
+                DateTime? sStartDt = sStart.HasValue ? pDate.ToDateTime(sStart.Value) : null;
+                DateTime? sEndDt = sEnd.HasValue ? pDate.ToDateTime(sEnd.Value) : null;
+                if (sStartDt.HasValue && sEndDt.HasValue && sEndDt <= sStartDt)
+                {
+                    sEndDt = sEndDt.Value.AddDays(1);
+                }
+
+                var dayPunchLogs = kvp.Value;
+                var pr = PunchProcessor.ProcessPunches(
+                    dayPunchLogs,
+                    pDate.ToDateTime(TimeOnly.MinValue),
+                    sStartDt,
+                    sEndDt,
+                    featureSettings);
+                var effectiveLogs = pr.Ordered;
+
+                string status = effectiveLogs.Count % 2 == 1 ? "Missing Punch" : "Present";
+                bool isWeeklyOff = emp != null && (emp.CompOffDayOfWeek.HasValue && pDate.DayOfWeek == emp.CompOffDayOfWeek.Value ||
+                                   (!emp.CompOffDayOfWeek.HasValue && pDate.DayOfWeek == DayOfWeek.Sunday));
+                if (isWeeklyOff && effectiveLogs.Count > 0)
+                {
+                    status = "Weekly Off (Worked)";
+                }
+
+                var synDto = new AttendanceLogDto
+                {
+                    EmployeeID = empId,
+                    EmployeeName = emp?.Name ?? "Unknown",
+                    Date = pDate,
+                    Status = status,
+                    ShiftStart = sStart,
+                    ShiftEnd = sEnd,
+                    ScheduledShiftDuration = isWeeklyOff
+                        ? GetDisplayScheduledDuration(sStart, sEnd, emp?.StandardBreakMinutes ?? 0)
+                        : (scheduleOverride != null ? TimeSpan.FromHours(8) : TimeSpan.Zero),
+                    Punches = string.Join("\n", effectiveLogs.Select(l => $"{l.PunchTime:HH:mm:ss}  {(!string.IsNullOrWhiteSpace(l.DeviceID) ? l.DeviceID : (l.BiometricID != null && l.BiometricID.StartsWith("AUTO_") ? "AndroidGeofenceAuto" : "Machine"))}  #{l.LogID}  {l.LogType}")),
+                    ShiftWorkedDuration = TimeSpan.Zero,
+                    FinalWorkedHours = 0m
+                };
+                logs.Add(synDto);
+                existingLogKeys.Add((empId, pDate));
+            }
+
+            logs = logs
+                .DistinctBy(x => (x.EmployeeID, x.Date))
+                .OrderByDescending(x => x.Date)
+                .ThenBy(x => x.EmployeeName)
+                .ToList();
 
             // ----------------------------------------------------
             // CUMULATIVE
             // ----------------------------------------------------
 
             decimal totalWorkedHours =
-    data.Sum(
-        x =>
-            Math.Max(
-                0m,
-                x.EarnedStandardHours)
-            +
-            (decimal)Math.Max(
-                0d,
-                x.TotalOvertimeDuration.TotalHours));
+                logs.Sum(x => x.FinalWorkedHours);
 
             cumulative =
                 new CompanyCumulativeSummary
                 {
                     TotalScheduledHours =
                         TimeSpan.FromTicks(
-                            data.Sum(
+                            logs.Sum(
                                 x =>
                                     x.ScheduledShiftDuration
                                         .Ticks)),
@@ -1103,30 +1164,30 @@
 
                     TotalOvertime =
                         TimeSpan.FromTicks(
-                            data.Sum(
+                            logs.Sum(
                                 x =>
-                                    x.TotalOvertimeDuration
+                                    x.OvertimeDuration
                                         .Ticks)),
 
                     TotalOverallPenalty =
                         TimeSpan.FromTicks(
-                            data.Sum(
+                            logs.Sum(
                                 x =>
-                                    x.TotalPenaltyDuration
+                                    x.TotalPenalty
                                         .Ticks)),
 
                     TotalLateness =
                         TimeSpan.FromTicks(
-                            data.Sum(
+                            logs.Sum(
                                 x =>
-                                    x.TotalLateness
+                                    x.LatenessDuration
                                         .Ticks)),
 
                     TotalBreakPenalty =
                         TimeSpan.FromTicks(
-                            data.Sum(
+                            logs.Sum(
                                 x =>
-                                    x.TotalBreakPenalty
+                                    x.BreakPenalty
                                         .Ticks))
                 };
         }
@@ -1162,17 +1223,18 @@
         DateOnly dStart,
         DateOnly dEnd,
         DateTime queryEndExclusive,
-        bool forceRecalculate = false)
+        bool forceRecalculate = false,
+        List<AttendanceLog>? preloadedPunches = null)
     {
         try
         {
             // --------------------------------------------------------
-            // Load raw punches only.
+            // Load raw punches (merge SQLite and preloaded Firebase SSOT punches).
             // PunchTime is already business-local.
             // DO NOT convert timezone here.
             // --------------------------------------------------------
 
-            var punches =
+            var dbPunches =
                 await dbContext.AttendanceLogs
                     .Where(
                         p =>
@@ -1186,6 +1248,26 @@
                     .OrderBy(
                         p => p.PunchTime)
                     .ToListAsync();
+
+            var punchesMap = new Dictionary<string, AttendanceLog>();
+            foreach (var p in dbPunches)
+            {
+                var k = $"{p.EmployeeID}_{p.PunchTime:yyyyMMddHHmmss}_{p.LogType}";
+                punchesMap[k] = p;
+            }
+            if (preloadedPunches != null)
+            {
+                foreach (var p in preloadedPunches)
+                {
+                    if (!p.EmployeeID.HasValue || !activeEmployeeIds.Contains(p.EmployeeID.Value)) continue;
+                    var k = $"{p.EmployeeID}_{p.PunchTime:yyyyMMddHHmmss}_{p.LogType}";
+                    if (!punchesMap.ContainsKey(k))
+                    {
+                        punchesMap[k] = p;
+                    }
+                }
+            }
+            var punches = punchesMap.Values.OrderBy(p => p.PunchTime).ToList();
 
             // --------------------------------------------------------
             // Load settings required by the EXISTING calculator.

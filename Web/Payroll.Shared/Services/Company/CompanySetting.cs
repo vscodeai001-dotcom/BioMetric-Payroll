@@ -15,9 +15,9 @@ namespace Payroll.Shared.Data
         public int SettingID { get; set; } = 0;
 
         // --- Company Details ---
-        public string CompanyName { get; set; } = "Your Company Name";
-        public string AddressLine1 { get; set; } = "Address Line 1";
-        public string CityStatePincode { get; set; } = "City, State, Pincode";
+        public string CompanyName { get; set; } = "";
+        public string AddressLine1 { get; set; } = "";
+        public string CityStatePincode { get; set; } = "";
 
         // --- PAYROLL RULES & DEVICE ---
         public string SalaryCalculationMethod { get; set; } = "Days in Month";
