@@ -10,6 +10,9 @@ namespace Payroll.Web.Services;
 /// </summary>
 public sealed class FirebaseAdminDashboardService
 {
+    private static readonly TimeZoneInfo s_indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
+        OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
+
     private readonly FirebaseRealtimeService _firebase;
     private readonly ILogger<FirebaseAdminDashboardService> _logger;
 
@@ -27,12 +30,16 @@ public sealed class FirebaseAdminDashboardService
     {
         var ownerUid = _firebase.ResolveOwnerUid(actorUid, "Admin");
 
-        var indiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(
-            OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
+        var indiaTimeZone = s_indiaTimeZone;
         var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
         var today = DateOnly.FromDateTime(now);
         var monthStart = new DateOnly(today.Year, today.Month, 1);
         var nextMonthStart = monthStart.AddMonths(1);
+
+        var todayStartUtc = TimeZoneInfo.ConvertTimeToUtc(today.ToDateTime(TimeOnly.MinValue), indiaTimeZone);
+        var todayEndUtc = TimeZoneInfo.ConvertTimeToUtc(today.AddDays(1).ToDateTime(TimeOnly.MinValue), indiaTimeZone);
+        var todayStartMs = new DateTimeOffset(todayStartUtc).ToUnixTimeMilliseconds();
+        var todayEndMs = new DateTimeOffset(todayEndUtc).ToUnixTimeMilliseconds() - 1;
 
         // Dashboard KPI reads are deliberately bounded. The previous version
         // downloaded the complete attendance/shift/summary collections every
@@ -50,8 +57,8 @@ public sealed class FirebaseAdminDashboardService
                 ownerUid,
                 "attendance",
                 "checkInTime",
-                startAt: new DateTimeOffset(DateTime.SpecifyKind(today.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
-                endAt: new DateTimeOffset(DateTime.SpecifyKind(today.AddDays(1).ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc)).ToUnixTimeMilliseconds() - 1,
+                startAt: todayStartMs,
+                endAt: todayEndMs,
                 cancellationToken: cancellationToken),
 
             _firebase.GetOwnerTableAsync(
@@ -82,7 +89,15 @@ public sealed class FirebaseAdminDashboardService
 
             _firebase.GetOwnerTrackingLiveAsync(
                 ownerUid,
-                cancellationToken));
+                cancellationToken),
+
+            _firebase.GetOwnerTableByChildRangeAsync(
+                ownerUid,
+                "attendance_punches",
+                "timestamp",
+                startAt: todayStartMs,
+                endAt: todayEndMs,
+                cancellationToken: cancellationToken));
 
         try
         {
@@ -93,6 +108,7 @@ public sealed class FirebaseAdminDashboardService
             var shifts = Items(results[4]).ToList();
             var summaries = Items(results[5]).ToList();
             var tracking = Items(results[6]).ToList();
+            var punches = Items(results[7]).ToList();
 
             // Authoritative Dashboard Date: calculated above in India Timezone.
 
@@ -143,19 +159,40 @@ public sealed class FirebaseAdminDashboardService
                             : g.Last().Name!);
 
             /*
-             * Present employees today.
+             * Present employees today (checks both legacy attendance and live mobile attendance punches).
              */
             var presentIds = attendance
                 .Where(a =>
                     activeIds.Contains(
                         Int(a, "employeeId") ?? int.MinValue) &&
                     UnixDateTime(a, "checkInTime") is DateTime dt &&
-                    dt >= now.Date &&
-                    dt < now.Date.AddDays(1))
+                    dt.Date == now.Date)
                 .Select(a => Int(a, "employeeId"))
                 .Where(id => id.HasValue)
                 .Select(id => id!.Value)
                 .ToHashSet();
+
+            var presentFromPunches = punches
+                .Where(p =>
+                {
+                    var empId = Int(p, "employeeId") ?? Int(p, "staffId");
+                    if (!empId.HasValue || !activeIds.Contains(empId.Value))
+                        return false;
+
+                    var type = String(p, "type") ?? String(p, "punchType") ?? "IN";
+                    if (!type.Equals("IN", StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    var status = String(p, "status");
+                    if (!string.IsNullOrEmpty(status) && status.Equals("REJECTED", StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    var punchTime = UnixDateTime(p, "timestamp") ?? UnixDateTime(p, "checkInTime");
+                    return punchTime is DateTime dt && dt.Date == now.Date;
+                })
+                .Select(p => (Int(p, "employeeId") ?? Int(p, "staffId"))!.Value);
+
+            presentIds.UnionWith(presentFromPunches);
 
             /*
              * Unpaid advances.
@@ -710,18 +747,17 @@ public sealed class FirebaseAdminDashboardService
             if (p.TryGetInt64(
                     out var ms))
             {
-                return DateTimeOffset
-                    .FromUnixTimeMilliseconds(ms)
-                    .LocalDateTime;
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime,
+                    s_indiaTimeZone);
             }
 
             if (p.TryGetDouble(
                     out var numeric))
             {
-                return DateTimeOffset
-                    .FromUnixTimeMilliseconds(
-                        (long)numeric)
-                    .LocalDateTime;
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTimeOffset.FromUnixTimeMilliseconds((long)numeric).UtcDateTime,
+                    s_indiaTimeZone);
             }
 
             return null;
@@ -746,9 +782,9 @@ public sealed class FirebaseAdminDashboardService
                     CultureInfo.InvariantCulture,
                     out var parsedMs))
             {
-                return DateTimeOffset
-                    .FromUnixTimeMilliseconds(parsedMs)
-                    .LocalDateTime;
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTimeOffset.FromUnixTimeMilliseconds(parsedMs).UtcDateTime,
+                    s_indiaTimeZone);
             }
 
             if (double.TryParse(
@@ -758,10 +794,9 @@ public sealed class FirebaseAdminDashboardService
                     CultureInfo.InvariantCulture,
                     out var parsedNumeric))
             {
-                return DateTimeOffset
-                    .FromUnixTimeMilliseconds(
-                        (long)parsedNumeric)
-                    .LocalDateTime;
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    DateTimeOffset.FromUnixTimeMilliseconds((long)parsedNumeric).UtcDateTime,
+                    s_indiaTimeZone);
             }
 
             /*
@@ -773,7 +808,9 @@ public sealed class FirebaseAdminDashboardService
                     DateTimeStyles.AssumeUniversal,
                     out var dto))
             {
-                return dto.LocalDateTime;
+                return TimeZoneInfo.ConvertTimeFromUtc(
+                    dto.UtcDateTime,
+                    s_indiaTimeZone);
             }
 
             if (DateTime.TryParse(

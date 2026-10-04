@@ -55,7 +55,10 @@ class AttendancePolicyRepository @Inject constructor(
     }
 
     private fun ownerRef(): DatabaseReference? {
-        val owner = sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() } ?: return null
+        val owner = sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
+            ?: (if (sessionStore.isLoggedIn() || com.google.firebase.auth.FirebaseAuth.getInstance().currentUser != null)
+                com.biometric.app.sync.FirebaseSsotSchema.DEFAULT_OWNER_UID else null)
+            ?: return null
         return com.google.firebase.database.FirebaseDatabase.getInstance()
             .reference.child("owners").child(owner)
     }

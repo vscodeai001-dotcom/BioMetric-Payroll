@@ -606,19 +606,30 @@ class CompanySettingsActivity : MotionBaseActivity() {
     private fun hydrateFromFirebase(snapshot: DataSnapshot) {
         if (!snapshot.exists()) return
 
+        fun raw(k: String): Any? {
+            val candidates = listOf(
+                k,
+                k.replaceFirstChar { it.lowercase() },
+                k.replaceFirstChar { it.uppercase() },
+                k.lowercase(),
+                k.uppercase()
+            )
+            return candidates.asSequence().mapNotNull { snapshot.child(it).value }.firstOrNull()
+        }
+
         fun num(k: String): Number? {
-            val v = snapshot.child(k).value ?: return null
+            val v = raw(k) ?: return null
             return when (v) {
                 is Number -> v
                 is String -> v.toDoubleOrNull()
                 else -> null
             }
         }
-        fun s(k: String): String? = snapshot.child(k).value?.toString()
+        fun s(k: String): String? = raw(k)?.toString()
         fun i(k: String): Int? = num(k)?.toInt()
         fun d(k: String): Double? = num(k)?.toDouble()
         fun b(k: String): Boolean? {
-            val v = snapshot.child(k).value ?: return null
+            val v = raw(k) ?: return null
             return when (v) {
                 is Boolean -> v
                 is Number -> v.toInt() == 1
@@ -634,8 +645,8 @@ class CompanySettingsActivity : MotionBaseActivity() {
         i("workDayCutoffHour")?.let { localCompany.workDayCutoffHour = it }
         i("lateGraceMinutes")?.let { localCompany.lateGraceMinutes = it }
         i("endTimeGraceMinutes")?.let { localCompany.endTimeGraceMinutes = it }
-        (d("officeLatitude") ?: d("latitude") ?: d("Latitude"))?.let { if (it != 0.0) localCompany.officeLatitude = it }
-        (d("officeLongitude") ?: d("longitude") ?: d("Longitude"))?.let { if (it != 0.0) localCompany.officeLongitude = it }
+        (d("officeLatitude") ?: d("latitude"))?.let { if (it != 0.0) localCompany.officeLatitude = it }
+        (d("officeLongitude") ?: d("longitude"))?.let { if (it != 0.0) localCompany.officeLongitude = it }
         (i("geoRadiusMeters") ?: i("radius") ?: i("geo_radius_meters"))?.let { if (it > 0) localCompany.geoRadiusMeters = it }
         i("autoBackupIntervalHours")?.let { localCompany.autoBackupIntervalHours = it }
         i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
@@ -855,10 +866,20 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 localCompany.salaryCalculationMethod = binding.spinnerGenSalaryMethod.text?.toString()?.ifBlank { "Days in Month" } ?: "Days in Month"
                 localCompany.workDayCutoffHour = binding.etGenCutoffHour.text?.toString()?.toIntOrNull() ?: 22
                 localCompany.lateGraceMinutes = binding.etGenLateGrace.text?.toString()?.toIntOrNull() ?: 0
-                localCompany.endTimeGraceMinutes = binding.etGenEarlyGrace.text?.toString()?.toIntOrNull() ?: 0
-                localCompany.officeLatitude = binding.etGenLatitude.text?.toString()?.toDoubleOrNull() ?: localCompany.officeLatitude
-                localCompany.officeLongitude = binding.etGenLongitude.text?.toString()?.toDoubleOrNull() ?: localCompany.officeLongitude
-                localCompany.geoRadiusMeters = binding.etGenRadius.text?.toString()?.toIntOrNull() ?: localCompany.geoRadiusMeters.takeIf { it > 0 } ?: 100
+                val latInput = binding.etGenLatitude.text?.toString()?.toDoubleOrNull()
+                if (latInput != null && latInput != 0.0) {
+                    localCompany.officeLatitude = latInput
+                }
+                val lonInput = binding.etGenLongitude.text?.toString()?.toDoubleOrNull()
+                if (lonInput != null && lonInput != 0.0) {
+                    localCompany.officeLongitude = lonInput
+                }
+                val radInput = binding.etGenRadius.text?.toString()?.toIntOrNull()
+                if (radInput != null && radInput > 0) {
+                    localCompany.geoRadiusMeters = radInput
+                } else if (localCompany.geoRadiusMeters <= 0) {
+                    localCompany.geoRadiusMeters = 100
+                }
 
                 localCompany.zktecoIP = binding.etZktecoIp.text?.toString()?.trim()
                 localCompany.zktecoPort = binding.etZktecoPort.text?.toString()?.toIntOrNull() ?: 4370

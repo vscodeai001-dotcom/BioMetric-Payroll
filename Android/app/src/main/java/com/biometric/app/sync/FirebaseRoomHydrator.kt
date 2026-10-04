@@ -101,17 +101,10 @@ class FirebaseRoomHydrator @Inject constructor(
 
         val role = sessionStore.userRole().trim().uppercase()
         val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
-        if (!isAdmin) {
-            Log.i("FirebaseRoomHydrator", "Skipping Admin Room table hydration for role=$role (wipe listener active)")
-            return
-        }
 
         hydrationJob = scope.launch {
-            // Core employee/self-service tables are hydrated from raw snapshots.
-            // Firebase records migrated from the Web DB can store employee IDs as
-            // numbers while Android's existing Room/domain models use String.
-            // Raw mapping prevents Firebase's strict getValue() mapper from
-            // dropping the records and leaving the Admin dashboard empty.
+            // Core operational and self-service tables are hydrated from raw snapshots for ALL roles.
+            // Mobile app works fully independent of Web server state with complete offline Room caching.
             observeValue("shops", existing = { shopDao.getAllRecords().map { it.shopId to it.syncState } }, onDelete = { key -> shopDao.deleteById(key) }) { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
             observeValue("employees", existing = { employeeDao.getAllRecords().map { it.employeeId to it.syncState } }, onDelete = { key -> employeeDao.deleteById(key) }) { it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) } }
             // SPARK PLAN OPTIMIZATION: Bound attendance to recent records (300). Prevents multi-MB historical download.
@@ -125,44 +118,8 @@ class FirebaseRoomHydrator @Inject constructor(
             observeValue("leave_requests", existing = { leaveDao.getAll().map { it.id to it.syncState } }, onDelete = { key -> leaveDao.deleteById(key) }) { it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) } }
             observeValue("resignation_requests", existing = { resignationDao.getAll().map { it.requestId to it.syncState } }, onDelete = { key -> resignationDao.deleteById(key) }) { it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) } }
 
-            // Admin/SuperAdmin data. Bounded with limitToLast to prevent multi-megabyte downloads.
-            observe("salary_snapshots",
-                query = firebaseSync.getOwnerRef()?.child("salary_snapshots")?.limitToLast(100),
-                onUpsert = { salarySnapshotDao.upsert(it.toLocalSalarySnapshot()) },
-                onDelete = { salarySnapshotDao.deleteById(it.stringValue("snapshotId") ?: it.key.orEmpty()) })
-            // BANDWIDTH OPTIMIZATION: Do NOT globally observe audit_logs in background.
-            // audit_logs is a massive append-only table. AuditTrailActivity queries its own
-            // date-bounded paged range on demand, so downloading the entire collection here
-            // wastes multiple megabytes of bandwidth on every app start.
-            observe("daily_summaries",
-                query = firebaseSync.getOwnerRef()?.child("daily_summaries")?.limitToLast(300),
-                onUpsert = { dailySummaryDao.upsert(it.toLocalDailySummary()) },
-                onDelete = { dailySummaryDao.deleteById(it.intValue("summaryId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             observeShiftSchedules()
             observePayrollHistory()
-            observe("bonus_records",
-                query = firebaseSync.getOwnerRef()?.child("bonus_records")?.limitToLast(100),
-                onUpsert = { bonusRecordDao.upsert(it.toLocalBonusRecord()) },
-                onDelete = {
-                    val key = it.key.orEmpty()
-                    val id = it.intValue("bonusId")
-                        ?: it.intValue("BonusID")
-                        ?: key.toIntOrNull()
-                        ?: (if (key.isNotBlank()) Math.abs(key.hashCode()).let { h -> if (h == 0) 1 else h } else 0)
-                    bonusRecordDao.deleteByIdOrKey(id, key)
-                })
-            observe("tax_declarations",
-                query = firebaseSync.getOwnerRef()?.child("tax_declarations")?.limitToLast(100),
-                onUpsert = { taxDeclarationDao.upsert(it.toLocalTaxDeclaration()) },
-                onDelete = { taxDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
-            observe("fbp_components",
-                query = firebaseSync.getOwnerRef()?.child("fbp_components")?.limitToLast(100),
-                onUpsert = { fbpComponentDao.upsert(it.toLocalFbpComponent()) },
-                onDelete = { fbpComponentDao.deleteById(it.intValue("componentId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
-            observe("fbp_declarations",
-                query = firebaseSync.getOwnerRef()?.child("fbp_declarations")?.limitToLast(100),
-                onUpsert = { fbpDeclarationDao.upsert(it.toLocalFbpDeclaration()) },
-                onDelete = { fbpDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
 
             observeValue("company_settings", existing = { emptyList() }, onDelete = { }) { 
                 if (it.key == "1") settingsDao.upsertCompanySettings(it.toLocalCompanySettings())
@@ -174,6 +131,45 @@ class FirebaseRoomHydrator @Inject constructor(
                     sessionStore.setDeploymentMode(fs.deploymentMode)
                     sessionStore.setOfflineMode(fs.isOfflineMode)
                 }
+            }
+
+            // Admin/SuperAdmin only heavy data collections.
+            if (isAdmin) {
+                observe("salary_snapshots",
+                    query = firebaseSync.getOwnerRef()?.child("salary_snapshots")?.limitToLast(100),
+                    onUpsert = { salarySnapshotDao.upsert(it.toLocalSalarySnapshot()) },
+                    onDelete = { salarySnapshotDao.deleteById(it.stringValue("snapshotId") ?: it.key.orEmpty()) })
+                // BANDWIDTH OPTIMIZATION: Do NOT globally observe audit_logs in background.
+                // audit_logs is a massive append-only table. AuditTrailActivity queries its own
+                // date-bounded paged range on demand, so downloading the entire collection here
+                // wastes multiple megabytes of bandwidth on every app start.
+                observe("daily_summaries",
+                    query = firebaseSync.getOwnerRef()?.child("daily_summaries")?.limitToLast(300),
+                    onUpsert = { dailySummaryDao.upsert(it.toLocalDailySummary()) },
+                    onDelete = { dailySummaryDao.deleteById(it.intValue("summaryId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+                observe("bonus_records",
+                    query = firebaseSync.getOwnerRef()?.child("bonus_records")?.limitToLast(100),
+                    onUpsert = { bonusRecordDao.upsert(it.toLocalBonusRecord()) },
+                    onDelete = {
+                        val key = it.key.orEmpty()
+                        val id = it.intValue("bonusId")
+                            ?: it.intValue("BonusID")
+                            ?: key.toIntOrNull()
+                            ?: (if (key.isNotBlank()) Math.abs(key.hashCode()).let { h -> if (h == 0) 1 else h } else 0)
+                        bonusRecordDao.deleteByIdOrKey(id, key)
+                    })
+                observe("tax_declarations",
+                    query = firebaseSync.getOwnerRef()?.child("tax_declarations")?.limitToLast(100),
+                    onUpsert = { taxDeclarationDao.upsert(it.toLocalTaxDeclaration()) },
+                    onDelete = { taxDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+                observe("fbp_components",
+                    query = firebaseSync.getOwnerRef()?.child("fbp_components")?.limitToLast(100),
+                    onUpsert = { fbpComponentDao.upsert(it.toLocalFbpComponent()) },
+                    onDelete = { fbpComponentDao.deleteById(it.intValue("componentId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
+                observe("fbp_declarations",
+                    query = firebaseSync.getOwnerRef()?.child("fbp_declarations")?.limitToLast(100),
+                    onUpsert = { fbpDeclarationDao.upsert(it.toLocalFbpDeclaration()) },
+                    onDelete = { fbpDeclarationDao.deleteById(it.intValue("declarationId") ?: it.key.orEmpty().toIntOrNull() ?: return@observe) })
             }
         }
     }
@@ -295,6 +291,7 @@ class FirebaseRoomHydrator @Inject constructor(
                                 Log.e("FirebaseRoomHydrator", "Failed to delete Room record $table/$key", error)
                             }
                     }
+                    triggerUiRefresh()
                 }
             }
 
@@ -352,6 +349,7 @@ class FirebaseRoomHydrator @Inject constructor(
                                 Log.e("FirebaseRoomHydrator", "Failed to reconcile Room records for $table", error)
                             }
                         }
+                        triggerUiRefresh()
                     }
                 }
 
@@ -366,6 +364,17 @@ class FirebaseRoomHydrator @Inject constructor(
         listeners += targetQuery to listener
     }
 
+    private var uiRefreshJob: Job? = null
+    private fun triggerUiRefresh() {
+        uiRefreshJob?.cancel()
+        uiRefreshJob = scope.launch {
+            delay(300L)
+            withContext(Dispatchers.Main) {
+                realtimeUiDispatcher.refreshVisible()
+            }
+        }
+    }
+
     private suspend fun hydrate(
         table: String,
         snapshot: DataSnapshot,
@@ -377,6 +386,7 @@ class FirebaseRoomHydrator @Inject constructor(
                     Log.e("FirebaseRoomHydrator", "Failed to hydrate $table/${snapshot.key}", error)
                 }
         }
+        triggerUiRefresh()
     }
 
     private fun DataSnapshot.raw(name: String): Any? {
@@ -794,19 +804,26 @@ class FirebaseRoomHydrator @Inject constructor(
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch {
-                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId)
+                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId) {
                         runCatching { payrollHistoryDao.upsert(snapshot.toLocalPayrollHistory()) }
+                        triggerUiRefresh()
+                    }
                 }
             }
             override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch {
-                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId)
+                    if (!isEmployee || snapshot.intValue("employeeId") == employeeId) {
                         runCatching { payrollHistoryDao.upsert(snapshot.toLocalPayrollHistory()) }
+                        triggerUiRefresh()
+                    }
                 }
             }
             override fun onChildRemoved(snapshot: DataSnapshot) {
                 val id = snapshot.intValue("payrollId") ?: snapshot.key?.toIntOrNull() ?: return
-                scope.launch { runCatching { payrollHistoryDao.deleteById(id) } }
+                scope.launch {
+                    runCatching { payrollHistoryDao.deleteById(id) }
+                    triggerUiRefresh()
+                }
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
@@ -837,19 +854,26 @@ class FirebaseRoomHydrator @Inject constructor(
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch {
-                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId)
+                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId) {
                         runCatching { shiftScheduleDao.upsert(snapshot.toLocalShiftSchedule()) }
+                        triggerUiRefresh()
+                    }
                 }
             }
             override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
                 scope.launch {
-                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId)
+                    if (!employeeRole || snapshot.intValue("employeeId") == employeeId) {
                         runCatching { shiftScheduleDao.upsert(snapshot.toLocalShiftSchedule()) }
+                        triggerUiRefresh()
+                    }
                 }
             }
             override fun onChildRemoved(snapshot: DataSnapshot) {
                 val id = snapshot.intValue("scheduleId") ?: snapshot.key?.toIntOrNull() ?: return
-                scope.launch { runCatching { shiftScheduleDao.deleteById(id) } }
+                scope.launch {
+                    runCatching { shiftScheduleDao.deleteById(id) }
+                    triggerUiRefresh()
+                }
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
@@ -874,13 +898,22 @@ class FirebaseRoomHydrator @Inject constructor(
         val targetQuery: Query = query ?: (firebaseSync.getOwnerRef()?.child(table) ?: return)
         val listener = object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                scope.launch { runCatching { onUpsert(snapshot) } }
+                scope.launch {
+                    runCatching { onUpsert(snapshot) }
+                    triggerUiRefresh()
+                }
             }
             override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
-                scope.launch { runCatching { onUpsert(snapshot) } }
+                scope.launch {
+                    runCatching { onUpsert(snapshot) }
+                    triggerUiRefresh()
+                }
             }
             override fun onChildRemoved(snapshot: DataSnapshot) {
-                scope.launch { runCatching { onDelete(snapshot) } }
+                scope.launch {
+                    runCatching { onDelete(snapshot) }
+                    triggerUiRefresh()
+                }
             }
             override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) = Unit
             override fun onCancelled(error: DatabaseError) {
@@ -923,9 +956,6 @@ class FirebaseRoomHydrator @Inject constructor(
 
     private fun scheduleRebind(reason: String) {
         if (!sessionStore.isLoggedIn() || !firebaseSync.isAuthenticated()) return
-        val role = sessionStore.userRole().trim().uppercase()
-        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
-        if (!isAdmin) return
 
         synchronized(this) {
             if (reconnectJob?.isActive == true) return

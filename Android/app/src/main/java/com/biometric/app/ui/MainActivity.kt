@@ -1833,6 +1833,8 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     // 2. Attendance & Tracking Section
                     val attendanceEnabled = isSuperAdmin || s.adminCanViewAttendance
                     menus.cardSectionAttendance.isVisible = attendanceEnabled
+                    menus.rowDailyLogs.isVisible = attendanceEnabled
+                    menus.rowRawPunchInspector.isVisible = attendanceEnabled
                     menus.rowCompanyReport.isVisible = isSuperAdmin || (s.enableCompanyReports && s.adminCanViewReports)
                     menus.rowLeaveManagement.isVisible = isSuperAdmin || s.enableLeaveManagement
                     menus.rowShiftSchedule.isVisible = isSuperAdmin || (s.enableShiftScheduling && s.adminCanManageShifts)

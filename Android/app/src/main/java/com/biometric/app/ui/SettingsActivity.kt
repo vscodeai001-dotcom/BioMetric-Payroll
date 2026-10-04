@@ -291,6 +291,7 @@ class SettingsActivity : MotionBaseActivity() {
         }
         val owner = firebaseSync.getOwnerRef() ?: return
         
+        val updates = mutableMapOf<String, Any?>()
         companyInputs.forEach { (name, view) ->
             runCatching {
                 val field = CompanySettings::class.java.getDeclaredField(name)
@@ -308,12 +309,15 @@ class SettingsActivity : MotionBaseActivity() {
                     else -> null
                 }
                 field.set(companySettings, value)
+                if (value != null) {
+                    updates[name] = value
+                }
             }
         }
         
         lifecycleScope.launch {
             runCatching {
-                owner.child("company_settings").child("1").setValue(companySettings).await()
+                owner.child("company_settings").child("1").updateChildren(updates).await()
                 firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
                 Toast.makeText(this@SettingsActivity, "Company settings saved ✅", Toast.LENGTH_SHORT).show()
             }.onFailure {

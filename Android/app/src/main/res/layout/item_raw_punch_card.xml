@@ -10,9 +10,9 @@
     android:focusable="true"
     app:cardCornerRadius="14dp"
     app:cardElevation="3dp"
-    app:cardBackgroundColor="#FFFFFF"
+    app:cardBackgroundColor="?attr/colorSurface"
     app:strokeWidth="3dp"
-    app:strokeColor="#E0E7FF">
+    app:strokeColor="?attr/colorOutlineVariant">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -43,7 +43,7 @@
                     android:textSize="20sp"
                     android:textStyle="bold"
                     android:fontFamily="monospace"
-                    android:textColor="#1E1B4B" />
+                    android:textColor="?attr/colorOnSurface" />
 
                 <TextView
                     android:id="@+id/tvPunchDate"
@@ -51,7 +51,7 @@
                     android:layout_height="wrap_content"
                     android:text="01-Jan-2026"
                     android:textSize="11sp"
-                    android:textColor="#6B7280" />
+                    android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
             <!-- Direction badge -->
@@ -121,7 +121,7 @@
                     android:text="Employee Name"
                     android:textSize="14sp"
                     android:textStyle="bold"
-                    android:textColor="#1E1B4B"
+                    android:textColor="?attr/colorOnSurface"
                     android:maxLines="1"
                     android:ellipsize="end" />
 
@@ -131,7 +131,7 @@
                     android:layout_height="wrap_content"
                     android:text="ID: #1  •  Staff"
                     android:textSize="11sp"
-                    android:textColor="#9CA3AF" />
+                    android:textColor="?attr/colorOnSurfaceVariant" />
             </LinearLayout>
 
             <!-- Source Tier badge -->
@@ -164,7 +164,7 @@
                 android:text="🖥 Terminal | 🆔 —"
                 android:textSize="10sp"
                 android:fontFamily="monospace"
-                android:textColor="#6B7280"
+                android:textColor="?attr/colorOnSurfaceVariant"
                 android:maxLines="1"
                 android:ellipsize="end" />
 
@@ -185,8 +185,8 @@
             android:layout_height="wrap_content"
             android:text="Accepted: Primary shift clock-in"
             android:textSize="11sp"
-            android:textColor="#4B5563"
-            android:background="#F9FAFB"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:background="?attr/colorSurfaceVariant"
             android:padding="8dp"
             android:fontFamily="sans-serif-light"
             android:maxLines="2"

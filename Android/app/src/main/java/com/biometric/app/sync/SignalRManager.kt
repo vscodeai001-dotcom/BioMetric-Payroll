@@ -818,6 +818,7 @@ class SignalRManager @Inject constructor(
         if (value.isNullOrBlank()) return 0L
         value.toLongOrNull()?.let { return it }
         runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli() }.getOrNull()?.let { return it }
         val patterns = listOf(
             "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSX",
             "yyyy-MM-dd'T'HH:mm:ss.SSSX",

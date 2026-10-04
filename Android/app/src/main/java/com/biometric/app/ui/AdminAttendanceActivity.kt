@@ -121,6 +121,13 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
     private fun setupToolbar() {
         binding.toolbar.setNavigationOnClickListener { finish() }
+        binding.toolbar.menu.add(0, 1001, 0, "Raw Punches 🔍").apply {
+            setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+            setOnMenuItemClickListener {
+                startActivity(android.content.Intent(this@AdminAttendanceActivity, RawPunchInspectorActivity::class.java))
+                true
+            }
+        }
     }
 
     private fun setupDatePickers() {
