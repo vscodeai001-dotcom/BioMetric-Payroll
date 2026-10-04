@@ -653,7 +653,7 @@ else if (locationUpdatesStarted) {
                 bearing = location.bearing,
                 batteryLevel = battery,
                 // CRITICAL: preserve the original GPS event time.
-                timestamp = location.time,
+                timestamp = if (location.time > 0L) location.time else System.currentTimeMillis(),
                 capturedElapsedRealtime = android.os.SystemClock.elapsedRealtime(),
                 // A capture is only marked offline when it must enter the local
                 // retry queue. Room is a temporary delivery queue, never SSOT.
@@ -708,6 +708,28 @@ else if (locationUpdatesStarted) {
         val effectiveSessionId = ensureFirebaseGpsSessionStarted(location.sessionId)
             ?: return false
 
+        val policy = runCatching { attendancePolicy.readFromLocal() }.getOrNull()
+        var distanceMeters = 0.0
+        var allowedRadiusMeters = policy?.geoRadiusMeters ?: 100
+        var isWithinAllowedRadius = true
+        if (policy != null && policy.officeLatitude != 0.0 && policy.officeLongitude != 0.0) {
+            val results = FloatArray(1)
+            Location.distanceBetween(
+                location.latitude, location.longitude,
+                policy.officeLatitude, policy.officeLongitude,
+                results
+            )
+            distanceMeters = results[0].toDouble().coerceAtLeast(0.0)
+            isWithinAllowedRadius = if (allowedRadiusMeters > 0) distanceMeters <= allowedRadiusMeters else true
+        }
+
+        val movementState = when {
+            location.speed < 0.2f -> "Stopped"
+            location.speed < 1.4f -> "Walking"
+            location.speed < 5.5f -> "Running"
+            else -> "Moving"
+        }
+
         val uploaded = firebaseSync.pushLiveLocation(
             employeeId = sessionStore.employeeId(),
             sessionId = effectiveSessionId,
@@ -721,7 +743,11 @@ else if (locationUpdatesStarted) {
             batteryLevel = location.batteryLevel,
             timestamp = location.timestamp,
             isOffline = false,
-            recordHistory = recordHistory
+            recordHistory = recordHistory,
+            distanceMeters = distanceMeters,
+            allowedRadiusMeters = allowedRadiusMeters,
+            isWithinAllowedRadius = isWithinAllowedRadius,
+            movementState = movementState
         )
 
         if (uploaded) {
@@ -852,8 +878,13 @@ else if (locationUpdatesStarted) {
             }
         }
 
+        if (serverSessionStarted && sessionId == effectiveSessionId && !remoteState.equals("ENDED", ignoreCase = true)) {
+            return effectiveSessionId
+        }
+
         val isAlreadyActive = remoteState.equals("ACTIVE", ignoreCase = true) && sessionId == effectiveSessionId
         if (isAlreadyActive) {
+            serverSessionStarted = true
             return effectiveSessionId
         }
 
@@ -862,7 +893,19 @@ else if (locationUpdatesStarted) {
             sessionId = effectiveSessionId
         )
 
-        return if (started) effectiveSessionId else null
+        if (started) {
+            serverSessionStarted = true
+            return effectiveSessionId
+        }
+
+        // Resilient fallback: As long as the session is not explicitly ENDED, proceed
+        // with effectiveSessionId because pushLiveLocation will auto-create and ensure the session is ACTIVE!
+        if (!remoteState.equals("ENDED", ignoreCase = true)) {
+            serverSessionStarted = true
+            return effectiveSessionId
+        }
+
+        return null
     }
 
     private fun queueTrackingLifecycleEvent(

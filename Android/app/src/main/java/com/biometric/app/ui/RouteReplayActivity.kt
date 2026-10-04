@@ -52,6 +52,7 @@ class RouteReplayActivity : AppCompatActivity(), OnMapReadyCallback {
 
     @Inject lateinit var sessionStore: MobileSessionStore
     @Inject lateinit var osrmApi: OsrmApiService
+    @Inject lateinit var signalR: com.biometric.app.sync.SignalRManager
 
     // Route and Replay State
     private var rawTracks: List<LocationTrack> = emptyList()
@@ -196,7 +197,7 @@ class RouteReplayActivity : AppCompatActivity(), OnMapReadyCallback {
                     val lat = child.child("Latitude").getValue(Double::class.java) ?: 0.0
                     val lon = child.child("Longitude").getValue(Double::class.java) ?: 0.0
                     val time = child.child("Timestamp").getValue(String::class.java) ?: ""
-                    val ts = runCatching { Instant.parse(time).toEpochMilli() }.getOrDefault(0L)
+                    val ts = signalR.parseTrackingTimestamp(time)
                     val acc = child.child("AccuracyMeters").getValue(Double::class.java)?.toFloat() ?: 0f
                     val spd = child.child("SpeedMps").getValue(Double::class.java)?.toFloat() ?: 0f
                     val batt = child.child("BatteryLevel").getValue(Int::class.java) ?: 0

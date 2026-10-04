@@ -282,12 +282,13 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun formatLocationTime(timestamp: String?): String {
         if (timestamp.isNullOrBlank()) return "No timestamp"
+        val epochMs = signalR.parseTrackingTimestamp(timestamp)
+        if (epochMs <= 0L) return timestamp
         return try {
-            val instant = java.time.Instant.parse(timestamp)
             val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply {
                 timeZone = TimeZone.getDefault()
             }
-            formatter.format(java.util.Date.from(instant))
+            formatter.format(java.util.Date(epochMs))
         } catch (_: Exception) {
             timestamp
         }
@@ -1401,16 +1402,13 @@ class TrackingMapActivity : MotionBaseActivity() {
 
     private fun getLocStatus(loc: SignalRManager.LiveLocation): String {
         val timestamp = loc.timestamp ?: return "Offline"
-        return try {
-            val parsed = java.time.Instant.parse(timestamp)
-            val ageMs = (System.currentTimeMillis() - parsed.toEpochMilli()).coerceAtLeast(0L)
-            when {
-                ageMs <= 300_000L -> "Live"
-                ageMs <= 900_000L -> "Stale"
-                else -> "Offline"
-            }
-        } catch (_: Exception) {
-            "Offline"
+        val epochMs = signalR.parseTrackingTimestamp(timestamp)
+        if (epochMs <= 0L) return "Offline"
+        val ageMs = (System.currentTimeMillis() - epochMs).coerceAtLeast(0L)
+        return when {
+            ageMs <= 300_000L -> "Live"
+            ageMs <= 900_000L -> "Stale"
+            else -> "Offline"
         }
     }
 

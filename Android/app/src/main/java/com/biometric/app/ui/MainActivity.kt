@@ -701,10 +701,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
 
     private fun formatAdminLocationTime(timestamp: String?): String {
         if (timestamp.isNullOrBlank()) return "No timestamp"
+        val epochMs = signalR.parseTrackingTimestamp(timestamp)
+        if (epochMs <= 0L) return timestamp
         return try {
-            val instant = java.time.Instant.parse(timestamp)
             val formatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).apply { timeZone = TimeZone.getDefault() }
-            formatter.format(Date.from(instant))
+            formatter.format(Date(epochMs))
         } catch (_: Exception) { timestamp }
     }
 

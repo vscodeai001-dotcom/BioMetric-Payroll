@@ -752,17 +752,7 @@ class LocationStaysActivity : MotionBaseActivity() {
         }
     }
 
-    private fun parseTrackingTimestamp(str: String?): Long {
-        if (str.isNullOrBlank()) return 0L
-        return runCatching { java.time.Instant.parse(str).toEpochMilli() }
-            .getOrElse {
-                runCatching {
-                    SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-                        timeZone = TimeZone.getTimeZone("UTC")
-                    }.parse(str)?.time ?: 0L
-                }.getOrDefault(0L)
-            }
-    }
+    private fun parseTrackingTimestamp(str: String?): Long = signal.parseTrackingTimestamp(str)
 
     override fun onDestroy() {
         mapView.onDetach()

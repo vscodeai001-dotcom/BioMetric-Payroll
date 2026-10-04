@@ -872,13 +872,28 @@ class FirebaseSyncManager @Inject constructor(
         batteryLevel: Int,
         timestamp: Long,
         isOffline: Boolean = false,
-        recordHistory: Boolean = true
+        recordHistory: Boolean = true,
+        distanceMeters: Double = 0.0,
+        allowedRadiusMeters: Int = 0,
+        isWithinAllowedRadius: Boolean = true,
+        movementState: String = "Stopped"
     ): Boolean {
         if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) return false
         if (employeeId <= 0 || sessionId.isBlank() || clientEventId.isBlank() || sequence <= 0L) return false
 
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
         if (!isAuthenticated()) return false
+
+        val safeTimestamp = if (timestamp > 0L) timestamp else System.currentTimeMillis()
+        val isoTimestamp = Date(safeTimestamp).toInstant().toString()
+        val isoNow = Date().toInstant().toString()
+
+        val resolvedMovementState = if (movementState.isNotBlank()) movementState else when {
+            speed < 0.2 -> "Stopped"
+            speed < 1.4 -> "Walking"
+            speed < 5.5 -> "Running"
+            else -> "Moving"
+        }
 
         val payload = mapOf(
             "EmployeeId" to employeeId,
@@ -887,22 +902,25 @@ class FirebaseSyncManager @Inject constructor(
             "Latitude" to latitude,
             "Longitude" to longitude,
             "AccuracyMeters" to accuracy.coerceAtLeast(0.0),
+            "DistanceMeters" to distanceMeters.coerceAtLeast(0.0),
+            "AllowedRadiusMeters" to allowedRadiusMeters.coerceAtLeast(0),
+            "IsWithinAllowedRadius" to isWithinAllowedRadius,
+            "MovementState" to resolvedMovementState,
             "SpeedMps" to speed.coerceAtLeast(0.0),
             "Bearing" to bearing,
             "BatteryLevel" to batteryLevel,
             "Sequence" to sequence,
-            "Timestamp" to Date(timestamp).toInstant().toString(),
-            "LastUpdatedUtc" to Date().toInstant().toString(),
+            "Timestamp" to isoTimestamp,
+            "LastUpdatedUtc" to isoNow,
+            "SessionStartedUtc" to isoTimestamp,
             "ClientEventId" to clientEventId,
             "State" to "ACTIVE",
-            "Source" to if (isOffline) "OfflineSync" else "Online",
-            "CaptureSource" to if (isOffline) "OfflineSync" else "Online"
+            "Source" to if (isOffline) "OfflineSync" else "ANDROID_FIREBASE",
+            "CaptureSource" to if (isOffline) "OfflineSync" else "ANDROID_FIREBASE"
         )
 
         return try {
-            // Offline/replayed GPS is immutable historical evidence. It must
-            // never advance the live marker, even when the previous session is
-            // still ACTIVE, because its capture time is in the past.
+            // Offline/replayed GPS is immutable historical evidence.
             if (isOffline) {
                 val sessionState = getGlobalRef()
                     .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
@@ -915,6 +933,26 @@ class FirebaseSyncManager @Inject constructor(
                     .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
                     .setValue(payload + ("SessionState" to if (sessionState.isBlank()) "OFFLINE_UNBOUND" else sessionState))
                     .await()
+                runCatching {
+                    getGlobalRef()
+                        .child("tracking/history/$employeeId/$clientEventId")
+                        .setValue(payload + ("SessionState" to if (sessionState.isBlank()) "OFFLINE_UNBOUND" else sessionState))
+                        .await()
+                }
+
+                // If live marker is older or missing, update it so the reconnecting employee immediately shows at their latest known position!
+                val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
+                runCatching {
+                    val currentLive = liveRef.get().await()
+                    val currentTs = currentLive.child("Timestamp").getValue(String::class.java)
+                    val currentEpoch = if (!currentTs.isNullOrBlank()) {
+                        runCatching { java.time.Instant.parse(currentTs).toEpochMilli() }.getOrDefault(0L)
+                    } else 0L
+                    if (safeTimestamp >= currentEpoch) {
+                        liveRef.updateChildren(payload).await()
+                        getGlobalRef().child("tracking/live/$employeeId").updateChildren(payload).await()
+                    }
+                }
                 return true
             }
 
@@ -923,35 +961,39 @@ class FirebaseSyncManager @Inject constructor(
             val sessionSnapshot = sessionRef.get().await()
 
             if (!sessionSnapshot.exists()) {
-                // Offline/historical evidence must never create an ACTIVE session.
-                // Keep it as immutable history and wait for a fresh current GPS fix.
-                Log.w(
+                // Auto-create active session if missing so Android is 100% standalone
+                Log.i(
                     "FirebaseSyncManager",
-                    "GPS point rejected because Firebase session does not exist. employee=$employeeId session=$sessionId"
+                    "Session missing in Firebase; creating ACTIVE session for employee=$employeeId session=$sessionId"
                 )
-                return false
-            }
-
-            val sessionState = sessionSnapshot.child("State")
-                .getValue(String::class.java)
-                .orEmpty()
-
-            if (sessionState.equals("ENDED", ignoreCase = true)) {
-                // Offline replay remains historical evidence. A current online
-                // GPS fix must instead force the caller to create a NEW session.
-                Log.w(
-                    "FirebaseSyncManager",
-                    "Current GPS fix rejected because its session is ENDED; caller must rotate the session. employee=$employeeId session=$sessionId"
+                val sessionPayload = mapOf(
+                    "EmployeeId" to employeeId,
+                    "SessionId" to sessionId,
+                    "OwnerUid" to ownerUid,
+                    "StartedAtUtc" to isoTimestamp,
+                    "State" to "ACTIVE",
+                    "Source" to "ANDROID_FIREBASE"
                 )
-                return false
-            }
+                runCatching { sessionRef.setValue(sessionPayload).await() }
+                runCatching {
+                    getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(sessionPayload).await()
+                }
+            } else {
+                val sessionState = sessionSnapshot.child("State")
+                    .getValue(String::class.java)
+                    .orEmpty()
 
-            if (!sessionState.equals("ACTIVE", ignoreCase = true)) {
-                Log.w(
-                    "FirebaseSyncManager",
-                    "GPS point deferred because session state is '$sessionState'. employee=$employeeId session=$sessionId"
-                )
-                return false
+                if (sessionState.equals("ENDED", ignoreCase = true)) {
+                    Log.w(
+                        "FirebaseSyncManager",
+                        "Current GPS fix rejected because its session is ENDED; caller must rotate the session. employee=$employeeId session=$sessionId"
+                    )
+                    return false
+                }
+
+                if (!sessionState.equals("ACTIVE", ignoreCase = true)) {
+                    runCatching { sessionRef.child("State").setValue("ACTIVE").await() }
+                }
             }
 
             val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
@@ -992,9 +1034,7 @@ class FirebaseSyncManager @Inject constructor(
 
             if (!accepted) return false
 
-            // Immutable history is written only after the live/session checks
-            // succeed and only when recordHistory is true. This throttles stationary/burst
-            // points to preserve Firebase Spark plan bandwidth while keeping the live marker real-time.
+            // Immutable history is written only after the live/session checks succeed
             if (recordHistory) {
                 getGlobalRef()
                     .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
@@ -1002,14 +1042,18 @@ class FirebaseSyncManager @Inject constructor(
                     .await()
             }
 
-            // Legacy compatibility stream receives only the newest accepted
-            // point. It is never allowed to overwrite a newer owner-scoped
-            // session.
+            // Legacy compatibility stream receives only the newest accepted point.
             try {
                 getGlobalRef()
                     .child("tracking/live/$employeeId")
                     .setValue(payload)
                     .await()
+                if (recordHistory) {
+                    getGlobalRef()
+                        .child("tracking/history/$employeeId/$clientEventId")
+                        .setValue(payload)
+                        .await()
+                }
             } catch (legacyEx: Exception) {
                 Log.d("FirebaseSyncManager", "Legacy tracking/live write skipped: ${legacyEx.message}")
             }
