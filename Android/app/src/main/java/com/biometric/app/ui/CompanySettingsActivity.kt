@@ -1158,8 +1158,8 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
                 val existingEmpIds = withContext(Dispatchers.IO) {
                     runCatching {
-                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
-                    }.getOrDefault(emptyList())
+                        appDatabase.localEmployeeDao().getAll().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList<Int>())
                 }
 
                 if (!activeTid.isNullOrBlank()) {

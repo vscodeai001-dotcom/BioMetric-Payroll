@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.biometric.app.sync.ssot.FirebaseSsotSchema
 
 /**
  * Compatibility facade retained for existing screens.

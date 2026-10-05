@@ -998,8 +998,8 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
 
                     // Purge cloud and local GPS tracking records for this tenant
                     val existingEmpIds = runCatching {
-                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
-                    }.getOrDefault(emptyList())
+                        appDatabase.localEmployeeDao().getAll().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList<Int>())
                     firebaseSync.wipeTrackingNodesForTenant(activeTenantId, existingEmpIds)
 
                     // Broadcast real-time wipe event to all other Android clients and Web
@@ -1055,8 +1055,8 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 // Query existing employee IDs before clearing local tables so tracking nodes can be cleanly purged
                 val existingEmpIds = withContext(Dispatchers.IO) {
                     runCatching {
-                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
-                    }.getOrDefault(emptyList())
+                        appDatabase.localEmployeeDao().getAll().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList<Int>())
                 }
 
                 // 2. Wipe employees & operational tables from Local Room
