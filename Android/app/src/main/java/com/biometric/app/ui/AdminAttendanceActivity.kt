@@ -392,14 +392,26 @@ class AdminAttendanceActivity : MotionBaseActivity() {
             )
         }.toMutableList()
 
-        // Synthesize missing active employee records for evaluated dates (including today)
-        val distinctDates = summariesInRange.map { it.shiftDate }.distinct().toMutableSet()
-        val todayStr = isoDateFormat.format(Date())
-        if (todayStr in f..t) {
-            distinctDates.add(todayStr)
+        // Synthesize missing active employee records for all calendar dates in the requested range
+        val distinctDates = mutableSetOf<String>()
+        val cal = (fromCalendar.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
         }
-        if (distinctDates.isEmpty() && f == t) {
-            distinctDates.add(f)
+        val endCal = (toCalendar.clone() as Calendar).apply {
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 59)
+            set(Calendar.SECOND, 59)
+        }
+        while (!cal.after(endCal)) {
+            distinctDates.add(isoDateFormat.format(cal.time))
+            cal.add(Calendar.DAY_OF_MONTH, 1)
+        }
+
+        for (s in summariesInRange) {
+            distinctDates.add(s.shiftDate)
         }
         for (p in allPunches) {
             val d = p.date.ifBlank { if (p.timestamp > 0) isoDateFormat.format(Date(p.timestamp)) else "" }
@@ -484,7 +496,13 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 val status = if (effectivePunches.isNotEmpty()) {
                     if (effectivePunches.size % 2 == 1) "Missing Punch" else "Present"
                 } else {
-                    "Absent"
+                    val dayOfWeek = runCatching {
+                        val c = Calendar.getInstance().apply { time = isoDateFormat.parse(dateStr)!! }
+                        c.get(Calendar.DAY_OF_WEEK)
+                    }.getOrDefault(Calendar.MONDAY)
+                    val isSunday = dayOfWeek == Calendar.SUNDAY
+                    val isCompOff = (emp.compOffDayOfWeek != null && emp.compOffDayOfWeek == (dayOfWeek - 1))
+                    if (isSunday || isCompOff) "Weekly Off" else "Absent"
                 }
 
                 val schedMs = if (!emp.shiftStart.isNullOrBlank() && !emp.shiftEnd.isNullOrBlank()) {

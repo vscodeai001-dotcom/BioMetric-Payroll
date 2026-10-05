@@ -69,6 +69,11 @@ public sealed class FirebaseAttendanceService
         }
 
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, "daily_summaries", ct);
+        if ((json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) &&
+            !string.Equals(OwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            json = await _firebase.GetOwnerTableAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, "daily_summaries", ct);
+        }
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
         {
             return localList
@@ -207,6 +212,12 @@ public sealed class FirebaseAttendanceService
 
         var json = await _firebase.GetOwnerTableByChildValueAsync(
             OwnerUid, "daily_summaries", "employeeId", employeeId, ct);
+        if ((json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) &&
+            !string.Equals(OwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            json = await _firebase.GetOwnerTableByChildValueAsync(
+                Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, "daily_summaries", "employeeId", employeeId, ct);
+        }
 
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
 
@@ -343,6 +354,18 @@ public sealed class FirebaseAttendanceService
             endUtcMs,
             limitToLast: 10000,
             cancellationToken: ct);
+        if ((json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) &&
+            !string.Equals(OwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            json = await _firebase.GetOwnerTableByChildRangeAsync(
+                Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid,
+                "attendance_punches",
+                "timestamp",
+                startUtcMs,
+                endUtcMs,
+                limitToLast: 10000,
+                cancellationToken: ct);
+        }
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
         {
             return localPunches;

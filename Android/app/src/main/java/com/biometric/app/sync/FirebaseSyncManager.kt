@@ -81,11 +81,9 @@ class FirebaseSyncManager @Inject constructor(
         val defaultOwner = FirebaseSsotSchema.DEFAULT_OWNER_UID
         val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
         return if (current.equals(defaultOwner, ignoreCase = true)) {
-            activeTid?.takeIf { it.isNotBlank() && !it.equals(defaultOwner, ignoreCase = true) && (it == "tenant_10001" || it == "tenant_default") }
+            activeTid?.takeIf { it.isNotBlank() && !it.equals(defaultOwner, ignoreCase = true) }
         } else {
-            // Dedicated multi-tenant workspaces (e.g. tenant_2001) MUST NEVER mirror or inherit
-            // the legacy default owner namespace. Complete isolation ensures zero cross-tenant leakage.
-            null
+            defaultOwner
         }
     }
 

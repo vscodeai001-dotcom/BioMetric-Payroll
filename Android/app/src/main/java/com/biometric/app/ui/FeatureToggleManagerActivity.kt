@@ -78,6 +78,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     @Inject lateinit var appDatabase: AppDatabase
     @Inject lateinit var apiService: MobileApiService
     @Inject lateinit var signalR: com.biometric.app.sync.SignalRManager
+    @Inject lateinit var realtimeUiDispatcher: com.biometric.app.sync.RealtimeUiDispatcher
 
     private val gson = Gson()
     private var currentSettings = LocalFeatureSettings()
@@ -645,7 +646,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         val ownerRef = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId/feature_settings/1")
                         ownerRef.setValue(map).await()
 
-                        val altTenant = if (activeTenantId == "biometricpayroll") "tenant_10001" else "biometricpayroll"
+                        val altTenant = if (activeTenantId == "biometricpayroll") (sessionStore.activeTenantId()?.takeIf { it.isNotBlank() } ?: "tenant_2001") else "biometricpayroll"
                         runCatching {
                             FirebaseDatabase.getInstance().getReference("owners/$altTenant/feature_settings/1").setValue(map).await()
                             FirebaseDatabase.getInstance().getReference("feature_settings/1").setValue(map).await()
@@ -953,11 +954,23 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                             android.util.Log.w("FeatureToggleManager", "Could not clear table $table: ${e.message}")
                         }
                     }
+                    try {
+                        appDatabase.invalidationTracker.refreshVersionsAsync()
+                    } catch (e: Exception) {
+                        android.util.Log.w("FeatureToggleManager", "Could not refresh Room versions: ${e.message}")
+                    }
                 }
 
-                // 3. Wipe operational nodes from Firebase Cloud
+                // 3. Wipe operational nodes from Firebase Cloud across all tenant aliases
                 withContext(Dispatchers.IO) {
-                    val root = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId")
+                    val tenantAliases = mutableSetOf(activeTenantId)
+                    if (activeTenantId.startsWith("tenant_")) {
+                        tenantAliases.add(activeTenantId.removePrefix("tenant_"))
+                    } else {
+                        tenantAliases.add("tenant_$activeTenantId")
+                    }
+                    tenantAliases.add(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID)
+
                     val operationalNodes = listOf(
                         "attendance",
                         "attendance_punches",
@@ -988,34 +1001,41 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         "notifications",
                         "events"
                     )
-                    for (node in operationalNodes) {
-                        try {
-                            root.child(node).removeValue().await()
-                        } catch (e: Exception) {
-                            android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
-                        }
-                    }
 
-                    // Purge cloud and local GPS tracking records for this tenant
                     val existingEmpIds = runCatching {
                         appDatabase.localEmployeeDao().getAll().mapNotNull { it.employeeId.toIntOrNull() }
                     }.getOrDefault(emptyList<Int>())
-                    firebaseSync.wipeTrackingNodesForTenant(activeTenantId, existingEmpIds)
 
-                    // Broadcast real-time wipe event to all other Android clients and Web
-                    try {
-                        root.child("system_events").child("wipe").setValue(mapOf(
-                            "wipeType" to "PARTIAL",
-                            "timestamp" to System.currentTimeMillis(),
-                            "tenantId" to activeTenantId,
-                            "source" to "AndroidAdmin"
-                        )).await()
-                    } catch (e: Exception) {
-                        android.util.Log.w("FeatureToggleManager", "Could not publish wipe event: ${e.message}")
+                    val nowMs = System.currentTimeMillis()
+                    for (tid in tenantAliases) {
+                        val root = FirebaseDatabase.getInstance().getReference("owners/$tid")
+                        for (node in operationalNodes) {
+                            try {
+                                root.child(node).removeValue().await()
+                            } catch (e: Exception) {
+                                android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node for $tid: ${e.message}")
+                            }
+                        }
+
+                        // Purge cloud and local GPS tracking records for this alias
+                        firebaseSync.wipeTrackingNodesForTenant(tid, existingEmpIds)
+
+                        // Broadcast real-time wipe event to all other Android clients and Web
+                        try {
+                            root.child("system_events").child("wipe").setValue(mapOf(
+                                "wipeType" to "PARTIAL",
+                                "timestamp" to nowMs,
+                                "tenantId" to tid,
+                                "source" to "AndroidAdmin"
+                            )).await()
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not publish wipe event for $tid: ${e.message}")
+                        }
                     }
                 }
 
                 signalR.clearLiveState()
+                realtimeUiDispatcher.refreshVisible()
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Operational data wiped for $activeCompanyName! (Settings & Employees preserved)", Toast.LENGTH_LONG).show()
                 HapticUtil.vibrateRisk(binding.btnPartialWipe)
@@ -1091,11 +1111,23 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                             android.util.Log.w("FeatureToggleManager", "Could not clear table $table: ${e.message}")
                         }
                     }
+                    try {
+                        appDatabase.invalidationTracker.refreshVersionsAsync()
+                    } catch (e: Exception) {
+                        android.util.Log.w("FeatureToggleManager", "Could not refresh Room versions: ${e.message}")
+                    }
                 }
 
-                // 3. Wipe operational & employee nodes from Firebase Cloud
+                // 3. Wipe operational & employee nodes from Firebase Cloud across all tenant aliases
                 withContext(Dispatchers.IO) {
-                    val root = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId")
+                    val tenantAliases = mutableSetOf(activeTenantId)
+                    if (activeTenantId.startsWith("tenant_")) {
+                        tenantAliases.add(activeTenantId.removePrefix("tenant_"))
+                    } else {
+                        tenantAliases.add("tenant_$activeTenantId")
+                    }
+                    tenantAliases.add(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID)
+
                     val allNodes = listOf(
                         "employees",
                         "employee_history",
@@ -1129,31 +1161,37 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         "notifications",
                         "events"
                     )
-                    for (node in allNodes) {
-                        try {
-                            root.child(node).removeValue().await()
-                        } catch (e: Exception) {
-                            android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node: ${e.message}")
+
+                    val nowMs = System.currentTimeMillis()
+                    for (tid in tenantAliases) {
+                        val root = FirebaseDatabase.getInstance().getReference("owners/$tid")
+                        for (node in allNodes) {
+                            try {
+                                root.child(node).removeValue().await()
+                            } catch (e: Exception) {
+                                android.util.Log.w("FeatureToggleManager", "Could not remove Firebase node $node for $tid: ${e.message}")
+                            }
                         }
-                    }
 
-                    // Purge cloud and local GPS tracking records for this tenant
-                    firebaseSync.wipeTrackingNodesForTenant(activeTenantId, existingEmpIds)
+                        // Purge cloud and local GPS tracking records for this alias
+                        firebaseSync.wipeTrackingNodesForTenant(tid, existingEmpIds)
 
-                    // Broadcast real-time full wipe event to all other Android clients and Web
-                    try {
-                        root.child("system_events").child("wipe").setValue(mapOf(
-                            "wipeType" to "FULL",
-                            "timestamp" to System.currentTimeMillis(),
-                            "tenantId" to activeTenantId,
-                            "source" to "AndroidAdmin"
-                        )).await()
-                    } catch (e: Exception) {
-                        android.util.Log.w("FeatureToggleManager", "Could not publish full wipe event: ${e.message}")
+                        // Broadcast real-time full wipe event to all other Android clients and Web
+                        try {
+                            root.child("system_events").child("wipe").setValue(mapOf(
+                                "wipeType" to "FULL",
+                                "timestamp" to nowMs,
+                                "tenantId" to tid,
+                                "source" to "AndroidAdmin"
+                            )).await()
+                        } catch (e: Exception) {
+                            android.util.Log.w("FeatureToggleManager", "Could not publish full wipe event for $tid: ${e.message}")
+                        }
                     }
                 }
 
                 signalR.clearLiveState()
+                realtimeUiDispatcher.refreshVisible()
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Full system wipe completed for $activeCompanyName! (Local DB & Cloud)", Toast.LENGTH_LONG).show()
                 HapticUtil.vibrateDeletion(binding.btnFullWipe)

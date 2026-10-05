@@ -839,7 +839,9 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
          * workforce count but the already-received live employee marker is lost.
          */
         lifecycleScope.launch {
-            sharedViewModel.allEmployees.collectLatest {
+            sharedViewModel.allEmployees.collectLatest { empList ->
+                val ids = empList.mapNotNull { e -> e.employeeId.toIntOrNull() }
+                signalR.setKnownEmployeeIds(ids)
                 delay(50L)
                 _binding?.let {
                     updateAdminMarkers(signalR.liveLocations.value.values.toList())
@@ -961,12 +963,16 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val firebaseEmployeeData = signalR.ownerEmployees.value
             val validEmployeeIds = (employeeData.mapNotNull { it.employeeId.toIntOrNull() } + firebaseEmployeeData.keys).toSet()
 
-            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else firebaseEmployeeData.size
-            val validLocations = if (validEmployeeIds.isEmpty()) emptyList() else locations.filter { it.employeeId in validEmployeeIds }
+            if (validEmployeeIds.isNotEmpty()) {
+                signalR.setKnownEmployeeIds(validEmployeeIds)
+            }
+
+            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else if (firebaseEmployeeData.isNotEmpty()) firebaseEmployeeData.size else locations.size
+            val validLocations = if (validEmployeeIds.isEmpty()) locations else locations.filter { it.employeeId in validEmployeeIds }
             val liveOpCount = validLocations.count { getLocStatus(it) == "Live" }
             b.tvAdminMapLiveCount.text = "$liveOpCount Live / $totalCount"
 
-            if (totalCount == 0 || validEmployeeIds.isEmpty()) {
+            if (totalCount == 0 && validLocations.isEmpty()) {
                 markers.keys.toList().forEach { id ->
                     dashboardMap.overlays.remove(markers[id]); markers.remove(id)
                     dashboardMap.overlays.remove(roadLines[id]); roadLines.remove(id)

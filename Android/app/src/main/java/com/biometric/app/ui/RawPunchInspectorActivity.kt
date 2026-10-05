@@ -7,7 +7,11 @@ import android.text.TextWatcher
 import android.view.View
 import android.widget.*
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.isVisible
+import androidx.core.view.updatePadding
+import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -42,6 +46,7 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
 
     // ------- Views -------
     private lateinit var swipeRefresh: SwipeRefreshLayout
+    private lateinit var nestedScroll: NestedScrollView
     private lateinit var rvPunches: RecyclerView
     private lateinit var tvEmpty: TextView
     private lateinit var progressBar: ProgressBar
@@ -101,6 +106,7 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
 
         bindViews()
         setupToolbar()
+        setupWindowInsets()
         setupRecyclerView()
         setupDatePickers()
         setupFilterChips()
@@ -109,9 +115,27 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         observeData()
     }
 
+    private fun setupWindowInsets() {
+        val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbarRawPunch)
+        ViewCompat.setOnApplyWindowInsetsListener(swipeRefresh) { _, insets ->
+            val statusBarTop = insets.getInsets(
+                WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+            ).top
+            val navBars = insets.getInsets(
+                WindowInsetsCompat.Type.navigationBars()
+            )
+
+            toolbar.updatePadding(top = statusBarTop)
+            nestedScroll.updatePadding(bottom = navBars.bottom + (24 * resources.displayMetrics.density).toInt())
+            insets
+        }
+        ViewCompat.requestApplyInsets(swipeRefresh)
+    }
+
     // ------- Binding -------
     private fun bindViews() {
         swipeRefresh = findViewById(R.id.swipeRefreshRawPunch)
+        nestedScroll = findViewById(R.id.nestedScrollRawPunch)
         rvPunches = findViewById(R.id.rvRawPunches)
         tvEmpty = findViewById(R.id.tvRawPunchEmpty)
         progressBar = findViewById(R.id.progressRawPunch)

@@ -304,8 +304,46 @@ public sealed class DatabaseBackupRestoreService
             var safetyBackup = await CreateBackupAsync($"PrePartialWipe_{targetTenantId}", cancellationToken);
             safetyFileName = safetyBackup.FileName;
 
-            // 2. Wipe Firebase Realtime Database operational nodes for this tenant ONLY
-            var firebaseOk = await _firebase.WipeOwnerOperationalDataOnlyAsync(targetTenantId, cancellationToken);
+            var cleanTenantId = targetTenantId.Trim();
+            var possibleTenantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { cleanTenantId };
+            if (cleanTenantId.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase))
+            {
+                possibleTenantIds.Add(cleanTenantId.Substring("tenant_".Length));
+            }
+            else
+            {
+                possibleTenantIds.Add($"tenant_{cleanTenantId}");
+            }
+
+            try
+            {
+                using var dbTenant = await _dbFactory.CreateDbContextAsync(cancellationToken);
+                var matchedTenant = await dbTenant.CompanyTenants.FirstOrDefaultAsync(
+                    t => t.TenantId == cleanTenantId || t.CompanyCode == cleanTenantId, cancellationToken);
+                if (matchedTenant != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.TenantId)) possibleTenantIds.Add(matchedTenant.TenantId);
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.CompanyCode)) possibleTenantIds.Add(matchedTenant.CompanyCode);
+                }
+
+                var totalTenants = await dbTenant.CompanyTenants.CountAsync(cancellationToken);
+                var isPrimaryOrSoleCompany = totalTenants <= 1 ||
+                                             possibleTenantIds.Contains(TenantContextService.DefaultTenantId) ||
+                                             string.Equals(cleanTenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase);
+                if (isPrimaryOrSoleCompany)
+                {
+                    possibleTenantIds.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+                }
+            }
+            catch { }
+
+            // 2. Wipe Firebase Realtime Database operational nodes for this tenant ONLY (across all alias keys)
+            var firebaseOk = true;
+            foreach (var tid in possibleTenantIds)
+            {
+                var ok = await _firebase.WipeOwnerOperationalDataOnlyAsync(tid, cancellationToken);
+                if (!ok) firebaseOk = false;
+            }
             _logger.LogInformation(
                 "Firebase Cloud operational data wiped for tenant {TenantId}. Success={Success}",
                 targetTenantId, firebaseOk);
@@ -314,7 +352,7 @@ public sealed class DatabaseBackupRestoreService
             {
                 using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
                 var empIds = await db.Employees
-                    .Where(e => e.TenantId == targetTenantId)
+                    .Where(e => (e.TenantId != null && possibleTenantIds.Contains(e.TenantId)) || (string.IsNullOrWhiteSpace(e.TenantId) && possibleTenantIds.Contains(TenantContextService.DefaultTenantId)))
                     .Select(e => e.EmployeeID)
                     .ToListAsync(cancellationToken);
                 foreach (var empId in empIds)
@@ -322,7 +360,10 @@ public sealed class DatabaseBackupRestoreService
                     await _firebase.DeletePathAsync($"tracking/live/{empId}", cancellationToken);
                     await _firebase.DeletePathAsync($"tracking/sessions/{empId}", cancellationToken);
                 }
-                await _firebase.DeletePathAsync($"owners/{targetTenantId}/tracking", cancellationToken);
+                foreach (var tid in possibleTenantIds)
+                {
+                    await _firebase.DeletePathAsync($"owners/{tid}/tracking", cancellationToken);
+                }
             }
             catch (Exception ex)
             {
@@ -335,21 +376,28 @@ public sealed class DatabaseBackupRestoreService
 
             // 4. Invalidate global caches
             await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
+            await _refreshService.NotifyApplicationDataChangedAsync(new[]
+            {
+                "AttendancePunch", "AttendanceLog", "DailySummary", "LeaveRequest", "SalaryAdvance"
+            });
 
             // 5. Broadcast real-time wipe event to Firebase for all Android clients & other Web sessions
-            try
+            foreach (var tid in possibleTenantIds)
             {
-                await _firebase.SetOwnerRecordAsync(targetTenantId, "system_events", "wipe", new
+                try
                 {
-                    wipeType = "PARTIAL",
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    tenantId = targetTenantId,
-                    source = "WebAdmin"
-                }, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast partial wipe event to Firebase.");
+                    await _firebase.SetAsync($"owners/{tid}/system_events/wipe", new
+                    {
+                        wipeType = "PARTIAL",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        tenantId = tid,
+                        source = "WebAdmin"
+                    }, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast partial wipe event to Firebase for tenant {TenantId}.", tid);
+                }
             }
 
             return new WipeResult
@@ -405,8 +453,46 @@ public sealed class DatabaseBackupRestoreService
                 _logger.LogWarning(ex, "Failed to query employees for full wipe tracking purge in tenant {TenantId}", targetTenantId);
             }
 
-            // 2. Wipe Firebase Realtime Database operational + employee nodes for this tenant ONLY
-            var firebaseOk = await _firebase.WipeOwnerAllDataAsync(targetTenantId, cancellationToken);
+            var cleanTenantId = targetTenantId.Trim();
+            var possibleTenantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { cleanTenantId };
+            if (cleanTenantId.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase))
+            {
+                possibleTenantIds.Add(cleanTenantId.Substring("tenant_".Length));
+            }
+            else
+            {
+                possibleTenantIds.Add($"tenant_{cleanTenantId}");
+            }
+
+            try
+            {
+                using var dbTenant = await _dbFactory.CreateDbContextAsync(cancellationToken);
+                var matchedTenant = await dbTenant.CompanyTenants.FirstOrDefaultAsync(
+                    t => t.TenantId == cleanTenantId || t.CompanyCode == cleanTenantId, cancellationToken);
+                if (matchedTenant != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.TenantId)) possibleTenantIds.Add(matchedTenant.TenantId);
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.CompanyCode)) possibleTenantIds.Add(matchedTenant.CompanyCode);
+                }
+
+                var totalTenants = await dbTenant.CompanyTenants.CountAsync(cancellationToken);
+                var isPrimaryOrSoleCompany = totalTenants <= 1 ||
+                                             possibleTenantIds.Contains(TenantContextService.DefaultTenantId) ||
+                                             string.Equals(cleanTenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase);
+                if (isPrimaryOrSoleCompany)
+                {
+                    possibleTenantIds.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+                }
+            }
+            catch { }
+
+            // 2. Wipe Firebase Realtime Database operational + employee nodes across all alias keys
+            var firebaseOk = true;
+            foreach (var tid in possibleTenantIds)
+            {
+                var ok = await _firebase.WipeOwnerAllDataAsync(tid, cancellationToken);
+                if (!ok) firebaseOk = false;
+            }
             _logger.LogInformation(
                 "Firebase Cloud all data wiped for tenant {TenantId}. Success={Success}",
                 targetTenantId, firebaseOk);
@@ -417,7 +503,10 @@ public sealed class DatabaseBackupRestoreService
                 await _firebase.DeletePathAsync($"tracking/live/{empId}", cancellationToken);
                 await _firebase.DeletePathAsync($"tracking/sessions/{empId}", cancellationToken);
             }
-            await _firebase.DeletePathAsync($"owners/{targetTenantId}/tracking", cancellationToken);
+            foreach (var tid in possibleTenantIds)
+            {
+                await _firebase.DeletePathAsync($"owners/{tid}/tracking", cancellationToken);
+            }
 
             // 3. Wipe SQLite operational records AND employees for this tenant only
             await WipeLocalAllDataForTenantAsync(targetTenantId, cancellationToken);
@@ -425,21 +514,28 @@ public sealed class DatabaseBackupRestoreService
 
             // 4. Invalidate global caches
             await _refreshService.NotifyGlobalRefreshAsync($"TENANT_DATA_WIPED:{targetTenantId}");
+            await _refreshService.NotifyApplicationDataChangedAsync(new[]
+            {
+                "AttendancePunch", "AttendanceLog", "DailySummary", "LeaveRequest", "SalaryAdvance", "Employee"
+            });
 
             // 5. Broadcast real-time wipe event to Firebase for all Android clients & other Web sessions
-            try
+            foreach (var tid in possibleTenantIds)
             {
-                await _firebase.SetOwnerRecordAsync(targetTenantId, "system_events", "wipe", new
+                try
                 {
-                    wipeType = "FULL",
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    tenantId = targetTenantId,
-                    source = "WebAdmin"
-                }, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to broadcast full wipe event to Firebase.");
+                    await _firebase.SetAsync($"owners/{tid}/system_events/wipe", new
+                    {
+                        wipeType = "FULL",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        tenantId = tid,
+                        source = "WebAdmin"
+                    }, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast full wipe event to Firebase for tenant {TenantId}.", tid);
+                }
             }
 
             return new WipeResult
@@ -513,52 +609,62 @@ public sealed class DatabaseBackupRestoreService
                 "CompanyTenants",
                 "user_theme_preferences",
                 "employees",
-                "shops"
+                "shops",
+                "fbp_components",
+                "report_definitions"
             };
+
+            var cleanTenantId = tenantId.Trim();
+            var possibleTenantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { cleanTenantId };
+            if (cleanTenantId.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase))
+            {
+                possibleTenantIds.Add(cleanTenantId.Substring("tenant_".Length));
+            }
+            else
+            {
+                possibleTenantIds.Add($"tenant_{cleanTenantId}");
+            }
+
+            try
+            {
+                var matchedTenant = await db.CompanyTenants.FirstOrDefaultAsync(
+                    t => t.TenantId == cleanTenantId || t.CompanyCode == cleanTenantId, cancellationToken);
+                if (matchedTenant != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.TenantId)) possibleTenantIds.Add(matchedTenant.TenantId);
+                    if (!string.IsNullOrWhiteSpace(matchedTenant.CompanyCode)) possibleTenantIds.Add(matchedTenant.CompanyCode);
+                }
+            }
+            catch { }
 
             // Fetch tenant employee IDs to scope operational deletions
             var tenantEmpIds = new HashSet<int>();
-            try
+            foreach (var tid in possibleTenantIds)
             {
-                var employeesSnapshot = await _firebase.GetOwnerTableAsync(tenantId, "employees", cancellationToken);
-                if (employeesSnapshot.HasValue)
+                try
                 {
-                    if (employeesSnapshot.Value.ValueKind == JsonValueKind.Object)
+                    var employeesSnapshot = await _firebase.GetOwnerTableAsync(tid, "employees", cancellationToken);
+                    if (employeesSnapshot.HasValue)
                     {
-                        foreach (var prop in employeesSnapshot.Value.EnumerateObject())
-                        {
-                            if (int.TryParse(prop.Name, out var id)) tenantEmpIds.Add(id);
-                            else if (prop.Value.TryGetProperty("EmployeeID", out var p1) && p1.TryGetInt32(out var eid)) tenantEmpIds.Add(eid);
-                            else if (prop.Value.TryGetProperty("employeeid", out var p2) && p2.TryGetInt32(out var eid2)) tenantEmpIds.Add(eid2);
-                        }
-                    }
-                    else if (employeesSnapshot.Value.ValueKind == JsonValueKind.Array)
-                    {
-                        var idx = 0;
-                        foreach (var elem in employeesSnapshot.Value.EnumerateArray())
-                        {
-                            if (elem.ValueKind != JsonValueKind.Null)
-                            {
-                                if (elem.TryGetProperty("EmployeeID", out var p) && p.TryGetInt32(out var id)) tenantEmpIds.Add(id);
-                                else tenantEmpIds.Add(idx);
-                            }
-                            idx++;
-                        }
+                        ExtractEmployeeIds(employeesSnapshot.Value, tenantEmpIds);
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}.", tenantId);
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not fetch Firebase employee IDs for tenant {TenantId}.", tid);
+                }
             }
 
             // Include local SQLite employees for this tenant
+            var totalTenants = await db.CompanyTenants.CountAsync(cancellationToken);
             try
             {
                 var localEmployees = await db.Employees.AsNoTracking().ToListAsync(cancellationToken);
                 var matchingLocalEmpIds = localEmployees
-                    .Where(e => string.IsNullOrWhiteSpace(e.TenantId) || string.Equals(e.TenantId, tenantId, StringComparison.OrdinalIgnoreCase) || tenantId == TenantContextService.DefaultTenantId)
+                    .Where(e => possibleTenantIds.Any(tid => string.Equals(e.TenantId, tid, StringComparison.OrdinalIgnoreCase)) ||
+                                (string.IsNullOrWhiteSpace(e.TenantId) && (totalTenants <= 1 || possibleTenantIds.Contains(TenantContextService.DefaultTenantId))))
                     .Select(e => e.EmployeeID)
+                    .Where(id => id > 0)
                     .ToList();
 
                 foreach (var id in matchingLocalEmpIds)
@@ -571,10 +677,11 @@ public sealed class DatabaseBackupRestoreService
                 _logger.LogWarning(ex, "Could not query local employees for tenant {TenantId}.", tenantId);
             }
 
-            // If tenant is default tenant OR if database is single-company:
+            // If database is single-company (totalTenants <= 1) OR tenant is default tenant:
             // Wipe all operational tables found in SQLite!
-            var isPrimaryOrSoleCompany = tenantId == TenantContextService.DefaultTenantId ||
-                                         !await db.CompanyTenants.AnyAsync(cancellationToken);
+            var isPrimaryOrSoleCompany = totalTenants <= 1 ||
+                                         possibleTenantIds.Contains(TenantContextService.DefaultTenantId) ||
+                                         string.Equals(tenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase);
 
             var wipedTables = new List<string>();
 
@@ -676,9 +783,21 @@ public sealed class DatabaseBackupRestoreService
             // 1. Wipe all operational tables first
             await WipeLocalOperationalDataForTenantAsync(tenantId, cancellationToken);
 
-            // 2. Wipe employees and shops for this tenant
-            var isPrimaryOrSoleCompany = tenantId == TenantContextService.DefaultTenantId ||
-                                         !await db.CompanyTenants.AnyAsync(cancellationToken);
+            var cleanTenantId = tenantId.Trim();
+            var possibleTenantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { cleanTenantId };
+            if (cleanTenantId.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase))
+            {
+                possibleTenantIds.Add(cleanTenantId.Substring("tenant_".Length));
+            }
+            else
+            {
+                possibleTenantIds.Add($"tenant_{cleanTenantId}");
+            }
+
+            var totalTenants = await db.CompanyTenants.CountAsync(cancellationToken);
+            var isPrimaryOrSoleCompany = totalTenants <= 1 ||
+                                         possibleTenantIds.Contains(TenantContextService.DefaultTenantId) ||
+                                         string.Equals(tenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase);
 
             if (isPrimaryOrSoleCompany)
             {
@@ -691,20 +810,23 @@ public sealed class DatabaseBackupRestoreService
             }
             else
             {
-                try
+                foreach (var tid in possibleTenantIds)
                 {
-                    await db.Database.ExecuteSqlAsync($"DELETE FROM employees WHERE tenant_id = {tenantId};", cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning("Could not delete employees for tenant {TenantId}: {Message}", tenantId, ex.Message);
-                }
+                    try
+                    {
+                        await db.Database.ExecuteSqlAsync($"DELETE FROM employees WHERE tenant_id = {tid};", cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Could not delete employees for tenant {TenantId}: {Message}", tid, ex.Message);
+                    }
 
-                try
-                {
-                    await db.Database.ExecuteSqlAsync($"DELETE FROM shops WHERE tenant_id = {tenantId};", cancellationToken);
+                    try
+                    {
+                        await db.Database.ExecuteSqlAsync($"DELETE FROM shops WHERE tenant_id = {tid};", cancellationToken);
+                    }
+                    catch { }
                 }
-                catch { }
             }
 
             _logger.LogInformation("WipeLocalAllDataForTenantAsync completed for tenant {TenantId} (employees & shops wiped).", tenantId);
@@ -714,6 +836,84 @@ public sealed class DatabaseBackupRestoreService
             if (isSqlite)
             {
                 try { await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = ON;", cancellationToken); } catch { }
+            }
+        }
+    }
+
+    private static void ExtractEmployeeIds(JsonElement element, HashSet<int> empIds)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in element.EnumerateObject())
+            {
+                if (int.TryParse(prop.Name, out var id) && id > 0)
+                {
+                    empIds.Add(id);
+                }
+                else if (prop.Name.StartsWith("emp_", StringComparison.OrdinalIgnoreCase) &&
+                         int.TryParse(prop.Name.Substring(4), out var empKeyId) && empKeyId > 0)
+                {
+                    empIds.Add(empKeyId);
+                }
+
+                if (prop.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var childProp in prop.Value.EnumerateObject())
+                    {
+                        if (childProp.Name.Equals("employeeid", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("employee_id", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("id", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("staffid", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("staff_id", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (childProp.Value.TryGetInt32(out var eid) && eid > 0)
+                            {
+                                empIds.Add(eid);
+                            }
+                            else if (int.TryParse(childProp.Value.GetString(), out var seid) && seid > 0)
+                            {
+                                empIds.Add(seid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            var idx = 0;
+            foreach (var elem in element.EnumerateArray())
+            {
+                if (elem.ValueKind == JsonValueKind.Object)
+                {
+                    var found = false;
+                    foreach (var childProp in elem.EnumerateObject())
+                    {
+                        if (childProp.Name.Equals("employeeid", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("employee_id", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("id", StringComparison.OrdinalIgnoreCase) ||
+                            childProp.Name.Equals("staffid", StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (childProp.Value.TryGetInt32(out var eid) && eid > 0)
+                            {
+                                empIds.Add(eid);
+                                found = true;
+                                break;
+                            }
+                            else if (int.TryParse(childProp.Value.GetString(), out var seid) && seid > 0)
+                            {
+                                empIds.Add(seid);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found && idx > 0)
+                    {
+                        empIds.Add(idx);
+                    }
+                }
+                idx++;
             }
         }
     }

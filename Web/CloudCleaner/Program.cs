@@ -36,6 +36,118 @@ class Program
 
     static async Task Main(string[] args)
     {
+        if (args.Length >= 1 && args[0] == "--inspect")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+            var owners = await GetShallowKeysAsync(http1, token1, "owners");
+            Console.WriteLine($"Owners: {string.Join(", ", owners)}");
+            foreach (var o in owners)
+            {
+                var tables = await GetShallowKeysAsync(http1, token1, $"owners/{o}");
+                Console.WriteLine($"\nOwner '{o}' tables: {string.Join(", ", tables)}");
+                if (tables.Contains("employees"))
+                {
+                    var emps = await GetShallowKeysAsync(http1, token1, $"owners/{o}/employees");
+                    Console.WriteLine($"  employees keys ({emps.Count}): {string.Join(", ", emps)}");
+                    foreach (var ek in emps)
+                    {
+                        var empJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/employees/{ek}.json?access_token={token1}");
+                        Console.WriteLine($"    emp #{ek}: {empJson}");
+                    }
+                }
+                if (tables.Contains("tracking"))
+                {
+                    var tKeys = await GetShallowKeysAsync(http1, token1, $"owners/{o}/tracking");
+                    Console.WriteLine($"  tracking keys: {string.Join(", ", tKeys)}");
+                    if (tKeys.Contains("live"))
+                    {
+                        var liveKeys = await GetShallowKeysAsync(http1, token1, $"owners/{o}/tracking/live");
+                        Console.WriteLine($"    tracking/live keys: {string.Join(", ", liveKeys)}");
+                        foreach (var lk in liveKeys)
+                        {
+                            var lContent = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/tracking/live/{lk}.json?access_token={token1}");
+                            Console.WriteLine($"      live #{lk}: {lContent}");
+                            if (o == "tenant_10001")
+                            {
+                                var putContent = new StringContent(lContent, System.Text.Encoding.UTF8, "application/json");
+                                await http1.PutAsync($"{DatabaseUrl}/owners/tenant_2001/tracking/live/{lk}.json?access_token={token1}", putContent);
+                                Console.WriteLine($"      Copied live #{lk} to owners/tenant_2001/tracking/live");
+                            }
+                        }
+                        if (o == "tenant_10001")
+                        {
+                            await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_10001.json?access_token={token1}");
+                            Console.WriteLine("Deleted owners/tenant_10001 completely.");
+                        }
+                    }
+                }
+            }
+            var rootLive = await GetShallowKeysAsync(http1, token1, "tracking/live");
+            Console.WriteLine($"\nRoot tracking/live keys: {string.Join(", ", rootLive)}");
+            var rootTenants = await GetShallowKeysAsync(http1, token1, "tenants");
+            Console.WriteLine($"Root tenants keys: {string.Join(", ", rootTenants)}");
+            foreach (var t in rootTenants)
+            {
+                var tContent = await http1.GetStringAsync($"{DatabaseUrl}/tenants/{t}.json?access_token={token1}");
+                Console.WriteLine($"  Tenant '{t}': {tContent}");
+            }
+            return;
+        }
+
+        if (args.Length >= 1 && args[0] == "--migrate-to-2001")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+
+            Console.WriteLine("Migrating employees from tenant_10001 to tenant_2001...");
+            var emps = await GetShallowKeysAsync(http1, token1, "owners/tenant_10001/employees");
+            foreach (var ek in emps)
+            {
+                var empJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/tenant_10001/employees/{ek}.json?access_token={token1}");
+                using var doc = JsonDocument.Parse(empJson);
+                var dict = new Dictionary<string, object?>();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (prop.Name == "tenantId" || prop.Name == "ownerUid")
+                    {
+                        dict[prop.Name] = "tenant_2001";
+                    }
+                    else
+                    {
+                        dict[prop.Name] = prop.Value.Clone();
+                    }
+                }
+                dict["tenantId"] = "tenant_2001";
+                dict["ownerUid"] = "tenant_2001";
+
+                var putContent = new StringContent(JsonSerializer.Serialize(dict), System.Text.Encoding.UTF8, "application/json");
+                var putRes = await http1.PutAsync($"{DatabaseUrl}/owners/tenant_2001/employees/{ek}.json?access_token={token1}", putContent);
+                Console.WriteLine($"  Wrote employee #{ek} to owners/tenant_2001/employees: {putRes.StatusCode}");
+            }
+
+            Console.WriteLine("Deleting old deleted tenants: tenant_10001, tenant_12011...");
+            await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_10001.json?access_token={token1}");
+            await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_12011.json?access_token={token1}");
+            Console.WriteLine("Purged tenant_10001 and tenant_12011.");
+
+            Console.WriteLine("Wiping operational tables under tenant_2001 and biometricpayroll...");
+            string[] opTables = ["attendance_punches", "attendance", "daily_summaries", "tracking", "tracking/live", "tracking/history", "tracking/sessions", "salary_advances", "bonus_records", "payroll_history", "leave_requests", "shift_schedules"];
+            foreach (var t in opTables)
+            {
+                await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_2001/{t}.json?access_token={token1}");
+                await http1.DeleteAsync($"{DatabaseUrl}/owners/biometricpayroll/{t}.json?access_token={token1}");
+                await http1.DeleteAsync($"{DatabaseUrl}/owners/2001/{t}.json?access_token={token1}");
+            }
+            await http1.DeleteAsync($"{DatabaseUrl}/tracking.json?access_token={token1}");
+            Console.WriteLine("Operational data purged.");
+            return;
+        }
+
         if (args.Length >= 3 && args[0] == "--set-password")
         {
             var email = args[1];

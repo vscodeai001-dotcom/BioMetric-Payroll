@@ -91,6 +91,23 @@ public sealed class FirebaseRealtimeService
                             return cookieTenant.Trim();
                         }
 
+                        // Check if a registered company tenant exists (e.g. tenant_2001 for sole/active company)
+                        try
+                        {
+                            using var scope = _scopeFactory.CreateScope();
+                            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                            if (dbFactory != null)
+                            {
+                                using var db = dbFactory.CreateDbContext();
+                                var activeTenant = db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefault();
+                                if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.TenantId))
+                                {
+                                    return activeTenant.TenantId.Trim();
+                                }
+                            }
+                        }
+                        catch { }
+
                         // SuperAdmin defaults to default primary workspace
                         return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
                     }
@@ -183,6 +200,22 @@ public sealed class FirebaseRealtimeService
                 _logger.LogDebug(ex, "Database tenant lookup for actorUid {ActorUid} encountered an issue; falling back.", actorUid);
             }
         }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = dbFactory.CreateDbContext();
+                var activeTenant = db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefault();
+                if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.TenantId))
+                {
+                    return activeTenant.TenantId.Trim();
+                }
+            }
+        }
+        catch { }
 
         return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
     }

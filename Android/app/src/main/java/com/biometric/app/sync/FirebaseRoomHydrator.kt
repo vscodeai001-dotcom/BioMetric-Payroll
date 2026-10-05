@@ -135,8 +135,10 @@ class FirebaseRoomHydrator @Inject constructor(
             if (!activeTid.isNullOrBlank() && activeTid != ownerUid && activeTid !in altOwners) {
                 altOwners.add(activeTid)
             }
-            if ("tenant_10001" != ownerUid && "tenant_10001" !in altOwners) {
-                altOwners.add("tenant_10001")
+            // Add short code or tenant prefix alias if active
+            val tenantPrefix = if (activeTid?.startsWith("tenant_") == true) activeTid.substring(7) else "tenant_${activeTid.orEmpty()}"
+            if (tenantPrefix.isNotBlank() && tenantPrefix != ownerUid && tenantPrefix !in altOwners) {
+                altOwners.add(tenantPrefix)
             }
 
             for (altUid in altOwners) {
@@ -159,10 +161,10 @@ class FirebaseRoomHydrator @Inject constructor(
                 observeValue("regularizations", query = altRef.child("regularizations"), existing = { emptyList() }, onDelete = { }) {
                     it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) }
                 }
-                observeValue("attendance_punches", query = altRef.child("attendance_punches").limitToLast(500), existing = { emptyList() }, onDelete = { }) {
+                observeValue("attendance_punches", query = altRef.child("attendance_punches").limitToLast(500), existing = { emptyList() }, onDelete = { key -> punchDao.deleteById(key) }) {
                     it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) }
                 }
-                observeValue("attendance", query = altRef.child("attendance").limitToLast(300), existing = { emptyList() }, onDelete = { }) {
+                observeValue("attendance", query = altRef.child("attendance").limitToLast(300), existing = { emptyList() }, onDelete = { key -> attendanceDao.deleteById(key) }) {
                     it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) }
                 }
                 observeValue("resignation_requests", query = altRef.child("resignation_requests"), existing = { emptyList() }, onDelete = { }) {
@@ -228,38 +230,47 @@ class FirebaseRoomHydrator @Inject constructor(
         }
     }
 
-    private var wipeListener: ValueEventListener? = null
-    private var wipeQuery: DatabaseReference? = null
+    private val wipeListeners = mutableListOf<Pair<DatabaseReference, ValueEventListener>>()
 
     private fun observeWipeEvents() {
-        val ownerRef = firebaseSync.getOwnerRef() ?: return
-        val wipeRef = ownerRef.child("system_events").child("wipe")
-        if (wipeQuery == wipeRef && wipeListener != null) return
+        for ((ref, l) in wipeListeners) {
+            ref.removeEventListener(l)
+        }
+        wipeListeners.clear()
 
-        wipeListener?.let { wipeQuery?.removeEventListener(it) }
-        wipeQuery = wipeRef
+        val refsToListen = mutableListOf<DatabaseReference>()
+        firebaseSync.getOwnerRef()?.child("system_events")?.child("wipe")?.let { refsToListen.add(it) }
 
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                if (!snapshot.exists()) return
-                val timestamp = snapshot.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
-                val wipeType = snapshot.child("wipeType").value?.toString()?.uppercase() ?: "PARTIAL"
-                val lastProcessed = sessionStore.lastProcessedWipeTimestamp()
-                if (timestamp > lastProcessed) {
-                    sessionStore.setLastProcessedWipeTimestamp(timestamp)
-                    Log.i("FirebaseRoomHydrator", "Real-time WIPE event received from cloud: type=$wipeType, ts=$timestamp (lastProcessed=$lastProcessed)")
-                    scope.launch {
-                        handleRealtimeWipe(isFull = (wipeType == "FULL"), wipeTimestamp = timestamp)
+        val defaultUid = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+        if (firebaseSync.getOwnerUid() != defaultUid) {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .getReference("owners").child(defaultUid).child("system_events").child("wipe")
+                .let { refsToListen.add(it) }
+        }
+
+        for (wipeRef in refsToListen) {
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    if (!snapshot.exists()) return
+                    val timestamp = snapshot.child("timestamp").value?.toString()?.toLongOrNull() ?: 0L
+                    val wipeType = snapshot.child("wipeType").value?.toString()?.uppercase() ?: "PARTIAL"
+                    val lastProcessed = sessionStore.lastProcessedWipeTimestamp()
+                    if (timestamp > lastProcessed) {
+                        sessionStore.setLastProcessedWipeTimestamp(timestamp)
+                        Log.i("FirebaseRoomHydrator", "Real-time WIPE event received from cloud: type=$wipeType, ts=$timestamp (lastProcessed=$lastProcessed)")
+                        scope.launch {
+                            handleRealtimeWipe(isFull = (wipeType == "FULL"), wipeTimestamp = timestamp)
+                        }
                     }
                 }
-            }
 
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("FirebaseRoomHydrator", "Wipe event listener cancelled: ${error.message}")
+                override fun onCancelled(error: DatabaseError) {
+                    Log.w("FirebaseRoomHydrator", "Wipe event listener cancelled: ${error.message}")
+                }
             }
+            wipeListeners.add(wipeRef to listener)
+            wipeRef.addValueEventListener(listener)
         }
-        wipeListener = listener
-        wipeRef.addValueEventListener(listener)
     }
 
     suspend fun handleRealtimeWipe(isFull: Boolean, wipeTimestamp: Long = 0L) {
@@ -299,6 +310,12 @@ class FirebaseRoomHydrator @Inject constructor(
                         for (t in masterTables) {
                             try { db.execSQL("DELETE FROM $t") } catch (e: Exception) { }
                         }
+                    }
+
+                    try {
+                        appDatabase.invalidationTracker.refreshVersionsAsync()
+                    } catch (e: Exception) {
+                        Log.w("FirebaseRoomHydrator", "Could not refresh Room versions on wipe: ${e.message}")
                     }
 
                     Log.i("FirebaseRoomHydrator", "Local database cleared in response to remote wipe event (isFull=$isFull, ts=$wipeTimestamp)")
@@ -1063,9 +1080,10 @@ class FirebaseRoomHydrator @Inject constructor(
         }
         valueListeners.clear()
 
-        wipeListener?.let { wipeQuery?.removeEventListener(it) }
-        wipeListener = null
-        wipeQuery = null
+        wipeListeners.forEach { (ref, listener) ->
+            runCatching { ref.removeEventListener(listener) }
+        }
+        wipeListeners.clear()
 
         activeOwnerUid = null
     }

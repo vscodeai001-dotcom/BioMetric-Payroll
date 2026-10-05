@@ -117,21 +117,24 @@ class SignalRManager @Inject constructor(
         _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
     }
 
+    fun setKnownEmployeeIds(ids: Collection<Int>) {
+        if (ids.isEmpty()) return
+        synchronized(ownerEmployeeIds) {
+            val before = ownerEmployeeIds.size
+            ownerEmployeeIds.addAll(ids.filter { it > 0 })
+            if (ownerEmployeeIds.size != before) {
+                publishOwnerScopedLocations(lastOwnerLiveLocations)
+            }
+        }
+    }
+
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
         val validIds = synchronized(ownerEmployeeIds) { ownerEmployeeIds.toSet() }
 
-        // Strict SSOT Tenant Scoping:
-        // When owner employees have been evaluated and the list is empty (0 employees in the company),
-        // or if an incoming GPS record belongs to an employee not registered under this owner,
-        // it is strictly rejected to prevent stale/ghost markers from lingering.
-        val filtered = if (ownerEmployeesLoaded && validIds.isEmpty()) {
-            emptyMap()
-        } else if (validIds.isNotEmpty()) {
+        val filtered = if (validIds.isNotEmpty()) {
             raw.filterKeys { id -> id in validIds }
-                .filterValues { it.sessionId.isNotBlank() }
         } else {
             raw.filterKeys { it > 0 }
-                .filterValues { it.sessionId.isNotBlank() }
         }
 
         val previous = _liveLocations.value
@@ -218,9 +221,7 @@ class SignalRManager @Inject constructor(
 
             if (employeeId <= 0) continue
 
-            if (value.SessionId.isBlank()) {
-                continue
-            }
+            val effectiveSessionId = value.SessionId.ifBlank { "live-$employeeId" }
 
             if (!value.Latitude.isFinite() || !value.Longitude.isFinite() ||
                 value.Latitude < -90.0 || value.Latitude > 90.0 ||
@@ -231,7 +232,7 @@ class SignalRManager @Inject constructor(
 
             locations[employeeId] = LiveLocation(
                 employeeId = employeeId,
-                sessionId = value.SessionId,
+                sessionId = effectiveSessionId,
                 latitude = value.Latitude,
                 longitude = value.Longitude,
                 accuracyMeters = value.AccuracyMeters,
@@ -285,13 +286,26 @@ class SignalRManager @Inject constructor(
         val employees = mutableMapOf<Int, OwnerEmployee>()
         snapshot.children.forEach { child ->
             val keyId = child.key?.toIntOrNull()
-            val rowId = child.child("employeeId").value?.toString()?.toIntOrNull()
+                ?: child.key?.removePrefix("emp_")?.removePrefix("employee_")?.toIntOrNull()
+            val rowId = sequenceOf(
+                child.child("employeeId").value?.toString()?.toIntOrNull(),
+                child.child("EmployeeID").value?.toString()?.toIntOrNull(),
+                child.child("EmployeeId").value?.toString()?.toIntOrNull(),
+                child.child("employee_id").value?.toString()?.toIntOrNull(),
+                child.child("id").value?.toString()?.toIntOrNull(),
+                child.child("Id").value?.toString()?.toIntOrNull(),
+                child.child("staffId").value?.toString()?.toIntOrNull(),
+                child.child("staff_id").value?.toString()?.toIntOrNull()
+            ).filterNotNull().firstOrNull { it > 0 }
             val id = keyId ?: rowId ?: 0
             if (id <= 0) return@forEach
 
             val name = sequenceOf(
                 child.child("name").getValue(String::class.java),
-                child.child("Name").getValue(String::class.java)
+                child.child("Name").getValue(String::class.java),
+                child.child("fullName").getValue(String::class.java),
+                child.child("FullName").getValue(String::class.java),
+                child.child("employeeName").getValue(String::class.java)
             ).filterNotNull().firstOrNull { it.isNotBlank() }
                 ?: "Employee #$id"
 
@@ -430,8 +444,7 @@ class SignalRManager @Inject constructor(
             altLiveRef.addValueEventListener(altListener)
         }
 
-        val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
-        if (!isEmployeeRole && isDefaultOwner) {
+        if (!isEmployeeRole) {
             val legacyRef = firebaseSync.getGlobalRef().child("tracking").child("live")
             val legListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
@@ -968,9 +981,15 @@ class SignalRManager @Inject constructor(
             else -> timestampStr
         }
 
+        val rawKeyId = snapshot.key?.toIntOrNull()
+            ?: snapshot.key?.removePrefix("emp_")?.removePrefix("employee_")?.toIntOrNull() ?: 0
+
+        val parsedEmpId = int("EmployeeId", "employeeId", "employee_id", "staffId", "staff_id", "id", "Id")
+        val finalEmpId = if (parsedEmpId > 0) parsedEmpId else rawKeyId
+
         return FirebaseLiveLocation(
-            EmployeeId = int("EmployeeId", "employeeId"),
-            SessionId = string("SessionId", "sessionId"),
+            EmployeeId = finalEmpId,
+            SessionId = string("SessionId", "sessionId", "session_id", "SessionID"),
             Latitude = double("Latitude", "latitude"),
             Longitude = double("Longitude", "longitude"),
             AccuracyMeters = double("AccuracyMeters", "accuracyMeters"),
@@ -989,6 +1008,8 @@ class SignalRManager @Inject constructor(
         value.toLongOrNull()?.let { return it }
         runCatching { java.time.Instant.parse(value).toEpochMilli() }.getOrNull()?.let { return it }
         runCatching { java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { java.time.LocalDateTime.parse(value).toInstant(java.time.ZoneOffset.UTC).toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { java.time.LocalDateTime.parse(value).atZone(java.time.ZoneId.of("Asia/Kolkata")).toInstant().toEpochMilli() }.getOrNull()?.let { return it }
         val patterns = listOf(
             "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSX",
             "yyyy-MM-dd'T'HH:mm:ss.SSSX",

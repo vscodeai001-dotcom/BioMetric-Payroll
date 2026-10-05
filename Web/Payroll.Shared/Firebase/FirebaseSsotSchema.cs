@@ -44,7 +44,8 @@ public static class FirebaseSsotSchema
             ["GeoPunchAudit"] = "geo_punch_audits",
             ["EmployeePresence"] = "presence",
             ["EmployeeGpsSession"] = "tracking/sessions",
-            ["EmployeeLocationHistory"] = "tracking/history"
+            ["EmployeeLocationHistory"] = "tracking/history",
+            ["SystemEvent"] = "system_events"
         };
 
     /// <summary>Firebase owner-scoped path for a table.</summary>
