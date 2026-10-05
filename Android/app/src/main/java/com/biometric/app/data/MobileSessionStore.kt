@@ -73,6 +73,9 @@ class MobileSessionStore @Inject constructor(
     fun deploymentMode(): String = prefs.getString(KEY_DEPLOYMENT_MODE, "CloudOnly") ?: "CloudOnly"
     fun setDeploymentMode(mode: String) { prefs.edit { putString(KEY_DEPLOYMENT_MODE, mode) } }
 
+    fun firebasePlanMode(): String = prefs.getString(KEY_FIREBASE_PLAN_MODE, "Spark") ?: "Spark"
+    fun setFirebasePlanMode(mode: String) { prefs.edit { putString(KEY_FIREBASE_PLAN_MODE, mode) } }
+
     private val syncStatePrefs get() = context.getSharedPreferences("app_sync_state", Context.MODE_PRIVATE)
 
     fun lastProcessedWipeTimestamp(): Long = syncStatePrefs.getLong("last_processed_wipe_timestamp", 0L)
@@ -149,5 +152,6 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_ACTIVE_TENANT_CODE = "active_tenant_code"
         private const val KEY_SAVED_AUTH_EMAIL = "saved_auth_email"
         private const val KEY_SAVED_AUTH_PASS = "saved_auth_pass"
+        private const val KEY_FIREBASE_PLAN_MODE = "firebase_plan_mode"
     }
 }

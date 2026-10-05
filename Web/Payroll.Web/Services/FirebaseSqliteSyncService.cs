@@ -246,22 +246,29 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
                 if (entityName.Equals("CompanySetting", StringComparison.Ordinal))
                 {
-                    var settings = await _firebase.GetOwnerRecordAsync(ownerUid, firebaseTable, "1", ct);
-                    if (settings.HasValue && settings.Value.ValueKind == JsonValueKind.Object)
-                    {
-                        var lat = GetDouble(settings.Value, "officeLatitude", "OfficeLatitude", "latitude", "Latitude");
-                        var lon = GetDouble(settings.Value, "officeLongitude", "OfficeLongitude", "longitude", "Longitude");
-                        var radius = GetInt(settings.Value, "geoRadiusMeters", "GeoRadiusMeters", "radius", "Radius");
-                        var speed = GetBool(settings.Value, "useSpeedBasedMarkers", "use_speed_based_markers", "UseSpeedBasedMarkers");
-                        await _refreshService.NotifyGeoSettingsChangedAsync(lat, lon, radius, speed);
+                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
 
-                        using var scope = _scopeFactory.CreateScope();
-                        await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
+                    using var scope = _scopeFactory.CreateScope();
+                    var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+                    if (dbFactory != null)
+                    {
+                        using var db = await dbFactory.CreateDbContextAsync(ct);
+                        var cs = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1, ct);
+                        if (cs != null)
+                        {
+                            await _refreshService.NotifyGeoSettingsChangedAsync(cs.OfficeLatitude, cs.OfficeLongitude, cs.GeoRadiusMeters, cs.UseSpeedBasedMarkers);
+                            await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
+                        }
                     }
                 }
                 else if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
                 {
+                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
                     await _refreshService.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
+                }
+                else if (entityName.Equals("Employee", StringComparison.Ordinal))
+                {
+                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
                 }
                 else if (entityName.Equals("AttendanceLog", StringComparison.Ordinal) ||
                          entityName.Equals("AttendancePunch", StringComparison.Ordinal))

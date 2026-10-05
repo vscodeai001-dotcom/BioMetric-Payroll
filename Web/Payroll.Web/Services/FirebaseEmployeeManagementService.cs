@@ -29,6 +29,27 @@ public sealed class FirebaseEmployeeManagementService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IServiceScopeFactory _scopeFactory;
     private static readonly ConcurrentDictionary<int, SemaphoreSlim> EmployeeWriteLocks = new();
+    private static readonly ConcurrentDictionary<string, (List<Employee> Items, DateTime CachedAt)> EmployeeCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (CompanySetting Settings, DateTime CachedAt)> CompanySettingsCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (FeatureSettings Settings, DateTime CachedAt)> FeatureSettingsCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan SettingsCacheTtl = TimeSpan.FromMinutes(5);
+
+    public static void InvalidateCache(string? ownerUid = null)
+    {
+        if (string.IsNullOrWhiteSpace(ownerUid))
+        {
+            EmployeeCache.Clear();
+            CompanySettingsCache.Clear();
+            FeatureSettingsCache.Clear();
+        }
+        else
+        {
+            EmployeeCache.TryRemove(ownerUid, out _);
+            CompanySettingsCache.TryRemove(ownerUid, out _);
+            FeatureSettingsCache.TryRemove(ownerUid, out _);
+        }
+    }
 
     public FirebaseEmployeeManagementService(
         FirebaseRealtimeService firebase,
@@ -48,6 +69,13 @@ public sealed class FirebaseEmployeeManagementService
 
     public async Task<List<Employee>> GetEmployeesAsync(CancellationToken ct = default)
     {
+        // 1. In-memory read cache to prevent flooding Firebase RTDB with repeated REST HTTP requests
+        var owner = OwnerUid;
+        if (EmployeeCache.TryGetValue(owner, out var cached) && (DateTime.UtcNow - cached.CachedAt) < CacheTtl)
+        {
+            return cached.Items;
+        }
+
         bool isOffline = false;
         using (var scope = _scopeFactory.CreateScope())
         {
@@ -59,22 +87,24 @@ public sealed class FirebaseEmployeeManagementService
                 if (dbFactory != null)
                 {
                     using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.Employees.AsNoTracking()
+                    var offlineList = await db.Employees.AsNoTracking()
                         .Where(x => !x.IsDeleted)
                         .OrderBy(x => x.Name)
                         .ToListAsync(ct);
+                    EmployeeCache[owner] = (offlineList, DateTime.UtcNow);
+                    return offlineList;
                 }
             }
         }
 
         try
         {
-            var snapshot = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeesTable, ct);
+            var snapshot = await _firebase.GetOwnerTableAsync(owner, EmployeesTable, ct);
             if (!snapshot.HasValue)
             {
                 _logger.LogWarning(
                     "Firebase employees read returned no data for owner {OwnerUid}.",
-                    OwnerUid);
+                    owner);
                 return new List<Employee>();
             }
 
@@ -103,9 +133,9 @@ public sealed class FirebaseEmployeeManagementService
             }
             else if (snapshot.Value.ValueKind == JsonValueKind.Array)
             {
-                _logger.LogInformation(
+                _logger.LogDebug(
                     "Firebase employees collection is array-shaped for owner {OwnerUid}; reading numeric employee records.",
-                    OwnerUid);
+                    owner);
 
                 var index = 0;
                 foreach (var item in snapshot.Value.EnumerateArray())
@@ -177,20 +207,23 @@ public sealed class FirebaseEmployeeManagementService
                 _logger.LogDebug(ex, "Local SQLite employee cache reconciliation skipped.");
             }
 
+            EmployeeCache[owner] = (distinctResult, DateTime.UtcNow);
             return distinctResult;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to read employees from Firebase for owner {OwnerUid}; falling back to local SQLite cache.", OwnerUid);
+            _logger.LogError(ex, "Failed to read employees from Firebase for owner {OwnerUid}; falling back to local SQLite cache.", owner);
             using var scope = _scopeFactory.CreateScope();
             var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
             if (dbFactory != null)
             {
                 using var db = await dbFactory.CreateDbContextAsync(ct);
-                return await db.Employees.AsNoTracking()
+                var fallbackList = await db.Employees.AsNoTracking()
                     .Where(x => !x.IsDeleted)
                     .OrderBy(x => x.Name)
                     .ToListAsync(ct);
+                EmployeeCache[owner] = (fallbackList, DateTime.UtcNow);
+                return fallbackList;
             }
             return new List<Employee>();
         }
@@ -373,6 +406,8 @@ public sealed class FirebaseEmployeeManagementService
                     }
                 }, OwnerUid, ct);
 
+            InvalidateCache(OwnerUid);
+
             return (true, employee, requestedId <= 0
                 ? "Employee synchronized to Firebase."
                 : "Employee synchronized to Firebase with duplicate-write protection.");
@@ -471,6 +506,8 @@ public sealed class FirebaseEmployeeManagementService
         {
             _logger.LogWarning(ex, "Failed to mark employee {EmployeeId} as deleted in local SQLite cache.", employeeId);
         }
+
+        InvalidateCache(OwnerUid);
 
         return (true, employee, "Employee moved to the Firebase recycle/deleted state.");
     }
@@ -865,15 +902,25 @@ public sealed class FirebaseEmployeeManagementService
 
     public async Task<CompanySetting?> GetCompanySettingsAsync(CancellationToken ct = default)
     {
+        var owner = OwnerUid;
+        if (CompanySettingsCache.TryGetValue(owner, out var cached) && (DateTime.UtcNow - cached.CachedAt) < SettingsCacheTtl)
+        {
+            return cached.Settings;
+        }
+
         try
         {
-            var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, CompanySettingsTable, "1", ct);
+            var snapshot = await _firebase.GetOwnerRecordAsync(owner, CompanySettingsTable, "1", ct);
             var res = Deserialize<CompanySetting>(snapshot);
-            if (res != null) return res;
+            if (res != null)
+            {
+                CompanySettingsCache[owner] = (res, DateTime.UtcNow);
+                return res;
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read Firebase company setting for owner {OwnerUid}", OwnerUid);
+            _logger.LogWarning(ex, "Failed to read Firebase company setting for owner {OwnerUid}", owner);
         }
 
         // Fallback to SQLite company setting for this tenant
@@ -884,16 +931,19 @@ public sealed class FirebaseEmployeeManagementService
             if (dbFactory != null)
             {
                 using var db = dbFactory.CreateDbContext();
-                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == OwnerUid);
+                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == owner);
                 var settingId = tenant?.CompanySettingId ?? 1;
                 var dbSetting = db.CompanySettings.AsNoTracking().FirstOrDefault(s => s.SettingID == settingId);
                 if (dbSetting != null)
+                {
+                    CompanySettingsCache[owner] = (dbSetting, DateTime.UtcNow);
                     return dbSetting;
+                }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read fallback SQLite company settings for owner {OwnerUid}", OwnerUid);
+            _logger.LogWarning(ex, "Failed to read fallback SQLite company settings for owner {OwnerUid}", owner);
         }
 
         return null;
@@ -901,15 +951,25 @@ public sealed class FirebaseEmployeeManagementService
 
     public async Task<FeatureSettings?> GetFeatureSettingsAsync(CancellationToken ct = default)
     {
+        var owner = OwnerUid;
+        if (FeatureSettingsCache.TryGetValue(owner, out var cached) && (DateTime.UtcNow - cached.CachedAt) < SettingsCacheTtl)
+        {
+            return cached.Settings;
+        }
+
         try
         {
-            var snapshot = await _firebase.GetOwnerRecordAsync(OwnerUid, FeatureSettingsTable, "1", ct);
+            var snapshot = await _firebase.GetOwnerRecordAsync(owner, FeatureSettingsTable, "1", ct);
             var res = Deserialize<FeatureSettings>(snapshot);
-            if (res != null) return res;
+            if (res != null)
+            {
+                FeatureSettingsCache[owner] = (res, DateTime.UtcNow);
+                return res;
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read Firebase feature setting for owner {OwnerUid}", OwnerUid);
+            _logger.LogWarning(ex, "Failed to read Firebase feature setting for owner {OwnerUid}", owner);
         }
 
         // Fallback to SQLite feature setting for this tenant
@@ -920,16 +980,19 @@ public sealed class FirebaseEmployeeManagementService
             if (dbFactory != null)
             {
                 using var db = dbFactory.CreateDbContext();
-                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == OwnerUid);
+                var tenant = db.CompanyTenants.AsNoTracking().FirstOrDefault(t => t.TenantId == owner);
                 var featureId = tenant?.FeatureSettingsId ?? 1;
                 var dbFeatures = db.FeatureSettings.AsNoTracking().FirstOrDefault(f => f.Id == featureId);
                 if (dbFeatures != null)
+                {
+                    FeatureSettingsCache[owner] = (dbFeatures, DateTime.UtcNow);
                     return dbFeatures;
+                }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read fallback SQLite feature settings for owner {OwnerUid}", OwnerUid);
+            _logger.LogWarning(ex, "Failed to read fallback SQLite feature settings for owner {OwnerUid}", owner);
         }
 
         return null;

@@ -192,6 +192,7 @@ class FirebaseRoomHydrator @Inject constructor(
                     settingsDao.upsertFeatureSettings(fs)
                     sessionStore.setDeploymentMode(fs.deploymentMode)
                     sessionStore.setOfflineMode(fs.isOfflineMode)
+                    sessionStore.setFirebasePlanMode(fs.firebasePlanMode)
                 }
             }
 

@@ -424,31 +424,20 @@ else
             isSuperAdmin ? "SuperAdmin" : "Admin");
         await LoadTrackingIntervalAsync();
 
-        // Dual SSOT Hydration & Continuous Parity:
+        // Dual SSOT Hydration:
         // Local SQLite already loaded instantaneously (0ms).
-        // Immediately query Firebase cloud SSOT so that any edits made from Mobile
-        // while Web was closed immediately update SQLite and reactive UI without reload.
-        // Concurrently run a lightweight parity heartbeat loop (every 2.5s) while page is open.
+        // Query Firebase cloud SSOT once on load so that any edits made while Web was closed
+        // update SQLite and reactive UI without reload. No aggressive polling timer needed.
         _cts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
             try
             {
                 await HydrateFromFirebaseCloudAsync();
-
-                using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(2500));
-                while (!_cts.Token.IsCancellationRequested && await timer.WaitForNextTickAsync(_cts.Token))
-                {
-                    if (!isSaving)
-                    {
-                        await HydrateFromFirebaseCloudAsync();
-                    }
-                }
             }
-            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Background Firebase continuous hydration loop failed.");
+                _logger.LogWarning(ex, "Initial Firebase company settings hydration encountered an issue.");
             }
         }, _cts.Token);
     }
@@ -852,42 +841,41 @@ else
     {
         try
         {
-            var candidateOwners = new List<string>();
-            if (!string.IsNullOrWhiteSpace(firebaseOwnerUid)) candidateOwners.Add(firebaseOwnerUid);
-            if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId) && !candidateOwners.Contains(activeTenant.TenantId))
-                candidateOwners.Add(activeTenant.TenantId);
-            if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid))
-                candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
-            if (!candidateOwners.Contains("tenant_201")) candidateOwners.Add("tenant_201");
-            if (!candidateOwners.Contains("201")) candidateOwners.Add("201");
+            var targetOwner = !string.IsNullOrWhiteSpace(activeTenant?.TenantId)
+                ? activeTenant.TenantId
+                : (!string.IsNullOrWhiteSpace(firebaseOwnerUid) ? firebaseOwnerUid : Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
 
             int rad = 0;
             double lat = 0, lon = 0;
             bool? speed = null;
             string? compName = null, addr = null, city = null;
 
-            foreach (var owner in candidateOwners)
+            var fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(targetOwner, "company_settings", "1");
+            if ((!fbRecord.HasValue || fbRecord.Value.ValueKind != System.Text.Json.JsonValueKind.Object) &&
+                !string.Equals(targetOwner, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
             {
-                var fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(owner, "company_settings", "1");
-                if (fbRecord.HasValue && fbRecord.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
-                {
-                    var val = fbRecord.Value;
-                    var r = ReadInt(val, "geoRadiusMeters") ?? ReadInt(val, "GeoRadiusMeters") ?? ReadInt(val, "radius") ?? ReadInt(val, "Radius") ?? 0;
-                    var la = ReadDouble(val, "officeLatitude") ?? ReadDouble(val, "OfficeLatitude") ?? ReadDouble(val, "latitude") ?? ReadDouble(val, "Latitude") ?? 0;
-                    var lo = ReadDouble(val, "officeLongitude") ?? ReadDouble(val, "OfficeLongitude") ?? ReadDouble(val, "longitude") ?? ReadDouble(val, "Longitude") ?? 0;
-                    var sp = ReadBool(val, "useSpeedBasedMarkers") ?? ReadBool(val, "use_speed_based_markers");
-                    var cn = ReadString(val, "companyName") ?? ReadString(val, "CompanyName");
-                    var a = ReadString(val, "addressLine1") ?? ReadString(val, "AddressLine1");
-                    var c = ReadString(val, "cityStatePincode") ?? ReadString(val, "CityStatePincode");
+                // Fallback to default owner only if primary owner has no settings node
+                fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, "company_settings", "1");
+            }
 
-                    if (r > 0 && rad == 0) rad = r;
-                    if (la != 0 && lat == 0) lat = la;
-                    if (lo != 0 && lon == 0) lon = lo;
-                    if (sp.HasValue && !speed.HasValue) speed = sp.Value;
-                    if (!string.IsNullOrWhiteSpace(cn) && !cn.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase) && compName == null) compName = cn.Trim();
-                    if (!string.IsNullOrWhiteSpace(a) && !a.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase) && addr == null) addr = a.Trim();
-                    if (!string.IsNullOrWhiteSpace(c) && !c.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase) && city == null) city = c.Trim();
-                }
+            if (fbRecord.HasValue && fbRecord.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                var val = fbRecord.Value;
+                var r = ReadInt(val, "geoRadiusMeters") ?? ReadInt(val, "GeoRadiusMeters") ?? ReadInt(val, "radius") ?? ReadInt(val, "Radius") ?? 0;
+                var la = ReadDouble(val, "officeLatitude") ?? ReadDouble(val, "OfficeLatitude") ?? ReadDouble(val, "latitude") ?? ReadDouble(val, "Latitude") ?? 0;
+                var lo = ReadDouble(val, "officeLongitude") ?? ReadDouble(val, "OfficeLongitude") ?? ReadDouble(val, "longitude") ?? ReadDouble(val, "Longitude") ?? 0;
+                var sp = ReadBool(val, "useSpeedBasedMarkers") ?? ReadBool(val, "use_speed_based_markers");
+                var cn = ReadString(val, "companyName") ?? ReadString(val, "CompanyName");
+                var a = ReadString(val, "addressLine1") ?? ReadString(val, "AddressLine1");
+                var c = ReadString(val, "cityStatePincode") ?? ReadString(val, "CityStatePincode");
+
+                if (r > 0) rad = r;
+                if (la != 0) lat = la;
+                if (lo != 0) lon = lo;
+                if (sp.HasValue) speed = sp.Value;
+                if (!string.IsNullOrWhiteSpace(cn) && !cn.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase)) compName = cn.Trim();
+                if (!string.IsNullOrWhiteSpace(a) && !a.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase)) addr = a.Trim();
+                if (!string.IsNullOrWhiteSpace(c) && !c.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase)) city = c.Trim();
             }
 
             bool changed = false;

@@ -377,139 +377,71 @@ class SignalRManager @Inject constructor(
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
         val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
-        val liveRef = firebaseSync.getGlobalRef()
-            .child("owners")
-            .child(ownerUid)
-            .child("tracking")
-            .child("live")
-            .let { ref ->
-                if (isEmployeeRole) {
-                    ref.child(employeeId.toString())
-                } else ref
-            }
 
-        // Spark Mode Optimization (Option B1): Restrict keepSynced(true) to individual employee node only.
-        if (isEmployeeRole) {
-            liveRef.keepSynced(true)
-        }
-
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                lastSuccessfulLiveReadAt = System.currentTimeMillis()
-                val parsed = parseSnapshotLocations(snapshot)
-                synchronized(primaryLiveLocations) {
-                    primaryLiveLocations.clear()
-                    primaryLiveLocations.putAll(parsed)
-                }
-                mergeAndPublishLocations()
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.w(
-                    "SignalRManager",
-                    "Firebase live-location listener cancelled: code=${error.code}, message=${error.message}"
-                )
-
-                if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
-                    triggerAuthRecovery("live-location listener: ${error.message}")
-                }
-            }
-        }
-
-        locationListener = listener
-        liveRef.addValueEventListener(listener)
-
-        val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
-        if (!isEmployeeRole && altOwnerUid != null) {
-            val altLiveRef = firebaseSync.getGlobalRef()
+        // Spark Plan Optimization:
+        // Employee phones only PUBLISH their own GPS coordinates.
+        // They NEVER consume other employees' live locations on mobile data.
+        // Only Admin / SuperAdmin attach live-location listeners for the map.
+        if (!isEmployeeRole) {
+            val liveRef = firebaseSync.getGlobalRef()
                 .child("owners")
-                .child(altOwnerUid)
+                .child(ownerUid)
                 .child("tracking")
                 .child("live")
-            val altListener = object : ValueEventListener {
+
+            val listener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
+                    lastSuccessfulLiveReadAt = System.currentTimeMillis()
                     val parsed = parseSnapshotLocations(snapshot)
-                    synchronized(altLiveLocations) {
-                        altLiveLocations.clear()
-                        altLiveLocations.putAll(parsed)
+                    synchronized(primaryLiveLocations) {
+                        primaryLiveLocations.clear()
+                        primaryLiveLocations.putAll(parsed)
                     }
                     mergeAndPublishLocations()
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.d("SignalRManager", "Alternate owner live-location listener cancelled: ${error.message}")
-                }
-            }
-            altLocationListener = altListener
-            altLiveRef.addValueEventListener(altListener)
-        }
+                    Log.w(
+                        "SignalRManager",
+                        "Firebase live-location listener cancelled: code=${error.code}, message=${error.message}"
+                    )
 
-        if (!isEmployeeRole) {
-            val legacyRef = firebaseSync.getGlobalRef().child("tracking").child("live")
-            val legListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    val parsed = parseSnapshotLocations(snapshot)
-                    synchronized(legacyLiveLocations) {
-                        legacyLiveLocations.clear()
-                        legacyLiveLocations.putAll(parsed)
+                    if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
+                        triggerAuthRecovery("live-location listener: ${error.message}")
                     }
-                    mergeAndPublishLocations()
-                }
-
-                override fun onCancelled(error: DatabaseError) {
-                    Log.d("SignalRManager", "Legacy live-location listener cancelled: ${error.message}")
                 }
             }
-            legacyLocationListener = legListener
-            legacyRef.addValueEventListener(legListener)
+
+            locationListener = listener
+            liveRef.addValueEventListener(listener)
         }
 
         // Authoritative employee binding for the current tenant.
-        val employeesRef = firebaseSync.getGlobalRef()
-            .child("owners")
-            .child(ownerUid)
-            .child("employees")
-        val employeesListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val parsed = parseSnapshotEmployees(snapshot)
-                synchronized(primaryOwnerEmployees) {
-                    primaryOwnerEmployees.clear()
-                    primaryOwnerEmployees.putAll(parsed)
-                }
-                mergeAndPublishEmployees()
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.w("SignalRManager", "Owner employee binding listener cancelled: code=${error.code}, message=${error.message}")
-                if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
-                    triggerAuthRecovery("employee binding listener: ${error.message}")
-                }
-            }
-        }
-        employeeListener = employeesListener
-        employeesRef.addValueEventListener(employeesListener)
-
-        if (!isEmployeeRole && altOwnerUid != null) {
-            val altEmployeesRef = firebaseSync.getGlobalRef()
+        // Authoritative employee binding for the current tenant (Admin only for live map).
+        if (!isEmployeeRole) {
+            val employeesRef = firebaseSync.getGlobalRef()
                 .child("owners")
-                .child(altOwnerUid)
+                .child(ownerUid)
                 .child("employees")
-            val altEmpListener = object : ValueEventListener {
+            val employeesListener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val parsed = parseSnapshotEmployees(snapshot)
-                    synchronized(altOwnerEmployees) {
-                        altOwnerEmployees.clear()
-                        altOwnerEmployees.putAll(parsed)
+                    synchronized(primaryOwnerEmployees) {
+                        primaryOwnerEmployees.clear()
+                        primaryOwnerEmployees.putAll(parsed)
                     }
                     mergeAndPublishEmployees()
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Log.d("SignalRManager", "Alternate owner employee listener cancelled: ${error.message}")
+                    Log.w("SignalRManager", "Owner employee binding listener cancelled: code=${error.code}, message=${error.message}")
+                    if (error.code == DatabaseError.PERMISSION_DENIED || error.message.contains("permission", ignoreCase = true)) {
+                        triggerAuthRecovery("employee binding listener: ${error.message}")
+                    }
                 }
             }
-            altEmployeeListener = altEmpListener
-            altEmployeesRef.addValueEventListener(altEmpListener)
+            employeeListener = employeesListener
+            employeesRef.addValueEventListener(employeesListener)
         }
 
         if (role.equals("ADMIN", true) ||
@@ -533,15 +465,17 @@ class SignalRManager @Inject constructor(
             }
         }
 
-        reconciliationJob?.cancel()
-        reconciliationJob = managerScope.launch {
-            while (isActive) {
-                delay(30_000L)
-                if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
-                    val now = System.currentTimeMillis()
-                    // Spark Mode Optimization (Option B5): Only reconcile if last successful live read was >60s ago
-                    if (now - lastSuccessfulLiveReadAt > 60_000L) {
-                        reconcileLiveLocationsNow()
+        if (!isEmployeeRole) {
+            reconciliationJob?.cancel()
+            reconciliationJob = managerScope.launch {
+                while (isActive) {
+                    delay(60_000L)
+                    if (activeOwnerUid == ownerUid && firebaseSync.isAuthenticated()) {
+                        val now = System.currentTimeMillis()
+                        // Spark Mode Optimization: Only reconcile if last successful live read was >120s ago
+                        if (now - lastSuccessfulLiveReadAt > 120_000L) {
+                            reconcileLiveLocationsNow()
+                        }
                     }
                 }
             }
@@ -685,8 +619,12 @@ class SignalRManager @Inject constructor(
     @Volatile private var lastReconcileTime = 0L
 
     fun reconcileLiveLocationsNow() {
+        val role = sessionStore.userRole().orEmpty()
+        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
+        if (isEmployeeRole) return // Employees only produce GPS; never consume live markers
+
         val now = System.currentTimeMillis()
-        if (now - lastReconcileTime < 2000L) return
+        if (now - lastReconcileTime < 30_000L) return
         lastReconcileTime = now
 
         if (activeOwnerUid == null || locationListener == null) {
@@ -694,23 +632,11 @@ class SignalRManager @Inject constructor(
         }
 
         val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
-        val role = sessionStore.userRole().orEmpty()
-        val employeeId = sessionStore.employeeId()
-        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
         val liveRef = firebaseSync.getGlobalRef()
             .child("owners")
             .child(ownerUid)
             .child("tracking")
             .child("live")
-            .let { ref ->
-                if (isEmployeeRole) {
-                    ref.child(employeeId.toString())
-                } else {
-                    ref
-                }
-            }
-
-        val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
 
         managerScope.launch {
             runCatching {
@@ -725,26 +651,6 @@ class SignalRManager @Inject constructor(
                 )
             }
 
-            if (!isEmployeeRole && altOwnerUid != null) {
-                runCatching {
-                    val altLiveRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("tracking").child("live")
-                    val altSnap = altLiveRef.get().await()
-                    withContext(Dispatchers.Main.immediate) {
-                        altLocationListener?.onDataChange(altSnap)
-                    }
-                }
-            }
-
-            val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
-            if (!isEmployeeRole && isDefaultOwner) {
-                runCatching {
-                    val legSnap = firebaseSync.getGlobalRef().child("tracking").child("live").get().await()
-                    withContext(Dispatchers.Main.immediate) {
-                        legacyLocationListener?.onDataChange(legSnap)
-                    }
-                }
-            }
-
             // Also pull fresh employee directory so live markers always map to valid employees
             val employeesRef = firebaseSync.getGlobalRef()
                 .child("owners")
@@ -756,17 +662,7 @@ class SignalRManager @Inject constructor(
                     employeeListener?.onDataChange(empSnapshot)
                 }
             }.onFailure { error ->
-                Log.d("SignalRManager", "Immediate employees directory reconciliation skipped (waiting for active listener sync): ${error.message}")
-            }
-
-            if (!isEmployeeRole && altOwnerUid != null) {
-                runCatching {
-                    val altEmployeesRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("employees")
-                    val altEmpSnapshot = altEmployeesRef.get().await()
-                    withContext(Dispatchers.Main.immediate) {
-                        altEmployeeListener?.onDataChange(altEmpSnapshot)
-                    }
-                }
+                Log.d("SignalRManager", "Immediate employees directory reconciliation skipped: ${error.message}")
             }
         }
     }
