@@ -17,6 +17,7 @@
 @inject Payroll.Web.Services.TenantManagementService TenantManager
 @inject NavigationManager Navigation
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
+@implements IDisposable
 
 <PageTitle>Company Settings</PageTitle>
 
@@ -335,6 +336,7 @@ else
     private string activeTab = "general";
     private int trackingIntervalSeconds = 30;
     private string? firebaseOwnerUid;
+    private CancellationTokenSource? _cts;
 
     private CompanyTenant? activeTenant;
 
@@ -422,73 +424,33 @@ else
             isSuperAdmin ? "SuperAdmin" : "Admin");
         await LoadTrackingIntervalAsync();
 
-        // Dual SSOT Hydration: Local SQLite already loaded instantaneously (0ms).
-        // Concurrently query Firebase cloud SSOT so that any edits made from Mobile
+        // Dual SSOT Hydration & Continuous Parity:
+        // Local SQLite already loaded instantaneously (0ms).
+        // Immediately query Firebase cloud SSOT so that any edits made from Mobile
         // while Web was closed immediately update SQLite and reactive UI without reload.
+        // Concurrently run a lightweight parity heartbeat loop (every 2.5s) while page is open.
+        _cts = new CancellationTokenSource();
         _ = Task.Run(async () =>
         {
             try
             {
-                var effectiveOwnerUid = firebaseOwnerUid ?? "biometricpayroll";
-                var fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(effectiveOwnerUid, "company_settings", "1");
-                if (fbRecord.HasValue && fbRecord.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                await HydrateFromFirebaseCloudAsync();
+
+                using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(2500));
+                while (!_cts.Token.IsCancellationRequested && await timer.WaitForNextTickAsync(_cts.Token))
                 {
-                    var val = fbRecord.Value;
-                    var rad = ReadInt(val, "geoRadiusMeters") ?? ReadInt(val, "GeoRadiusMeters") ?? ReadInt(val, "radius") ?? ReadInt(val, "Radius") ?? 0;
-                    var lat = ReadDouble(val, "officeLatitude") ?? ReadDouble(val, "OfficeLatitude") ?? ReadDouble(val, "latitude") ?? ReadDouble(val, "Latitude") ?? 0;
-                    var lon = ReadDouble(val, "officeLongitude") ?? ReadDouble(val, "OfficeLongitude") ?? ReadDouble(val, "longitude") ?? ReadDouble(val, "Longitude") ?? 0;
-                    var speed = ReadBool(val, "useSpeedBasedMarkers") ?? ReadBool(val, "use_speed_based_markers") ?? false;
-                    var compName = ReadString(val, "companyName") ?? ReadString(val, "CompanyName");
-                    var addr = ReadString(val, "addressLine1") ?? ReadString(val, "AddressLine1");
-                    var city = ReadString(val, "cityStatePincode") ?? ReadString(val, "CityStatePincode");
-
-                    bool changed = false;
-                    if (settings != null)
+                    if (!isSaving)
                     {
-                        if (rad > 0 && settings.GeoRadiusMeters != rad) { settings.GeoRadiusMeters = rad; changed = true; }
-                        if (lat != 0 && settings.OfficeLatitude != lat) { settings.OfficeLatitude = lat; changed = true; }
-                        if (lon != 0 && settings.OfficeLongitude != lon) { settings.OfficeLongitude = lon; changed = true; }
-                        if (settings.UseSpeedBasedMarkers != speed) { settings.UseSpeedBasedMarkers = speed; changed = true; }
-                        if (!string.IsNullOrWhiteSpace(compName) && !compName.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase) && settings.CompanyName != compName.Trim()) { settings.CompanyName = compName.Trim(); changed = true; }
-                        if (addr != null && !addr.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase) && settings.AddressLine1 != addr) { settings.AddressLine1 = addr; changed = true; }
-                        if (city != null && !city.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase) && settings.CityStatePincode != city) { settings.CityStatePincode = city; changed = true; }
-                    }
-
-                    if (changed)
-                    {
-                        await using var db = await DbFactory.CreateDbContextAsync();
-                        var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
-                        var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
-                        if (existing != null)
-                        {
-                            if (rad > 0) existing.GeoRadiusMeters = rad;
-                            if (lat != 0) existing.OfficeLatitude = lat;
-                            if (lon != 0) existing.OfficeLongitude = lon;
-                            existing.UseSpeedBasedMarkers = speed;
-                            if (!string.IsNullOrWhiteSpace(compName)) existing.CompanyName = compName.Trim();
-                            if (addr != null) existing.AddressLine1 = addr;
-                            if (city != null) existing.CityStatePincode = city;
-                            await db.SaveChangesAsync();
-                        }
-
-                        if (settings != null)
-                        {
-                            await AttendanceRefresh.NotifyGeoSettingsChangedAsync(
-                                settings.OfficeLatitude,
-                                settings.OfficeLongitude,
-                                settings.GeoRadiusMeters,
-                                settings.UseSpeedBasedMarkers);
-                        }
-
-                        await InvokeAsync(StateHasChanged);
+                        await HydrateFromFirebaseCloudAsync();
                     }
                 }
             }
+            catch (OperationCanceledException) { }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Background Firebase hydration for CompanySettings failed.");
+                _logger.LogWarning(ex, "Background Firebase continuous hydration loop failed.");
             }
-        });
+        }, _cts.Token);
     }
 
     private void OpenDeleteCompanyModal()
@@ -598,20 +560,36 @@ else
                     }
                 }
 
-                if (!features.IsOfflineMode && !string.IsNullOrWhiteSpace(firebaseOwnerUid))
+                if (!features.IsOfflineMode)
                 {
                     try
                     {
-                        await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/feature_settings/1", features, default);
-                        if (!string.Equals(firebaseOwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+                        var syncOwners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        if (!string.IsNullOrWhiteSpace(firebaseOwnerUid)) syncOwners.Add(firebaseOwnerUid);
+                        if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId)) syncOwners.Add(activeTenant.TenantId);
+                        syncOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+                        syncOwners.Add("tenant_201");
+                        syncOwners.Add("201");
+
+                        foreach (var targetOwner in syncOwners)
                         {
-                            await FirebaseRealtime.SetAsync($"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/feature_settings/1", features, default);
+                            await FirebaseRealtime.SetAsync($"owners/{targetOwner}/feature_settings/1", features, default);
+                            await FirebaseRealtime.PublishLocalApplicationChangeAsync(targetOwner, "FeatureSettings", "MODIFIED", "1", default);
                         }
-                        await FirebaseRealtime.UpdateAsync(new Dictionary<string, object?>
+
+                        var tenantSyncIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        if (!string.IsNullOrWhiteSpace(firebaseOwnerUid) && !firebaseOwnerUid.Equals(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase)) tenantSyncIds.Add(firebaseOwnerUid);
+                        if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId)) tenantSyncIds.Add(activeTenant.TenantId);
+                        tenantSyncIds.Add("tenant_201");
+
+                        foreach (var tId in tenantSyncIds)
                         {
-                            [$"tenants/{firebaseOwnerUid}/deploymentMode"] = features.DeploymentMode,
-                            [$"tenants/{firebaseOwnerUid}/isOfflineMode"] = features.IsOfflineMode
-                        }, default);
+                            await FirebaseRealtime.UpdateAsync(new Dictionary<string, object?>
+                            {
+                                [$"tenants/{tId}/deploymentMode"] = features.DeploymentMode,
+                                [$"tenants/{tId}/isOfflineMode"] = features.IsOfflineMode
+                            }, default);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -651,73 +629,82 @@ else
             // Mirror company settings to Firebase under tenant's owner node
             try
             {
-                if (!string.IsNullOrWhiteSpace(firebaseOwnerUid))
+                var companyPayload = new Dictionary<string, object?>
                 {
-                    var companyPayload = new Dictionary<string, object?>
-                    {
-                        ["companyName"] = settings.CompanyName,
-                        ["addressLine1"] = settings.AddressLine1,
-                        ["cityStatePincode"] = settings.CityStatePincode,
-                        ["salaryCalculationMethod"] = settings.SalaryCalculationMethod,
-                        ["officeLatitude"] = settings.OfficeLatitude,
-                        ["officeLongitude"] = settings.OfficeLongitude,
-                        ["latitude"] = settings.OfficeLatitude,
-                        ["longitude"] = settings.OfficeLongitude,
-                        ["geoRadiusMeters"] = settings.GeoRadiusMeters,
-                        ["radius"] = settings.GeoRadiusMeters,
-                        ["geo_radius_meters"] = settings.GeoRadiusMeters,
-                        ["zktecoIP"] = settings.ZktecoIP,
-                        ["zktecoPort"] = settings.ZktecoPort,
-                        ["zktecoMachineNumber"] = settings.ZktecoMachineNumber,
-                        ["workDayCutoffHour"] = settings.WorkDayCutoffHour,
-                        ["lateGraceMinutes"] = settings.LateGraceMinutes,
-                        ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes,
-                        ["enablePfEsiSystem"] = settings.EnablePfEsiSystem,
-                        ["esiWageLimit"] = settings.EsiWageLimit,
-                        ["basicSalaryPercentage"] = settings.BasicSalaryPercentage,
-                        ["employeePfPercentage"] = settings.EmployeePfPercentage,
-                        ["employeeEsiPercentage"] = settings.EmployeeEsiPercentage,
-                        ["employerPfPercentage"] = settings.EmployerPfPercentage,
-                        ["employerEsiPercentage"] = settings.EmployerEsiPercentage,
-                        ["enableProfessionalTax"] = settings.EnableProfessionalTax,
-                        ["enableShiftAllowance"] = settings.EnableShiftAllowance,
-                        ["enableLeaveAccrual"] = settings.EnableLeaveAccrual,
-                        ["leaveAccrualRate"] = settings.LeaveAccrualRate,
-                        ["enableSandwichRule"] = settings.EnableSandwichRule,
-                        ["enableLeaveManagement"] = settings.EnableLeaveManagement,
-                        ["enableTdsDeduction"] = settings.EnableTdsDeduction,
-                        ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours,
-                        ["stayDwellMinutes"] = settings.StayDwellMinutes,
-                        ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters,
-                        ["useSpeedBasedMarkers"] = settings.UseSpeedBasedMarkers,
-                        ["use_speed_based_markers"] = settings.UseSpeedBasedMarkers,
-                        ["enableEmailNotifications"] = settings.EnableEmailNotifications,
-                        ["smtpHost"] = settings.SmtpHost,
-                        ["smtpPort"] = settings.SmtpPort,
-                        ["smtpFromEmail"] = settings.SmtpFromEmail,
-                        ["smtpUser"] = settings.SmtpUser,
-                        ["smtpPass"] = settings.SmtpPass,
-                        ["pageTransitionEffect"] = settings.PageTransitionEffect
-                    };
-                    await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
-                    await FirebaseRealtime.PublishLocalApplicationChangeAsync(firebaseOwnerUid, "CompanySetting", "MODIFIED", "1", default);
+                    ["companyName"] = settings.CompanyName,
+                    ["addressLine1"] = settings.AddressLine1,
+                    ["cityStatePincode"] = settings.CityStatePincode,
+                    ["salaryCalculationMethod"] = settings.SalaryCalculationMethod,
+                    ["officeLatitude"] = settings.OfficeLatitude,
+                    ["officeLongitude"] = settings.OfficeLongitude,
+                    ["latitude"] = settings.OfficeLatitude,
+                    ["longitude"] = settings.OfficeLongitude,
+                    ["geoRadiusMeters"] = settings.GeoRadiusMeters,
+                    ["radius"] = settings.GeoRadiusMeters,
+                    ["geo_radius_meters"] = settings.GeoRadiusMeters,
+                    ["zktecoIP"] = settings.ZktecoIP,
+                    ["zktecoPort"] = settings.ZktecoPort,
+                    ["zktecoMachineNumber"] = settings.ZktecoMachineNumber,
+                    ["workDayCutoffHour"] = settings.WorkDayCutoffHour,
+                    ["lateGraceMinutes"] = settings.LateGraceMinutes,
+                    ["endTimeGraceMinutes"] = settings.EndTimeGraceMinutes,
+                    ["enablePfEsiSystem"] = settings.EnablePfEsiSystem,
+                    ["esiWageLimit"] = settings.EsiWageLimit,
+                    ["basicSalaryPercentage"] = settings.BasicSalaryPercentage,
+                    ["employeePfPercentage"] = settings.EmployeePfPercentage,
+                    ["employeeEsiPercentage"] = settings.EmployeeEsiPercentage,
+                    ["employerPfPercentage"] = settings.EmployerPfPercentage,
+                    ["employerEsiPercentage"] = settings.EmployerEsiPercentage,
+                    ["enableProfessionalTax"] = settings.EnableProfessionalTax,
+                    ["enableShiftAllowance"] = settings.EnableShiftAllowance,
+                    ["enableLeaveAccrual"] = settings.EnableLeaveAccrual,
+                    ["leaveAccrualRate"] = settings.LeaveAccrualRate,
+                    ["enableSandwichRule"] = settings.EnableSandwichRule,
+                    ["enableLeaveManagement"] = settings.EnableLeaveManagement,
+                    ["enableTdsDeduction"] = settings.EnableTdsDeduction,
+                    ["autoBackupIntervalHours"] = settings.AutoBackupIntervalHours,
+                    ["stayDwellMinutes"] = settings.StayDwellMinutes,
+                    ["stayClusterRadiusMeters"] = settings.StayClusterRadiusMeters,
+                    ["useSpeedBasedMarkers"] = settings.UseSpeedBasedMarkers,
+                    ["use_speed_based_markers"] = settings.UseSpeedBasedMarkers,
+                    ["enableEmailNotifications"] = settings.EnableEmailNotifications,
+                    ["smtpHost"] = settings.SmtpHost,
+                    ["smtpPort"] = settings.SmtpPort,
+                    ["smtpFromEmail"] = settings.SmtpFromEmail,
+                    ["smtpUser"] = settings.SmtpUser,
+                    ["smtpPass"] = settings.SmtpPass,
+                    ["pageTransitionEffect"] = settings.PageTransitionEffect
+                };
 
-                    if (!string.Equals(firebaseOwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
-                    {
-                        await FirebaseRealtime.SetAsync($"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/company_settings/1", companyPayload, default);
-                        await FirebaseRealtime.PublishLocalApplicationChangeAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, "CompanySetting", "MODIFIED", "1", default);
-                    }
+                var syncOwners = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(firebaseOwnerUid)) syncOwners.Add(firebaseOwnerUid);
+                if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId)) syncOwners.Add(activeTenant.TenantId);
+                syncOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+                syncOwners.Add("tenant_201");
+                syncOwners.Add("201");
 
-                    // Also mirror coordinates and radius directly to tenants/{firebaseOwnerUid}
+                foreach (var targetOwner in syncOwners)
+                {
+                    await FirebaseRealtime.SetAsync($"owners/{targetOwner}/company_settings/1", companyPayload, default);
+                    await FirebaseRealtime.PublishLocalApplicationChangeAsync(targetOwner, "CompanySetting", "MODIFIED", "1", default);
+                }
+
+                var tenantSyncIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(firebaseOwnerUid) && !firebaseOwnerUid.Equals(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase)) tenantSyncIds.Add(firebaseOwnerUid);
+                if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId)) tenantSyncIds.Add(activeTenant.TenantId);
+                tenantSyncIds.Add("tenant_201");
+
+                foreach (var tId in tenantSyncIds)
+                {
                     await FirebaseRealtime.UpdateAsync(new Dictionary<string, object?>
                     {
-                        [$"tenants/{firebaseOwnerUid}/companyName"] = settings.CompanyName,
-                        [$"tenants/{firebaseOwnerUid}/officeLatitude"] = settings.OfficeLatitude,
-                        [$"tenants/{firebaseOwnerUid}/officeLongitude"] = settings.OfficeLongitude,
-                        [$"tenants/{firebaseOwnerUid}/latitude"] = settings.OfficeLatitude,
-                        [$"tenants/{firebaseOwnerUid}/longitude"] = settings.OfficeLongitude,
-                        [$"tenants/{firebaseOwnerUid}/geoRadiusMeters"] = settings.GeoRadiusMeters,
-                        [$"tenants/{firebaseOwnerUid}/radius"] = settings.GeoRadiusMeters
+                        [$"tenants/{tId}/companyName"] = settings.CompanyName,
+                        [$"tenants/{tId}/officeLatitude"] = settings.OfficeLatitude,
+                        [$"tenants/{tId}/officeLongitude"] = settings.OfficeLongitude,
+                        [$"tenants/{tId}/latitude"] = settings.OfficeLatitude,
+                        [$"tenants/{tId}/longitude"] = settings.OfficeLongitude,
+                        [$"tenants/{tId}/geoRadiusMeters"] = settings.GeoRadiusMeters,
+                        [$"tenants/{tId}/radius"] = settings.GeoRadiusMeters
                     }, default);
                 }
 
@@ -861,10 +848,107 @@ else
             ? p.ValueKind == System.Text.Json.JsonValueKind.True ? true : p.ValueKind == System.Text.Json.JsonValueKind.False ? false : (p.ValueKind == System.Text.Json.JsonValueKind.String && bool.TryParse(p.GetString(), out var b) ? b : null)
             : null;
 
+    private async Task<bool> HydrateFromFirebaseCloudAsync(bool forceStateHasChanged = true)
+    {
+        try
+        {
+            var candidateOwners = new List<string>();
+            if (!string.IsNullOrWhiteSpace(firebaseOwnerUid)) candidateOwners.Add(firebaseOwnerUid);
+            if (!string.IsNullOrWhiteSpace(activeTenant?.TenantId) && !candidateOwners.Contains(activeTenant.TenantId))
+                candidateOwners.Add(activeTenant.TenantId);
+            if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid))
+                candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+            if (!candidateOwners.Contains("tenant_201")) candidateOwners.Add("tenant_201");
+            if (!candidateOwners.Contains("201")) candidateOwners.Add("201");
+
+            int rad = 0;
+            double lat = 0, lon = 0;
+            bool? speed = null;
+            string? compName = null, addr = null, city = null;
+
+            foreach (var owner in candidateOwners)
+            {
+                var fbRecord = await FirebaseRealtime.GetOwnerRecordAsync(owner, "company_settings", "1");
+                if (fbRecord.HasValue && fbRecord.Value.ValueKind == System.Text.Json.JsonValueKind.Object)
+                {
+                    var val = fbRecord.Value;
+                    var r = ReadInt(val, "geoRadiusMeters") ?? ReadInt(val, "GeoRadiusMeters") ?? ReadInt(val, "radius") ?? ReadInt(val, "Radius") ?? 0;
+                    var la = ReadDouble(val, "officeLatitude") ?? ReadDouble(val, "OfficeLatitude") ?? ReadDouble(val, "latitude") ?? ReadDouble(val, "Latitude") ?? 0;
+                    var lo = ReadDouble(val, "officeLongitude") ?? ReadDouble(val, "OfficeLongitude") ?? ReadDouble(val, "longitude") ?? ReadDouble(val, "Longitude") ?? 0;
+                    var sp = ReadBool(val, "useSpeedBasedMarkers") ?? ReadBool(val, "use_speed_based_markers");
+                    var cn = ReadString(val, "companyName") ?? ReadString(val, "CompanyName");
+                    var a = ReadString(val, "addressLine1") ?? ReadString(val, "AddressLine1");
+                    var c = ReadString(val, "cityStatePincode") ?? ReadString(val, "CityStatePincode");
+
+                    if (r > 0 && rad == 0) rad = r;
+                    if (la != 0 && lat == 0) lat = la;
+                    if (lo != 0 && lon == 0) lon = lo;
+                    if (sp.HasValue && !speed.HasValue) speed = sp.Value;
+                    if (!string.IsNullOrWhiteSpace(cn) && !cn.Equals("Your Company Name", StringComparison.OrdinalIgnoreCase) && compName == null) compName = cn.Trim();
+                    if (!string.IsNullOrWhiteSpace(a) && !a.Equals("Address Line 1", StringComparison.OrdinalIgnoreCase) && addr == null) addr = a.Trim();
+                    if (!string.IsNullOrWhiteSpace(c) && !c.Equals("City, State, Pincode", StringComparison.OrdinalIgnoreCase) && city == null) city = c.Trim();
+                }
+            }
+
+            bool changed = false;
+            if (settings != null)
+            {
+                if (rad > 0 && settings.GeoRadiusMeters != rad) { settings.GeoRadiusMeters = rad; changed = true; }
+                if (lat != 0 && settings.OfficeLatitude != lat) { settings.OfficeLatitude = lat; changed = true; }
+                if (lon != 0 && settings.OfficeLongitude != lon) { settings.OfficeLongitude = lon; changed = true; }
+                if (speed.HasValue && settings.UseSpeedBasedMarkers != speed.Value) { settings.UseSpeedBasedMarkers = speed.Value; changed = true; }
+                if (!string.IsNullOrWhiteSpace(compName) && settings.CompanyName != compName) { settings.CompanyName = compName; changed = true; }
+                if (addr != null && settings.AddressLine1 != addr) { settings.AddressLine1 = addr; changed = true; }
+                if (city != null && settings.CityStatePincode != city) { settings.CityStatePincode = city; changed = true; }
+            }
+
+            if (changed)
+            {
+                await using var db = await DbFactory.CreateDbContextAsync();
+                var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
+                var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId);
+                if (existing != null)
+                {
+                    if (rad > 0) existing.GeoRadiusMeters = rad;
+                    if (lat != 0) existing.OfficeLatitude = lat;
+                    if (lon != 0) existing.OfficeLongitude = lon;
+                    if (speed.HasValue) existing.UseSpeedBasedMarkers = speed.Value;
+                    if (!string.IsNullOrWhiteSpace(compName)) existing.CompanyName = compName;
+                    if (addr != null) existing.AddressLine1 = addr;
+                    if (city != null) existing.CityStatePincode = city;
+                    await db.SaveChangesAsync();
+                }
+
+                if (settings != null)
+                {
+                    await AttendanceRefresh.NotifyGeoSettingsChangedAsync(
+                        settings.OfficeLatitude,
+                        settings.OfficeLongitude,
+                        settings.GeoRadiusMeters,
+                        settings.UseSpeedBasedMarkers);
+                }
+
+                if (forceStateHasChanged)
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "HydrateFromFirebaseCloudAsync failed.");
+        }
+        return false;
+    }
+
     private async Task HandleRealtimeRefresh()
     {
         try
         {
+            // 1. Pull latest cloud state immediately from Firebase SSOT
+            await HydrateFromFirebaseCloudAsync(forceStateHasChanged: false);
+
             var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
             var targetFeatureId = activeTenant?.FeatureSettingsId > 0 ? activeTenant.FeatureSettingsId : 1;
 
@@ -893,6 +977,12 @@ else
         {
             _logger.LogWarning(ex, "Realtime company settings refresh failed.");
         }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
     }
 
 }

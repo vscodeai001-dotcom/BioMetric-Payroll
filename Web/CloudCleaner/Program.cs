@@ -36,6 +36,51 @@ class Program
 
     static async Task Main(string[] args)
     {
+        if (args.Length >= 1 && args[0] == "--cs-check")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+            var checkNodes = new[] {
+                "owners/tenant_201/company_settings/1.json",
+                "owners/biometricpayroll/company_settings/1.json",
+                "owners/201/company_settings/1.json",
+                "company_settings/1.json",
+                "tenants/tenant_201.json"
+            };
+            foreach (var node in checkNodes)
+            {
+                try
+                {
+                    var res = await http1.GetStringAsync($"{DatabaseUrl}/{node}?access_token={token1}");
+                    Console.WriteLine($"\n=== Node: {node} ===\n{res}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"\n=== Node: {node} === ERROR: {ex.Message}");
+                }
+            }
+            return;
+        }
+        if (args.Length >= 1 && args[0] == "--cs-sync")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+            var sourceJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/biometricpayroll/company_settings/1.json?access_token={token1}");
+            Console.WriteLine($"\nSource [owners/biometricpayroll/company_settings/1]:\n{sourceJson}");
+
+            var putTargets = new[] { "owners/tenant_201/company_settings/1.json", "owners/201/company_settings/1.json" };
+            foreach (var target in putTargets)
+            {
+                var content = new StringContent(sourceJson, System.Text.Encoding.UTF8, "application/json");
+                var putRes = await http1.PutAsync($"{DatabaseUrl}/{target}?access_token={token1}", content);
+                Console.WriteLine($"Put to {target}: {putRes.StatusCode}");
+            }
+            return;
+        }
         if (args.Length >= 1 && args[0] == "--fs-check")
         {
             var credential1 = GoogleCredential.FromFile(ServiceAccountPath)

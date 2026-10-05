@@ -524,11 +524,26 @@ class CompanySettingsActivity : MotionBaseActivity() {
     private var companySettingsListener: ValueEventListener? = null
     private var altCompanySettingsRef: com.google.firebase.database.DatabaseReference? = null
     private var altCompanySettingsListener: ValueEventListener? = null
+    private val activeCompanyListeners = mutableListOf<Pair<com.google.firebase.database.DatabaseReference, ValueEventListener>>()
 
     private fun attachFirebaseListeners() {
-        val owner = firebaseSync.getOwnerRef()
-        if (owner != null && companySettingsRef == null) {
-            val ref = owner.child("company_settings").child("1")
+        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+        val targets = mutableSetOf<String>()
+        firebaseSync.getOwnerRef()?.key?.let { targets.add(it) }
+        targets.add(defaultOwner)
+        if (!activeTid.isNullOrBlank()) targets.add(activeTid)
+        targets.add("tenant_201")
+        targets.add("201")
+
+        // Detach existing listeners first to prevent duplicates
+        for ((ref, l) in activeCompanyListeners) {
+            runCatching { ref.removeEventListener(l) }
+        }
+        activeCompanyListeners.clear()
+
+        for (targetUid in targets) {
+            val ref = FirebaseDatabase.getInstance().getReference("owners").child(targetUid).child("company_settings").child("1")
             val listener = object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     hydrateFromFirebase(snapshot)
@@ -536,29 +551,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
                 override fun onCancelled(error: DatabaseError) {}
             }
             ref.addValueEventListener(listener)
-            companySettingsRef = ref
-            companySettingsListener = listener
-        }
-
-        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
-        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
-        val altUid = if (owner?.key == defaultOwner) {
-            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
-        } else {
-            defaultOwner
-        }
-
-        if (altUid != null && altCompanySettingsRef == null) {
-            val altRef = FirebaseDatabase.getInstance().getReference("owners").child(altUid).child("company_settings").child("1")
-            val altListener = object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    hydrateFromFirebase(snapshot)
-                }
-                override fun onCancelled(error: DatabaseError) {}
-            }
-            altRef.addValueEventListener(altListener)
-            altCompanySettingsRef = altRef
-            altCompanySettingsListener = altListener
+            activeCompanyListeners.add(ref to listener)
         }
     }
 
@@ -572,6 +565,14 @@ class CompanySettingsActivity : MotionBaseActivity() {
             val activeTenantName = sessionStore.activeCompanyName().ifBlank {
                 getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("selected_tenant_name", "").orEmpty()
             }.ifBlank { intent.getStringExtra("TENANT_NAME").orEmpty() }
+
+            val currentTid = sessionStore.activeTenantId()
+            if (currentTid.isNullOrBlank() || currentTid.equals(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                if (localCompany.companyName.contains("Sri Diyaa", ignoreCase = true) || activeTenantName.contains("Sri Diyaa", ignoreCase = true)) {
+                    sessionStore.saveActiveTenant("tenant_201", "Sri Diyaa Agencies, Ariyankuppam.", "201")
+                    sessionStore.setFirebaseOwnerUid("tenant_201")
+                }
+            }
 
             if (localCompany.companyName.isBlank() || localCompany.companyName.equals("Your Company Name", ignoreCase = true)) {
                 if (activeTenantName.isNotBlank() && !activeTenantName.equals("Your Company Name", ignoreCase = true)) {
@@ -1048,7 +1049,27 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "useSpeedBasedMarkers" to localCompany.useSpeedBasedMarkers,
                             "use_speed_based_markers" to localCompany.useSpeedBasedMarkers
                         )
-                        owner.child("company_settings").child("1").setValue(companyPayload).await()
+                        // Save company settings & feature settings across ALL canonical SSOT nodes
+                        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+                        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+                        val syncTargets = mutableSetOf<String>()
+                        owner.key?.let { syncTargets.add(it) }
+                        syncTargets.add(defaultOwner)
+                        if (!activeTid.isNullOrBlank()) syncTargets.add(activeTid)
+                        syncTargets.add("tenant_201")
+                        syncTargets.add("201")
+
+                        val featureMap = com.google.gson.Gson().fromJson(com.google.gson.Gson().toJson(localFeatures), Map::class.java)
+                        @Suppress("UNCHECKED_CAST")
+                        val featurePayload = featureMap as Map<String, Any>
+
+                        for (targetUid in syncTargets) {
+                            runCatching {
+                                val targetOwnerRef = FirebaseDatabase.getInstance().getReference("owners").child(targetUid)
+                                targetOwnerRef.child("company_settings").child("1").setValue(companyPayload).await()
+                                targetOwnerRef.child("feature_settings").child("1").setValue(featurePayload).await()
+                            }
+                        }
 
                         // Rebaseline all active employees against new radius/office coordinates immediately
                         autoPunchCoordinator.rebaselineAllActiveEmployees(
@@ -1057,13 +1078,14 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             localCompany.geoRadiusMeters
                         )
 
-                        // Sync Admin Credentials to owner root node
+                        // Sync Admin Credentials to owner root node and tenant_201
                         val adminUpdates = mutableMapOf<String, Any>()
                         if (adminEmail.isNotBlank()) adminUpdates["adminEmail"] = adminEmail
                         if (adminName.isNotBlank()) adminUpdates["adminName"] = adminName
                         if (adminPhone.isNotBlank()) adminUpdates["adminPhone"] = adminPhone
                         if (adminUpdates.isNotEmpty()) {
-                            owner.updateChildren(adminUpdates).await()
+                            runCatching { owner.updateChildren(adminUpdates).await() }
+                            runCatching { FirebaseDatabase.getInstance().getReference("owners").child("tenant_201").updateChildren(adminUpdates).await() }
                         }
 
                         // Update Firebase Auth password if changed
@@ -1072,44 +1094,31 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             user?.updatePassword(adminPass)?.await()
                         }
 
-                        val featureMap = com.google.gson.Gson().fromJson(com.google.gson.Gson().toJson(localFeatures), Map::class.java)
-                        @Suppress("UNCHECKED_CAST")
-                        owner.child("feature_settings").child("1").setValue(featureMap as Map<String, Any>).await()
-
-                        // Mirror to alternate owner (biometricpayroll <-> activeTenantId)
-                        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
-                        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
-                        val altUid = if (owner.key == defaultOwner) {
-                            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
-                        } else {
-                            defaultOwner
-                        }
-                        if (altUid != null) {
-                            val altOwnerRef = FirebaseDatabase.getInstance().getReference("owners").child(altUid)
-                            runCatching {
-                                altOwnerRef.child("company_settings").child("1").setValue(companyPayload).await()
-                                altOwnerRef.child("feature_settings").child("1").setValue(featureMap).await()
-                            }
-                        }
-
                         // Sync tenant metadata to /tenants/{tenantId}
-                        if (!activeTid.isNullOrBlank()) {
-                            val tenantUpdates = mutableMapOf<String, Any>(
-                                "companyName" to localCompany.companyName,
-                                "deploymentMode" to currentDeploymentMode,
-                                "isOfflineMode" to isOfflineMode,
-                                "officeLatitude" to localCompany.officeLatitude,
-                                "officeLongitude" to localCompany.officeLongitude,
-                                "latitude" to localCompany.officeLatitude,
-                                "longitude" to localCompany.officeLongitude,
-                                "geoRadiusMeters" to localCompany.geoRadiusMeters,
-                                "radius" to localCompany.geoRadiusMeters,
-                                "geo_radius_meters" to localCompany.geoRadiusMeters
-                            )
-                            if (adminEmail.isNotBlank()) tenantUpdates["adminEmail"] = adminEmail
-                            if (adminName.isNotBlank()) tenantUpdates["adminName"] = adminName
-                            if (adminPhone.isNotBlank()) tenantUpdates["adminPhone"] = adminPhone
-                            FirebaseDatabase.getInstance().getReference("tenants").child(activeTid).updateChildren(tenantUpdates).await()
+                        val tenantUpdates = mutableMapOf<String, Any>(
+                            "companyName" to localCompany.companyName,
+                            "deploymentMode" to currentDeploymentMode,
+                            "isOfflineMode" to isOfflineMode,
+                            "officeLatitude" to localCompany.officeLatitude,
+                            "officeLongitude" to localCompany.officeLongitude,
+                            "latitude" to localCompany.officeLatitude,
+                            "longitude" to localCompany.officeLongitude,
+                            "geoRadiusMeters" to localCompany.geoRadiusMeters,
+                            "radius" to localCompany.geoRadiusMeters,
+                            "geo_radius_meters" to localCompany.geoRadiusMeters
+                        )
+                        if (adminEmail.isNotBlank()) tenantUpdates["adminEmail"] = adminEmail
+                        if (adminName.isNotBlank()) tenantUpdates["adminName"] = adminName
+                        if (adminPhone.isNotBlank()) tenantUpdates["adminPhone"] = adminPhone
+
+                        val tenantNodes = mutableSetOf<String>()
+                        if (!activeTid.isNullOrBlank() && activeTid != defaultOwner) tenantNodes.add(activeTid)
+                        tenantNodes.add("tenant_201")
+
+                        for (tId in tenantNodes) {
+                            runCatching {
+                                FirebaseDatabase.getInstance().getReference("tenants").child(tId).updateChildren(tenantUpdates).await()
+                            }
                         }
 
                         firebaseSync.notifyRealtimeAfterWrite("CompanySettings", "MODIFIED")
@@ -1227,6 +1236,10 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        for ((ref, l) in activeCompanyListeners) {
+            runCatching { ref.removeEventListener(l) }
+        }
+        activeCompanyListeners.clear()
         companySettingsListener?.let { l ->
             companySettingsRef?.removeEventListener(l)
         }
