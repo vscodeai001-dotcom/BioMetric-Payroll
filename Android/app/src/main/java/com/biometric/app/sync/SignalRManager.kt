@@ -51,7 +51,17 @@ class SignalRManager @Inject constructor(
     private var realtimeRecoveryJob: Job? = null
     @Volatile private var isRecoveringFromAuth = false
     private var locationListener: ValueEventListener? = null
+    private var altLocationListener: ValueEventListener? = null
+    private var legacyLocationListener: ValueEventListener? = null
     private var employeeListener: ValueEventListener? = null
+    private var altEmployeeListener: ValueEventListener? = null
+
+    private val primaryLiveLocations = mutableMapOf<Int, LiveLocation>()
+    private val altLiveLocations = mutableMapOf<Int, LiveLocation>()
+    private val legacyLiveLocations = mutableMapOf<Int, LiveLocation>()
+
+    private val primaryOwnerEmployees = mutableMapOf<Int, OwnerEmployee>()
+    private val altOwnerEmployees = mutableMapOf<Int, OwnerEmployee>()
 
     // Employee Android writes are published to client_events because employees
     // are not allowed to write owner_events. Admin/SuperAdmin clients must
@@ -73,6 +83,7 @@ class SignalRManager @Inject constructor(
     }
     private var authStateRegistered = false
     private val ownerEmployeeIds = mutableSetOf<Int>()
+    @Volatile private var ownerEmployeesLoaded = false
     private var lastOwnerLiveLocations: Map<Int, LiveLocation> = emptyMap()
     @Volatile private var activeOwnerUid: String? = null
     @Volatile private var liveSnapshotGeneration: Long = 0L
@@ -89,11 +100,38 @@ class SignalRManager @Inject constructor(
     private val _ownerEmployees = MutableStateFlow<Map<Int, OwnerEmployee>>(emptyMap())
     val ownerEmployees = _ownerEmployees.asStateFlow()
 
+    fun clearLiveState() {
+        ownerEmployeesLoaded = false
+        synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
+        synchronized(primaryLiveLocations) { primaryLiveLocations.clear() }
+        synchronized(altLiveLocations) { altLiveLocations.clear() }
+        synchronized(legacyLiveLocations) { legacyLiveLocations.clear() }
+        synchronized(primaryOwnerEmployees) { primaryOwnerEmployees.clear() }
+        synchronized(altOwnerEmployees) { altOwnerEmployees.clear() }
+        _ownerEmployees.value = emptyMap()
+        lastOwnerLiveLocations = emptyMap()
+        _liveLocations.value = emptyMap()
+        lastSuccessfulLiveReadAt = 0L
+        _dataChangeEvents.tryEmit(SyncEvent.LocationChanged)
+        _dataChangeEvents.tryEmit(SyncEvent.GlobalRefresh)
+    }
+
     private fun publishOwnerScopedLocations(raw: Map<Int, LiveLocation>) {
-        // Authoritative tenant check: render only valid owner-scoped GPS records.
-        val filtered = raw
-            .filterKeys { it > 0 }
-            .filterValues { it.sessionId.isNotBlank() }
+        val validIds = synchronized(ownerEmployeeIds) { ownerEmployeeIds.toSet() }
+
+        // Strict SSOT Tenant Scoping:
+        // When owner employees have been evaluated and the list is empty (0 employees in the company),
+        // or if an incoming GPS record belongs to an employee not registered under this owner,
+        // it is strictly rejected to prevent stale/ghost markers from lingering.
+        val filtered = if (ownerEmployeesLoaded && validIds.isEmpty()) {
+            emptyMap()
+        } else if (validIds.isNotEmpty()) {
+            raw.filterKeys { id -> id in validIds }
+                .filterValues { it.sessionId.isNotBlank() }
+        } else {
+            raw.filterKeys { it > 0 }
+                .filterValues { it.sessionId.isNotBlank() }
+        }
 
         val previous = _liveLocations.value
         if (liveLocationMapsEquivalent(previous, filtered)) {
@@ -127,6 +165,158 @@ class SignalRManager @Inject constructor(
                 a.speedMps == b.speedMps &&
                 a.movementState == b.movementState
         }
+    }
+
+    private fun parseSnapshotLocations(snapshot: DataSnapshot): Map<Int, LiveLocation> {
+        val locations = mutableMapOf<Int, LiveLocation>()
+        val isSingleEmployeeNode =
+            snapshot.hasChild("EmployeeId") ||
+                    snapshot.hasChild("employeeId") ||
+                    snapshot.hasChild("Latitude") ||
+                    snapshot.hasChild("latitude")
+
+        val children = if (isSingleEmployeeNode) {
+            listOf(snapshot)
+        } else {
+            snapshot.children.toList()
+        }
+
+        for (child in children) {
+            val state = sequenceOf(
+                child.child("State").value?.toString(),
+                child.child("state").value?.toString()
+            ).filterNotNull().firstOrNull { it.isNotBlank() }
+
+            if (state.equals("ENDED", true) ||
+                state.equals("OFFLINE", true)) {
+                continue
+            }
+
+            val keyEmployeeId = child.key?.toIntOrNull()
+
+            val value = runCatching {
+                readLiveLocation(child)
+            }.onFailure { error ->
+                Log.w(
+                    "SignalRManager",
+                    "Ignoring malformed live-location node ${child.key}",
+                    error
+                )
+            }.getOrNull() ?: continue
+
+            val payloadEmployeeId = value.EmployeeId
+
+            val employeeId = when {
+                keyEmployeeId != null && keyEmployeeId > 0 -> {
+                    if (payloadEmployeeId > 0 && payloadEmployeeId != keyEmployeeId) continue
+                    keyEmployeeId
+                }
+                keyEmployeeId == null && payloadEmployeeId > 0 -> payloadEmployeeId
+                else -> continue
+            }
+
+            if (employeeId <= 0) continue
+
+            if (value.SessionId.isBlank()) {
+                continue
+            }
+
+            if (!value.Latitude.isFinite() || !value.Longitude.isFinite() ||
+                value.Latitude < -90.0 || value.Latitude > 90.0 ||
+                value.Longitude < -180.0 || value.Longitude > 180.0 ||
+                (value.Latitude == 0.0 && value.Longitude == 0.0)) {
+                continue
+            }
+
+            locations[employeeId] = LiveLocation(
+                employeeId = employeeId,
+                sessionId = value.SessionId,
+                latitude = value.Latitude,
+                longitude = value.Longitude,
+                accuracyMeters = value.AccuracyMeters,
+                distanceMeters = value.DistanceMeters,
+                allowedRadiusMeters = value.AllowedRadiusMeters,
+                isWithinAllowedRadius = value.IsWithinAllowedRadius,
+                timestamp = value.Timestamp,
+                speedMps = value.SpeedMps,
+                movementState = value.MovementState
+            )
+        }
+        return locations
+    }
+
+    private fun mergeAndPublishLocations() {
+        val merged = mutableMapOf<Int, LiveLocation>()
+        synchronized(legacyLiveLocations) {
+            merged.putAll(legacyLiveLocations)
+        }
+        synchronized(altLiveLocations) {
+            altLiveLocations.forEach { (id, loc) ->
+                val existing = merged[id]
+                if (existing == null || isLocationNewer(loc, existing)) {
+                    merged[id] = loc
+                }
+            }
+        }
+        synchronized(primaryLiveLocations) {
+            primaryLiveLocations.forEach { (id, loc) ->
+                val existing = merged[id]
+                if (existing == null || isLocationNewer(loc, existing)) {
+                    merged[id] = loc
+                }
+            }
+        }
+
+        lastOwnerLiveLocations = merged.toMap()
+        managerScope.launch(Dispatchers.Main.immediate) {
+            publishOwnerScopedLocations(lastOwnerLiveLocations)
+        }
+    }
+
+    private fun isLocationNewer(candidate: LiveLocation, current: LiveLocation): Boolean {
+        val candTs = parseTrackingTimestamp(candidate.timestamp)
+        val currTs = parseTrackingTimestamp(current.timestamp)
+        return candTs >= currTs
+    }
+
+    private fun parseSnapshotEmployees(snapshot: DataSnapshot): Map<Int, OwnerEmployee> {
+        ownerEmployeesLoaded = true
+        val employees = mutableMapOf<Int, OwnerEmployee>()
+        snapshot.children.forEach { child ->
+            val keyId = child.key?.toIntOrNull()
+            val rowId = child.child("employeeId").value?.toString()?.toIntOrNull()
+            val id = keyId ?: rowId ?: 0
+            if (id <= 0) return@forEach
+
+            val name = sequenceOf(
+                child.child("name").getValue(String::class.java),
+                child.child("Name").getValue(String::class.java)
+            ).filterNotNull().firstOrNull { it.isNotBlank() }
+                ?: "Employee #$id"
+
+            val email = sequenceOf(
+                child.child("email").getValue(String::class.java),
+                child.child("Email").getValue(String::class.java)
+            ).filterNotNull().firstOrNull { it.isNotBlank() }
+                ?: ""
+
+            employees[id] = OwnerEmployee(id, name, email)
+        }
+        return employees
+    }
+
+    private fun mergeAndPublishEmployees() {
+        ownerEmployeesLoaded = true
+        val merged = mutableMapOf<Int, OwnerEmployee>()
+        synchronized(altOwnerEmployees) { merged.putAll(altOwnerEmployees) }
+        synchronized(primaryOwnerEmployees) { merged.putAll(primaryOwnerEmployees) }
+
+        synchronized(ownerEmployeeIds) {
+            ownerEmployeeIds.clear()
+            ownerEmployeeIds.addAll(merged.keys)
+        }
+        _ownerEmployees.value = merged
+        publishOwnerScopedLocations(lastOwnerLiveLocations)
     }
 
     @Synchronized
@@ -171,20 +361,19 @@ class SignalRManager @Inject constructor(
 
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
+        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
         val liveRef = firebaseSync.getGlobalRef()
             .child("owners")
             .child(ownerUid)
             .child("tracking")
             .child("live")
             .let { ref ->
-                if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) {
+                if (isEmployeeRole) {
                     ref.child(employeeId.toString())
                 } else ref
             }
 
         // Spark Mode Optimization (Option B1): Restrict keepSynced(true) to individual employee node only.
-        // For Admin multi-employee views, do not force offline disk caching of the entire tree to save ~50GB/month bandwidth.
-        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
         if (isEmployeeRole) {
             liveRef.keepSynced(true)
         }
@@ -192,107 +381,12 @@ class SignalRManager @Inject constructor(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSuccessfulLiveReadAt = System.currentTimeMillis()
-                val locations = mutableMapOf<Int, LiveLocation>()
-
-                // Never call getValue(FirebaseLiveLocation) on the parent
-                // tracking/live node. A collection is decoded by Firebase as an
-                // ArrayList in some data shapes, which caused the fatal crash:
-                // "Can't convert object of type java.util.ArrayList ...".
-                //
-                // The canonical schema is tracking/live/{EmployeeId}/{fields}.
-                // A single employee node is supported for Employee/Staff sessions.
-                val isSingleEmployeeNode =
-                    snapshot.hasChild("EmployeeId") ||
-                            snapshot.hasChild("employeeId") ||
-                            snapshot.hasChild("Latitude") ||
-                            snapshot.hasChild("latitude")
-
-                val children = if (isSingleEmployeeNode) {
-                    listOf(snapshot)
-                } else {
-                    snapshot.children.toList()
+                val parsed = parseSnapshotLocations(snapshot)
+                synchronized(primaryLiveLocations) {
+                    primaryLiveLocations.clear()
+                    primaryLiveLocations.putAll(parsed)
                 }
-
-                for (child in children) {
-                    val state = sequenceOf(
-                        child.child("State").value?.toString(),
-                        child.child("state").value?.toString()
-                    ).filterNotNull().firstOrNull { it.isNotBlank() }
-
-                    // Match Web Admin lifecycle filtering. Firebase can retain
-                    // a terminal compatibility node briefly after logout/end.
-                    if (state.equals("ENDED", true) ||
-                        state.equals("OFFLINE", true)) {
-                        continue
-                    }
-
-                    val keyEmployeeId = child.key?.toIntOrNull()
-
-                    val value = runCatching {
-                        // Never rely on Firebase bean conversion for live GPS.
-                        // Realtime Database may expose mixed historical shapes
-                        // (object/array and numeric values stored as strings).
-                        // Read the scalar fields explicitly so one malformed
-                        // historical node can never crash the Admin process.
-                        readLiveLocation(child)
-                    }.onFailure { error ->
-                        Log.w(
-                            "SignalRManager",
-                            "Ignoring malformed live-location node ${child.key}",
-                            error
-                        )
-                    }.getOrNull() ?: continue
-
-                    val payloadEmployeeId = value.EmployeeId
-
-                    // tracking/live is keyed by the canonical EmployeeId. Reject
-                    // malformed/scaffold nodes and payload/key mismatches.
-                    val employeeId = when {
-                        keyEmployeeId != null && keyEmployeeId > 0 -> {
-                            if (payloadEmployeeId > 0 && payloadEmployeeId != keyEmployeeId) continue
-                            keyEmployeeId
-                        }
-                        keyEmployeeId == null && payloadEmployeeId > 0 -> payloadEmployeeId
-                        else -> continue
-                    }
-
-                    if (employeeId <= 0) continue
-
-                    if (value.SessionId.isBlank()) {
-                        // A live marker without a GPS session is never authoritative.
-                        continue
-                    }
-
-                    // Web Parity: ignore unanchored / Null Island (0.0, 0.0) coordinates
-                    // until authoritative GPS coordinates are received.
-                    if (!value.Latitude.isFinite() || !value.Longitude.isFinite() ||
-                        value.Latitude < -90.0 || value.Latitude > 90.0 ||
-                        value.Longitude < -180.0 || value.Longitude > 180.0 ||
-                        (value.Latitude == 0.0 && value.Longitude == 0.0)) {
-                        continue
-                    }
-
-                    locations[employeeId] = LiveLocation(
-                        employeeId = employeeId,
-                        sessionId = value.SessionId,
-                        latitude = value.Latitude,
-                        longitude = value.Longitude,
-                        accuracyMeters = value.AccuracyMeters,
-                        distanceMeters = value.DistanceMeters,
-                        allowedRadiusMeters = value.AllowedRadiusMeters,
-                        isWithinAllowedRadius = value.IsWithinAllowedRadius,
-                        timestamp = value.Timestamp,
-                        speedMps = value.SpeedMps,
-                        movementState = value.MovementState
-                    )
-                }
-
-                // Web Parity: tracking/live snapshot is the real-time SSOT.
-                // Publish active locations immediately without blocking secondary network loops.
-                lastOwnerLiveLocations = locations.toMap()
-                managerScope.launch(Dispatchers.Main.immediate) {
-                    publishOwnerScopedLocations(lastOwnerLiveLocations)
-                }
+                mergeAndPublishLocations()
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -310,46 +404,65 @@ class SignalRManager @Inject constructor(
         locationListener = listener
         liveRef.addValueEventListener(listener)
 
-        // Authoritative employee binding for the current tenant. Admin maps
-        // must render only employees that actually exist under this owner.
+        val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
+        if (!isEmployeeRole && altOwnerUid != null) {
+            val altLiveRef = firebaseSync.getGlobalRef()
+                .child("owners")
+                .child(altOwnerUid)
+                .child("tracking")
+                .child("live")
+            val altListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val parsed = parseSnapshotLocations(snapshot)
+                    synchronized(altLiveLocations) {
+                        altLiveLocations.clear()
+                        altLiveLocations.putAll(parsed)
+                    }
+                    mergeAndPublishLocations()
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.d("SignalRManager", "Alternate owner live-location listener cancelled: ${error.message}")
+                }
+            }
+            altLocationListener = altListener
+            altLiveRef.addValueEventListener(altListener)
+        }
+
+        val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
+        if (!isEmployeeRole && isDefaultOwner) {
+            val legacyRef = firebaseSync.getGlobalRef().child("tracking").child("live")
+            val legListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val parsed = parseSnapshotLocations(snapshot)
+                    synchronized(legacyLiveLocations) {
+                        legacyLiveLocations.clear()
+                        legacyLiveLocations.putAll(parsed)
+                    }
+                    mergeAndPublishLocations()
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.d("SignalRManager", "Legacy live-location listener cancelled: ${error.message}")
+                }
+            }
+            legacyLocationListener = legListener
+            legacyRef.addValueEventListener(legListener)
+        }
+
+        // Authoritative employee binding for the current tenant.
         val employeesRef = firebaseSync.getGlobalRef()
             .child("owners")
             .child(ownerUid)
             .child("employees")
         val employeesListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val employees = mutableMapOf<Int, OwnerEmployee>()
-                snapshot.children.forEach { child ->
-                    val keyId = child.key?.toIntOrNull()
-                    val rowId = child.child("employeeId").value?.toString()?.toIntOrNull()
-                    val id = keyId ?: rowId ?: 0
-                    if (id <= 0) return@forEach
-
-                    val name = sequenceOf(
-                        child.child("name").getValue(String::class.java),
-                        child.child("Name").getValue(String::class.java)
-                    ).filterNotNull().firstOrNull { it.isNotBlank() }
-                        ?: "Employee #$id"
-
-                    val email = sequenceOf(
-                        child.child("email").getValue(String::class.java),
-                        child.child("Email").getValue(String::class.java)
-                    ).filterNotNull().firstOrNull { it.isNotBlank() }
-                        ?: ""
-
-                    employees[id] = OwnerEmployee(id, name, email)
+                val parsed = parseSnapshotEmployees(snapshot)
+                synchronized(primaryOwnerEmployees) {
+                    primaryOwnerEmployees.clear()
+                    primaryOwnerEmployees.putAll(parsed)
                 }
-
-                synchronized(ownerEmployeeIds) {
-                    ownerEmployeeIds.clear()
-                    ownerEmployeeIds.addAll(employees.keys)
-                }
-                _ownerEmployees.value = employees
-
-                // Important: a live GPS record can arrive before employee master
-                // hydration. Re-apply the retained live snapshot immediately after
-                // the authoritative employee directory becomes available.
-                publishOwnerScopedLocations(lastOwnerLiveLocations)
+                mergeAndPublishEmployees()
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -361,6 +474,29 @@ class SignalRManager @Inject constructor(
         }
         employeeListener = employeesListener
         employeesRef.addValueEventListener(employeesListener)
+
+        if (!isEmployeeRole && altOwnerUid != null) {
+            val altEmployeesRef = firebaseSync.getGlobalRef()
+                .child("owners")
+                .child(altOwnerUid)
+                .child("employees")
+            val altEmpListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val parsed = parseSnapshotEmployees(snapshot)
+                    synchronized(altOwnerEmployees) {
+                        altOwnerEmployees.clear()
+                        altOwnerEmployees.putAll(parsed)
+                    }
+                    mergeAndPublishEmployees()
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.d("SignalRManager", "Alternate owner employee listener cancelled: ${error.message}")
+                }
+            }
+            altEmployeeListener = altEmpListener
+            altEmployeesRef.addValueEventListener(altEmpListener)
+        }
 
         if (role.equals("ADMIN", true) ||
             role.equals("SUPERADMIN", true) ||
@@ -546,18 +682,21 @@ class SignalRManager @Inject constructor(
         val ownerUid = activeOwnerUid?.takeIf { it.isNotBlank() } ?: firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return
         val role = sessionStore.userRole().orEmpty()
         val employeeId = sessionStore.employeeId()
+        val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
         val liveRef = firebaseSync.getGlobalRef()
             .child("owners")
             .child(ownerUid)
             .child("tracking")
             .child("live")
             .let { ref ->
-                if (role.equals("STAFF", true) || role.equals("EMPLOYEE", true)) {
+                if (isEmployeeRole) {
                     ref.child(employeeId.toString())
                 } else {
                     ref
                 }
             }
+
+        val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
 
         managerScope.launch {
             runCatching {
@@ -572,6 +711,26 @@ class SignalRManager @Inject constructor(
                 )
             }
 
+            if (!isEmployeeRole && altOwnerUid != null) {
+                runCatching {
+                    val altLiveRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("tracking").child("live")
+                    val altSnap = altLiveRef.get().await()
+                    withContext(Dispatchers.Main.immediate) {
+                        altLocationListener?.onDataChange(altSnap)
+                    }
+                }
+            }
+
+            val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
+            if (!isEmployeeRole && isDefaultOwner) {
+                runCatching {
+                    val legSnap = firebaseSync.getGlobalRef().child("tracking").child("live").get().await()
+                    withContext(Dispatchers.Main.immediate) {
+                        legacyLocationListener?.onDataChange(legSnap)
+                    }
+                }
+            }
+
             // Also pull fresh employee directory so live markers always map to valid employees
             val employeesRef = firebaseSync.getGlobalRef()
                 .child("owners")
@@ -584,6 +743,16 @@ class SignalRManager @Inject constructor(
                 }
             }.onFailure { error ->
                 Log.d("SignalRManager", "Immediate employees directory reconciliation skipped (waiting for active listener sync): ${error.message}")
+            }
+
+            if (!isEmployeeRole && altOwnerUid != null) {
+                runCatching {
+                    val altEmployeesRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("employees")
+                    val altEmpSnapshot = altEmployeesRef.get().await()
+                    withContext(Dispatchers.Main.immediate) {
+                        altEmployeeListener?.onDataChange(altEmpSnapshot)
+                    }
+                }
             }
         }
     }
@@ -871,6 +1040,14 @@ class SignalRManager @Inject constructor(
             runCatching { liveRef.keepSynced(false) }
             employeeListener?.let { runCatching { employeesRefForStop(ownerUid).removeEventListener(it) } }
 
+            val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
+            if (!altOwnerUid.isNullOrBlank()) {
+                val altLiveRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("tracking").child("live")
+                altLocationListener?.let { runCatching { altLiveRef.removeEventListener(it) } }
+                altEmployeeListener?.let { runCatching { firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("employees").removeEventListener(it) } }
+            }
+            legacyLocationListener?.let { runCatching { firebaseSync.getGlobalRef().child("tracking").child("live").removeEventListener(it) } }
+
             // Detach child employee queries FIRST before detaching parent root listener
             // to prevent Firebase SDK internal SyncTree "View does not exist but we have a tag" warning.
             clientEventEmployeeListeners.values.forEach { (query, listener) ->
@@ -884,10 +1061,19 @@ class SignalRManager @Inject constructor(
         }
 
         locationListener = null
+        altLocationListener = null
+        legacyLocationListener = null
         employeeListener = null
+        altEmployeeListener = null
         clientEventsRootListener = null
         if (clearState) {
+            ownerEmployeesLoaded = false
             synchronized(ownerEmployeeIds) { ownerEmployeeIds.clear() }
+            synchronized(primaryLiveLocations) { primaryLiveLocations.clear() }
+            synchronized(altLiveLocations) { altLiveLocations.clear() }
+            synchronized(legacyLiveLocations) { legacyLiveLocations.clear() }
+            synchronized(primaryOwnerEmployees) { primaryOwnerEmployees.clear() }
+            synchronized(altOwnerEmployees) { altOwnerEmployees.clear() }
             _ownerEmployees.value = emptyMap()
             lastOwnerLiveLocations = emptyMap()
             _liveLocations.value = emptyMap()

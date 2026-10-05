@@ -189,15 +189,17 @@ class FbpComponentsActivity : MotionBaseActivity() {
                 val targetId = if (id > 0) id else ((allComponents.maxOfOrNull { it.componentId } ?: 0) + 1)
                 val owner = sync.getOwnerRef()
                 if (owner != null) {
-                    owner.child("fbp_components").child(targetId.toString()).setValue(
-                        mapOf(
-                            "componentId" to targetId,
-                            "name" to name,
-                            "maxAnnualLimit" to limit,
-                            "isActive" to active,
-                            "isTaxExempt" to exempt
-                        )
-                    ).await()
+                    val compMap = mapOf(
+                        "componentId" to targetId,
+                        "name" to name,
+                        "maxAnnualLimit" to limit,
+                        "isActive" to active,
+                        "isTaxExempt" to exempt
+                    )
+                    owner.child("fbp_components").child(targetId.toString()).setValue(compMap).await()
+                    runCatching {
+                        sync.getAlternateOwnerRef()?.child("fbp_components")?.child(targetId.toString())?.setValue(compMap)?.await()
+                    }
                     sync.notifyRealtimeChanged("FBPComponent", if (id > 0) "UPDATED" else "ADDED", targetId.toString())
                 }
 

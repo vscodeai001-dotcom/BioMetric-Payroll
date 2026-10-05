@@ -30,8 +30,12 @@ import com.biometric.app.sync.FirebaseSyncManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -193,6 +197,14 @@ class LeaveManagementActivity : MotionBaseActivity() {
         }
 
         lifecycleScope.launch {
+            firebaseSync.getDataFlow<LeaveRequest>("leave_requests").collectLatest { fbList ->
+                if (fbList.isNotEmpty()) {
+                    repository.upsertLeaveRequests(fbList)
+                }
+            }
+        }
+
+        lifecycleScope.launch {
             repository.allEmployeesFlow.collectLatest { employees ->
                 allEmployees.clear()
                 allEmployees.addAll(employees.filter { it.isActive }.sortedBy { it.name })
@@ -223,54 +235,69 @@ class LeaveManagementActivity : MotionBaseActivity() {
     private fun fetchLeavesFromServer() {
         lifecycleScope.launch {
             binding.swipeRefresh.isRefreshing = true
-            try {
-                val empId = filterEmployeeId ?: 0
-                // When isAllDates is true, query without date bounds to ensure all leaves sync into SSOT Room
-                val fromStr = if (!isAllDates) isoDateFormat.format(filterStartDate.time) else null
-                val toStr = if (!isAllDates) isoDateFormat.format(filterEndDate.time) else null
 
-                val response = mobileApi.adminLeaves(
-                    authorization = apiAuth,
-                    employeeId = empId,
-                    status = "All",
-                    from = fromStr,
-                    to = toStr
-                )
-                if (response.isSuccessful) {
-                    val list = response.body().orEmpty()
-                    val entities = list.map { dto ->
-                        val dateMs = dto.leaveDate?.let { dateStr ->
-                            runCatching {
-                                isoDateFormat.parse(dateStr)?.time
-                                    ?: SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(dateStr)?.time
-                                    ?: SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(dateStr)?.time
-                            }.getOrNull()
-                        } ?: 0L
-
-                        LeaveRequest(
-                            id = dto.id.toString(),
-                            staffId = dto.employeeId.toString(),
-                            employeeId = dto.employeeId.toString(),
-                            staffName = dto.employeeName.ifBlank { "Employee" },
-                            leaveType = dto.leaveType.ifBlank { "Paid Leave" },
-                            startDate = dateMs,
-                            endDate = dateMs,
-                            reason = dto.notes.orEmpty(),
-                            status = dto.status?.ifBlank { null } ?: if (dto.approved) "Approved" else "Pending",
-                            adminNotes = dto.adminNotes,
-                            isHalfDay = dto.isHalfDay,
-                            createdAt = dateMs
-                        )
-                    }
-                    repository.upsertLeaveRequests(entities)
+            // 1. Standalone Firebase RTDB direct sync (works without Web)
+            runCatching {
+                val primarySnap = firebaseSync.getOwnerRef()?.child("leave_requests")?.get()?.await()
+                val altSnap = firebaseSync.getAlternateOwnerRef()?.child("leave_requests")?.get()?.await()
+                val list = mutableListOf<LeaveRequest>()
+                primarySnap?.children?.mapNotNull { it.getValue(LeaveRequest::class.java) }?.let { list.addAll(it) }
+                altSnap?.children?.mapNotNull { it.getValue(LeaveRequest::class.java) }?.let { list.addAll(it) }
+                if (list.isNotEmpty()) {
+                    val deduplicated = list.distinctBy { it.id }
+                    repository.upsertLeaveRequests(deduplicated)
                 }
-            } catch (e: Exception) {
-                // Network unavailable: local Room cache remains active
-                Log.d("LeaveManagement", "Server API unavailable, using local Room/Firebase SSOT: ${e.message}")
-            } finally {
-                binding.swipeRefresh.isRefreshing = false
-                filterAndRender()
             }
+
+            // 2. Best-effort Web API sync (non-blocking with short timeout)
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    withTimeoutOrNull(2500L) {
+                        val empId = filterEmployeeId ?: 0
+                        val fromStr = if (!isAllDates) isoDateFormat.format(filterStartDate.time) else null
+                        val toStr = if (!isAllDates) isoDateFormat.format(filterEndDate.time) else null
+
+                        val response = mobileApi.adminLeaves(
+                            authorization = apiAuth,
+                            employeeId = empId,
+                            status = "All",
+                            from = fromStr,
+                            to = toStr
+                        )
+                        if (response.isSuccessful) {
+                            val list = response.body().orEmpty()
+                            val entities = list.map { dto ->
+                                val dateMs = dto.leaveDate?.let { dateStr ->
+                                    runCatching {
+                                        isoDateFormat.parse(dateStr)?.time
+                                            ?: SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(dateStr)?.time
+                                            ?: SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).parse(dateStr)?.time
+                                    }.getOrNull()
+                                } ?: 0L
+
+                                LeaveRequest(
+                                    id = dto.id.toString(),
+                                    staffId = dto.employeeId.toString(),
+                                    employeeId = dto.employeeId.toString(),
+                                    staffName = dto.employeeName.ifBlank { "Employee" },
+                                    leaveType = dto.leaveType.ifBlank { "Paid Leave" },
+                                    startDate = dateMs,
+                                    endDate = dateMs,
+                                    reason = dto.notes.orEmpty(),
+                                    status = dto.status?.ifBlank { null } ?: if (dto.approved) "Approved" else "Pending",
+                                    adminNotes = dto.adminNotes,
+                                    isHalfDay = dto.isHalfDay,
+                                    createdAt = dateMs
+                                )
+                            }
+                            repository.upsertLeaveRequests(entities)
+                        }
+                    }
+                }
+            }
+
+            binding.swipeRefresh.isRefreshing = false
+            filterAndRender()
         }
     }
 
@@ -354,28 +381,31 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 val remarks = input.text.toString().trim()
                 lifecycleScope.launch {
                     val newStatus = if (approved) "Approved" else "Rejected"
-                    try {
-                        val reqId = request.id.toIntOrNull() ?: 0
-                        if (reqId > 0) {
-                            mobileApi.setAdminLeaveStatus(
-                                apiAuth,
-                                reqId,
-                                AdminLeaveStatusRequest(approved, remarks.ifBlank { null })
-                            )
-                        }
-                    } catch (_: Exception) {}
 
-                    // Offline-first / Firebase Room update
+                    // Immediate offline-first / Firebase Room update
                     repository.updateLeaveStatus(request.id, newStatus, remarks)
                     request.status = newStatus
                     request.adminNotes = remarks
-                    try {
-                        firebaseSync.pushLeaveRequest(request)
-                    } catch (_: Exception) {}
+                    runCatching { firebaseSync.pushLeaveRequest(request) }
 
                     filterAndRender()
-                    fetchLeavesFromServer()
                     toast("Leave request ${if (approved) "Approved ✅" else "Rejected ❌"}")
+
+                    // Fire Web API in background (non-blocking)
+                    launch(Dispatchers.IO) {
+                        runCatching {
+                            withTimeoutOrNull(2500L) {
+                                val reqId = request.id.toIntOrNull() ?: 0
+                                if (reqId > 0) {
+                                    mobileApi.setAdminLeaveStatus(
+                                        apiAuth,
+                                        reqId,
+                                        AdminLeaveStatusRequest(approved, remarks.ifBlank { null })
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -388,18 +418,23 @@ class LeaveManagementActivity : MotionBaseActivity() {
             .setMessage("Are you sure you want to delete the leave record for ${request.staffName} (${formatDate(request.startDate)})?")
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
-                    try {
-                        val reqId = request.id.toIntOrNull() ?: 0
-                        if (reqId > 0) {
-                            mobileApi.deleteAdminLeave(apiAuth, reqId)
-                        }
-                    } catch (_: Exception) {}
-
                     allRequests.removeAll { it.id == request.id }
                     repository.deleteLeaveRequest(request.id)
+                    runCatching { firebaseSync.deleteLeaveRequest(request.id) }
                     filterAndRender()
-                    fetchLeavesFromServer()
                     toast("Leave record deleted / revoked 🗑️")
+
+                    // Fire Web API in background (non-blocking)
+                    launch(Dispatchers.IO) {
+                        runCatching {
+                            withTimeoutOrNull(2500L) {
+                                val reqId = request.id.toIntOrNull() ?: 0
+                                if (reqId > 0) {
+                                    mobileApi.deleteAdminLeave(apiAuth, reqId)
+                                }
+                            }
+                        }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -465,18 +500,6 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 val notes = dialogBinding.etDialogNotes.text?.toString()?.trim()
 
                 lifecycleScope.launch {
-                    try {
-                        val req = CreateAdminLeaveRequest(
-                            employeeId = empId,
-                            leaveDate = leaveDateStr,
-                            leaveType = leaveTypeStr,
-                            isHalfDay = isHalf,
-                            notes = notes?.ifBlank { null }
-                        )
-                        mobileApi.createAdminLeave(apiAuth, req)
-                    } catch (_: Exception) {}
-
-                    // Offline-first / Firebase SSOT fallback
                     val dateCal = Calendar.getInstance().apply {
                         time = runCatching { isoDateFormat.parse(leaveDateStr) }.getOrNull() ?: Date()
                     }
@@ -497,14 +520,28 @@ class LeaveManagementActivity : MotionBaseActivity() {
                         isHalfDay = isHalf,
                         createdAt = dateMs
                     )
+                    allRequests.add(0, newLeave)
                     repository.upsertLeaveRequests(listOf(newLeave))
-                    try {
-                        firebaseSync.pushLeaveRequest(newLeave)
-                    } catch (_: Exception) {}
+                    runCatching { firebaseSync.pushLeaveRequest(newLeave) }
 
                     toast("Approved leave granted for ${selectedEmp.name} ✅")
                     filterAndRender()
-                    fetchLeavesFromServer()
+
+                    // Fire Web API in background (non-blocking)
+                    launch(Dispatchers.IO) {
+                        runCatching {
+                            withTimeoutOrNull(2500L) {
+                                val req = CreateAdminLeaveRequest(
+                                    employeeId = empId,
+                                    leaveDate = leaveDateStr,
+                                    leaveType = leaveTypeStr,
+                                    isHalfDay = isHalf,
+                                    notes = notes?.ifBlank { null }
+                                )
+                                mobileApi.createAdminLeave(apiAuth, req)
+                            }
+                        }
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)

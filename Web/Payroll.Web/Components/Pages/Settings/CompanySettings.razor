@@ -603,6 +603,10 @@ else
                     try
                     {
                         await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/feature_settings/1", features, default);
+                        if (!string.Equals(firebaseOwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await FirebaseRealtime.SetAsync($"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/feature_settings/1", features, default);
+                        }
                         await FirebaseRealtime.UpdateAsync(new Dictionary<string, object?>
                         {
                             [$"tenants/{firebaseOwnerUid}/deploymentMode"] = features.DeploymentMode,
@@ -657,7 +661,11 @@ else
                         ["salaryCalculationMethod"] = settings.SalaryCalculationMethod,
                         ["officeLatitude"] = settings.OfficeLatitude,
                         ["officeLongitude"] = settings.OfficeLongitude,
+                        ["latitude"] = settings.OfficeLatitude,
+                        ["longitude"] = settings.OfficeLongitude,
                         ["geoRadiusMeters"] = settings.GeoRadiusMeters,
+                        ["radius"] = settings.GeoRadiusMeters,
+                        ["geo_radius_meters"] = settings.GeoRadiusMeters,
                         ["zktecoIP"] = settings.ZktecoIP,
                         ["zktecoPort"] = settings.ZktecoPort,
                         ["zktecoMachineNumber"] = settings.ZktecoMachineNumber,
@@ -693,6 +701,24 @@ else
                     };
                     await FirebaseRealtime.SetAsync($"owners/{firebaseOwnerUid}/company_settings/1", companyPayload, default);
                     await FirebaseRealtime.PublishLocalApplicationChangeAsync(firebaseOwnerUid, "CompanySetting", "MODIFIED", "1", default);
+
+                    if (!string.Equals(firebaseOwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await FirebaseRealtime.SetAsync($"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/company_settings/1", companyPayload, default);
+                        await FirebaseRealtime.PublishLocalApplicationChangeAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, "CompanySetting", "MODIFIED", "1", default);
+                    }
+
+                    // Also mirror coordinates and radius directly to tenants/{firebaseOwnerUid}
+                    await FirebaseRealtime.UpdateAsync(new Dictionary<string, object?>
+                    {
+                        [$"tenants/{firebaseOwnerUid}/companyName"] = settings.CompanyName,
+                        [$"tenants/{firebaseOwnerUid}/officeLatitude"] = settings.OfficeLatitude,
+                        [$"tenants/{firebaseOwnerUid}/officeLongitude"] = settings.OfficeLongitude,
+                        [$"tenants/{firebaseOwnerUid}/latitude"] = settings.OfficeLatitude,
+                        [$"tenants/{firebaseOwnerUid}/longitude"] = settings.OfficeLongitude,
+                        [$"tenants/{firebaseOwnerUid}/geoRadiusMeters"] = settings.GeoRadiusMeters,
+                        [$"tenants/{firebaseOwnerUid}/radius"] = settings.GeoRadiusMeters
+                    }, default);
                 }
 
                 if (activeTenant != null && !string.Equals(activeTenant.CompanyName, settings.CompanyName))
@@ -760,18 +786,26 @@ else
         var existing = await FirebaseRealtime.GetGlobalRecordAsync(
             $"owners/{firebaseOwnerUid}/tracking_configuration",
             CancellationToken.None);
+        var trackingPayload = new Dictionary<string, object?>
+        {
+            ["mode"] = ReadString(existing, "mode") ?? "24/7",
+            ["customStart"] = ReadString(existing, "customStart") ?? string.Empty,
+            ["customEnd"] = ReadString(existing, "customEnd") ?? string.Empty,
+            ["intervalSeconds"] = trackingIntervalSeconds,
+            ["enabled"] = ReadBool(existing, "enabled") ?? true,
+            ["updatedAt"] = DateTime.UtcNow.ToString("O"),
+            ["updatedBy"] = firebaseOwnerUid
+        };
         await FirebaseRealtime.SetGlobalRecordAsync(
             $"owners/{firebaseOwnerUid}/tracking_configuration",
-            new Dictionary<string, object?>
-            {
-                ["mode"] = ReadString(existing, "mode") ?? "24/7",
-                ["customStart"] = ReadString(existing, "customStart") ?? string.Empty,
-                ["customEnd"] = ReadString(existing, "customEnd") ?? string.Empty,
-                ["intervalSeconds"] = trackingIntervalSeconds,
-                ["enabled"] = ReadBool(existing, "enabled") ?? true,
-                ["updatedAt"] = DateTime.UtcNow.ToString("O"),
-                ["updatedBy"] = firebaseOwnerUid
-            });
+            trackingPayload);
+
+        if (!string.Equals(firebaseOwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            await FirebaseRealtime.SetGlobalRecordAsync(
+                $"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/tracking_configuration",
+                trackingPayload);
+        }
     }
 
     private async Task OnTrackingIntervalChanged(int seconds)

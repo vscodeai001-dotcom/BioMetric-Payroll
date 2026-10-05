@@ -77,6 +77,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var appDatabase: AppDatabase
     @Inject lateinit var apiService: MobileApiService
+    @Inject lateinit var signalR: com.biometric.app.sync.SignalRManager
 
     private val gson = Gson()
     private var currentSettings = LocalFeatureSettings()
@@ -644,7 +645,9 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         val ownerRef = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId/feature_settings/1")
                         ownerRef.setValue(map).await()
 
-                        if (activeTenantId == "biometricpayroll") {
+                        val altTenant = if (activeTenantId == "biometricpayroll") "tenant_10001" else "biometricpayroll"
+                        runCatching {
+                            FirebaseDatabase.getInstance().getReference("owners/$altTenant/feature_settings/1").setValue(map).await()
                             FirebaseDatabase.getInstance().getReference("feature_settings/1").setValue(map).await()
                         }
 
@@ -993,6 +996,12 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         }
                     }
 
+                    // Purge cloud and local GPS tracking records for this tenant
+                    val existingEmpIds = runCatching {
+                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList())
+                    firebaseSync.wipeTrackingNodesForTenant(activeTenantId, existingEmpIds)
+
                     // Broadcast real-time wipe event to all other Android clients and Web
                     try {
                         root.child("system_events").child("wipe").setValue(mapOf(
@@ -1005,6 +1014,8 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         android.util.Log.w("FeatureToggleManager", "Could not publish wipe event: ${e.message}")
                     }
                 }
+
+                signalR.clearLiveState()
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Operational data wiped for $activeCompanyName! (Settings & Employees preserved)", Toast.LENGTH_LONG).show()
                 HapticUtil.vibrateRisk(binding.btnPartialWipe)
@@ -1040,6 +1051,13 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             try {
                 // 1. Safety backup
                 performBackup("PreWipeSafety")
+
+                // Query existing employee IDs before clearing local tables so tracking nodes can be cleanly purged
+                val existingEmpIds = withContext(Dispatchers.IO) {
+                    runCatching {
+                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList())
+                }
 
                 // 2. Wipe employees & operational tables from Local Room
                 withContext(Dispatchers.IO) {
@@ -1119,6 +1137,9 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         }
                     }
 
+                    // Purge cloud and local GPS tracking records for this tenant
+                    firebaseSync.wipeTrackingNodesForTenant(activeTenantId, existingEmpIds)
+
                     // Broadcast real-time full wipe event to all other Android clients and Web
                     try {
                         root.child("system_events").child("wipe").setValue(mapOf(
@@ -1131,6 +1152,8 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                         android.util.Log.w("FeatureToggleManager", "Could not publish full wipe event: ${e.message}")
                     }
                 }
+
+                signalR.clearLiveState()
 
                 Toast.makeText(this@FeatureToggleManagerActivity, "Full system wipe completed for $activeCompanyName! (Local DB & Cloud)", Toast.LENGTH_LONG).show()
                 HapticUtil.vibrateDeletion(binding.btnFullWipe)

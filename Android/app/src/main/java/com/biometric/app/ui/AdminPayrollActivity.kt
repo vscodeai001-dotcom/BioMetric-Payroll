@@ -916,6 +916,9 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
                     // Push to Firebase Realtime Database
                     ownerRef.child("payroll_history").child(pid.toString()).setValue(realtimeRow).await()
+                    runCatching {
+                        firebaseSync.getAlternateOwnerRef()?.child("payroll_history")?.child(pid.toString())?.setValue(realtimeRow)?.await()
+                    }
                 }
 
                 // Upsert to local Room SQLite
@@ -954,6 +957,14 @@ class AdminPayrollActivity : MotionBaseActivity() {
                     runCatching {
                         val advSnapshot = ownerRef.child("advance_payments").get().await()
                         advSnapshot.children.forEach { child ->
+                            val empId = child.child("employeeId").value?.toString()?.toIntOrNull()
+                            val isRec = child.child("isRecovered").value as? Boolean ?: false
+                            if (empId == row.employeeID && !isRec) {
+                                child.ref.child("isRecovered").setValue(true)
+                                child.ref.child("recoveryPaymentId").setValue(pid.toString())
+                            }
+                        }
+                        firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.get()?.await()?.children?.forEach { child ->
                             val empId = child.child("employeeId").value?.toString()?.toIntOrNull()
                             val isRec = child.child("isRecovered").value as? Boolean ?: false
                             if (empId == row.employeeID && !isRec) {

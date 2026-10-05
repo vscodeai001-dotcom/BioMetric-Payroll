@@ -381,8 +381,16 @@ namespace Payroll.Web.Services
         }
 
 
+        public event Action<string?>? OnRefresh;
+
         public async Task NotifyGlobalRefreshAsync(string? reason = null)
         {
+            try
+            {
+                OnRefresh?.Invoke(reason);
+            }
+            catch { }
+
             await _hub.Clients.All.SendAsync(
                 "GlobalRefresh",
                 new

@@ -396,6 +396,28 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 }
             }
         }
+
+        val altOwner = firebaseSync.getAlternateOwnerRef()
+        if (altOwner != null) {
+            val altQuery = when (table) {
+                "attendance_punches", "regularizations", "leave_requests" ->
+                    altOwner.child(table).orderByChild("staffId").equalTo(strId)
+                "advance_payments", "resignation_requests" ->
+                    altOwner.child(table).orderByChild("employeeId").equalTo(numId)
+                else -> null
+            }
+            if (altQuery != null) {
+                val altSnapshot = runCatching { altQuery.get().await() }.getOrNull()
+                if (altSnapshot != null && altSnapshot.hasChildren()) {
+                    results.addAll(altSnapshot.children.mapNotNull { mapper(it) })
+                } else if (table in listOf("leave_requests", "advance_payments")) {
+                    val altFb = runCatching { altOwner.child(table).orderByChild("employeeId").equalTo(strId).get().await() }.getOrNull()
+                    if (altFb != null && altFb.hasChildren()) {
+                        results.addAll(altFb.children.mapNotNull { mapper(it) })
+                    }
+                }
+            }
+        }
         return results
     }
 
@@ -811,22 +833,24 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         }
 
         val id = UUID.randomUUID().toString()
-        ownerRef().child("advance_payments").child(id).setValue(
-            mapOf(
-                "advanceId" to id,
-                "id" to id,
-                "employeeId" to sessionStore.employeeId(),
-                "staffId" to emp.employeeId,
-                "shopId" to emp.shopId,
-                "amount" to amount,
-                "date" to System.currentTimeMillis(),
-                "isRecovered" to false,
-                "recoveryPaymentId" to null,
-                "reason" to reason,
-                "status" to "Pending",
-                "advanceType" to "General"
-            )
-        ).await()
+        val payload = mapOf(
+            "advanceId" to id,
+            "id" to id,
+            "employeeId" to sessionStore.employeeId(),
+            "staffId" to emp.employeeId,
+            "shopId" to emp.shopId,
+            "amount" to amount,
+            "date" to System.currentTimeMillis(),
+            "isRecovered" to false,
+            "recoveryPaymentId" to null,
+            "reason" to reason,
+            "status" to "Pending",
+            "advanceType" to "General"
+        )
+        ownerRef().child("advance_payments").child(id).setValue(payload).await()
+        runCatching {
+            firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.child(id)?.setValue(payload)?.await()
+        }
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "ADDED", id)
         notifyPortalChanged()
     }

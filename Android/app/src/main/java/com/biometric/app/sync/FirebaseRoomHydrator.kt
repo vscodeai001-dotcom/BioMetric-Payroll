@@ -69,7 +69,8 @@ class FirebaseRoomHydrator @Inject constructor(
     private val fbpDeclarationDao: LocalFbpDeclarationDao,
     private val settingsDao: LocalSettingsDao,
     private val firebaseAuthTokenManager: FirebaseAuthTokenManager,
-    private val realtimeUiDispatcher: RealtimeUiDispatcher
+    private val realtimeUiDispatcher: RealtimeUiDispatcher,
+    private val signalRManagerProvider: javax.inject.Provider<SignalRManager>
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var hydrationJob: Job? = null
@@ -123,6 +124,59 @@ class FirebaseRoomHydrator @Inject constructor(
 
             observeValue("company_settings", existing = { emptyList() }, onDelete = { }) { 
                 if (it.key == "1") settingsDao.upsertCompanySettings(it.toLocalCompanySettings())
+            }
+            val ownerUid = firebaseSync.getOwnerUid()
+            val defaultUid = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+            val altOwners = mutableListOf<String>()
+            if (ownerUid != null && ownerUid != defaultUid) {
+                altOwners.add(defaultUid)
+            }
+            val activeTid = sessionStore.activeTenantId()
+            if (!activeTid.isNullOrBlank() && activeTid != ownerUid && activeTid !in altOwners) {
+                altOwners.add(activeTid)
+            }
+            if ("tenant_10001" != ownerUid && "tenant_10001" !in altOwners) {
+                altOwners.add("tenant_10001")
+            }
+
+            for (altUid in altOwners) {
+                val altRef = com.google.firebase.database.FirebaseDatabase.getInstance().getReference("owners").child(altUid)
+                observeValue("company_settings", query = altRef.child("company_settings"), existing = { emptyList() }, onDelete = { }) {
+                    if (it.key == "1") settingsDao.upsertCompanySettings(it.toLocalCompanySettings())
+                }
+                observeValue("feature_settings", query = altRef.child("feature_settings"), existing = { emptyList() }, onDelete = { }) {
+                    if (it.key == "1") settingsDao.upsertFeatureSettings(it.toLocalFeatureSettings())
+                }
+                observeValue("leave_requests", query = altRef.child("leave_requests"), existing = { emptyList() }, onDelete = { }) {
+                    it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) }
+                }
+                observeValue("advance_payments", query = altRef.child("advance_payments"), existing = { emptyList() }, onDelete = { }) {
+                    it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) }
+                }
+                observeValue("employees", query = altRef.child("employees"), existing = { emptyList() }, onDelete = { }) {
+                    it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) }
+                }
+                observeValue("regularizations", query = altRef.child("regularizations"), existing = { emptyList() }, onDelete = { }) {
+                    it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) }
+                }
+                observeValue("attendance_punches", query = altRef.child("attendance_punches").limitToLast(500), existing = { emptyList() }, onDelete = { }) {
+                    it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) }
+                }
+                observeValue("attendance", query = altRef.child("attendance").limitToLast(300), existing = { emptyList() }, onDelete = { }) {
+                    it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) }
+                }
+                observeValue("resignation_requests", query = altRef.child("resignation_requests"), existing = { emptyList() }, onDelete = { }) {
+                    it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) }
+                }
+                observeValue("shops", query = altRef.child("shops"), existing = { emptyList() }, onDelete = { }) {
+                    it.toShop().let { value -> shopDao.upsert(value.toLocal()) }
+                }
+                observeValue("shop_closed_days", query = altRef.child("shop_closed_days"), existing = { emptyList() }, onDelete = { }) {
+                    it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) }
+                }
+                observeValue("employee_history", query = altRef.child("employee_history"), existing = { emptyList() }, onDelete = { }) {
+                    it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) }
+                }
             }
             observeValue("feature_settings", existing = { emptyList() }, onDelete = { }) { 
                 if (it.key == "1") {
@@ -252,6 +306,10 @@ class FirebaseRoomHydrator @Inject constructor(
                     Log.e("FirebaseRoomHydrator", "Failed to clear local Room on wipe event", e)
                 }
             }
+        }
+
+        runCatching {
+            signalRManagerProvider.get().clearLiveState()
         }
 
         withContext(Dispatchers.Main) {
@@ -396,8 +454,30 @@ class FirebaseRoomHydrator @Inject constructor(
     private fun DataSnapshot.s(name: String): String? = raw(name)?.toString()?.takeIf { it.isNotBlank() }
     private fun DataSnapshot.i(name: String): Int = when (val v = raw(name)) { is Number -> v.toInt(); else -> v?.toString()?.toIntOrNull() ?: 0 }
     private fun DataSnapshot.l(name: String): Long = when (val v = raw(name)) { is Number -> v.toLong(); else -> v?.toString()?.toLongOrNull() ?: 0L }
-    private fun DataSnapshot.d(name: String): Double = when (val v = raw(name)) { is Number -> v.toDouble(); else -> v?.toString()?.toDoubleOrNull() ?: 0.0 }
+    private fun DataSnapshot.d(name: String, default: Double = 0.0): Double = when (val v = raw(name)) { is Number -> v.toDouble(); else -> v?.toString()?.toDoubleOrNull() ?: default }
     private fun DataSnapshot.b(name: String, default: Boolean = false): Boolean = when (val v = raw(name)) { is Boolean -> v; else -> v?.toString()?.toBooleanStrictOrNull() ?: default }
+    private fun DataSnapshot.intAny(vararg names: String): Int? {
+        for (name in names) {
+            val v = raw(name)
+            val parsed = when (v) {
+                is Number -> v.toInt()
+                else -> v?.toString()?.toIntOrNull()
+            }
+            if (parsed != null && parsed > 0) return parsed
+        }
+        return null
+    }
+    private fun DataSnapshot.doubleAny(vararg names: String): Double? {
+        for (name in names) {
+            val v = raw(name)
+            val parsed = when (v) {
+                is Number -> v.toDouble()
+                else -> v?.toString()?.toDoubleOrNull()
+            }
+            if (parsed != null && parsed != 0.0) return parsed
+        }
+        return null
+    }
 
     private fun DataSnapshot.toShop() = Shop(
         shopId = s("shopId") ?: key.orEmpty(),
@@ -692,9 +772,9 @@ class FirebaseRoomHydrator @Inject constructor(
         addressLine1 = s("addressLine1")?.takeIf { !it.equals("Address Line 1", ignoreCase = true) } ?: "",
         cityStatePincode = s("cityStatePincode")?.takeIf { !it.equals("City, State, Pincode", ignoreCase = true) } ?: "",
         salaryCalculationMethod = s("salaryCalculationMethod") ?: "Days in Month",
-        officeLatitude = d("officeLatitude").takeIf { it != 0.0 } ?: (d("latitude").takeIf { it != 0.0 } ?: 0.0),
-        officeLongitude = d("officeLongitude").takeIf { it != 0.0 } ?: (d("longitude").takeIf { it != 0.0 } ?: 0.0),
-        geoRadiusMeters = (i("geoRadiusMeters") ?: i("radius") ?: i("geo_radius_meters")).takeIf { it > 0 } ?: 100,
+        officeLatitude = doubleAny("officeLatitude", "latitude", "OfficeLatitude", "Latitude") ?: 0.0,
+        officeLongitude = doubleAny("officeLongitude", "longitude", "OfficeLongitude", "Longitude") ?: 0.0,
+        geoRadiusMeters = intAny("geoRadiusMeters", "radius", "geo_radius_meters", "GeoRadiusMeters", "Radius") ?: 100,
         zktecoIP = s("zktecoIP"),
         zktecoPort = i("zktecoPort").takeIf { it > 0 } ?: 4370,
         zktecoMachineNumber = i("zktecoMachineNumber").takeIf { it > 0 } ?: 1,

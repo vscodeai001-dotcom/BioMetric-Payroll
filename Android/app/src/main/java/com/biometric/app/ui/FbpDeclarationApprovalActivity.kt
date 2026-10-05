@@ -172,9 +172,12 @@ class FbpDeclarationApprovalActivity : MotionBaseActivity() {
                         val owner = sync.getOwnerRef()
                         if (owner != null) {
                             rows.forEach { item ->
-                                owner.child("fbp_declarations").child(item.declarationId.toString()).updateChildren(
-                                    mapOf("status" to "Approved")
-                                ).await()
+                                val declKey = item.declarationId.toString()
+                                val approvedMap = mapOf<String, Any>("status" to "Approved")
+                                owner.child("fbp_declarations").child(declKey).updateChildren(approvedMap).await()
+                                runCatching {
+                                    sync.getAlternateOwnerRef()?.child("fbp_declarations")?.child(declKey)?.updateChildren(approvedMap)?.await()
+                                }
                             }
                             sync.notifyRealtimeChanged("FBPDeclaration", "UPDATED", empId.toString())
                         }
@@ -217,7 +220,11 @@ class FbpDeclarationApprovalActivity : MotionBaseActivity() {
                         if (owner != null) {
                             // Update declarations to Rejected or remove so employee can re-submit
                             rows.forEach { item ->
-                                owner.child("fbp_declarations").child(item.declarationId.toString()).removeValue().await()
+                                val declKey = item.declarationId.toString()
+                                owner.child("fbp_declarations").child(declKey).removeValue().await()
+                                runCatching {
+                                    sync.getAlternateOwnerRef()?.child("fbp_declarations")?.child(declKey)?.removeValue()?.await()
+                                }
                             }
                             sync.notifyRealtimeChanged("FBPDeclaration", "DELETED", empId.toString())
                         }

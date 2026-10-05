@@ -56,8 +56,19 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(value))
     }
 
-    suspend fun advances(unpaidOnly: Boolean = false): List<MoneyEntryDto> =
-        ownerRef().child("advance_payments").get().await().children.mapNotNull { s ->
+    suspend fun advances(unpaidOnly: Boolean = false): List<MoneyEntryDto> {
+        val primaryChildren = try {
+            ownerRef().child("advance_payments").get().await().children
+        } catch (_: Exception) {
+            emptyList<DataSnapshot>()
+        }
+        val altChildren = try {
+            firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.get()?.await()?.children ?: emptyList<DataSnapshot>()
+        } catch (_: Exception) {
+            emptyList<DataSnapshot>()
+        }
+        val allChildren = (primaryChildren + altChildren).distinctBy { it.key }
+        return allChildren.mapNotNull { s ->
             val recovered = s.booleanAny("isRecovered", "IsRecovered")
             if (unpaidOnly && recovered) return@mapNotNull null
             MoneyEntryDto(
@@ -69,7 +80,8 @@ class FirebaseAdminFinanceRepository @Inject constructor(
                 paid = recovered,
                 employeeId = s.int("employeeId")
             )
-        }.sortedByDescending { it.date }
+        }.distinctBy { it.id }.sortedByDescending { it.date }
+    }
 
     suspend fun bonuses(): List<MoneyEntryDto> =
         ownerRef().child("bonus_records").get().await().children.map { s ->
@@ -159,34 +171,55 @@ class FirebaseAdminFinanceRepository @Inject constructor(
         }
 
         val id = UUID.randomUUID().toString()
-        ownerRef().child("advance_payments").child(id).setValue(
-            mapOf(
-                "advanceId" to id,
-                "employeeId" to employeeId,
-                "shopId" to shopId,
-                "amount" to amount,
-                "date" to parsedTime,
-                "isRecovered" to false,
-                "recoveryPaymentId" to null,
-                "advanceType" to type
-            )
-        ).await()
+        val payload = mapOf(
+            "advanceId" to id,
+            "employeeId" to employeeId,
+            "shopId" to shopId,
+            "amount" to amount,
+            "date" to parsedTime,
+            "isRecovered" to false,
+            "recoveryPaymentId" to null,
+            "advanceType" to type
+        )
+        ownerRef().child("advance_payments").child(id).setValue(payload).await()
+        runCatching {
+            firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.child(id)?.setValue(payload)?.await()
+        }
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "ADDED", id)
     }
 
     suspend fun deleteAdvance(advanceId: String) {
         require(advanceId.isNotBlank()) { "Valid advanceId is required." }
         ownerRef().child("advance_payments").child(advanceId).removeValue().await()
+        runCatching {
+            firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await()
+        }
         firebaseSync.notifyRealtimeChanged("AdvancePayment", "DELETED", advanceId)
     }
 
     suspend fun deleteAdvanceAndDuplicates(adv: com.biometric.app.data.entity.AdvancePayment) {
         if (adv.advanceId.isNotBlank()) {
             ownerRef().child("advance_payments").child(adv.advanceId).removeValue().await()
+            runCatching {
+                firebaseSync.getAlternateOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.removeValue()?.await()
+            }
         }
         runCatching {
             val root = ownerRef().child("advance_payments")
             val snap = root.get().await()
+            val targetMinute = adv.date / 60000L
+            for (child in snap.children) {
+                val eId = child.child("employeeId").value?.toString() ?: child.child("staffId").value?.toString()
+                val amt = child.child("amount").value?.toString()?.toDoubleOrNull() ?: 0.0
+                val dt = child.child("date").value?.toString()?.toLongOrNull() ?: 0L
+                if (eId == adv.employeeId && Math.abs(amt - adv.amount) < 0.01 && (dt / 60000L == targetMinute)) {
+                    child.ref.removeValue().await()
+                }
+            }
+        }
+        runCatching {
+            val altRoot = firebaseSync.getAlternateOwnerRef()?.child("advance_payments") ?: return@runCatching
+            val snap = altRoot.get().await()
             val targetMinute = adv.date / 60000L
             for (child in snap.children) {
                 val eId = child.child("employeeId").value?.toString() ?: child.child("staffId").value?.toString()

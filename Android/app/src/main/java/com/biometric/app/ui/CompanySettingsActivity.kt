@@ -43,6 +43,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var autoPunchCoordinator: GeofenceAutoPunchCoordinator
     @Inject lateinit var appDatabase: com.biometric.app.data.AppDatabase
+    @Inject lateinit var signalR: com.biometric.app.sync.SignalRManager
 
     private var localCompany = LocalCompanySettings()
     private var localFeatures = com.biometric.app.data.entity.LocalFeatureSettings()
@@ -454,6 +455,12 @@ class CompanySettingsActivity : MotionBaseActivity() {
                         if (line1.isNotBlank()) child("addressLine1").setValue(line1)
                         if (cityStatePin.isNotBlank()) child("cityStatePincode").setValue(cityStatePin)
                     }
+                    runCatching {
+                        firebaseSync.getAlternateOwnerRef()?.child("company_settings")?.child("1")?.apply {
+                            if (line1.isNotBlank()) child("addressLine1").setValue(line1)
+                            if (cityStatePin.isNotBlank()) child("cityStatePincode").setValue(cityStatePin)
+                        }
+                    }
                 }
             }
         }
@@ -507,10 +514,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
             localSettingsDao.getCompanySettingsFlow().collectLatest { cs ->
                 if (cs != null) {
                     localCompany = cs
-                    val hasFocus = currentFocus is android.widget.EditText
-                    if (!hasFocus) {
-                        populateUi()
-                    }
+                    populateUi(preserveFocus = true)
                 }
             }
         }
@@ -518,6 +522,45 @@ class CompanySettingsActivity : MotionBaseActivity() {
 
     private var companySettingsRef: com.google.firebase.database.DatabaseReference? = null
     private var companySettingsListener: ValueEventListener? = null
+    private var altCompanySettingsRef: com.google.firebase.database.DatabaseReference? = null
+    private var altCompanySettingsListener: ValueEventListener? = null
+
+    private fun attachFirebaseListeners() {
+        val owner = firebaseSync.getOwnerRef()
+        if (owner != null && companySettingsRef == null) {
+            val ref = owner.child("company_settings").child("1")
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    hydrateFromFirebase(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            ref.addValueEventListener(listener)
+            companySettingsRef = ref
+            companySettingsListener = listener
+        }
+
+        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+        val altUid = if (owner?.key == defaultOwner) {
+            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
+        } else {
+            defaultOwner
+        }
+
+        if (altUid != null && altCompanySettingsRef == null) {
+            val altRef = FirebaseDatabase.getInstance().getReference("owners").child(altUid).child("company_settings").child("1")
+            val altListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    hydrateFromFirebase(snapshot)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            altRef.addValueEventListener(altListener)
+            altCompanySettingsRef = altRef
+            altCompanySettingsListener = altListener
+        }
+    }
 
     private fun loadInitialData() {
         binding.loadingOverlay.visibility = View.VISIBLE
@@ -560,22 +603,14 @@ class CompanySettingsActivity : MotionBaseActivity() {
             trackingIntervalSeconds = config.intervalSeconds
 
             // Populate UI
-            populateUi()
+            populateUi(preserveFocus = false)
             binding.loadingOverlay.visibility = View.GONE
 
             // Sync latest company and admin details from Firebase in real-time
+            attachFirebaseListeners()
+
             val owner = firebaseSync.getOwnerRef()
             if (owner != null) {
-                val ref = owner.child("company_settings").child("1")
-                val listener = object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        hydrateFromFirebase(snapshot)
-                    }
-                    override fun onCancelled(error: DatabaseError) {}
-                }
-                ref.addValueEventListener(listener)
-                companySettingsRef = ref
-                companySettingsListener = listener
 
                 // Load Admin Details from Owner specific child keys (Never query root owner node to prevent OOM)
                 owner.child("adminEmail").addListenerForSingleValueEvent(object : ValueEventListener {
@@ -628,6 +663,20 @@ class CompanySettingsActivity : MotionBaseActivity() {
         fun s(k: String): String? = raw(k)?.toString()
         fun i(k: String): Int? = num(k)?.toInt()
         fun d(k: String): Double? = num(k)?.toDouble()
+        fun intAny(vararg keys: String): Int? {
+            for (key in keys) {
+                val value = i(key)
+                if (value != null && value > 0) return value
+            }
+            return null
+        }
+        fun doubleAny(vararg keys: String): Double? {
+            for (key in keys) {
+                val value = d(key)
+                if (value != null && value != 0.0) return value
+            }
+            return null
+        }
         fun b(k: String): Boolean? {
             val v = raw(k) ?: return null
             return when (v) {
@@ -645,9 +694,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
         i("workDayCutoffHour")?.let { localCompany.workDayCutoffHour = it }
         i("lateGraceMinutes")?.let { localCompany.lateGraceMinutes = it }
         i("endTimeGraceMinutes")?.let { localCompany.endTimeGraceMinutes = it }
-        (d("officeLatitude") ?: d("latitude"))?.let { if (it != 0.0) localCompany.officeLatitude = it }
-        (d("officeLongitude") ?: d("longitude"))?.let { if (it != 0.0) localCompany.officeLongitude = it }
-        (i("geoRadiusMeters") ?: i("radius") ?: i("geo_radius_meters"))?.let { if (it > 0) localCompany.geoRadiusMeters = it }
+        doubleAny("officeLatitude", "latitude", "OfficeLatitude", "Latitude")?.let { if (it != 0.0) localCompany.officeLatitude = it }
+        doubleAny("officeLongitude", "longitude", "OfficeLongitude", "Longitude")?.let { if (it != 0.0) localCompany.officeLongitude = it }
+        intAny("geoRadiusMeters", "radius", "geo_radius_meters", "GeoRadiusMeters", "Radius")?.let { if (it > 0) localCompany.geoRadiusMeters = it }
         i("autoBackupIntervalHours")?.let { localCompany.autoBackupIntervalHours = it }
         i("stayDwellMinutes")?.let { if (it > 0) localCompany.stayDwellMinutes = it }
         i("stayClusterRadiusMeters")?.let { if (it > 0) localCompany.stayClusterRadiusMeters = it }
@@ -698,7 +747,7 @@ class CompanySettingsActivity : MotionBaseActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             localSettingsDao.upsertCompanySettings(localCompany)
         }
-        populateUi()
+        populateUi(preserveFocus = true)
 
         if ((localCompany.addressLine1.isBlank() || localCompany.cityStatePincode.isBlank()) &&
             localCompany.officeLatitude != 0.0 && localCompany.officeLongitude != 0.0) {
@@ -706,7 +755,15 @@ class CompanySettingsActivity : MotionBaseActivity() {
         }
     }
 
-    private fun populateUi() {
+    private fun setTextIfNotFocused(editText: android.widget.EditText, text: String, preserveFocus: Boolean) {
+        if (!preserveFocus || !editText.hasFocus()) {
+            if (editText.text?.toString() != text) {
+                editText.setText(text)
+            }
+        }
+    }
+
+    private fun populateUi(preserveFocus: Boolean = false) {
         val activeTenantName = sessionStore.activeCompanyName().ifBlank {
             getSharedPreferences("auth_prefs", MODE_PRIVATE).getString("selected_tenant_name", "").orEmpty()
         }.ifBlank { intent.getStringExtra("TENANT_NAME").orEmpty() }
@@ -724,9 +781,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
         }
 
         // Tab 1: General & Rules
-        binding.etGenCompanyName.setText(if (localCompany.companyName.equals("Your Company Name", ignoreCase = true)) "" else localCompany.companyName)
-        binding.etGenAddressLine1.setText(if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) "" else localCompany.addressLine1)
-        binding.etGenCityStatePincode.setText(if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) "" else localCompany.cityStatePincode)
+        setTextIfNotFocused(binding.etGenCompanyName, if (localCompany.companyName.equals("Your Company Name", ignoreCase = true)) "" else localCompany.companyName, preserveFocus)
+        setTextIfNotFocused(binding.etGenAddressLine1, if (localCompany.addressLine1.equals("Address Line 1", ignoreCase = true)) "" else localCompany.addressLine1, preserveFocus)
+        setTextIfNotFocused(binding.etGenCityStatePincode, if (localCompany.cityStatePincode.equals("City, State, Pincode", ignoreCase = true)) "" else localCompany.cityStatePincode, preserveFocus)
 
         if ((binding.etGenAddressLine1.text.isNullOrBlank() || binding.etGenCityStatePincode.text.isNullOrBlank()) &&
             localCompany.officeLatitude != 0.0 && localCompany.officeLongitude != 0.0) {
@@ -740,9 +797,9 @@ class CompanySettingsActivity : MotionBaseActivity() {
             binding.spinnerGenSalaryMethod.setText(salaryCalcMethods[0], false)
         }
 
-        binding.etGenCutoffHour.setText(localCompany.workDayCutoffHour.toString())
-        binding.etGenLateGrace.setText(localCompany.lateGraceMinutes.toString())
-        binding.etGenEarlyGrace.setText(localCompany.endTimeGraceMinutes.toString())
+        setTextIfNotFocused(binding.etGenCutoffHour, localCompany.workDayCutoffHour.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etGenLateGrace, localCompany.lateGraceMinutes.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etGenEarlyGrace, localCompany.endTimeGraceMinutes.toString(), preserveFocus)
 
         // GPS Interval
         val intervalItem = intervalLabels.find { it.second == trackingIntervalSeconds } ?: intervalLabels[0]
@@ -768,44 +825,44 @@ class CompanySettingsActivity : MotionBaseActivity() {
             ?: markerStyleLabels[0]
         binding.spinnerMarkerStyle.setText(markerItem.first, false)
 
-        binding.etGenLatitude.setText(if (localCompany.officeLatitude != 0.0) localCompany.officeLatitude.toString() else "")
-        binding.etGenLongitude.setText(if (localCompany.officeLongitude != 0.0) localCompany.officeLongitude.toString() else "")
-        binding.etGenRadius.setText(localCompany.geoRadiusMeters.toString())
+        setTextIfNotFocused(binding.etGenLatitude, if (localCompany.officeLatitude != 0.0) localCompany.officeLatitude.toString() else "", preserveFocus)
+        setTextIfNotFocused(binding.etGenLongitude, if (localCompany.officeLongitude != 0.0) localCompany.officeLongitude.toString() else "", preserveFocus)
+        setTextIfNotFocused(binding.etGenRadius, localCompany.geoRadiusMeters.toString(), preserveFocus)
 
-        binding.etZktecoIp.setText(localCompany.zktecoIP.orEmpty())
-        binding.etZktecoPort.setText(localCompany.zktecoPort.toString())
-        binding.etZktecoMachineNo.setText(localCompany.zktecoMachineNumber.toString())
+        setTextIfNotFocused(binding.etZktecoIp, localCompany.zktecoIP.orEmpty(), preserveFocus)
+        setTextIfNotFocused(binding.etZktecoPort, localCompany.zktecoPort.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etZktecoMachineNo, localCompany.zktecoMachineNumber.toString(), preserveFocus)
 
         // Tab 2: Admin Credentials Pre-fill
         val sessionEmail = sessionStore.userEmail()
         val sessionName = sessionStore.employeeName()
         if (sessionEmail.isNotBlank() && binding.etAdminEmail.text.isNullOrBlank()) {
-            binding.etAdminEmail.setText(sessionEmail)
+            setTextIfNotFocused(binding.etAdminEmail, sessionEmail, preserveFocus)
         }
         if (sessionName.isNotBlank() && binding.etAdminName.text.isNullOrBlank()) {
-            binding.etAdminName.setText(sessionName)
+            setTextIfNotFocused(binding.etAdminName, sessionName, preserveFocus)
         }
 
         val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
         if (binding.etAdminEmail.text.isNullOrBlank() && !fbUser?.email.isNullOrBlank()) {
-            binding.etAdminEmail.setText(fbUser?.email)
+            setTextIfNotFocused(binding.etAdminEmail, fbUser.email.orEmpty(), preserveFocus)
         }
         if (binding.etAdminName.text.isNullOrBlank() && !fbUser?.displayName.isNullOrBlank()) {
-            binding.etAdminName.setText(fbUser?.displayName)
+            setTextIfNotFocused(binding.etAdminName, fbUser.displayName.orEmpty(), preserveFocus)
         }
         if (binding.etAdminPhone.text.isNullOrBlank() && !fbUser?.phoneNumber.isNullOrBlank()) {
-            binding.etAdminPhone.setText(fbUser?.phoneNumber)
+            setTextIfNotFocused(binding.etAdminPhone, fbUser.phoneNumber.orEmpty(), preserveFocus)
         }
 
         // Tab 3: Statutory
         binding.swPfEsiSystem.isChecked = localCompany.enablePfEsiSystem
         binding.layoutPfEsiFields.visibility = if (localCompany.enablePfEsiSystem) View.VISIBLE else View.GONE
-        binding.etEsiWageLimit.setText(localCompany.esiWageLimit.toString())
-        binding.etBasicSalaryPct.setText(localCompany.basicSalaryPercentage.toString())
-        binding.etEmployeePfPct.setText(localCompany.employeePfPercentage.toString())
-        binding.etEmployeeEsiPct.setText(localCompany.employeeEsiPercentage.toString())
-        binding.etEmployerPfPct.setText(localCompany.employerPfPercentage.toString())
-        binding.etEmployerEsiPct.setText(localCompany.employerEsiPercentage.toString())
+        setTextIfNotFocused(binding.etEsiWageLimit, localCompany.esiWageLimit.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etBasicSalaryPct, localCompany.basicSalaryPercentage.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etEmployeePfPct, localCompany.employeePfPercentage.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etEmployeeEsiPct, localCompany.employeeEsiPercentage.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etEmployerPfPct, localCompany.employerPfPercentage.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etEmployerEsiPct, localCompany.employerEsiPercentage.toString(), preserveFocus)
 
         binding.swProfessionalTax.isChecked = localCompany.enableProfessionalTax
         binding.swShiftAllowance.isChecked = localCompany.enableShiftAllowance
@@ -813,15 +870,15 @@ class CompanySettingsActivity : MotionBaseActivity() {
         // Tab 4: Email
         binding.swEmailNotifications.isChecked = localCompany.enableEmailNotifications
         binding.layoutEmailFields.visibility = if (localCompany.enableEmailNotifications) View.VISIBLE else View.GONE
-        binding.etSmtpHost.setText(localCompany.smtpHost.orEmpty())
-        binding.etSmtpPort.setText(localCompany.smtpPort.toString())
-        binding.etSmtpFromEmail.setText(localCompany.smtpFromEmail.orEmpty())
-        binding.etSmtpUser.setText(localCompany.smtpUser.orEmpty())
-        binding.etSmtpPass.setText(localCompany.smtpPass.orEmpty())
+        setTextIfNotFocused(binding.etSmtpHost, localCompany.smtpHost.orEmpty(), preserveFocus)
+        setTextIfNotFocused(binding.etSmtpPort, localCompany.smtpPort.toString(), preserveFocus)
+        setTextIfNotFocused(binding.etSmtpFromEmail, localCompany.smtpFromEmail.orEmpty(), preserveFocus)
+        setTextIfNotFocused(binding.etSmtpUser, localCompany.smtpUser.orEmpty(), preserveFocus)
+        setTextIfNotFocused(binding.etSmtpPass, localCompany.smtpPass.orEmpty(), preserveFocus)
 
         // Tab 5: Leave Rules
         binding.swLeaveAccrual.isChecked = localCompany.enableLeaveAccrual
-        binding.etLeaveAccrualRate.setText(localCompany.leaveAccrualRate.toString())
+        setTextIfNotFocused(binding.etLeaveAccrualRate, localCompany.leaveAccrualRate.toString(), preserveFocus)
         binding.swSandwichRule.isChecked = localCompany.enableSandwichRule
     }
 
@@ -956,7 +1013,11 @@ class CompanySettingsActivity : MotionBaseActivity() {
                             "salaryCalculationMethod" to localCompany.salaryCalculationMethod,
                             "officeLatitude" to localCompany.officeLatitude,
                             "officeLongitude" to localCompany.officeLongitude,
+                            "latitude" to localCompany.officeLatitude,
+                            "longitude" to localCompany.officeLongitude,
                             "geoRadiusMeters" to localCompany.geoRadiusMeters,
+                            "radius" to localCompany.geoRadiusMeters,
+                            "geo_radius_meters" to localCompany.geoRadiusMeters,
                             "workDayCutoffHour" to localCompany.workDayCutoffHour,
                             "lateGraceMinutes" to localCompany.lateGraceMinutes,
                             "endTimeGraceMinutes" to localCompany.endTimeGraceMinutes,
@@ -1015,13 +1076,35 @@ class CompanySettingsActivity : MotionBaseActivity() {
                         @Suppress("UNCHECKED_CAST")
                         owner.child("feature_settings").child("1").setValue(featureMap as Map<String, Any>).await()
 
-                        // Sync tenant metadata to /tenants/{tenantId}
+                        // Mirror to alternate owner (biometricpayroll <-> activeTenantId)
+                        val defaultOwner = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
                         val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+                        val altUid = if (owner.key == defaultOwner) {
+                            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
+                        } else {
+                            defaultOwner
+                        }
+                        if (altUid != null) {
+                            val altOwnerRef = FirebaseDatabase.getInstance().getReference("owners").child(altUid)
+                            runCatching {
+                                altOwnerRef.child("company_settings").child("1").setValue(companyPayload).await()
+                                altOwnerRef.child("feature_settings").child("1").setValue(featureMap).await()
+                            }
+                        }
+
+                        // Sync tenant metadata to /tenants/{tenantId}
                         if (!activeTid.isNullOrBlank()) {
                             val tenantUpdates = mutableMapOf<String, Any>(
                                 "companyName" to localCompany.companyName,
                                 "deploymentMode" to currentDeploymentMode,
-                                "isOfflineMode" to isOfflineMode
+                                "isOfflineMode" to isOfflineMode,
+                                "officeLatitude" to localCompany.officeLatitude,
+                                "officeLongitude" to localCompany.officeLongitude,
+                                "latitude" to localCompany.officeLatitude,
+                                "longitude" to localCompany.officeLongitude,
+                                "geoRadiusMeters" to localCompany.geoRadiusMeters,
+                                "radius" to localCompany.geoRadiusMeters,
+                                "geo_radius_meters" to localCompany.geoRadiusMeters
                             )
                             if (adminEmail.isNotBlank()) tenantUpdates["adminEmail"] = adminEmail
                             if (adminName.isNotBlank()) tenantUpdates["adminName"] = adminName
@@ -1073,15 +1156,35 @@ class CompanySettingsActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             try {
                 val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+                val existingEmpIds = withContext(Dispatchers.IO) {
+                    runCatching {
+                        appDatabase.localEmployeeDao().getAllEmployees().mapNotNull { it.employeeId.toIntOrNull() }
+                    }.getOrDefault(emptyList())
+                }
+
                 if (!activeTid.isNullOrBlank()) {
                     val db = FirebaseDatabase.getInstance()
                     try {
-                        db.getReference("tenants").child(activeTid).removeValue()
-                        db.getReference("owners").child(activeTid).removeValue()
-                        db.getReference("owner_events").child(activeTid).removeValue()
-                        db.getReference("shops").child(activeTid).removeValue()
+                        // Broadcast wipe event so Web & other Android devices immediately drop this company
+                        db.getReference("owners").child(activeTid).child("system_events").child("wipe").setValue(mapOf(
+                            "wipeType" to "FULL",
+                            "timestamp" to System.currentTimeMillis(),
+                            "tenantId" to activeTid,
+                            "source" to "AndroidCompanySettings"
+                        )).await()
+                    } catch (e: Exception) { }
+
+                    firebaseSync.wipeTrackingNodesForTenant(activeTid, existingEmpIds)
+
+                    try {
+                        db.getReference("tenants").child(activeTid).removeValue().await()
+                        db.getReference("owners").child(activeTid).removeValue().await()
+                        db.getReference("owner_events").child(activeTid).removeValue().await()
+                        db.getReference("shops").child(activeTid).removeValue().await()
                     } catch (e: Exception) { }
                 }
+
+                signalR.clearLiveState()
 
                 withContext(Dispatchers.IO) {
                     appDatabase.clearAllTables()
@@ -1116,27 +1219,10 @@ class CompanySettingsActivity : MotionBaseActivity() {
             val cs = withContext(Dispatchers.IO) { localSettingsDao.getCompanySettings() }
             if (cs != null) {
                 localCompany = cs
-                val hasFocus = currentFocus is android.widget.EditText
-                if (!hasFocus) {
-                    populateUi()
-                }
-            }
-            if (companySettingsRef == null) {
-                val owner = firebaseSync.getOwnerRef()
-                if (owner != null) {
-                    val ref = owner.child("company_settings").child("1")
-                    val listener = object : ValueEventListener {
-                        override fun onDataChange(snapshot: DataSnapshot) {
-                            hydrateFromFirebase(snapshot)
-                        }
-                        override fun onCancelled(error: DatabaseError) {}
-                    }
-                    ref.addValueEventListener(listener)
-                    companySettingsRef = ref
-                    companySettingsListener = listener
-                }
+                populateUi(preserveFocus = true)
             }
         }
+        attachFirebaseListeners()
     }
 
     override fun onDestroy() {
@@ -1144,5 +1230,13 @@ class CompanySettingsActivity : MotionBaseActivity() {
         companySettingsListener?.let { l ->
             companySettingsRef?.removeEventListener(l)
         }
+        companySettingsRef = null
+        companySettingsListener = null
+
+        altCompanySettingsListener?.let { l ->
+            altCompanySettingsRef?.removeEventListener(l)
+        }
+        altCompanySettingsRef = null
+        altCompanySettingsListener = null
     }
 }

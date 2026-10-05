@@ -76,12 +76,55 @@ class FirebaseSyncManager @Inject constructor(
         return if (isAuthenticated() || sessionStore.isLoggedIn()) FirebaseSsotSchema.DEFAULT_OWNER_UID else null
     }
 
+    fun getAlternateOwnerUid(): String? {
+        val current = getOwnerUid() ?: FirebaseSsotSchema.DEFAULT_OWNER_UID
+        val defaultOwner = FirebaseSsotSchema.DEFAULT_OWNER_UID
+        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+        return if (current.equals(defaultOwner, ignoreCase = true)) {
+            activeTid?.takeIf { it.isNotBlank() && !it.equals(defaultOwner, ignoreCase = true) && (it == "tenant_10001" || it == "tenant_default") }
+        } else {
+            // Dedicated multi-tenant workspaces (e.g. tenant_2001) MUST NEVER mirror or inherit
+            // the legacy default owner namespace. Complete isolation ensures zero cross-tenant leakage.
+            null
+        }
+    }
+
+    suspend fun wipeTrackingNodesForTenant(tenantId: String, employeeIds: List<Int> = emptyList()) {
+        try {
+            getGlobalRef().child("owners/$tenantId/tracking").removeValue().await()
+        } catch (e: Exception) {
+            Log.w("FirebaseSyncManager", "Could not remove owners/$tenantId/tracking: ${e.message}")
+        }
+        for (id in employeeIds) {
+            try {
+                getGlobalRef().child("tracking/live/$id").removeValue().await()
+                getGlobalRef().child("tracking/sessions/$id").removeValue().await()
+            } catch (e: Exception) {
+                Log.w("FirebaseSyncManager", "Could not remove legacy tracking for $id: ${e.message}")
+            }
+        }
+        if (tenantId.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+            try {
+                getGlobalRef().child("tracking/live").removeValue().await()
+                getGlobalRef().child("tracking/sessions").removeValue().await()
+            } catch (e: Exception) { }
+        }
+    }
+
     fun getOwnerRef(): DatabaseReference? {
         if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
             return null
         }
         val uid = getOwnerUid() ?: return null
         return database.child("owners").child(uid)
+    }
+
+    fun getAlternateOwnerRef(): DatabaseReference? {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) {
+            return null
+        }
+        val altUid = getAlternateOwnerUid() ?: return null
+        return database.child("owners").child(altUid)
     }
 
     @Volatile
@@ -144,28 +187,45 @@ class FirebaseSyncManager @Inject constructor(
             close()
             return@callbackFlow
         }
+        val altRef = getAlternateOwnerRef()?.child(table)
+
+        val primaryMap = mutableMapOf<String, T>()
+        val altMap = mutableMapOf<String, T>()
+
+        fun emitMerged() {
+            syncScope.launch(Dispatchers.Default) {
+                val merged = LinkedHashMap<String, T>(primaryMap)
+                altMap.forEach { (k, v) ->
+                    if (!merged.containsKey(k)) merged[k] = v
+                }
+                trySend(merged.values.toList())
+            }
+        }
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 lastSyncTime.value = System.currentTimeMillis()
 
                 syncScope.launch(Dispatchers.Default) {
-                    val list = mutableListOf<T>()
+                    val currentKeys = mutableSetOf<String>()
                     for (childSnapshot in snapshot.children) {
                         try {
                             if (childSnapshot.hasChildren()) {
-                                tolerantFirebaseValue<T>(childSnapshot)?.let { list.add(it) }
+                                val key = childSnapshot.key.orEmpty()
+                                tolerantFirebaseValue<T>(childSnapshot)?.let {
+                                    primaryMap[key] = it
+                                    currentKeys.add(key)
+                                }
                             }
                         } catch (e: Exception) {
-                            // One legacy/malformed row must never flood logcat or
-                            // abort the whole collection. Continue with valid rows.
                             Log.w(
                                 "FirebaseSyncManager",
                                 "Skipping malformed row in '$table' key=${childSnapshot.key}: ${e.message}"
                             )
                         }
                     }
-                    trySend(list)
+                    primaryMap.keys.retainAll(currentKeys)
+                    emitMerged()
                 }
             }
             override fun onCancelled(error: DatabaseError) {
@@ -174,7 +234,39 @@ class FirebaseSyncManager @Inject constructor(
             }
         }
         ref.addValueEventListener(listener)
-        awaitClose { ref.removeEventListener(listener) }
+
+        var altListener: ValueEventListener? = null
+        if (altRef != null && altRef.path.toString() != ref.path.toString()) {
+            val aListener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    syncScope.launch(Dispatchers.Default) {
+                        val currentKeys = mutableSetOf<String>()
+                        for (childSnapshot in snapshot.children) {
+                            try {
+                                if (childSnapshot.hasChildren()) {
+                                    val key = childSnapshot.key.orEmpty()
+                                    tolerantFirebaseValue<T>(childSnapshot)?.let {
+                                        altMap[key] = it
+                                        currentKeys.add(key)
+                                    }
+                                }
+                            } catch (_: Exception) {
+                            }
+                        }
+                        altMap.keys.retainAll(currentKeys)
+                        emitMerged()
+                    }
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            }
+            altListener = aListener
+            altRef.addValueEventListener(aListener)
+        }
+
+        awaitClose {
+            ref.removeEventListener(listener)
+            altListener?.let { altRef?.removeEventListener(it) }
+        }
     }
 
     fun decodeAuditLog(snapshot: DataSnapshot): com.biometric.app.data.entity.AuditLog? {
@@ -579,7 +671,11 @@ class FirebaseSyncManager @Inject constructor(
         database.child("client_events").child(employeeId.toString()).child(eventId).setValue(payload).await()
     }
 
-    suspend fun pushShop(shop: Shop) { getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await(); notifyRealtimeChanged("Shop", "MODIFIED") }
+    suspend fun pushShop(shop: Shop) {
+        getOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await()
+        runCatching { getAlternateOwnerRef()?.child("shops")?.child(shop.shopId)?.setValue(shop)?.await() }
+        notifyRealtimeChanged("Shop", "MODIFIED")
+    }
     suspend fun pushEmployee(emp: Employee) {
         val ref = getOwnerRef() ?: return
         val map = mapOf<String, Any?>(
@@ -644,11 +740,17 @@ class FirebaseSyncManager @Inject constructor(
             "lastModified" to System.currentTimeMillis()
         )
         ref.child("employees").child(emp.employeeId).setValue(map).await()
+        runCatching {
+            getAlternateOwnerRef()?.child("employees")?.child(emp.employeeId)?.setValue(map)?.await()
+        }
         notifyRealtimeChanged("Employee", "MODIFIED", emp.employeeId)
     }
     suspend fun pushAttendance(att: Attendance) {
         val id = att.attendanceId.ifBlank { return }
         getOwnerRef()?.child("attendance")?.child(id)?.setValue(att)?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("attendance")?.child(id)?.setValue(att)?.await()
+        }
         notifyRealtimeChanged("Attendance", "MODIFIED")
     }
 
@@ -829,7 +931,14 @@ class FirebaseSyncManager @Inject constructor(
                     snapshot.child("SessionId").getValue(String::class.java).orEmpty() == sessionId
                 }
                 if (ownerLiveClosed) {
-                    getGlobalRef().child("tracking/live/$employeeId").updateChildren(endPayload).await()
+                    if (ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                        getGlobalRef().child("tracking/live/$employeeId").updateChildren(endPayload).await()
+                    }
+                    getAlternateOwnerUid()?.let { altUid ->
+                        runCatching {
+                            getGlobalRef().child("owners/$altUid/tracking/live/$employeeId").updateChildren(endPayload).await()
+                        }
+                    }
                 }
             }
             committed
@@ -950,7 +1059,14 @@ class FirebaseSyncManager @Inject constructor(
                     } else 0L
                     if (safeTimestamp >= currentEpoch) {
                         liveRef.updateChildren(payload).await()
-                        getGlobalRef().child("tracking/live/$employeeId").updateChildren(payload).await()
+                        if (ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                            getGlobalRef().child("tracking/live/$employeeId").updateChildren(payload).await()
+                        }
+                        getAlternateOwnerUid()?.let { altUid ->
+                            runCatching {
+                                getGlobalRef().child("owners/$altUid/tracking/live/$employeeId").updateChildren(payload).await()
+                            }
+                        }
                     }
                 }
                 return true
@@ -1034,6 +1150,16 @@ class FirebaseSyncManager @Inject constructor(
 
             if (!accepted) return false
 
+            // Mirror to alternate owner so Admin sees live employee regardless of tenant node
+            getAlternateOwnerUid()?.let { altUid ->
+                runCatching {
+                    getGlobalRef()
+                        .child("owners/$altUid/tracking/live/$employeeId")
+                        .updateChildren(payload)
+                        .await()
+                }
+            }
+
             // Immutable history is written only after the live/session checks succeed
             if (recordHistory) {
                 getGlobalRef()
@@ -1042,20 +1168,22 @@ class FirebaseSyncManager @Inject constructor(
                     .await()
             }
 
-            // Legacy compatibility stream receives only the newest accepted point.
-            try {
-                getGlobalRef()
-                    .child("tracking/live/$employeeId")
-                    .setValue(payload)
-                    .await()
-                if (recordHistory) {
+            // Legacy compatibility stream receives only the newest accepted point (default owner only).
+            if (ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                try {
                     getGlobalRef()
-                        .child("tracking/history/$employeeId/$clientEventId")
+                        .child("tracking/live/$employeeId")
                         .setValue(payload)
                         .await()
+                    if (recordHistory) {
+                        getGlobalRef()
+                            .child("tracking/history/$employeeId/$clientEventId")
+                            .setValue(payload)
+                            .await()
+                    }
+                } catch (legacyEx: Exception) {
+                    Log.d("FirebaseSyncManager", "Legacy tracking/live write skipped: ${legacyEx.message}")
                 }
-            } catch (legacyEx: Exception) {
-                Log.d("FirebaseSyncManager", "Legacy tracking/live write skipped: ${legacyEx.message}")
             }
 
             true
@@ -1094,12 +1222,24 @@ class FirebaseSyncManager @Inject constructor(
         try {
             ref.child("attendance_punches").child(id).setValue(map).await()
             ref.child("attendance").child(id).setValue(map).await()
+            runCatching {
+                getAlternateOwnerRef()?.let { alt ->
+                    alt.child("attendance_punches").child(id).setValue(map).await()
+                    alt.child("attendance").child(id).setValue(map).await()
+                }
+            }
             notifyRealtimeChanged("AttendancePunch", "MODIFIED", id)
         } catch (e: Exception) {
             Log.w("FirebaseSyncManager", "Failed to push attendance punch $id", e)
         }
     }
-    suspend fun pushAdvance(adv: AdvancePayment) { getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await(); notifyRealtimeChanged("AdvancePayment", "MODIFIED") }
+    suspend fun pushAdvance(adv: AdvancePayment) {
+        getOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("advance_payments")?.child(adv.advanceId)?.setValue(adv)?.await()
+        }
+        notifyRealtimeChanged("AdvancePayment", "MODIFIED")
+    }
     /**
      * These three request types are intentionally accepted as Any.
      * Different project revisions keep these request models in different
@@ -1112,12 +1252,18 @@ class FirebaseSyncManager @Inject constructor(
     suspend fun pushRegularization(request: Any) {
         val id = extractStringId(request, "id") ?: return
         getOwnerRef()?.child("regularizations")?.child(id)?.setValue(request)?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("regularizations")?.child(id)?.setValue(request)?.await()
+        }
         notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", id)
     }
 
     suspend fun pushLeaveRequest(request: Any) {
         val id = extractStringId(request, "id") ?: return
         getOwnerRef()?.child("leave_requests")?.child(id)?.setValue(request)?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("leave_requests")?.child(id)?.setValue(request)?.await()
+        }
         notifyRealtimeChanged("LeaveRequest", "MODIFIED", id)
     }
 
@@ -1127,6 +1273,9 @@ class FirebaseSyncManager @Inject constructor(
             ?: return
 
         getOwnerRef()?.child("resignation_requests")?.child(id)?.setValue(request)?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("resignation_requests")?.child(id)?.setValue(request)?.await()
+        }
         notifyRealtimeChanged("ResignationRequest", "MODIFIED", id)
     }
 
@@ -1144,6 +1293,7 @@ class FirebaseSyncManager @Inject constructor(
         syncScope.launch {
             runCatching {
                 ref.child("salary_payments").child(p.paymentId).setValue(p).await()
+                runCatching { getAlternateOwnerRef()?.child("salary_payments")?.child(p.paymentId)?.setValue(p)?.await() }
                 notifyRealtimeChanged("SalaryPayment", "MODIFIED")
             }.onFailure {
                 Log.w("FirebaseSyncManager", "Salary payment write failed", it)
@@ -1151,7 +1301,11 @@ class FirebaseSyncManager @Inject constructor(
         }
     }
 
-    suspend fun pushHistory(hist: EmployeeHistory) { getOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await(); notifyRealtimeChanged("EmployeeHistory", "MODIFIED") }
+    suspend fun pushHistory(hist: EmployeeHistory) {
+        getOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await()
+        runCatching { getAlternateOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)?.await() }
+        notifyRealtimeChanged("EmployeeHistory", "MODIFIED")
+    }
 
     fun pushHistoryAtomic(hist: EmployeeHistory) {
         val ref = getOwnerRef()?.child("employee_history") ?: return
@@ -1172,17 +1326,26 @@ class FirebaseSyncManager @Inject constructor(
                     Log.w("FirebaseSyncManager", "Atomic history write did not commit: ${error?.message ?: "not committed"}")
                     return
                 }
-                // The realtime invalidation is emitted only after Firebase
-                // confirms the atomic transaction. This prevents another
-                // platform from reloading before the history write exists.
+                runCatching {
+                    getAlternateOwnerRef()?.child("employee_history")?.child(hist.historyId)?.setValue(hist)
+                }
                 notifyRealtimeChanged("EmployeeHistory", "MODIFIED")
             }
         })
     }
-    suspend fun pushClosedDay(day: ShopClosedDay) { getOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await(); notifyRealtimeChanged("ShopClosedDay", "MODIFIED") }
-    suspend fun pushReminder(reminder: Reminder) { getOwnerRef()?.child("reminders")?.child(reminder.reminderId)?.setValue(reminder)?.await(); notifyRealtimeChanged("Reminder", "MODIFIED") }
+    suspend fun pushClosedDay(day: ShopClosedDay) {
+        getOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await()
+        runCatching { getAlternateOwnerRef()?.child("shop_closed_days")?.child(day.id)?.setValue(day)?.await() }
+        notifyRealtimeChanged("ShopClosedDay", "MODIFIED")
+    }
+    suspend fun pushReminder(reminder: Reminder) {
+        getOwnerRef()?.child("reminders")?.child(reminder.reminderId)?.setValue(reminder)?.await()
+        runCatching { getAlternateOwnerRef()?.child("reminders")?.child(reminder.reminderId)?.setValue(reminder)?.await() }
+        notifyRealtimeChanged("Reminder", "MODIFIED")
+    }
     suspend fun pushProfile(profile: UserProfile) {
         getOwnerRef()?.child("user_profiles")?.child(profile.uid)?.setValue(profile)?.await()
+        runCatching { getAlternateOwnerRef()?.child("user_profiles")?.child(profile.uid)?.setValue(profile)?.await() }
         notifyRealtimeChanged("UserProfile", "MODIFIED")
         try { FirebaseFirestore.getInstance().collection("userProfiles").document(profile.uid).set(profile).await() } catch (_: Exception) {}
     }
@@ -1214,8 +1377,16 @@ class FirebaseSyncManager @Inject constructor(
             false
         }
     }
-    suspend fun pushRecycleBin(item: RecycleBinItem) { getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await(); notifyRealtimeChanged("RecycleBinItem", "MODIFIED") }
-    suspend fun pushAuditLog(log: AuditLog) { getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await(); notifyRealtimeChanged("AuditLog", "ADDED") }
+    suspend fun pushRecycleBin(item: RecycleBinItem) {
+        getOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await()
+        runCatching { getAlternateOwnerRef()?.child("recycle_bin")?.child(item.id)?.setValue(item)?.await() }
+        notifyRealtimeChanged("RecycleBinItem", "MODIFIED")
+    }
+    suspend fun pushAuditLog(log: AuditLog) {
+        getOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await()
+        runCatching { getAlternateOwnerRef()?.child("audit_logs")?.child(log.logId)?.setValue(log)?.await() }
+        notifyRealtimeChanged("AuditLog", "ADDED")
+    }
 
     /**
      * Publishes a mobile authentication event (login/logout/conflict) to the
@@ -1414,21 +1585,23 @@ class FirebaseSyncManager @Inject constructor(
 
         val ref = getOwnerRef()?.child("shift_schedules")?.child(record.scheduleId.toString()) ?: return false
         return try {
-            ref.setValue(
-                mapOf(
-                    "scheduleId" to record.scheduleId,
-                    "employeeId" to record.employeeId,
-                    "shiftDate" to record.shiftDate,
-                    "startTime" to record.startTime,
-                    "endTime" to record.endTime,
-                    "isRecurringPattern" to record.isRecurringPattern,
-                    "patternDurationDays" to record.patternDurationDays,
-                    "appliesToDayOfWeek" to record.appliesToDayOfWeek,
-                    "_entity" to "ShiftSchedule",
-                    "_key" to record.scheduleId.toString(),
-                    "_updatedUtc" to java.time.Instant.now().toString()
-                )
-            ).await()
+            val map = mapOf(
+                "scheduleId" to record.scheduleId,
+                "employeeId" to record.employeeId,
+                "shiftDate" to record.shiftDate,
+                "startTime" to record.startTime,
+                "endTime" to record.endTime,
+                "isRecurringPattern" to record.isRecurringPattern,
+                "patternDurationDays" to record.patternDurationDays,
+                "appliesToDayOfWeek" to record.appliesToDayOfWeek,
+                "_entity" to "ShiftSchedule",
+                "_key" to record.scheduleId.toString(),
+                "_updatedUtc" to java.time.Instant.now().toString()
+            )
+            ref.setValue(map).await()
+            runCatching {
+                getAlternateOwnerRef()?.child("shift_schedules")?.child(record.scheduleId.toString())?.setValue(map)?.await()
+            }
             notifyRealtimeChanged("ShiftSchedule", "MODIFIED", record.scheduleId.toString())
             true
         } catch (e: Exception) {
@@ -1533,21 +1706,25 @@ class FirebaseSyncManager @Inject constructor(
 
     suspend fun pushGeofenceRaw(id: String, value: Any?) {
         getOwnerRef()?.child("geofences")?.child(id)?.setValue(value)?.await()
+        runCatching { getAlternateOwnerRef()?.child("geofences")?.child(id)?.setValue(value)?.await() }
         notifyRealtimeChanged("Geofence", "MODIFIED")
     }
 
     suspend fun deleteGeofenceRaw(id: String) {
         getOwnerRef()?.child("geofences")?.child(id)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("geofences")?.child(id)?.removeValue()?.await() }
         notifyRealtimeChanged("Geofence", "DELETED")
     }
 
     suspend fun pushShiftRaw(id: String, value: Any?) {
         getOwnerRef()?.child("shift_schedules")?.child(id)?.setValue(value)?.await()
+        runCatching { getAlternateOwnerRef()?.child("shift_schedules")?.child(id)?.setValue(value)?.await() }
         notifyRealtimeChanged("Shift", "MODIFIED")
     }
 
     suspend fun deleteShiftRaw(id: String) {
         getOwnerRef()?.child("shift_schedules")?.child(id)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("shift_schedules")?.child(id)?.removeValue()?.await() }
         notifyRealtimeChanged("Shift", "DELETED")
     }
 
@@ -1556,6 +1733,7 @@ class FirebaseSyncManager @Inject constructor(
         updates.entries.chunked(300).forEach { chunk ->
             val chunkMap = chunk.associateBy({ it.key }) { it.value }
             ref.updateChildren(chunkMap).await()
+            runCatching { getAlternateOwnerRef()?.updateChildren(chunkMap)?.await() }
         }
         notifyRealtimeChanged("RecycleBinItem", "MODIFIED")
     }
@@ -1564,20 +1742,62 @@ class FirebaseSyncManager @Inject constructor(
         val ref = getOwnerRef() ?: return
         ref.child("monthly_snapshots").removeValue().await()
         ref.child("summaries").removeValue().await()
+        runCatching {
+            getAlternateOwnerRef()?.child("monthly_snapshots")?.removeValue()?.await()
+            getAlternateOwnerRef()?.child("summaries")?.removeValue()?.await()
+        }
         notifyRealtimeChanged("SalarySnapshot", "DELETED")
         notifyRealtimeChanged("DailySummary", "DELETED")
     }
 
     suspend fun clearTable(table: String) {
         getOwnerRef()?.child(table)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child(table)?.removeValue()?.await() }
         notifyRealtimeChanged(table, "DELETED")
     }
 
-    suspend fun deleteShop(shopId: String) { getOwnerRef()?.child("shops")?.child(shopId)?.removeValue()?.await(); notifyRealtimeChanged("Shop", "DELETED") }
-    suspend fun deleteAttendance(attendanceId: String) { getOwnerRef()?.child("attendance")?.child(attendanceId)?.removeValue()?.await(); notifyRealtimeChanged("Attendance", "DELETED") }
-    suspend fun deletePunch(punchId: String) { getOwnerRef()?.child("attendance_punches")?.child(punchId)?.removeValue()?.await(); notifyRealtimeChanged("AttendancePunch", "DELETED") }
-    suspend fun deleteAdvance(advanceId: String) { getOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await(); notifyRealtimeChanged("AdvancePayment", "DELETED") }
-    suspend fun deleteClosedDay(dayId: String) { getOwnerRef()?.child("shop_closed_days")?.child(dayId)?.removeValue()?.await(); notifyRealtimeChanged("ShopClosedDay", "DELETED") }
-    suspend fun deleteHistory(historyId: String) { getOwnerRef()?.child("employee_history")?.child(historyId)?.removeValue()?.await(); notifyRealtimeChanged("EmployeeHistory", "DELETED") }
-    suspend fun deleteRecycleBinItem(id: String) { getOwnerRef()?.child("recycle_bin")?.child(id)?.removeValue()?.await(); notifyRealtimeChanged("RecycleBinItem", "DELETED") }
+    suspend fun deleteShop(shopId: String) {
+        getOwnerRef()?.child("shops")?.child(shopId)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("shops")?.child(shopId)?.removeValue()?.await() }
+        notifyRealtimeChanged("Shop", "DELETED")
+    }
+    suspend fun deleteAttendance(attendanceId: String) {
+        getOwnerRef()?.child("attendance")?.child(attendanceId)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("attendance")?.child(attendanceId)?.removeValue()?.await() }
+        notifyRealtimeChanged("Attendance", "DELETED")
+    }
+    suspend fun deletePunch(punchId: String) {
+        getOwnerRef()?.child("attendance_punches")?.child(punchId)?.removeValue()?.await()
+        getOwnerRef()?.child("attendance")?.child(punchId)?.removeValue()?.await()
+        runCatching {
+            getAlternateOwnerRef()?.child("attendance_punches")?.child(punchId)?.removeValue()?.await()
+            getAlternateOwnerRef()?.child("attendance")?.child(punchId)?.removeValue()?.await()
+        }
+        notifyRealtimeChanged("AttendancePunch", "DELETED")
+    }
+    suspend fun deleteAdvance(advanceId: String) {
+        getOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("advance_payments")?.child(advanceId)?.removeValue()?.await() }
+        notifyRealtimeChanged("AdvancePayment", "DELETED")
+    }
+    suspend fun deleteLeaveRequest(id: String) {
+        getOwnerRef()?.child("leave_requests")?.child(id)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("leave_requests")?.child(id)?.removeValue()?.await() }
+        notifyRealtimeChanged("LeaveRequest", "DELETED", id)
+    }
+    suspend fun deleteClosedDay(dayId: String) {
+        getOwnerRef()?.child("shop_closed_days")?.child(dayId)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("shop_closed_days")?.child(dayId)?.removeValue()?.await() }
+        notifyRealtimeChanged("ShopClosedDay", "DELETED")
+    }
+    suspend fun deleteHistory(historyId: String) {
+        getOwnerRef()?.child("employee_history")?.child(historyId)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("employee_history")?.child(historyId)?.removeValue()?.await() }
+        notifyRealtimeChanged("EmployeeHistory", "DELETED")
+    }
+    suspend fun deleteRecycleBinItem(id: String) {
+        getOwnerRef()?.child("recycle_bin")?.child(id)?.removeValue()?.await()
+        runCatching { getAlternateOwnerRef()?.child("recycle_bin")?.child(id)?.removeValue()?.await() }
+        notifyRealtimeChanged("RecycleBinItem", "DELETED")
+    }
 }

@@ -11,6 +11,7 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import com.biometric.app.sync.ssot.FirebaseSsotSchema
 import javax.inject.Inject
@@ -83,21 +84,21 @@ class AttendancePolicyRepository @Inject constructor(
     }
 
     fun observe(): Flow<Policy> = callbackFlow {
+        // Emit Room-cached policy immediately as baseline
+        val initialPolicy = runCatching { readFromLocal() }.getOrDefault(Policy())
+        trySend(initialPolicy)
+
+        val roomJob = launch {
+            localSettingsDao.getCompanySettingsFlow().collect { cs ->
+                if (cs != null) {
+                    trySend(readFromLocal())
+                }
+            }
+        }
+
         val owner = ownerRef()
         if (owner == null) {
-            // Firebase owner UID not yet available (cold-start / session not ready).
-            // Emit the Room-cached policy immediately so geofence auto-punch works
-            // standalone without needing a Firebase session.
-            // IMPORTANT: Never call close() here — the flow MUST stay open so
-            // GeofenceAutoPunchCoordinator's stateIn(Eagerly) does not terminate
-            // the channel permanently.
-            val localPolicy = runCatching { readFromLocal() }.getOrDefault(Policy())
-            Log.d(TAG, "ownerRef null — emitting Room-cached policy: " +
-                "geoFence=${localPolicy.geoFencingEnabled}, " +
-                "autoPunch=${localPolicy.automaticGeofencePunchingEnabled}, " +
-                "radius=${localPolicy.geoRadiusMeters}")
-            trySend(localPolicy)
-            awaitClose()
+            awaitClose { roomJob.cancel() }
             return@callbackFlow
         }
 
@@ -105,6 +106,18 @@ class AttendancePolicyRepository @Inject constructor(
         val companyRef = owner.child("company_settings").child("1")
         var featureSnapshot: DataSnapshot? = null
         var companySnapshot: DataSnapshot? = null
+
+        val defaultOwner = FirebaseSsotSchema.DEFAULT_OWNER_UID
+        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+        val altUid = if (owner.key == defaultOwner) {
+            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
+        } else {
+            defaultOwner
+        }
+        val altCompanyRef = if (altUid != null) {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .reference.child("owners").child(altUid).child("company_settings").child("1")
+        } else null
 
         fun emitPolicy() {
             val f = featureSnapshot
@@ -122,17 +135,23 @@ class AttendancePolicyRepository @Inject constructor(
         }
         val companyListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                companySnapshot = snapshot
-                emitPolicy()
+                if (snapshot.exists()) {
+                    companySnapshot = snapshot
+                    emitPolicy()
+                }
             }
             override fun onCancelled(error: DatabaseError) = Unit
         }
 
         featureRef.addValueEventListener(featureListener)
         companyRef.addValueEventListener(companyListener)
+        altCompanyRef?.addValueEventListener(companyListener)
+
         awaitClose {
+            roomJob.cancel()
             featureRef.removeEventListener(featureListener)
             companyRef.removeEventListener(companyListener)
+            altCompanyRef?.removeEventListener(companyListener)
         }
     }.distinctUntilChanged()
 

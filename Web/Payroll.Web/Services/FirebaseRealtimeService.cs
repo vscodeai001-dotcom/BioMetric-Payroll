@@ -2208,8 +2208,15 @@ public sealed class FirebaseRealtimeService
             if (!ok) allOk = false;
         }
 
+        await DeletePathAsync($"owners/{cleanUid}/tracking", cancellationToken);
         await DeletePathAsync($"owner_events/{cleanUid}", cancellationToken);
         await DeletePathAsync("mobile_auth_events", cancellationToken);
+
+        if (cleanUid.Equals(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            await DeletePathAsync("tracking/live", cancellationToken);
+            await DeletePathAsync("tracking/sessions", cancellationToken);
+        }
 
         _logger.LogInformation("WipeOwnerOperationalDataOnlyAsync for owner {OwnerUid}: success={Success}", cleanUid, allOk);
         return allOk;
@@ -2272,8 +2279,15 @@ public sealed class FirebaseRealtimeService
             if (!ok) allOk = false;
         }
 
+        await DeletePathAsync($"owners/{cleanUid}/tracking", cancellationToken);
         await DeletePathAsync($"owner_events/{cleanUid}", cancellationToken);
         await DeletePathAsync("mobile_auth_events", cancellationToken);
+
+        if (cleanUid.Equals(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        {
+            await DeletePathAsync("tracking/live", cancellationToken);
+            await DeletePathAsync("tracking/sessions", cancellationToken);
+        }
 
         _logger.LogInformation("WipeOwnerAllDataAsync for owner {OwnerUid}: success={Success}", cleanUid, allOk);
         return allOk;

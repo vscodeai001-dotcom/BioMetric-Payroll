@@ -14,6 +14,7 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject FirebaseEmployeeManagementService FirebaseEmployees
 @inject FirebaseRealtimeService FirebaseRealtime
+@inject AttendanceRefreshService RefreshService
 @inject ILogger<LiveStaffLocationPanel> Logger
 
 <div class="live-staff-card card border-0 shadow-sm mb-4">
@@ -4350,6 +4351,24 @@ foreach (var point in ordered)
          */
         refreshCts = new CancellationTokenSource();
         _ = AutoRefresh(refreshCts.Token);
+
+        RefreshService.OnRefresh += HandleGlobalRefresh;
+    }
+
+    private void HandleGlobalRefresh(string? action)
+    {
+        if (action != null && (action.StartsWith("TENANT_DATA_WIPED", StringComparison.OrdinalIgnoreCase) ||
+                               action.StartsWith("COMPANY_DELETED", StringComparison.OrdinalIgnoreCase) ||
+                               action.Equals("GLOBAL_REFRESH", StringComparison.OrdinalIgnoreCase)))
+        {
+            _ = InvokeAsync(async () =>
+            {
+                await LoadEmployees();
+                locations.Clear();
+                await RefreshLocations();
+                StateHasChanged();
+            });
+        }
     }
 
     private async Task StreamFirebaseLiveLocationsAsync(
@@ -4617,8 +4636,11 @@ foreach (var point in ordered)
                     .ToList();
 
             employees.Clear();
-
             employees.AddRange(data);
+            if (employees.Count == 0)
+            {
+                locations.Clear();
+            }
         }
         catch (Exception ex)
         {
@@ -4661,6 +4683,14 @@ foreach (var point in ordered)
                     .Select(e => e.EmployeeID)
                     .ToHashSet();
 
+                if (validEmployeeIds.Count == 0)
+                {
+                    locations.Clear();
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
                 // Merge into dictionary: start with ALL current active employees
                 // so partial patch events from Firebase never wipe unmentioned employees.
                 var mergedByEmployee = locations.ToDictionary(x => x.EmployeeId);
@@ -4670,6 +4700,7 @@ foreach (var point in ordered)
                     JsonElement node)
                 {
                     if (employeeId <= 0 ||
+                        !validEmployeeIds.Contains(employeeId) ||
                         node.ValueKind != JsonValueKind.Object)
                         return;
 
@@ -4745,7 +4776,9 @@ foreach (var point in ordered)
                 }
 
                 var next =
-                    mergedByEmployee.Values.ToList();
+                    mergedByEmployee.Values
+                        .Where(x => validEmployeeIds.Contains(x.EmployeeId))
+                        .ToList();
 
                 var previousSignature = string.Join(
                     '|',
@@ -5146,6 +5179,15 @@ foreach (var point in ordered)
                 var validEmployeeIds =
                     employees.Select(e => e.EmployeeID).ToHashSet();
 
+                if (validEmployeeIds.Count == 0)
+                {
+                    locations.Clear();
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
                 var foundUnknownEmployee = false;
 
                 if (liveSnapshot.HasValue &&
@@ -5297,8 +5339,18 @@ foreach (var point in ordered)
                  * events still remove employees immediately through the
                  * authoritative lifecycle path.
                  */
+                if (validEmployeeIds.Count == 0)
+                {
+                    locations.Clear();
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
                 if (snapshot.Count == 0 &&
                     locations.Count > 0 &&
+                    validEmployeeIds.Count > 0 &&
                     lastKnownGoodLiveSnapshotAt != DateTime.MinValue &&
                     DateTime.UtcNow - lastKnownGoodLiveSnapshotAt < TimeSpan.FromSeconds(120))
                 {
@@ -5313,6 +5365,7 @@ foreach (var point in ordered)
                 locations.Clear();
                 locations.AddRange(
                     snapshot
+                        .Where(x => validEmployeeIds.Contains(x.EmployeeId))
                         .GroupBy(x => x.EmployeeId)
                         .Select(g => g
                             .OrderByDescending(x => x.LastUpdatedUtc)
@@ -7144,6 +7197,7 @@ foreach (var point in ordered)
             return;
 
         disposed = true;
+        RefreshService.OnRefresh -= HandleGlobalRefresh;
 
         /*
          * Stop UI timer.

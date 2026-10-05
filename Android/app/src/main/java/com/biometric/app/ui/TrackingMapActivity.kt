@@ -859,13 +859,15 @@ class TrackingMapActivity : MotionBaseActivity() {
         val mapView = binding.mapview
         val employeeData = sharedViewModel.allEmployees.value
         val firebaseEmployeeData = signalR.ownerEmployees.value
+        val validEmployeeIds = (employeeData.mapNotNull { it.employeeId.toIntOrNull() } + firebaseEmployeeData.keys).toSet()
+        val validLocations = if (validEmployeeIds.isEmpty()) emptyList() else locations.filter { it.employeeId in validEmployeeIds }
         val geoPoints = mutableListOf<GeoPoint>()
 
-        val liveCount = locations.count { getLocStatus(it) == "Live" }
-        val staleCount = locations.count { getLocStatus(it) == "Stale" }
-        val offlineCount = locations.count { getLocStatus(it) == "Offline" }
+        val liveCount = validLocations.count { getLocStatus(it) == "Live" }
+        val staleCount = validLocations.count { getLocStatus(it) == "Stale" }
+        val offlineCount = validLocations.count { getLocStatus(it) == "Offline" }
 
-        val outsideCount = locations.count { loc ->
+        val outsideCount = validLocations.count { loc ->
             if (officeLat != 0.0 && officeLon != 0.0 && officeRadiusMeters > 0) {
                 distanceMeters(
                     officeLat,
@@ -881,17 +883,40 @@ class TrackingMapActivity : MotionBaseActivity() {
         binding.tvLiveCount.text = "$liveCount Live"
         binding.tvOutsideCount.text = "$outsideCount Outside"
         binding.tvMapSync.text =
-            "Realtime • ${locations.size} sessions • ${staleCount} stale • ${offlineCount} offline"
+            "Realtime • ${validLocations.size} sessions • ${staleCount} stale • ${offlineCount} offline"
+
+        if (validEmployeeIds.isEmpty()) {
+            markers.keys.toList().forEach { id ->
+                mapView.overlays.remove(markers[id])
+                mapView.overlays.remove(roadLines[id])
+                mapView.overlays.remove(roadCasings[id])
+                mapView.overlays.remove(travelledRoadLines[id])
+                mapView.overlays.remove(travelledRoadCasings[id])
+                mapView.overlays.remove(collisionConnectors[id])
+                markers.remove(id)
+                roadLines.remove(id)
+                roadCasings.remove(id)
+                travelledRoadLines.remove(id)
+                travelledRoadCasings.remove(id)
+                collisionConnectors.remove(id)
+            }
+            binding.cardSelectedLocationRail.visibility = View.GONE
+            stopSelectedRailAutoScroll()
+            selectedAddressJob?.cancel()
+            selectedAddressEmployeeId = null
+            mapView.invalidate()
+            return
+        }
 
         // Intelligent co-location spatial clustering and non-overlapping pin fanning
         val clusterPositions = LocationClusterHelper.computeClusterPositions(
-            locations = locations,
+            locations = validLocations,
             officeLat = officeLat,
             officeLon = officeLon,
             officeRadiusMeters = officeRadiusMeters
         )
 
-        val currentIds = locations.map { it.employeeId }.toSet()
+        val currentIds = validLocations.map { it.employeeId }.toSet()
 
         if (followingEmployeeId != null && followingEmployeeId !in currentIds) {
             binding.cardSelectedLocationRail.visibility = View.GONE
@@ -915,11 +940,11 @@ class TrackingMapActivity : MotionBaseActivity() {
             collisionConnectors.remove(id)
         }
 
-        locations.forEach { loc ->
+        validLocations.forEach { loc ->
             val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
             val firebaseEmp = firebaseEmployeeData[loc.employeeId]
             
-            val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
+            val employeeName = emp?.name ?: firebaseEmp?.name ?: return@forEach
             val status = getLocStatus(loc)
 
             val matchesStatus = statusFilter == "All" || statusFilter == status

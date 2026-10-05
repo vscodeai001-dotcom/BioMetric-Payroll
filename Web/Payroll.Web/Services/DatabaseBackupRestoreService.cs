@@ -310,6 +310,25 @@ public sealed class DatabaseBackupRestoreService
                 "Firebase Cloud operational data wiped for tenant {TenantId}. Success={Success}",
                 targetTenantId, firebaseOk);
 
+            try
+            {
+                using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+                var empIds = await db.Employees
+                    .Where(e => e.TenantId == targetTenantId)
+                    .Select(e => e.EmployeeID)
+                    .ToListAsync(cancellationToken);
+                foreach (var empId in empIds)
+                {
+                    await _firebase.DeletePathAsync($"tracking/live/{empId}", cancellationToken);
+                    await _firebase.DeletePathAsync($"tracking/sessions/{empId}", cancellationToken);
+                }
+                await _firebase.DeletePathAsync($"owners/{targetTenantId}/tracking", cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to purge operational tracking paths for tenant {TenantId}", targetTenantId);
+            }
+
             // 3. Wipe SQLite database operational records strictly tied to this tenant's employees
             await WipeLocalOperationalDataForTenantAsync(targetTenantId, cancellationToken);
             _logger.LogInformation("Local SQLite operational data wiped for tenant {TenantId} (settings & employees preserved).", targetTenantId);
@@ -371,11 +390,34 @@ public sealed class DatabaseBackupRestoreService
             var safetyBackup = await CreateBackupAsync($"PreWipeSafety_{targetTenantId}", cancellationToken);
             safetyFileName = safetyBackup.FileName;
 
+            // Query existing employee IDs before local and cloud tables are wiped
+            List<int> empIds = new();
+            try
+            {
+                using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+                empIds = await db.Employees
+                    .Where(e => e.TenantId == targetTenantId)
+                    .Select(e => e.EmployeeID)
+                    .ToListAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to query employees for full wipe tracking purge in tenant {TenantId}", targetTenantId);
+            }
+
             // 2. Wipe Firebase Realtime Database operational + employee nodes for this tenant ONLY
             var firebaseOk = await _firebase.WipeOwnerAllDataAsync(targetTenantId, cancellationToken);
             _logger.LogInformation(
                 "Firebase Cloud all data wiped for tenant {TenantId}. Success={Success}",
                 targetTenantId, firebaseOk);
+
+            // Clean up tracking nodes in cloud
+            foreach (var empId in empIds)
+            {
+                await _firebase.DeletePathAsync($"tracking/live/{empId}", cancellationToken);
+                await _firebase.DeletePathAsync($"tracking/sessions/{empId}", cancellationToken);
+            }
+            await _firebase.DeletePathAsync($"owners/{targetTenantId}/tracking", cancellationToken);
 
             // 3. Wipe SQLite operational records AND employees for this tenant only
             await WipeLocalAllDataForTenantAsync(targetTenantId, cancellationToken);

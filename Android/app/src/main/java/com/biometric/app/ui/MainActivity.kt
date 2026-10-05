@@ -959,17 +959,31 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             val dashboardMap = b.adminMapView
             val employeeData = sharedViewModel.allEmployees.value
             val firebaseEmployeeData = signalR.ownerEmployees.value
+            val validEmployeeIds = (employeeData.mapNotNull { it.employeeId.toIntOrNull() } + firebaseEmployeeData.keys).toSet()
 
-            val liveOpCount = locations.count { getLocStatus(it) == "Live" }
-            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else (firebaseEmployeeData.size.takeIf { it > 0 } ?: locations.size.coerceAtLeast(1))
+            val totalCount = if (employeeData.isNotEmpty()) employeeData.size else firebaseEmployeeData.size
+            val validLocations = if (validEmployeeIds.isEmpty()) emptyList() else locations.filter { it.employeeId in validEmployeeIds }
+            val liveOpCount = validLocations.count { getLocStatus(it) == "Live" }
             b.tvAdminMapLiveCount.text = "$liveOpCount Live / $totalCount"
+
+            if (totalCount == 0 || validEmployeeIds.isEmpty()) {
+                markers.keys.toList().forEach { id ->
+                    dashboardMap.overlays.remove(markers[id]); markers.remove(id)
+                    dashboardMap.overlays.remove(roadLines[id]); roadLines.remove(id)
+                    dashboardMap.overlays.remove(roadCasings[id]); roadCasings.remove(id)
+                    dashboardMap.overlays.remove(collisionConnectors[id]); collisionConnectors.remove(id)
+                }
+                lastRenderedLiveSignature = ""
+                dashboardMap.invalidate()
+                return@let
+            }
 
             // Firebase can repeat the same parent snapshot. Avoid rebuilding
             // marker windows/routes and invalidating OSMDroid surface when
             // the visible state has not changed.
             val renderSignature = buildString {
                 append(statusFilter).append('|').append(currentGeofenceRadiusMeters).append('|').append(adminFollowingEmployeeId).append('|')
-                locations.sortedBy { it.employeeId }.forEach { loc ->
+                validLocations.sortedBy { it.employeeId }.forEach { loc ->
                     val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
                     val fEmp = firebaseEmployeeData[loc.employeeId]
                     append(loc.employeeId).append(':')
@@ -984,11 +998,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             if (renderSignature == lastRenderedLiveSignature) return@let
             lastRenderedLiveSignature = renderSignature
             val geoPoints = mutableListOf<GeoPoint>()
-            val currentIds = locations.map { it.employeeId }
+            val currentIds = validLocations.map { it.employeeId }
 
             // Intelligent co-location spatial clustering and non-overlapping pin fanning
             val clusterPositions = LocationClusterHelper.computeClusterPositions(
-                locations = locations,
+                locations = validLocations,
                 officeLat = officeMarker?.position?.latitude ?: 0.0,
                 officeLon = officeMarker?.position?.longitude ?: 0.0,
                 officeRadiusMeters = currentGeofenceRadiusMeters
@@ -1002,12 +1016,12 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 dashboardMap.overlays.remove(collisionConnectors[id]); collisionConnectors.remove(id)
             }
 
-            locations.forEach { loc ->
+            validLocations.forEach { loc ->
                 if (loc.employeeId <= 0) return@forEach
                 val emp = employeeData.find { it.employeeId == loc.employeeId.toString() }
                 val firebaseEmp = firebaseEmployeeData[loc.employeeId]
                 
-                val employeeName = emp?.name ?: firebaseEmp?.name ?: "Employee #${loc.employeeId}"
+                val employeeName = emp?.name ?: firebaseEmp?.name ?: return@forEach
                 val status = getLocStatus(loc)
                 val isFilteredOut = statusFilter != "All" && statusFilter != status
                 

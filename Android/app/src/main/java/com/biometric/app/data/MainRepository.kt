@@ -641,12 +641,12 @@ class MainRepository(
         if (existing != null) {
             regularizationDao.upsert(existing.copy(status = status, adminRemarks = remarks, syncState = 0))
             runCatching {
-                firebaseSync.getOwnerRef()?.child("regularizations")?.child(requestId)?.updateChildren(
-                    mapOf(
-                        "status" to status,
-                        "adminRemarks" to remarks
-                    )
+                val map = mapOf(
+                    "status" to status,
+                    "adminRemarks" to remarks
                 )
+                firebaseSync.getOwnerRef()?.child("regularizations")?.child(requestId)?.updateChildren(map)
+                firebaseSync.getAlternateOwnerRef()?.child("regularizations")?.child(requestId)?.updateChildren(map)
                 firebaseSync.notifyRealtimeChanged("AttendanceRegularization", "MODIFIED", requestId)
             }
         }
@@ -660,7 +660,16 @@ class MainRepository(
         val existing = localLeaveRequestDao.getAllFlow().first().find { it.id == requestId }
         if (existing != null) {
             localLeaveRequestDao.upsert(existing.copy(status = status, adminNotes = remarks, syncState = 0))
+            runCatching {
+                val map = mapOf(
+                    "status" to status,
+                    "adminNotes" to remarks
+                )
+                firebaseSync.getOwnerRef()?.child("leave_requests")?.child(requestId)?.updateChildren(map)
+                firebaseSync.getAlternateOwnerRef()?.child("leave_requests")?.child(requestId)?.updateChildren(map)
+                firebaseSync.notifyRealtimeChanged("LeaveRequest", "MODIFIED", requestId)
             }
+        }
     }
 
     suspend fun upsertLeaveRequests(requests: List<LeaveRequest>) = withContext(Dispatchers.IO) {
@@ -686,7 +695,7 @@ class MainRepository(
 
     suspend fun deleteLeaveRequest(requestId: String) = withContext(Dispatchers.IO) {
         localLeaveRequestDao.deleteById(requestId)
-        firebaseSync.getOwnerRef()?.child("leave_requests")?.child(requestId)?.removeValue()
+        firebaseSync.deleteLeaveRequest(requestId)
         notifyDataChanged()
     }
 
@@ -695,7 +704,16 @@ class MainRepository(
         val existing = localResignationRequestDao.getAllFlow().first().find { it.requestId == requestId }
         if (existing != null) {
             localResignationRequestDao.upsert(existing.copy(status = status, adminRemarks = remarks, syncState = 0))
+            runCatching {
+                val map = mapOf(
+                    "status" to status,
+                    "adminRemarks" to remarks
+                )
+                firebaseSync.getOwnerRef()?.child("resignation_requests")?.child(requestId)?.updateChildren(map)
+                firebaseSync.getAlternateOwnerRef()?.child("resignation_requests")?.child(requestId)?.updateChildren(map)
+                firebaseSync.notifyRealtimeChanged("ResignationRequest", "MODIFIED", requestId)
             }
+        }
     }
 
     fun getAdvanceRecords(employeeId: String, start: Long, end: Long): Flow<List<AdvancePayment>> = allAdvancesFlow

@@ -376,6 +376,10 @@ namespace Payroll.Web.Services
                         ["workDayCutoffHour"] = request.WorkDayCutoffHour
                     };
                     await _firebase.SetAsync($"owners/{tenant.TenantId}/company_settings/1", companyPayload, default);
+                    if (!string.Equals(tenant.TenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _firebase.SetAsync($"owners/{Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid}/company_settings/1", companyPayload, default);
+                    }
                 }
                 catch (Exception fbEx)
                 {
@@ -769,6 +773,47 @@ namespace Payroll.Web.Services
                 _logger.LogInformation("SuperAdmin {UserEmail} initiated permanent deletion of company {CompanyName} ({TenantId})",
                     currentUserEmail, companyName, effectiveTenantId);
 
+                // Fetch employee IDs before deletion to purge their tracking nodes
+                var employeeIds = await db.Employees
+                    .Where(e => e.TenantId == effectiveTenantId || (effectiveTenantId == TenantContextService.DefaultTenantId && (e.TenantId == null || e.TenantId == "" || e.TenantId == TenantContextService.DefaultTenantId)))
+                    .Select(e => e.EmployeeID)
+                    .ToListAsync(ct);
+
+                // Broadcast wipe event to Android before deleting the owner node
+                try
+                {
+                    await _firebase.SetOwnerRecordAsync(effectiveTenantId, "system_events", "wipe", new
+                    {
+                        wipeType = "FULL",
+                        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        tenantId = effectiveTenantId,
+                        source = "WebAdminCompanyDelete"
+                    }, ct);
+                }
+                catch { }
+
+                // Purge tracking for these employees from Firebase Realtime Database
+                try
+                {
+                    foreach (var empId in employeeIds)
+                    {
+                        await _firebase.DeletePathAsync($"tracking/live/{empId}", ct);
+                        await _firebase.DeletePathAsync($"tracking/sessions/{empId}", ct);
+                    }
+                    await _firebase.DeletePathAsync($"owners/{effectiveTenantId}/tracking", ct);
+
+                    if (string.Equals(effectiveTenantId, TenantContextService.DefaultTenantId, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(effectiveTenantId, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _firebase.DeletePathAsync("tracking/live", ct);
+                        await _firebase.DeletePathAsync("tracking/sessions", ct);
+                    }
+                }
+                catch (Exception trackEx)
+                {
+                    _logger.LogWarning(trackEx, "Tracking purge completed with warnings for {TenantId}", effectiveTenantId);
+                }
+
                 // 2. Cloud Wipe: Permanently delete entire company tree from Firebase Realtime Database
                 try
                 {
@@ -784,11 +829,6 @@ namespace Payroll.Web.Services
                 }
 
                 // 3. Local SQLite Wipe: Purge all operational and employee data tied to this tenant
-                var employeeIds = await db.Employees
-                    .Where(e => e.TenantId == effectiveTenantId || (effectiveTenantId == TenantContextService.DefaultTenantId && (e.TenantId == null || e.TenantId == "" || e.TenantId == TenantContextService.DefaultTenantId)))
-                    .Select(e => e.EmployeeID)
-                    .ToListAsync(ct);
-
                 if (employeeIds.Count > 0)
                 {
                     var idList = string.Join(",", employeeIds);

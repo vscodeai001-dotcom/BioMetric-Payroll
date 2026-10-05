@@ -114,10 +114,12 @@ class PunchCorrectionApprovalActivity : MotionBaseActivity() {
             val mergedItems = mutableListOf<PendingCorrectionUiModel>()
             val seenKeys = mutableSetOf<String>()
 
-            // 1. Attempt to fetch pending punches from backend API
+            // 1. Attempt to fetch pending punches from backend API (with short timeout so offline is instant)
             try {
-                val response = api.adminPendingPunches(auth())
-                if (response.isSuccessful) {
+                val response = kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                    api.adminPendingPunches(auth())
+                }
+                if (response?.isSuccessful == true) {
                     response.body().orEmpty().forEach { dto ->
                         val key = "api_${dto.id}"
                         if (seenKeys.add(key)) {
