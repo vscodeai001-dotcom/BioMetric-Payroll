@@ -50,14 +50,22 @@ class TrackingWindowResolver @Inject constructor(
     }
 
     suspend fun resolve(now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())): Window {
-        val employeeId = sessionStore.employeeId()
-        val emp = if (employeeId > 0) employeeDao.getById(employeeId.toString()) else null
+        return resolveForEmployee(sessionStore.employeeId(), now)
+    }
+
+    suspend fun resolveForEmployee(
+        targetEmployeeId: Int,
+        now: LocalDateTime = LocalDateTime.now(ZoneId.systemDefault())
+    ): Window {
+        val emp = if (targetEmployeeId > 0) employeeDao.getById(targetEmployeeId.toString()) else null
         val profileMode = emp?.trackingMode?.trim()?.uppercase()
 
-        val prefMode = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_TRACKING_MODE, null)
-            ?.trim()
-            ?.uppercase()
+        val prefMode = if (targetEmployeeId == sessionStore.employeeId()) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_TRACKING_MODE, null)
+                ?.trim()
+                ?.uppercase()
+        } else null
 
         val mode = when {
             profileMode == "SHIFT" || profileMode == "SHIFT_TIME" || profileMode == "SHIFT_ONLY" -> MODE_SHIFT
@@ -67,14 +75,17 @@ class TrackingWindowResolver @Inject constructor(
         }
 
         return when (mode) {
-            MODE_SHIFT -> resolveShift(now)
+            MODE_SHIFT -> resolveShift(targetEmployeeId, now, emp)
             MODE_CUSTOM -> resolveCustom(now)
             else -> Window(true, MODE_24_7, source = "24/7")
         }
     }
 
-    private suspend fun resolveShift(now: LocalDateTime): Window {
-        val employeeId = sessionStore.employeeId()
+    private suspend fun resolveShift(
+        employeeId: Int,
+        now: LocalDateTime,
+        emp: com.biometric.app.data.entity.LocalEmployee?
+    ): Window {
         if (employeeId <= 0) return Window(false, MODE_SHIFT, source = "NO_EMPLOYEE")
 
         val today = now.toLocalDate()
@@ -131,7 +142,32 @@ class TrackingWindowResolver @Inject constructor(
         if (active != null) return active
 
         val next = candidates.firstOrNull { it.start != null && it.start.isAfter(now) }
-        return Window(false, MODE_SHIFT, next?.start, next?.end, if (candidates.isEmpty()) "NO_SHIFT" else "OUTSIDE_SHIFT")
+        if (next != null) {
+            return Window(false, MODE_SHIFT, next.start, next.end, "OUTSIDE_SHIFT")
+        }
+
+        // Fallback to employee profile shift if no shift_schedules exist
+        if (emp != null && emp.shiftStart.isNotBlank() && emp.shiftEnd.isNotBlank()) {
+            val start = parseTime(emp.shiftStart)
+            val end = parseTime(emp.shiftEnd)
+            if (start != null && end != null) {
+                val startDateTime = LocalDateTime.of(today, start)
+                val endDateTime = LocalDateTime.of(
+                    if (!end.isAfter(start)) today.plusDays(1) else today,
+                    end
+                )
+                val isActive = !now.isBefore(startDateTime) && now.isBefore(endDateTime)
+                return Window(
+                    isActive,
+                    MODE_SHIFT,
+                    startDateTime,
+                    endDateTime,
+                    if (isActive) "EMPLOYEE_PROFILE_SHIFT" else "OUTSIDE_SHIFT"
+                )
+            }
+        }
+
+        return Window(false, MODE_SHIFT, null, null, if (candidates.isEmpty()) "NO_SHIFT" else "OUTSIDE_SHIFT")
     }
 
     private fun resolveCustom(now: LocalDateTime): Window {

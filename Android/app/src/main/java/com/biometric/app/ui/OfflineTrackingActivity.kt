@@ -26,6 +26,7 @@ import com.biometric.app.data.dao.OfflineTrackingEventDao
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.LocalAttendancePunch
 import com.biometric.app.data.entity.OfflineTrackingEvent
+import com.biometric.app.domain.location.GeofenceAutoPunchCoordinator
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.OfflineTrackingMonitor
 import com.biometric.app.sync.SignalRManager
@@ -872,7 +873,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     localConverted
                 }
 
-                val empPeriods = buildOfflinePeriods(combinedPoints, localEvents, empId, empName, allLocalPunches)
+                val empProfile = activeEmployees.firstOrNull { it.employeeId == empId.toString() }
+                val empPeriods = buildOfflinePeriods(combinedPoints, localEvents, empId, empName, allLocalPunches, empProfile)
                 allPeriods.addAll(empPeriods)
 
                 val liveLoc = signalR.liveLocations.value[empId]
@@ -913,7 +915,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 }
             } else {
                 // All Employees Overview
-                val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device", allLocalPunches)
+                val myProfile = activeEmployees.firstOrNull { it.employeeId == sessionStore.employeeId().toString() }
+                val localPeriods = buildOfflinePeriods(localRecent, localEvents, sessionStore.employeeId(), empNameMap[sessionStore.employeeId()] ?: "This Device", allLocalPunches, myProfile)
                 allPeriods.addAll(localPeriods)
 
                 val sortedPeriods = allPeriods.distinctBy { it.id }.sortedByDescending { it.startTime }
@@ -972,7 +975,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         events: List<OfflineTrackingEvent>,
         employeeId: Int,
         employeeName: String,
-        localPunches: List<LocalAttendancePunch> = emptyList()
+        localPunches: List<LocalAttendancePunch> = emptyList(),
+        employeeProfile: Employee? = null
     ): List<OfflinePeriodItem> {
         val sorted = locations.sortedBy { it.timestamp }
         if (sorted.isEmpty()) return emptyList()
@@ -1003,6 +1007,15 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             clusters.add(curCluster)
         }
 
+        val tz = TimeZone.getTimeZone("Asia/Kolkata")
+        val timeFmt = SimpleDateFormat("HH:mm", Locale.US).apply { timeZone = tz }
+        val punchFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
+
+        val trackingMode = employeeProfile?.trackingMode?.trim()?.uppercase() ?: "24/7"
+        val isShiftMode = trackingMode == "SHIFT" || trackingMode == "SHIFT_TIME" || trackingMode == "SHIFT_ONLY"
+        val shiftStartStr = employeeProfile?.shiftStart?.trim().orEmpty()
+        val shiftEndStr = employeeProfile?.shiftEnd?.trim().orEmpty()
+
         for (c in clusters) {
             if (c.isEmpty()) continue
             val first = c.first()
@@ -1017,6 +1030,29 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 )
             }
             val duration = (last.timestamp - first.timestamp).coerceAtLeast(60_000L)
+
+            // Shift vs 24/7 evaluation
+            var isOffShift = false
+            var shiftTag = if (isShiftMode) "Active Shift Disconnection" else "24/7 Active Tracking"
+            if (isShiftMode && shiftStartStr.isNotBlank() && shiftEndStr.isNotBlank()) {
+                val startHour = timeFmt.format(Date(first.timestamp))
+                val inShift = isTimeBetween(startHour, shiftStartStr, shiftEndStr)
+                if (!inShift) {
+                    isOffShift = true
+                    shiftTag = "Off-Duty / Non-Shift Gap"
+                }
+            }
+
+            // Attendance state just before this gap
+            val priorPunches = localPunches.filter { p ->
+                val pStaffId = p.staffId.toIntOrNull() ?: 0
+                (pStaffId == employeeId || employeeId == 0 || p.staffId == employeeId.toString()) &&
+                    p.timestamp < first.timestamp
+            }.sortedBy { it.timestamp }
+            val lastPrior = priorPunches.lastOrNull()
+            val priorState = if (lastPrior != null) {
+                if (GeofenceAutoPunchCoordinator.isCheckInType(lastPrior.type)) "IN" else "OUT"
+            } else "OUT"
 
             val relatedEvent = events.firstOrNull {
                 abs(it.eventTime - first.timestamp) < 30 * 60 * 1000L &&
@@ -1034,15 +1070,23 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 (pStaffId == employeeId || employeeId == 0 || p.staffId == employeeId.toString()) &&
                         p.timestamp >= (first.timestamp - 120_000L) &&
                         p.timestamp <= (last.timestamp + 120_000L)
-            }.map { p ->
+            }.sortedBy { it.timestamp }.map { p ->
                 val isOutside = if (officeLat != 0.0 && officeLng != 0.0 && p.latitude != 0.0) {
                     calculateDistance(p.latitude, p.longitude, officeLat, officeLng) > officeRadiusMeters
                 } else false
+
+                val changeDetail = when {
+                    p.type.equals("OUT", ignoreCase = true) -> "Exited ${officeRadiusMeters}m radius → Shift Closed"
+                    p.type.equals("IN", ignoreCase = true) -> "Entered ${officeRadiusMeters}m radius → Shift Opened"
+                    else -> "Attendance Punch Recorded"
+                }
+
                 OfflinePunchInfo(
                     type = p.type,
                     timestamp = p.timestamp,
                     isSynced = p.syncState == 1,
-                    isOutside = isOutside
+                    isOutside = isOutside,
+                    changeDetail = changeDetail
                 )
             }
 
@@ -1050,6 +1094,34 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 c.count { calculateDistance(it.latitude, it.longitude, officeLat, officeLng) <= officeRadiusMeters }
             } else {
                 c.count { it.accuracy > 0 }
+            }
+
+            val isSynced = c.all { it.syncState == LocalLocation.SYNCED || it.syncState == LocalLocation.FIREBASE_SYNCED }
+
+            val liveImpact = when {
+                punchesInGap.isNotEmpty() -> {
+                    val punchDetails = punchesInGap.joinToString(", ") { p ->
+                        val timeStr = punchFmt.format(Date(p.timestamp))
+                        "${p.type.uppercase()} at $timeStr (${if (p.type.equals("OUT", true)) "Exited radius → Closed shift" else "Entered radius → Opened shift"})"
+                    }
+                    if (isSynced) {
+                        "Live Attendance Updated: $punchDetails • Successfully merged into live ledger"
+                    } else {
+                        "Pending Local Reconcile: $punchDetails • Queued on device"
+                    }
+                }
+                isOffShift -> {
+                    "Off-Duty Window: Outside scheduled shift ($shiftStartStr - $shiftEndStr) • Tracking idle, no attendance punch created"
+                }
+                priorState == "IN" && inRadiusCount > 0 -> {
+                    "Stationary / Active Inside: Remained inside ${officeRadiusMeters}m radius • Active shift remained IN (No punch created)"
+                }
+                priorState == "OUT" -> {
+                    "Stationary / Moving Outside: Stayed outside ${officeRadiusMeters}m radius • Attendance remained OUT (No punch created)"
+                }
+                else -> {
+                    "No Attendance State Changes: ${c.size} breadcrumbs captured • Reconciled to live route"
+                }
             }
 
             result.add(
@@ -1064,14 +1136,37 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     pointsCount = c.size,
                     distanceMeters = dist,
                     inRadiusCount = inRadiusCount,
-                    isSynced = c.all { it.syncState == LocalLocation.SYNCED || it.syncState == LocalLocation.FIREBASE_SYNCED },
+                    isSynced = isSynced,
                     points = c,
-                    punches = punchesInGap
+                    punches = punchesInGap,
+                    isOffShift = isOffShift,
+                    shiftTag = shiftTag,
+                    liveImpactSummary = liveImpact,
+                    priorState = priorState
                 )
             )
         }
 
         return result
+    }
+
+    private fun isTimeBetween(currentTime: String, startTime: String, endTime: String): Boolean {
+        val cur = parseTimeMinutes(currentTime) ?: return false
+        val start = parseTimeMinutes(startTime) ?: return false
+        val end = parseTimeMinutes(endTime) ?: return false
+        return if (end >= start) {
+            cur in start..end
+        } else {
+            cur >= start || cur <= end
+        }
+    }
+
+    private fun parseTimeMinutes(timeStr: String): Int? {
+        val parts = timeStr.trim().split(":")
+        if (parts.size < 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        return h * 60 + m
     }
 
     private fun buildJourneyTimeline(
@@ -1115,13 +1210,18 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         for (period in offlinePeriods) {
             val distText = if (period.distanceMeters >= 1000) String.format(Locale.US, "%.1f km", period.distanceMeters / 1000.0) else "${period.distanceMeters.toInt()}m"
             val syncLabel = if (period.isSynced) "✓ Reconciled & Synced to Cloud" else "⏳ Queued in Local Memory"
+            val badgeLabel = if (period.isOffShift) "OFF-DUTY GAP" else "OFFLINE GAP"
+            val punchSummary = if (period.punches.isNotEmpty()) {
+                val pStr = period.punches.joinToString(", ") { p -> "${p.type.uppercase()} at ${formatTimeOnly(p.timestamp)} (${p.changeDetail})" }
+                "Punches: $pStr • "
+            } else ""
             steps.add(
                 TimelineStepItem(
                     time = period.startTime,
                     icon = if (period.reason.contains("airplane", true)) "✈️" else "📴",
-                    badge = "OFFLINE GAP",
-                    title = "Offline Disconnection: ${period.reason}",
-                    description = "Duration: ${formatDuration(period.durationMs)} • ${period.pointsCount} points captured offline ($distText traveled)",
+                    badge = badgeLabel,
+                    title = "Offline Disconnection: ${period.reason} [${period.shiftTag}]",
+                    description = "${punchSummary}Duration: ${formatDuration(period.durationMs)} • ${period.pointsCount} points captured offline ($distText traveled)\n${period.liveImpactSummary}",
                     syncStatus = syncLabel,
                     isSuccess = false
                 )
@@ -1133,7 +1233,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                         icon = "🔄",
                         badge = "RECONCILED",
                         title = "Connection Restored & Reconciled",
-                        description = "Network returned at ${formatTimeOnly(period.endTime)} • ${period.pointsCount} offline points uploaded to Cloud",
+                        description = "Network returned at ${formatTimeOnly(period.endTime)} • ${period.pointsCount} offline points merged into Live\n${period.liveImpactSummary}",
                         syncStatus = "✓ Integrated into Live Route",
                         isSuccess = true
                     )
@@ -1537,7 +1637,8 @@ data class OfflinePunchInfo(
     val type: String,
     val timestamp: Long,
     val isSynced: Boolean = true,
-    val isOutside: Boolean = false
+    val isOutside: Boolean = false,
+    val changeDetail: String = ""
 )
 
 data class OfflinePeriodItem(
@@ -1553,7 +1654,11 @@ data class OfflinePeriodItem(
     val inRadiusCount: Int,
     val isSynced: Boolean,
     val points: List<LocalLocation>,
-    val punches: List<OfflinePunchInfo> = emptyList()
+    val punches: List<OfflinePunchInfo> = emptyList(),
+    val isOffShift: Boolean = false,
+    val shiftTag: String = "Active Shift Disconnection",
+    val liveImpactSummary: String = "",
+    val priorState: String = "OUT"
 )
 
 data class TimelineStepItem(
@@ -1784,6 +1889,7 @@ private class OfflinePeriodAdapter(
     override fun getItemCount(): Int = items.size
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
+        private val tvShiftTag = view.findViewById<TextView>(R.id.tvPeriodShiftTag)
         private val tvTitle = view.findViewById<TextView>(R.id.tvPeriodTitle)
         private val tvWindow = view.findViewById<TextView>(R.id.tvPeriodWindow)
         private val tvDuration = view.findViewById<TextView>(R.id.tvPeriodDuration)
@@ -1802,6 +1908,15 @@ private class OfflinePeriodAdapter(
 
             tvTitle.text = if (item.employeeName.isNotBlank()) item.employeeName else "Employee #${item.employeeId}"
             tvWindow.text = "Disconnected: ${fmt.format(Date(item.startTime))} → Reconnected: ${timeFmt.format(Date(item.endTime))} IST"
+
+            tvShiftTag.text = item.shiftTag
+            if (item.isOffShift) {
+                tvShiftTag.setTextColor(Color.parseColor("#616161"))
+                tvShiftTag.setBackgroundColor(Color.parseColor("#EEEEEE"))
+            } else {
+                tvShiftTag.setTextColor(Color.parseColor("#E65100"))
+                tvShiftTag.setBackgroundColor(Color.parseColor("#FFF3E0"))
+            }
 
             val mins = item.durationMs / 60000
             val secs = (item.durationMs % 60000) / 1000
@@ -1823,27 +1938,33 @@ private class OfflinePeriodAdapter(
 
             // Punches taken during the offline period:
             if (item.punches.isNotEmpty()) {
-                val punchText = item.punches.joinToString("  •  ") { p ->
+                val punchText = item.punches.joinToString("\n") { p ->
                     val icon = if (p.type.equals("OUT", ignoreCase = true)) "🔴" else "🟢"
                     val syncLabel = if (p.isSynced) "Synced to Live" else "Pending Local"
-                    "$icon ${p.type.uppercase()} Punch at ${punchFmt.format(Date(p.timestamp))} ($syncLabel)"
+                    val detail = if (p.changeDetail.isNotBlank()) " • ${p.changeDetail}" else ""
+                    "$icon ${p.type.uppercase()} Punch at ${punchFmt.format(Date(p.timestamp))} ($syncLabel)$detail"
                 }
                 tvPunches.text = punchText
-                tvPunches.setTextColor(Color.parseColor("#2E7D32"))
+                tvPunches.setTextColor(Color.parseColor("#1B5E20"))
             } else {
-                tvPunches.text = "No attendance punches taken during this gap"
+                tvPunches.text = if (item.isOffShift) {
+                    "Off-Duty Window • Tracking paused (No punches taken)"
+                } else {
+                    "No attendance punches taken during this gap (Maintained previous state: ${item.priorState})"
+                }
                 tvPunches.setTextColor(Color.parseColor("#757575"))
             }
 
             // How gap was reconciled to live data:
-            if (item.isSynced) {
-                val punchNote = if (item.punches.isNotEmpty()) "${item.punches.size} punch(es) reconciled & " else ""
-                tvLiveImpact.text = "Live Data Impact: ${punchNote}${item.pointsCount} offline breadcrumbs uploaded to cloud upon reconnection"
-                tvLiveImpact.setTextColor(Color.parseColor("#1565C0"))
-            } else {
-                tvLiveImpact.text = "Live Data Impact: Pending sync - ${item.pointsCount} breadcrumbs and punches stored in local queue"
-                tvLiveImpact.setTextColor(Color.parseColor("#E65100"))
+            tvLiveImpact.text = item.liveImpactSummary.ifBlank {
+                if (item.isSynced) {
+                    val punchNote = if (item.punches.isNotEmpty()) "${item.punches.size} punch(es) reconciled & " else ""
+                    "Live Data Impact: ${punchNote}${item.pointsCount} offline breadcrumbs uploaded to cloud upon reconnection"
+                } else {
+                    "Live Data Impact: Pending sync - ${item.pointsCount} breadcrumbs and punches stored in local queue"
+                }
             }
+            tvLiveImpact.setTextColor(if (item.punches.isNotEmpty()) Color.parseColor("#1565C0") else Color.parseColor("#424242"))
 
             val distText = if (item.distanceMeters >= 1000) {
                 String.format(Locale.US, "%.2f km", item.distanceMeters / 1000.0)

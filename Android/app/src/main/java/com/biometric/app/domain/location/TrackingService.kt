@@ -600,10 +600,13 @@ else if (locationUpdatesStarted) {
 
         // Industry standard GPS logging throttles (preserves Spark plan & eliminates route playback duplicates):
         // 1. Initial point of session -> always record
-        // 2. Normal displacement: >= 60s elapsed AND moved >= 10m
-        // 3. Significant displacement: >= 30s elapsed AND moved >= 25m
-        // 4. Stationary heartbeat: >= 300s (5 minutes) elapsed
+        // 2. Offline recording: high-fidelity local capture (>= 15s or moved >= 5m) so zero data loss when offline
+        // 3. Normal displacement: >= 60s elapsed AND moved >= 10m
+        // 4. Significant displacement: >= 30s elapsed AND moved >= 25m
+        // 5. Stationary heartbeat: >= 300s (5 minutes) elapsed
+        val isOnline = offlineMonitor.isOnline()
         val isHistoryDue = prevHistory == null ||
+            (!isOnline && (timeSinceLastHistory >= 15_000L || distSinceLastHistory >= 5f)) ||
             (timeSinceLastHistory >= 60_000L && distSinceLastHistory >= 10f) ||
             (timeSinceLastHistory >= 30_000L && distSinceLastHistory >= 25f) ||
             (timeSinceLastHistory >= 300_000L)

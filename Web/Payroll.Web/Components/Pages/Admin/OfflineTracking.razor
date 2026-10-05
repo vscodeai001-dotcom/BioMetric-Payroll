@@ -94,8 +94,8 @@
                                 <th>Employee</th>
                                 <th>Offline Started</th>
                                 <th>Reconnected</th>
-                                <th>Duration</th>
-                                <th>Offline Attendance Punches</th>
+                                <th>Duration & Mode</th>
+                                <th>Changes Made to Live Attendance</th>
                                 <th>GPS Breadcrumbs</th>
                                 <th>Live Data Reconciliation</th>
                                 <th class="text-end">Inspect</th>
@@ -120,6 +120,16 @@
                                 </td>
                                 <td>
                                     <span class="badge bg-dark-subtle text-dark">@FormatAge(period.Duration)</span>
+                                    <div class="mt-1">
+                                        @if (period.IsOffShift)
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary border">@period.ShiftTag</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">@period.ShiftTag</span>
+                                        }
+                                    </div>
                                 </td>
                                 <td>
                                     @if (period.Punches.Any())
@@ -129,15 +139,18 @@
                                         {
                                             var isOut = p.Type.Equals("OUT", StringComparison.OrdinalIgnoreCase);
                                             <span class="badge @(isOut ? "bg-danger-subtle text-danger border border-danger-subtle" : "bg-success-subtle text-success border border-success-subtle") text-start">
-                                                @(isOut ? "🔴 OUT Punch" : "🟢 IN Punch"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt")
-                                                <small class="d-block fw-normal text-muted">(Recorded Offline on Device)</small>
+                                                @(isOut ? "🔴 OUT Punch Added" : "🟢 IN Punch Added"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt")
+                                                <small class="d-block fw-normal text-muted">@p.ChangeDetail</small>
                                             </span>
                                         }
                                         </div>
                                     }
                                     else
                                     {
-                                        <span class="small text-muted"><i class="bi bi-dash-circle me-1"></i>No punches taken</span>
+                                        <div class="small text-muted">
+                                            <i class="bi bi-shield-check text-secondary me-1"></i>
+                                            @period.LiveImpactSummary
+                                        </div>
                                     }
                                 </td>
                                 <td>
@@ -156,10 +169,10 @@
                                         <div>
                                             <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled to Live</span>
                                             <div class="small text-primary mt-1">
-                                                <i class="bi bi-cloud-arrow-up me-1"></i>Pushed from local to live upon reconnection
+                                                <i class="bi bi-cloud-arrow-up me-1"></i>Pushed from mobile to live upon reconnection
                                                 @if (period.Punches.Any())
                                                 {
-                                                    <span>(@period.Punches.Count punches & @period.PointCount points merged)</span>
+                                                    <div class="fw-semibold text-success">(@period.Punches.Count punches added & @period.PointCount points merged)</div>
                                                 }
                                             </div>
                                         </div>
@@ -282,14 +295,9 @@
             var employeeList = (await FirebaseEmployees.GetEmployeesAsync())
                 .Where(e => !e.IsDeleted)
                 .OrderBy(e => e.Name)
-                .Select(e => new { e.EmployeeID, e.Name })
                 .ToList();
 
-            // This page is specifically an OFFLINE tracking investigation view.
-            // Do not populate it with employees who have no offline GPS evidence.
-
-            // GPS capture metadata is already represented by the migration.
-            // Keep the query read-only so this page never changes existing data.
+            var employeeMap = employeeList.ToDictionary(x => x.EmployeeID);
             var employeeNames = employeeList.ToDictionary(x => x.EmployeeID, x => x.Name);
             offlineSyncRows = await db.EmployeeLocationHistory.AsNoTracking()
                 .Where(point => point.CaptureSource == "OfflineSync" &&
@@ -314,7 +322,7 @@
 
             offlineSyncRows.Reverse();
             CalculateOfflineMovement();
-            BuildOfflinePeriods(todayPunches);
+            BuildOfflinePeriods(todayPunches, employeeMap);
 
             var trackedEmployees = employeeList;
 
@@ -483,13 +491,16 @@
     private static string FormatDistance(double m) => m >= 1000 ? $"{m / 1000:F2} km" : $"{m:F0} m";
     private static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"));
 
-    private void BuildOfflinePeriods(List<AttendanceLog> todayPunches)
+    private void BuildOfflinePeriods(List<AttendanceLog> todayPunches, Dictionary<int, Employee> employeeMap)
     {
         offlinePeriods.Clear();
         if (offlineSyncRows.Count == 0) return;
 
         foreach (var group in offlineSyncRows.GroupBy(x => x.EmployeeId))
         {
+            var empId = group.Key;
+            employeeMap.TryGetValue(empId, out var empProfile);
+
             var cluster = new List<OfflineSyncRow>();
             OfflineSyncRow? last = null;
 
@@ -499,7 +510,7 @@
                 {
                     if (cluster.Any())
                     {
-                        offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches));
+                        offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches, empProfile));
                         cluster = new List<OfflineSyncRow>();
                     }
                 }
@@ -509,14 +520,14 @@
 
             if (cluster.Any())
             {
-                offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches));
+                offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches, empProfile));
             }
         }
 
         offlinePeriods = offlinePeriods.OrderByDescending(x => x.StartUtc).ToList();
     }
 
-    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster, List<AttendanceLog> todayPunches)
+    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster, List<AttendanceLog> todayPunches, Employee? empProfile)
     {
         var first = cluster.First();
         var last = cluster.Last();
@@ -525,6 +536,39 @@
         {
             dist += CalculateDistanceMeters(cluster[i - 1].Latitude, cluster[i - 1].Longitude, cluster[i].Latitude, cluster[i].Longitude);
         }
+
+        var isShiftMode = (empProfile?.TrackingMode ?? "24/7").Trim().Equals("SHIFT", StringComparison.OrdinalIgnoreCase) ||
+                          (empProfile?.TrackingMode ?? "").Contains("SHIFT", StringComparison.OrdinalIgnoreCase);
+
+        bool isOffShift = false;
+        string shiftTag = isShiftMode ? "Active Shift Disconnection" : "24/7 Active Tracking";
+
+        if (isShiftMode && empProfile?.ShiftStartTime.HasValue == true && empProfile?.ShiftEndTime.HasValue == true)
+        {
+            var localStart = ToLocal(first.CapturedAtUtc);
+            var timeOnly = TimeOnly.FromDateTime(localStart);
+            var sStart = empProfile.ShiftStartTime.Value;
+            var sEnd = empProfile.ShiftEndTime.Value;
+
+            bool inShift = sEnd >= sStart 
+                ? (timeOnly >= sStart && timeOnly <= sEnd)
+                : (timeOnly >= sStart || timeOnly <= sEnd);
+
+            if (!inShift)
+            {
+                isOffShift = true;
+                shiftTag = "Off-Duty / Non-Shift Gap";
+            }
+        }
+
+        var lastPriorPunch = todayPunches
+            .Where(p => p.EmployeeID == first.EmployeeId && p.PunchTime < first.CapturedAtUtc)
+            .OrderByDescending(p => p.PunchTime)
+            .FirstOrDefault();
+
+        var priorState = lastPriorPunch != null
+            ? (IsInType(lastPriorPunch.LogType) ? "IN" : "OUT")
+            : "OUT";
 
         var punchesInGap = todayPunches
             .Where(p => p.EmployeeID == first.EmployeeId &&
@@ -535,11 +579,43 @@
             {
                 Type = p.LogType ?? "PUNCH",
                 PunchTimeUtc = p.PunchTime,
-                IsApproved = p.IsApproved
+                IsApproved = p.IsApproved,
+                ChangeDetail = IsOutType(p.LogType) 
+                    ? "Exited allowed radius → Closed shift" 
+                    : "Entered allowed radius → Opened shift"
             })
             .ToList();
 
         var isSynced = cluster.All(x => x.SyncedAtUtc.HasValue);
+
+        string liveImpact;
+        if (punchesInGap.Any())
+        {
+            var punchSummary = string.Join(", ", punchesInGap.Select(p =>
+                $"{(IsOutType(p.Type) ? "🔴 OUT" : "🟢 IN")} at {ToLocal(p.PunchTimeUtc):hh:mm tt} ({p.ChangeDetail})"));
+            liveImpact = isSynced
+                ? $"Live Attendance Updated: {punchSummary} • Successfully reconciled into live attendance ledger"
+                : $"Pending Sync: {punchSummary} • Buffered on mobile";
+        }
+        else if (isOffShift)
+        {
+            var sRange = empProfile != null && empProfile.ShiftStartTime.HasValue && empProfile.ShiftEndTime.HasValue
+                ? $"{empProfile.ShiftStartTime.Value:HH:mm} - {empProfile.ShiftEndTime.Value:HH:mm}"
+                : "Off-duty hours";
+            liveImpact = $"Off-Duty Window: Outside scheduled shift ({sRange}) • Tracking idle, no attendance punch created";
+        }
+        else if (priorState == "IN" && cluster.Any(x => x.IsWithinAllowedRadius))
+        {
+            liveImpact = "Stationary / Active Inside: Employee remained inside allowed radius • Active shift remained IN (No punches changed)";
+        }
+        else if (priorState == "OUT")
+        {
+            liveImpact = "Stationary / Moving Outside: Employee stayed outside allowed radius • Attendance remained OUT (No punches changed)";
+        }
+        else
+        {
+            liveImpact = $"No Attendance State Changes: {cluster.Count} offline breadcrumbs captured • Merged to live route";
+        }
 
         return new OfflinePeriodDisplay
         {
@@ -554,8 +630,24 @@
             IsSynced = isSynced,
             Points = cluster,
             Punches = punchesInGap,
-            DisconnectReason = "Network Disconnected / Signal Loss"
+            DisconnectReason = "Network Disconnected / Signal Loss",
+            IsOffShift = isOffShift,
+            ShiftTag = shiftTag,
+            LiveImpactSummary = liveImpact,
+            PriorState = priorState
         };
+    }
+
+    private static bool IsInType(string? type)
+    {
+        var t = type?.Trim().ToUpperInvariant() ?? "";
+        return t == "IN" || t == "CHECKIN" || t == "CHECK_IN" || t == "PUNCH" || t.StartsWith("AUTO_IN");
+    }
+
+    private static bool IsOutType(string? type)
+    {
+        var t = type?.Trim().ToUpperInvariant() ?? "";
+        return t == "OUT" || t == "CHECKOUT" || t == "CHECK_OUT" || t.StartsWith("AUTO_OUT");
     }
 
     public async ValueTask DisposeAsync()
@@ -571,6 +663,7 @@
         public string Type { get; set; } = "IN";
         public DateTime PunchTimeUtc { get; set; }
         public bool IsApproved { get; set; } = true;
+        public string ChangeDetail { get; set; } = "";
     }
 
     private sealed class OfflineSyncRow
@@ -617,5 +710,9 @@
         public bool IsSynced { get; set; }
         public List<OfflineSyncRow> Points { get; set; } = new();
         public List<ReconciledPunch> Punches { get; set; } = new();
+        public bool IsOffShift { get; set; }
+        public string ShiftTag { get; set; } = "Active Shift Disconnection";
+        public string LiveImpactSummary { get; set; } = "";
+        public string PriorState { get; set; } = "OUT";
     }
 }

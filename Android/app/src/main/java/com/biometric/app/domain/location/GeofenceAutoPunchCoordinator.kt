@@ -51,7 +51,8 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     private val localAttendancePunchDao: LocalAttendancePunchDao,
     private val localAttendanceDao: LocalAttendanceDao,
     private val closedDayDao: LocalShopClosedDayDao,
-    private val firebaseSync: FirebaseSyncManager
+    private val firebaseSync: FirebaseSyncManager,
+    private val trackingWindowResolver: TrackingWindowResolver
 ) {
     private val evalMutex = Mutex()
     private var lastEvaluatedInside: Boolean? = null
@@ -164,6 +165,13 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
 
         if (!policy.geoFencingEnabled || !policy.automaticGeofencePunchingEnabled) return
         if (policy.geoRadiusMeters <= 0 || policy.officeLatitude == 0.0 || policy.officeLongitude == 0.0) return
+
+        // Respect employee tracking mode (24/7 vs scheduled shift hours)
+        val window = trackingWindowResolver.resolve()
+        if (!window.allowed) {
+            Log.d(TAG, "Skipping auto-punch: outside active tracking window (mode=${window.mode}, source=${window.source})")
+            return
+        }
 
         // If the admin changed the geofence radius, reset inside/outside state so
         // the next GPS fix re-evaluates against the new boundary and fires a punch
