@@ -80,12 +80,28 @@ namespace Payroll.Web.Services
 
         public async Task<string> GetActiveTenantIdAsync()
         {
+            await using var dbContext = await _dbFactory.CreateDbContextAsync();
+            var validTenants = await dbContext.CompanyTenants.AsNoTracking().Where(t => t.IsActive).ToListAsync();
+            var validTenantIds = validTenants.Select(t => t.TenantId).Where(t => !string.IsNullOrWhiteSpace(t)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var activeFallback = validTenants.OrderByDescending(t => t.Id).FirstOrDefault()?.TenantId ?? DefaultTenantId;
+
+            bool IsValid(string? tid)
+            {
+                if (string.IsNullOrWhiteSpace(tid)) return false;
+                if (string.Equals(tid, DefaultTenantId, StringComparison.OrdinalIgnoreCase)) return true;
+                return validTenantIds.Contains(tid.Trim());
+            }
+
             var isSuperAdmin = await IsSuperAdminAsync();
             if (isSuperAdmin)
             {
                 if (!string.IsNullOrWhiteSpace(_superAdminSelectedTenantId))
                 {
-                    return _superAdminSelectedTenantId;
+                    if (IsValid(_superAdminSelectedTenantId))
+                    {
+                        return _superAdminSelectedTenantId;
+                    }
+                    _superAdminSelectedTenantId = null;
                 }
 
                 // Check static cache by SuperAdmin email
@@ -95,8 +111,12 @@ namespace Payroll.Web.Services
                     var email = authState.User.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
                     if (_superAdminSelectedTenantsByEmail.TryGetValue(email, out var cachedTenant) && !string.IsNullOrWhiteSpace(cachedTenant))
                     {
-                        _superAdminSelectedTenantId = cachedTenant;
-                        return _superAdminSelectedTenantId;
+                        if (IsValid(cachedTenant))
+                        {
+                            _superAdminSelectedTenantId = cachedTenant;
+                            return _superAdminSelectedTenantId;
+                        }
+                        _superAdminSelectedTenantsByEmail.TryRemove(email, out _);
                     }
                 }
                 catch { }
@@ -105,32 +125,32 @@ namespace Payroll.Web.Services
                 var http = _httpContextAccessor.HttpContext;
                 if (http != null && http.Request.Cookies.TryGetValue(TenantCookieName, out var cookieTenant) && !string.IsNullOrWhiteSpace(cookieTenant))
                 {
-                    _superAdminSelectedTenantId = cookieTenant;
-                    return _superAdminSelectedTenantId;
-                }
-
-                try
-                {
-                    await using var db = await _dbFactory.CreateDbContextAsync();
-                    var firstTenant = await db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefaultAsync();
-                    if (firstTenant != null)
+                    if (IsValid(cookieTenant))
                     {
-                        _superAdminSelectedTenantId = firstTenant.TenantId;
+                        _superAdminSelectedTenantId = cookieTenant;
                         return _superAdminSelectedTenantId;
                     }
+                    try
+                    {
+                        if (!http.Response.HasStarted)
+                        {
+                            http.Response.Cookies.Delete(TenantCookieName);
+                        }
+                    }
+                    catch { }
                 }
-                catch { }
 
-                return DefaultTenantId;
+                _superAdminSelectedTenantId = activeFallback;
+                return _superAdminSelectedTenantId;
             }
 
             // For regular Admin or Employee, resolve based on current user
             var authStateUser = await _authStateProvider.GetAuthenticationStateAsync();
             var user = authStateUser.User;
 
-            // 1. Direct claim check: instant resolution without DB query
+            // 1. Direct claim check: only if tenant exists and is active
             var tenantClaim = user.FindFirst("TenantId")?.Value ?? user.FindFirst("OwnerUid")?.Value;
-            if (!string.IsNullOrWhiteSpace(tenantClaim))
+            if (!string.IsNullOrWhiteSpace(tenantClaim) && IsValid(tenantClaim))
             {
                 return tenantClaim.Trim();
             }
@@ -139,22 +159,19 @@ namespace Payroll.Web.Services
             var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
             var userEmail = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
 
-            await using var dbContext = await _dbFactory.CreateDbContextAsync();
-
             if (!string.IsNullOrWhiteSpace(userId) || !string.IsNullOrWhiteSpace(userEmail))
             {
-                var tenant = await dbContext.CompanyTenants
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(t => (userId != null && t.AdminUserId == userId) ||
-                                              (userEmail != null && t.AdminEmail.ToLower() == userEmail.ToLower()));
+                var tenant = validTenants
+                    .FirstOrDefault(t => (userId != null && t.AdminUserId == userId) ||
+                                          (userEmail != null && t.AdminEmail.ToLower() == userEmail.ToLower()));
 
-                if (tenant != null)
+                if (tenant != null && IsValid(tenant.TenantId))
                 {
                     return tenant.TenantId;
                 }
             }
 
-            return DefaultTenantId;
+            return activeFallback;
         }
 
         public async Task SetActiveTenantIdAsync(string tenantId)

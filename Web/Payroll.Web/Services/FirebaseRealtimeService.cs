@@ -52,13 +52,48 @@ public sealed class FirebaseRealtimeService
 
     public string ResolveOwnerUid(string? actorUid = null, string? role = null)
     {
-        // 1. If actorUid is explicitly a tenant ID (e.g. starts with "tenant_" or equals "biometricpayroll"), return it
+        // Gather existing active tenant IDs from database to validate any claims or cookies
+        HashSet<string>? validTenantIds = null;
+        string? activeFallbackTenantId = null;
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = dbFactory.CreateDbContext();
+                var tenants = db.CompanyTenants.AsNoTracking().Where(t => t.IsActive).ToList();
+                if (tenants.Count > 0)
+                {
+                    validTenantIds = tenants.Select(t => t.TenantId).Where(t => !string.IsNullOrWhiteSpace(t)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    activeFallbackTenantId = tenants.OrderByDescending(t => t.Id).FirstOrDefault()?.TenantId;
+                }
+            }
+        }
+        catch { }
+
+        bool IsValidTenant(string? tid)
+        {
+            if (string.IsNullOrWhiteSpace(tid)) return false;
+            if (string.Equals(tid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase)) return true;
+            if (validTenantIds != null && validTenantIds.Count > 0)
+            {
+                return validTenantIds.Contains(tid.Trim());
+            }
+            return true;
+        }
+
+        // 1. If actorUid is explicitly a tenant ID (e.g. starts with "tenant_" or equals "biometricpayroll"), return it only if valid
         if (!string.IsNullOrWhiteSpace(actorUid))
         {
             if (actorUid.StartsWith("tenant_", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(actorUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
             {
-                return actorUid.Trim();
+                if (IsValidTenant(actorUid))
+                {
+                    return actorUid.Trim();
+                }
             }
         }
 
@@ -79,7 +114,8 @@ public sealed class FirebaseRealtimeService
                     {
                         var superAdminEmail = user.Identity?.Name ?? FirebaseAuthSecurityConstants.CanonicalSuperAdminEmail;
                         if (TenantContextService.TryGetSuperAdminTenant(superAdminEmail, out var cachedTenantId) &&
-                            !string.IsNullOrWhiteSpace(cachedTenantId))
+                            !string.IsNullOrWhiteSpace(cachedTenantId) &&
+                            IsValidTenant(cachedTenantId))
                         {
                             return cachedTenantId.Trim();
                         }
@@ -88,25 +124,27 @@ public sealed class FirebaseRealtimeService
                         if (httpContext.Request.Cookies.TryGetValue("BioMetric_SuperAdmin_ActiveTenant", out var cookieTenant) &&
                             !string.IsNullOrWhiteSpace(cookieTenant))
                         {
-                            return cookieTenant.Trim();
-                        }
-
-                        // Check if a registered company tenant exists (e.g. tenant_2001 for sole/active company)
-                        try
-                        {
-                            using var scope = _scopeFactory.CreateScope();
-                            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                            if (dbFactory != null)
+                            if (IsValidTenant(cookieTenant))
                             {
-                                using var db = dbFactory.CreateDbContext();
-                                var activeTenant = db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefault();
-                                if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.TenantId))
+                                return cookieTenant.Trim();
+                            }
+                            else
+                            {
+                                try
                                 {
-                                    return activeTenant.TenantId.Trim();
+                                    if (!httpContext.Response.HasStarted)
+                                    {
+                                        httpContext.Response.Cookies.Delete("BioMetric_SuperAdmin_ActiveTenant");
+                                    }
                                 }
+                                catch { }
                             }
                         }
-                        catch { }
+
+                        if (!string.IsNullOrWhiteSpace(activeFallbackTenantId))
+                        {
+                            return activeFallbackTenantId;
+                        }
 
                         // SuperAdmin defaults to default primary workspace
                         return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
@@ -115,12 +153,12 @@ public sealed class FirebaseRealtimeService
                     // Company Admin or Employee: Check explicit TenantId / OwnerUid claims
                     var tenantClaim = user.FindFirst("TenantId")?.Value 
                         ?? user.FindFirst("OwnerUid")?.Value;
-                    if (!string.IsNullOrWhiteSpace(tenantClaim))
+                    if (!string.IsNullOrWhiteSpace(tenantClaim) && IsValidTenant(tenantClaim))
                     {
                         return tenantClaim.Trim();
                     }
 
-                    // If claims don't have it, query database by user ID or email
+                    // If claims don't have it or claim is stale/deleted, query database by user ID or email
                     var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? user.FindFirst("sub")?.Value;
                     var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.Identity?.Name;
 
@@ -135,7 +173,7 @@ public sealed class FirebaseRealtimeService
                                 (userId != null && t.AdminUserId == userId) ||
                                 (email != null && t.AdminEmail.ToLower() == email.ToLower()));
 
-                            if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId))
+                            if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId) && IsValidTenant(tenant.TenantId))
                             {
                                 return tenant.TenantId.Trim();
                             }
@@ -147,7 +185,7 @@ public sealed class FirebaseRealtimeService
                                     (!string.IsNullOrWhiteSpace(userId) && e.AspNetUserId == userId) ||
                                     (!string.IsNullOrWhiteSpace(email) && e.Email != null && e.Email.ToLower() == email.ToLower()));
 
-                                if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId))
+                                if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId) && IsValidTenant(emp.TenantId))
                                 {
                                     return emp.TenantId.Trim();
                                 }
@@ -177,7 +215,7 @@ public sealed class FirebaseRealtimeService
                         t.AdminUserId == actorUid ||
                         t.AdminEmail.ToLower() == actorUid.ToLower());
 
-                    if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId))
+                    if (tenant != null && !string.IsNullOrWhiteSpace(tenant.TenantId) && IsValidTenant(tenant.TenantId))
                     {
                         return tenant.TenantId.Trim();
                     }
@@ -189,7 +227,7 @@ public sealed class FirebaseRealtimeService
                         e.EmployeeID.ToString() == actorUid ||
                         actorUid == $"employee-{e.EmployeeID}");
 
-                    if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId))
+                    if (emp != null && !string.IsNullOrWhiteSpace(emp.TenantId) && IsValidTenant(emp.TenantId))
                     {
                         return emp.TenantId.Trim();
                     }
@@ -201,21 +239,10 @@ public sealed class FirebaseRealtimeService
             }
         }
 
-        try
+        if (!string.IsNullOrWhiteSpace(activeFallbackTenantId))
         {
-            using var scope = _scopeFactory.CreateScope();
-            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-            if (dbFactory != null)
-            {
-                using var db = dbFactory.CreateDbContext();
-                var activeTenant = db.CompanyTenants.AsNoTracking().OrderByDescending(t => t.IsActive).FirstOrDefault();
-                if (activeTenant != null && !string.IsNullOrWhiteSpace(activeTenant.TenantId))
-                {
-                    return activeTenant.TenantId.Trim();
-                }
-            }
+            return activeFallbackTenantId;
         }
-        catch { }
 
         return Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid;
     }

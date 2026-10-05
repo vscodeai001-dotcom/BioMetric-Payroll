@@ -8398,6 +8398,26 @@ function escapeStayMapHtml(value) {
 // ============================================================
 // SUPERADMIN MULTI-TENANT WORKSPACE COOKIE SYNC
 // ============================================================
+// Self-healing: Immediately purge deprecated/deleted ghost tenants (tenant_10001, tenant_12011)
+(function () {
+    try {
+        var cookies = document.cookie.split(";");
+        for (var i = 0; i < cookies.length; i++) {
+            var c = cookies[i].trim();
+            if (c.indexOf("BioMetric_SuperAdmin_ActiveTenant=") === 0) {
+                var val = decodeURIComponent(c.substring("BioMetric_SuperAdmin_ActiveTenant=".length));
+                if (val === "tenant_10001" || val === "tenant_12011") {
+                    document.cookie = "BioMetric_SuperAdmin_ActiveTenant=; max-age=0; path=/; SameSite=Lax";
+                }
+            }
+        }
+        var lsVal = localStorage.getItem("BioMetric_SuperAdmin_ActiveTenant");
+        if (lsVal === "tenant_10001" || lsVal === "tenant_12011") {
+            localStorage.removeItem("BioMetric_SuperAdmin_ActiveTenant");
+        }
+    } catch (e) { }
+})();
+
 window.setTenantCookie = function (tenantId) {
     try {
         var name = "BioMetric_SuperAdmin_ActiveTenant";
