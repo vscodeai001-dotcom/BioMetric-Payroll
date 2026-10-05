@@ -88,8 +88,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     private var activeCompanyCode = "PRIMARY"
     private var isUserSuperAdmin = false
 
-    private var featureSettingsRef: DatabaseReference? = null
-    private var featureSettingsListener: ValueEventListener? = null
+    private val activeFirebaseListeners = mutableListOf<Pair<DatabaseReference, ValueEventListener>>()
 
     private data class TabEntry(val title: String, val index: Int)
     private val activeTabs = mutableListOf<TabEntry>()
@@ -107,8 +106,10 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
         val role = sessionStore.userRole().trim().uppercase()
         isUserSuperAdmin = role in setOf("SUPERADMIN", "SUPER_ADMIN")
 
-        activeTenantId = sessionStore.firebaseOwnerUid() ?: "biometricpayroll"
-        activeCompanyCode = if (activeTenantId.startsWith("tenant_")) activeTenantId.removePrefix("tenant_").uppercase() else "PRIMARY"
+        activeTenantId = sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
+            ?: sessionStore.activeTenantId()?.takeIf { it.isNotBlank() }
+            ?: "tenant_201"
+        activeCompanyCode = if (activeTenantId.startsWith("tenant_")) activeTenantId.removePrefix("tenant_").uppercase() else "201"
 
         setupToolbar()
         setupListeners()
@@ -311,11 +312,19 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
     }
 
     private fun setupRealtimeFirebaseListener() {
-        val owner = firebaseSync.getOwnerRef() ?: return
-        val ref = owner.child("feature_settings").child("1")
-        if (featureSettingsRef == ref && featureSettingsListener != null) return
+        activeFirebaseListeners.forEach { (ref, l) -> ref.removeEventListener(l) }
+        activeFirebaseListeners.clear()
 
-        featureSettingsListener?.let { featureSettingsRef?.removeEventListener(it) }
+        val refsToObserve = mutableListOf<DatabaseReference>()
+        firebaseSync.getOwnerRef()?.child("feature_settings")?.child("1")?.let { refsToObserve.add(it) }
+        if (activeTenantId.isNotBlank()) {
+            refsToObserve.add(FirebaseDatabase.getInstance().getReference("owners").child(activeTenantId).child("feature_settings").child("1"))
+        }
+        refsToObserve.add(FirebaseDatabase.getInstance().getReference("owners").child("tenant_201").child("feature_settings").child("1"))
+        refsToObserve.add(FirebaseDatabase.getInstance().getReference("owners").child("biometricpayroll").child("feature_settings").child("1"))
+        refsToObserve.add(FirebaseDatabase.getInstance().getReference("owners").child("201").child("feature_settings").child("1"))
+        refsToObserve.add(FirebaseDatabase.getInstance().getReference("feature_settings").child("1"))
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists() || isSaving) return
@@ -323,14 +332,29 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             }
             override fun onCancelled(error: DatabaseError) {}
         }
-        ref.addValueEventListener(listener)
-        featureSettingsRef = ref
-        featureSettingsListener = listener
+
+        val distinctRefs = refsToObserve.distinctBy { it.toString() }
+        for (r in distinctRefs) {
+            r.addValueEventListener(listener)
+            activeFirebaseListeners.add(r to listener)
+        }
     }
 
     private fun hydrateFromFirebase(snapshot: DataSnapshot) {
+        fun raw(name: String): Any? {
+            val exact = snapshot.child(name)
+            if (exact.exists()) return exact.value
+            val lower = name.replaceFirstChar { it.lowercase() }
+            val lowerSnap = snapshot.child(lower)
+            if (lowerSnap.exists()) return lowerSnap.value
+            val upper = name.replaceFirstChar { it.uppercase() }
+            val upperSnap = snapshot.child(upper)
+            if (upperSnap.exists()) return upperSnap.value
+            return null
+        }
+
         fun b(k: String, def: Boolean = false): Boolean {
-            val v = snapshot.child(k).value ?: return def
+            val v = raw(k) ?: return def
             return when (v) {
                 is Boolean -> v
                 is Number -> v.toInt() == 1
@@ -338,7 +362,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 else -> def
             }
         }
-        fun s(k: String): String? = snapshot.child(k).value?.toString()
+        fun s(k: String): String? = raw(k)?.toString()
 
         val fs = LocalFeatureSettings(
             id = 1,
@@ -350,7 +374,7 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             enableBonusManagement = b("enableBonusManagement", true),
             enableProfessionalTax = b("enableProfessionalTax", true),
             enableStatutoryCompliance = b("enableStatutoryCompliance", true),
-            enableEmailNotifications = b("enableEmailNotifications", true),
+            enableEmailNotifications = b("enableEmailNotifications", false),
             enableInAppNotifications = b("enableInAppNotifications", true),
             enableCustomReporting = b("enableCustomReporting", true),
             enableCompanyReports = b("enableCompanyReports", true),
@@ -360,11 +384,11 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
             enableAutomaticGeofencePunching = b("enableAutomaticGeofencePunching"),
             enableDualAttendance = b("enableDualAttendance"),
             enablePunchCorrection = b("enablePunchCorrection"),
-            enableRegularizationReq = b("enableRegularizationReq"),
+            enableRegularizationReq = b("enableRegularizationReq") || b("enableRegularizationRequest"),
             enableResignationModule = b("enableResignationModule"),
             enableYearEndSummary = b("enableYearEndSummary"),
             enableTaxDeclarations = b("enableTaxDeclarations"),
-            enableFlexibleBenefits = b("enableFlexibleBenefits"),
+            enableFlexibleBenefits = b("enableFlexibleBenefits") || b("enableSalaryStructuring"),
             enableTdsDeduction = b("enableTdsDeduction"),
             enableAutoShiftRotation = b("enableAutoShiftRotation"),
             enableShiftScheduling = b("enableShiftScheduling"),
@@ -423,9 +447,8 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        featureSettingsListener?.let { featureSettingsRef?.removeEventListener(it) }
-        featureSettingsListener = null
-        featureSettingsRef = null
+        activeFirebaseListeners.forEach { (ref, l) -> ref.removeEventListener(l) }
+        activeFirebaseListeners.clear()
     }
 
     private fun loadSettings() {
@@ -643,20 +666,33 @@ class FeatureToggleManagerActivity : MotionBaseActivity() {
                 val map = buildFirebaseMap(updated)
                 withContext(Dispatchers.IO) {
                     runCatching {
-                        val ownerRef = FirebaseDatabase.getInstance().getReference("owners/$activeTenantId/feature_settings/1")
-                        ownerRef.setValue(map).await()
+                        val targets = mutableSetOf(
+                            "owners/$activeTenantId/feature_settings/1",
+                            "owners/tenant_201/feature_settings/1",
+                            "owners/biometricpayroll/feature_settings/1",
+                            "owners/201/feature_settings/1",
+                            "feature_settings/1"
+                        )
+                        sessionStore.activeTenantId()?.takeIf { it.isNotBlank() }?.let {
+                            targets.add("owners/$it/feature_settings/1")
+                        }
 
-                        val altTenant = if (activeTenantId == "biometricpayroll") (sessionStore.activeTenantId()?.takeIf { it.isNotBlank() } ?: "tenant_2001") else "biometricpayroll"
-                        runCatching {
-                            FirebaseDatabase.getInstance().getReference("owners/$altTenant/feature_settings/1").setValue(map).await()
-                            FirebaseDatabase.getInstance().getReference("feature_settings/1").setValue(map).await()
+                        for (path in targets) {
+                            runCatching {
+                                FirebaseDatabase.getInstance().getReference(path).setValue(map).await()
+                            }
                         }
 
                         val tenantUpdates = mapOf<String, Any>(
                             "deploymentMode" to updated.deploymentMode,
                             "isOfflineMode" to updated.isOfflineMode
                         )
-                        FirebaseDatabase.getInstance().getReference("tenants").child(activeTenantId).updateChildren(tenantUpdates).await()
+                        runCatching {
+                            FirebaseDatabase.getInstance().getReference("tenants").child(activeTenantId).updateChildren(tenantUpdates).await()
+                        }
+                        runCatching {
+                            FirebaseDatabase.getInstance().getReference("tenants").child("tenant_201").updateChildren(tenantUpdates).await()
+                        }
 
                         firebaseSync.notifyRealtimeAfterWrite("FeatureSettings", "MODIFIED")
                     }

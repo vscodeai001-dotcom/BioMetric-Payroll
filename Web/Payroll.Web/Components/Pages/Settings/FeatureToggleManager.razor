@@ -1074,6 +1074,12 @@ else
                         ["deploymentMode"] = settings.DeploymentMode
                     };
                     await FirebaseRealtime.SetAsync($"owners/{activeTenant.TenantId}/feature_settings/1", featureMap, default);
+                    await FirebaseRealtime.SetAsync("owners/biometricpayroll/feature_settings/1", featureMap, default);
+                    if (!string.IsNullOrWhiteSpace(activeTenant.CompanyCode))
+                    {
+                        await FirebaseRealtime.SetAsync($"owners/{activeTenant.CompanyCode}/feature_settings/1", featureMap, default);
+                    }
+                    await FirebaseRealtime.SetAsync("feature_settings/1", featureMap, default);
                 }
                 catch (Exception fbEx)
                 {

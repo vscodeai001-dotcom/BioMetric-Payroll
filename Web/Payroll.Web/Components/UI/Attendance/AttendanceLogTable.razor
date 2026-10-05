@@ -23,13 +23,25 @@
         white-space: nowrap;
     }
 
-    .attendance-log-table th {
-        font-size: 0.71rem;
+    .attendance-log-table th,
+    .attendance-log-table thead th {
+        font-size: 0.72rem;
         font-weight: 600;
         letter-spacing: 0.01em;
         text-align: center;
         background-color: #1e293b !important;
+        color: #ffffff !important;
         border-color: #334155 !important;
+    }
+
+    .attendance-log-table thead th,
+    .attendance-log-table thead th * {
+        color: #ffffff !important;
+    }
+
+    .attendance-log-table thead th.text-danger,
+    .attendance-log-table thead th.text-danger * {
+        color: #fca5a5 !important;
     }
 
     .attendance-log-table .raw-punches-cell {

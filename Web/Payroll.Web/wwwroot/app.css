@@ -116,6 +116,18 @@
     color: #212529;
 }
 
+.table thead.table-dark th,
+.table thead.table-dark td,
+.table-dark th,
+.table-dark td {
+    background-color: #1e293b !important;
+    color: #ffffff !important;
+}
+
+.table thead.table-dark th.text-danger {
+    color: #fca5a5 !important;
+}
+
 .table.table-striped > tbody > tr:nth-of-type(odd) > * {
     background-color: #f8f9fa;
     color: #212529;

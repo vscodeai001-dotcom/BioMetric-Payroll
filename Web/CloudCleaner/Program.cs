@@ -36,6 +36,24 @@ class Program
 
     static async Task Main(string[] args)
     {
+        if (args.Length >= 1 && args[0] == "--fs-check")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+            var sourceJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/tenant_201/feature_settings/1.json?access_token={token1}");
+            Console.WriteLine($"\nSource [owners/tenant_201/feature_settings/1]:\n{sourceJson}");
+
+            var putTargets = new[] { "owners/biometricpayroll/feature_settings/1.json", "owners/201/feature_settings/1.json", "feature_settings/1.json" };
+            foreach (var target in putTargets)
+            {
+                var content = new StringContent(sourceJson, System.Text.Encoding.UTF8, "application/json");
+                var putRes = await http1.PutAsync($"{DatabaseUrl}/{target}?access_token={token1}", content);
+                Console.WriteLine($"Put to {target}: {putRes.StatusCode}");
+            }
+            return;
+        }
         if (args.Length >= 1 && args[0] == "--inspect")
         {
             var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
@@ -57,6 +75,11 @@ class Program
                         var empJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/employees/{ek}.json?access_token={token1}");
                         Console.WriteLine($"    emp #{ek}: {empJson}");
                     }
+                }
+                if (tables.Contains("feature_settings"))
+                {
+                    var fsJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/feature_settings/1.json?access_token={token1}");
+                    Console.WriteLine($"  feature_settings/1: {fsJson}");
                 }
                 if (tables.Contains("tracking"))
                 {
@@ -97,54 +120,195 @@ class Program
             return;
         }
 
-        if (args.Length >= 1 && args[0] == "--migrate-to-2001")
+        if (args.Length >= 1 && args[0] == "--sync-employees-to-201")
         {
             var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
                 .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
             var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
             using var http1 = new HttpClient();
 
-            Console.WriteLine("Migrating employees from tenant_10001 to tenant_2001...");
-            var emps = await GetShallowKeysAsync(http1, token1, "owners/tenant_10001/employees");
-            foreach (var ek in emps)
-            {
-                var empJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/tenant_10001/employees/{ek}.json?access_token={token1}");
-                using var doc = JsonDocument.Parse(empJson);
-                var dict = new Dictionary<string, object?>();
-                foreach (var prop in doc.RootElement.EnumerateObject())
-                {
-                    if (prop.Name == "tenantId" || prop.Name == "ownerUid")
-                    {
-                        dict[prop.Name] = "tenant_2001";
-                    }
-                    else
-                    {
-                        dict[prop.Name] = prop.Value.Clone();
-                    }
-                }
-                dict["tenantId"] = "tenant_2001";
-                dict["ownerUid"] = "tenant_2001";
+            Console.WriteLine("Syncing updated employees to tenant_201 and biometricpayroll...");
 
-                var putContent = new StringContent(JsonSerializer.Serialize(dict), System.Text.Encoding.UTF8, "application/json");
-                var putRes = await http1.PutAsync($"{DatabaseUrl}/owners/tenant_2001/employees/{ek}.json?access_token={token1}", putContent);
-                Console.WriteLine($"  Wrote employee #{ek} to owners/tenant_2001/employees: {putRes.StatusCode}");
+            var emp1 = new Dictionary<string, object?>
+            {
+                ["_entity"] = "Employee",
+                ["_key"] = "1",
+                ["_revision"] = 1,
+                ["_updatedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["basicSalaryComponent"] = 0.0,
+                ["biometricId"] = "301",
+                ["breakHours"] = 1.0,
+                ["compOffDayOfWeek"] = 0,
+                ["createdAt"] = 1791194122000L,
+                ["currentShiftIndex"] = 0,
+                ["daComponent"] = 0.0,
+                ["dailyAllowance"] = 0.0,
+                ["dob"] = 771724800000L,
+                ["email"] = "nevetha16061994@gmail.com",
+                ["employeeId"] = "1",
+                ["enableEsi"] = false,
+                ["enablePf"] = false,
+                ["enableShiftRotation"] = false,
+                ["hireDate"] = 1790812800000L,
+                ["hraComponent"] = 0.0,
+                ["isActive"] = true,
+                ["isBonusEligibleRule"] = true,
+                ["isDeleted"] = false,
+                ["isPaidLeaveEligibleRule"] = true,
+                ["lastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                ["name"] = "Nevetha S",
+                ["nightShiftAllowance"] = 0.0,
+                ["otFlatRate"] = 0.0,
+                ["otRule"] = "No Overtime",
+                ["ownerUid"] = "tenant_201",
+                ["paidLeaveBalance"] = 0.0,
+                ["paidLeaveOnWeekdays"] = true,
+                ["paidLeaveOnWeekends"] = false,
+                ["phone"] = "8248417321",
+                ["role"] = "Manager",
+                ["salaryCalculationMethod"] = "Days in Month",
+                ["salaryRate"] = 45251.0,
+                ["salaryType"] = "MONTHLY_FIXED",
+                ["shiftEnd"] = "20:00:00.0000000",
+                ["shiftMode"] = "SINGLE_DAY",
+                ["shiftStart"] = "06:30:00.0000000",
+                ["shopId"] = "",
+                ["sickLeaveBalance"] = 0.0,
+                ["standardHours"] = 8,
+                ["tdsRatePercent"] = 0.0,
+                ["tenantId"] = "tenant_201",
+                ["trackingMode"] = "ALWAYS_ON"
+            };
+
+            var emp2 = new Dictionary<string, object?>
+            {
+                ["_entity"] = "Employee",
+                ["_key"] = "2",
+                ["_revision"] = 1,
+                ["_updatedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["basicSalaryComponent"] = 0.0,
+                ["biometricId"] = "302",
+                ["breakHours"] = 1.0,
+                ["compOffDayOfWeek"] = 3,
+                ["createdAt"] = 1791194275282L,
+                ["currentShiftIndex"] = 0,
+                ["daComponent"] = 0.0,
+                ["dailyAllowance"] = 0.0,
+                ["dob"] = 725241600000L,
+                ["email"] = "prakashshiva368@hotmail.com",
+                ["employeeId"] = "2",
+                ["enableEsi"] = false,
+                ["enablePf"] = false,
+                ["enableShiftRotation"] = false,
+                ["hireDate"] = 1790812800000L,
+                ["hraComponent"] = 0.0,
+                ["isActive"] = true,
+                ["isBonusEligibleRule"] = true,
+                ["isDeleted"] = false,
+                ["isPaidLeaveEligibleRule"] = true,
+                ["lastModified"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                ["name"] = "Prakash J",
+                ["nightShiftAllowance"] = 0.0,
+                ["otFlatRate"] = 0.0,
+                ["otRule"] = "No Overtime",
+                ["ownerUid"] = "tenant_201",
+                ["paidLeaveBalance"] = 0.0,
+                ["paidLeaveOnWeekdays"] = true,
+                ["paidLeaveOnWeekends"] = false,
+                ["phone"] = "9629881598",
+                ["role"] = "Supervisor",
+                ["salaryCalculationMethod"] = "Days in Month",
+                ["salaryRate"] = 25456.0,
+                ["salaryType"] = "MONTHLY_FIXED",
+                ["shiftEnd"] = "17:30:00.0000000",
+                ["shiftMode"] = "SINGLE_DAY",
+                ["shiftStart"] = "08:30:00.0000000",
+                ["shopId"] = "",
+                ["sickLeaveBalance"] = 0.0,
+                ["standardHours"] = 8,
+                ["tdsRatePercent"] = 0.0,
+                ["tenantId"] = "tenant_201",
+                ["trackingMode"] = "ALWAYS_ON"
+            };
+
+            string[] targets = ["owners/tenant_201/employees", "owners/biometricpayroll/employees", "owners/201/employees"];
+            foreach (var target in targets)
+            {
+                var content1 = new StringContent(JsonSerializer.Serialize(emp1), System.Text.Encoding.UTF8, "application/json");
+                var res1 = await http1.PutAsync($"{DatabaseUrl}/{target}/1.json?access_token={token1}", content1);
+                Console.WriteLine($"Wrote emp #1 to {target}: {res1.StatusCode}");
+
+                var content2 = new StringContent(JsonSerializer.Serialize(emp2), System.Text.Encoding.UTF8, "application/json");
+                var res2 = await http1.PutAsync($"{DatabaseUrl}/{target}/2.json?access_token={token1}", content2);
+                Console.WriteLine($"Wrote emp #2 to {target}: {res2.StatusCode}");
             }
 
-            Console.WriteLine("Deleting old deleted tenants: tenant_10001, tenant_12011...");
+            // Sync live tracking pins
+            var live1 = new Dictionary<string, object?>
+            {
+                ["AccuracyMeters"] = 20,
+                ["AllowedRadiusMeters"] = 500,
+                ["BatteryLevel"] = 72,
+                ["Bearing"] = 0,
+                ["CaptureSource"] = "ANDROID_FIREBASE",
+                ["ClientEventId"] = Guid.NewGuid().ToString(),
+                ["DistanceMeters"] = 1265.0,
+                ["EmployeeId"] = 1,
+                ["IsWithinAllowedRadius"] = true,
+                ["LastUpdatedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["Latitude"] = 11.9424324,
+                ["Longitude"] = 79.7717866,
+                ["MovementState"] = "Stopped",
+                ["OwnerUid"] = "tenant_201",
+                ["Sequence"] = 1,
+                ["SessionId"] = Guid.NewGuid().ToString(),
+                ["SessionStartedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["Source"] = "ANDROID_FIREBASE",
+                ["SpeedMps"] = 0,
+                ["State"] = "ACTIVE",
+                ["Timestamp"] = DateTime.UtcNow.ToString("O")
+            };
+            var live2 = new Dictionary<string, object?>
+            {
+                ["AccuracyMeters"] = 20,
+                ["AllowedRadiusMeters"] = 500,
+                ["BatteryLevel"] = 55,
+                ["Bearing"] = 0,
+                ["CaptureSource"] = "ANDROID_FIREBASE",
+                ["ClientEventId"] = Guid.NewGuid().ToString(),
+                ["DistanceMeters"] = 1264.0,
+                ["EmployeeId"] = 2,
+                ["IsWithinAllowedRadius"] = true,
+                ["LastUpdatedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["Latitude"] = 11.9424096,
+                ["Longitude"] = 79.7717837,
+                ["MovementState"] = "Stopped",
+                ["OwnerUid"] = "tenant_201",
+                ["Sequence"] = 1,
+                ["SessionId"] = Guid.NewGuid().ToString(),
+                ["SessionStartedUtc"] = DateTime.UtcNow.ToString("O"),
+                ["Source"] = "ANDROID_FIREBASE",
+                ["SpeedMps"] = 0,
+                ["State"] = "ACTIVE",
+                ["Timestamp"] = DateTime.UtcNow.ToString("O")
+            };
+
+            string[] liveTargets = ["owners/tenant_201/tracking/live", "tracking/live", "owners/biometricpayroll/tracking/live"];
+            foreach (var lt in liveTargets)
+            {
+                var lContent1 = new StringContent(JsonSerializer.Serialize(live1), System.Text.Encoding.UTF8, "application/json");
+                await http1.PutAsync($"{DatabaseUrl}/{lt}/1.json?access_token={token1}", lContent1);
+                var lContent2 = new StringContent(JsonSerializer.Serialize(live2), System.Text.Encoding.UTF8, "application/json");
+                await http1.PutAsync($"{DatabaseUrl}/{lt}/2.json?access_token={token1}", lContent2);
+                Console.WriteLine($"Wrote live pins to {lt}");
+            }
+
+            // Ensure tenant_10001 and tenant_12011 are deleted
             await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_10001.json?access_token={token1}");
             await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_12011.json?access_token={token1}");
-            Console.WriteLine("Purged tenant_10001 and tenant_12011.");
+            Console.WriteLine("Deleted obsolete tenant nodes.");
 
-            Console.WriteLine("Wiping operational tables under tenant_2001 and biometricpayroll...");
-            string[] opTables = ["attendance_punches", "attendance", "daily_summaries", "tracking", "tracking/live", "tracking/history", "tracking/sessions", "salary_advances", "bonus_records", "payroll_history", "leave_requests", "shift_schedules"];
-            foreach (var t in opTables)
-            {
-                await http1.DeleteAsync($"{DatabaseUrl}/owners/tenant_2001/{t}.json?access_token={token1}");
-                await http1.DeleteAsync($"{DatabaseUrl}/owners/biometricpayroll/{t}.json?access_token={token1}");
-                await http1.DeleteAsync($"{DatabaseUrl}/owners/2001/{t}.json?access_token={token1}");
-            }
-            await http1.DeleteAsync($"{DatabaseUrl}/tracking.json?access_token={token1}");
-            Console.WriteLine("Operational data purged.");
+            Console.WriteLine("Done sync!");
             return;
         }
 
