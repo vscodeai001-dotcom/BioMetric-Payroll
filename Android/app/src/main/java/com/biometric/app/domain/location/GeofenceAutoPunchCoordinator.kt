@@ -190,6 +190,12 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             return
         }
 
+        // Ignore poor accuracy GPS fixes (> 40 meters) to prevent phantom boundary jumps
+        if (location.hasAccuracy() && location.accuracy > 40f) {
+            Log.d(TAG, "Ignoring location for auto-punch: accuracy is poor (${location.accuracy}m > 40m)")
+            return
+        }
+
         // Calculate distance to office
         val results = FloatArray(1)
         Location.distanceBetween(
@@ -200,7 +206,15 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             results
         )
         val distanceMeters = results[0]
-        val isInside = distanceMeters <= policy.geoRadiusMeters
+
+        // Hysteresis buffer (20m): require exiting beyond (radius + 20m) to trigger OUT,
+        // and entering inside (radius - 20m) to trigger IN. Eliminates perimeter GPS jitter.
+        val hysteresisBufferMeters = 20.0f
+        val isInside = if (lastEvaluatedInside == true) {
+            distanceMeters <= (policy.geoRadiusMeters + hysteresisBufferMeters)
+        } else {
+            distanceMeters <= (policy.geoRadiusMeters - hysteresisBufferMeters).coerceAtLeast(10f)
+        }
 
         evalMutex.withLock {
             val staffIdStr = employeeId.toString()
@@ -242,7 +256,17 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 return
             }
 
-            // Directional Debounce & Cross-Device Safety Net:
+            // 1. Universal Transition Debounce & Rapid Flip Guard:
+            // Prevent ANY auto punch (whether IN or OUT) within 3 minutes (180,000ms) of ANY prior punch today.
+            // A person cannot auto clock-out right after an auto clock-in, nor auto clock-in right after clock-out.
+            val lastAnyPunchTime = pastPunches.maxOfOrNull { it.timestamp }
+                ?: maxOf(lastInPunchTimeMs, lastOutPunchTimeMs)
+            if (lastAnyPunchTime > 0 && (nowMs - lastAnyPunchTime) < 180_000L) {
+                Log.d(TAG, "Guard: only ${(nowMs - lastAnyPunchTime) / 1000}s since last punch, skipping auto punch to prevent rapid flip")
+                return
+            }
+
+            // 2. Directional Debounce & Cross-Device Safety Net:
             // Prevent duplicate IN punches within 5 minutes of an existing IN.
             // Prevent duplicate OUT punches within 5 minutes of an existing OUT.
             if (isInside) {

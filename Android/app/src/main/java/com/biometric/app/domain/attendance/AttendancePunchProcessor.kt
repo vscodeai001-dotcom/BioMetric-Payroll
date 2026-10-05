@@ -133,11 +133,16 @@ object AttendancePunchProcessor {
             if (!isDup) {
                 val matchIdx = deduplicated.indexOfFirst {
                     it.staffId == p.staffId &&
-                    (it.timestamp == p.timestamp ||
-                     (Math.abs(it.timestamp - p.timestamp) <= 120_000L &&
-                      it.tier == PunchSourceTier.GeofenceAuto &&
-                      p.tier == PunchSourceTier.GeofenceAuto &&
-                      isExplicitOutPunch(it.type) == isExplicitOutPunch(p.type)))
+                    (
+                        // 1. Same-minute collision of same direction
+                        (it.timestamp == p.timestamp && isExplicitOutPunch(it.type) == isExplicitOutPunch(p.type)) ||
+                        // 2. Same-minute collision between different tiers (higher tier wins)
+                        (it.timestamp == p.timestamp && it.tier != p.tier) ||
+                        // 3. Geofence rapid oscillation / jitter within 3 minutes (180s)
+                        (Math.abs(it.timestamp - p.timestamp) <= 180_000L &&
+                         it.tier == PunchSourceTier.GeofenceAuto &&
+                         p.tier == PunchSourceTier.GeofenceAuto)
+                    )
                 }
                 if (matchIdx >= 0) {
                     val match = deduplicated[matchIdx]

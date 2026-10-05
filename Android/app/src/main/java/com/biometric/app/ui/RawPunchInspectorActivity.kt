@@ -372,9 +372,11 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
                 val tier = AttendancePunchProcessor.getPunchTier(raw.deviceId, null, raw.type)
 
                 // Check accepted
+                val isRawOut = AttendancePunchProcessor.isExplicitOutPunch(raw.type)
                 val acceptedIndex = acceptedList.indexOfFirst { acc ->
                     acc.id == raw.punchId ||
-                        (acc.timestamp == raw.timestamp && acc.staffId == raw.staffId)
+                        (acc.timestamp == raw.timestamp && acc.staffId == raw.staffId &&
+                         AttendancePunchProcessor.isExplicitOutPunch(acc.type) == isRawOut)
                 }
                 val isAccepted = acceptedIndex >= 0
 
@@ -462,6 +464,17 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         }
 
         if (tier == PunchSourceTier.GeofenceAuto) {
+            val rapidFlip = dayPunches.firstOrNull { o ->
+                o.punchId != raw.punchId &&
+                    kotlin.math.abs(o.timestamp - raw.timestamp) < 180_000L &&
+                    AttendancePunchProcessor.getPunchTier(o.deviceId, null, o.type) == PunchSourceTier.GeofenceAuto &&
+                    AttendancePunchProcessor.isExplicitOutPunch(o.type) != AttendancePunchProcessor.isExplicitOutPunch(raw.type)
+            }
+            if (rapidFlip != null) {
+                val priorTime = timeFmt.format(Date(rapidFlip.timestamp))
+                return "🚫 Suppressed: GPS perimeter jitter / rapid flip within 3m of $priorTime ${rapidFlip.type}" to "GPS Perimeter Jitter"
+            }
+
             val authIn = punchItems.firstOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitInPunch(it.type) }
             val authOut = punchItems.lastOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitOutPunch(it.type) }
             if (authIn != null && authOut != null && raw.timestamp > authIn.timestamp && raw.timestamp < authOut.timestamp) {

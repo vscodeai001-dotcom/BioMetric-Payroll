@@ -850,6 +850,7 @@ public class GeoLocationService
         if (allowedRadiusMeters <= 0)
             return true;
 
+        var attendanceLockHeld = false;
         try
         {
             /*
@@ -885,10 +886,11 @@ public class GeoLocationService
             if (!isTransition && !isInitialInside && !currentLocationState)
                 return true;
 
+            await AcquireAttendanceAdvisoryLockAsync(db, employeeId);
+            attendanceLockHeld = true;
+
             await using var transaction =
                 await db.Database.BeginTransactionAsync();
-
-            await AcquireAttendanceAdvisoryLockAsync(db, employeeId);
 
             var punchTime = overridePunchTime.HasValue
                 ? TimeZoneInfo.ConvertTimeFromUtc(
@@ -1014,8 +1016,8 @@ public class GeoLocationService
             // 5-minute Debounce & Cross-Device Safety Net (Symmetric +/- 5 minutes):
             // Re-query the DB fresh (not the stale todaysPunches snapshot) so that
             // any AndroidGeofenceAuto written by Android or Firebase sync is caught.
-            var guardWindowStart = punchTime.AddMinutes(-5);
-            var guardWindowEnd   = punchTime.AddMinutes(5);
+            var guardWindowStart = DateTime.SpecifyKind(punchTime.AddMinutes(-5), DateTimeKind.Unspecified);
+            var guardWindowEnd   = DateTime.SpecifyKind(punchTime.AddMinutes(5), DateTimeKind.Unspecified);
             var windowPunches = await db.AttendanceLogs
                 .Where(p =>
                     p.EmployeeID == employeeId &&
@@ -1026,6 +1028,30 @@ public class GeoLocationService
                 .OrderByDescending(p => p.PunchTime)
                 .ToListAsync();
 
+            // 1. Universal Rapid Flip Guard:
+            // An employee cannot auto clock-out right after an auto clock-in,
+            // nor auto clock-in right after an auto clock-out within 3 minutes (180 seconds).
+            var recentAnyAutoPunch = windowPunches.FirstOrDefault(p =>
+                (p.DeviceID == "GeofenceAuto" || p.DeviceID == "AndroidGeofenceAuto" || (p.BiometricID != null && p.BiometricID.StartsWith("AUTO_"))) &&
+                Math.Abs((p.PunchTime - punchTime).TotalMinutes) < 3.0);
+
+            if (recentAnyAutoPunch != null)
+            {
+                _logger.LogInformation(
+                    "Automatic geofence {PunchType} skipped — a recent auto punch ({ExistingType}) already exists within 3 minutes. " +
+                    "EmployeeId={EmployeeId}, ExistingLogId={LogId}, ExistingDevice={Device}, ExistingTime={Time}",
+                    punchType,
+                    recentAnyAutoPunch.LogType,
+                    employeeId,
+                    recentAnyAutoPunch.LogID,
+                    recentAnyAutoPunch.DeviceID,
+                    recentAnyAutoPunch.PunchTime);
+
+                await transaction.CommitAsync();
+                return true;
+            }
+
+            // 2. Directional 5-minute guard:
             if (currentLocationState) // i.e. generating an IN punch
             {
                 var freshInPunch = windowPunches.FirstOrDefault(p => IsInType(p.LogType) &&
@@ -1205,6 +1231,13 @@ public class GeoLocationService
 
             return false;
         }
+        finally
+        {
+            if (attendanceLockHeld)
+            {
+                ReleaseAttendanceAdvisoryLock(employeeId);
+            }
+        }
 
         static string requiredPunchType(bool inside) => inside ? "IN" : "OUT";
     }
@@ -1270,13 +1303,18 @@ public class GeoLocationService
             || t.StartsWith("AUTO_OUT", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Task AcquireAttendanceAdvisoryLockAsync(
-        AppDbContext db,
+    private static async Task AcquireAttendanceAdvisoryLockAsync(
+        AppDbContext? db,
         int employeeId)
     {
-        // The local SQLite compatibility database serializes writes at the
-        // transaction boundary, so no PostgreSQL-specific advisory SQL is used.
-        return Task.CompletedTask;
+        var lockKey = AttendanceAdvisoryLockNamespace + (uint)employeeId;
+        await AcquireLocalLockAsync(lockKey);
+    }
+
+    private static void ReleaseAttendanceAdvisoryLock(int employeeId)
+    {
+        var lockKey = AttendanceAdvisoryLockNamespace + (uint)employeeId;
+        ReleaseLocalLock(lockKey);
     }
 
     private static async Task AcquireLocalLockAsync(long key)
@@ -2331,6 +2369,24 @@ public class GeoLocationService
             var stableRadius = Math.Max(0, allowedRadiusMeters);
             var stableAccuracy = NormalizeAccuracy(accuracyMeters);
 
+            // Determine previous location state from actual historical context instead of null,
+            // so historical batch sync does not treat every INSIDE fix as an initial entrance.
+            bool? effectivePrevState = session.LastIsWithinAllowedRadius;
+            if (!effectivePrevState.HasValue)
+            {
+                var indiaCapture = TimeZoneInfo.ConvertTimeFromUtc(capturedUtc, IndiaTimeZone);
+                var lastPriorPunch = await db.AttendanceLogs
+                    .AsNoTracking()
+                    .Where(p => p.EmployeeID == employeeId && p.PunchTime <= indiaCapture)
+                    .OrderByDescending(p => p.PunchTime)
+                    .FirstOrDefaultAsync();
+
+                if (lastPriorPunch != null)
+                {
+                    effectivePrevState = IsInType(lastPriorPunch.LogType);
+                }
+            }
+
             return await ProcessAutomaticGeofencePunchAsync(
                 db,
                 employeeId,
@@ -2340,7 +2396,7 @@ public class GeoLocationService
                 stableAccuracy,
                 stableDistance,
                 stableRadius,
-                previousLocationState: null,
+                previousLocationState: effectivePrevState,
                 currentLocationState: isWithinAllowedRadius,
                 overridePunchTime: capturedUtc);
         }

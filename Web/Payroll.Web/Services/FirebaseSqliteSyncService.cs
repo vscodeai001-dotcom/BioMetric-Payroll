@@ -2233,6 +2233,19 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                     {
                         existingLog = await db.AttendanceLogs.FirstOrDefaultAsync(l => l.LogID == matched.LogID, ct);
                     }
+                    else if (isAutoGeofence)
+                    {
+                        // Rapid boundary oscillation flip: ignore geofence flip within 3 minutes of any recent auto punch
+                        var rapidFlip = candidates.FirstOrDefault(l =>
+                            (l.DeviceID == "GeofenceAuto" || l.DeviceID == "AndroidGeofenceAuto" || (l.BiometricID != null && l.BiometricID.StartsWith("AUTO_"))) &&
+                            Math.Abs((l.PunchTime - punchTime).TotalSeconds) < 180.0 &&
+                            ((l.LogType ?? "").Contains("OUT") != logType.Contains("OUT")));
+
+                        if (rapidFlip != null)
+                        {
+                            return false;
+                        }
+                    }
                 }
 
                 var isNew = existingLog == null;

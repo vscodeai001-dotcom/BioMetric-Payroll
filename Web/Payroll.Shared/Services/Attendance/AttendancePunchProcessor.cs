@@ -165,15 +165,20 @@ namespace Payroll.Shared.Services
                 {
                     var match = deduplicated.FirstOrDefault(x =>
                         x.EmployeeID == p.EmployeeID &&
-                        (x.PunchTime == p.PunchTime ||
-                         (Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) <= 120 &&
-                          GetPunchTier(x) == PunchSourceTier.GeofenceAuto &&
-                          GetPunchTier(p) == PunchSourceTier.GeofenceAuto &&
-                          IsExplicitOutPunch(x) == IsExplicitOutPunch(p))));
+                        (
+                            // 1. Same-minute collision of same direction
+                            (x.PunchTime == p.PunchTime && IsExplicitOutPunch(x) == IsExplicitOutPunch(p)) ||
+                            // 2. Same-minute collision between different tiers (higher tier wins)
+                            (x.PunchTime == p.PunchTime && GetPunchTier(x) != GetPunchTier(p)) ||
+                            // 3. Geofence rapid oscillation / jitter within 3 minutes (180s)
+                            (Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) <= 180 &&
+                             GetPunchTier(x) == PunchSourceTier.GeofenceAuto &&
+                             GetPunchTier(p) == PunchSourceTier.GeofenceAuto)
+                        ));
 
                     if (match != null)
                     {
-                        // Same minute collision: higher priority tier wins
+                        // Higher priority tier wins (Physical > Manual > Geofence)
                         var tierMatch = GetPunchTier(match);
                         var tierIncoming = GetPunchTier(p);
                         if (tierIncoming < tierMatch)
