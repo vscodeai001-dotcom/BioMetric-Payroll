@@ -265,6 +265,23 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 return
             }
 
+            // Strict Guard: An automatic OUT punch requires:
+            // 1. Employee must have an active IN punch today (cannot punch OUT without punching IN).
+            // 2. The most recent punch must be an IN punch (cannot punch OUT if already OUT).
+            // 3. Employee must have actually transitioned from INSIDE to OUTSIDE (lastEvaluatedInside == true).
+            // If the employee is outside the radius (at home, service restarted, etc.), no OUT punch is created.
+            if (!isInside) {
+                val hasInPunchToday = pastPunches.any { isCheckInType(it.type) }
+                val isLastPunchIn = lastPunch != null && isCheckInType(lastPunch.type)
+                val wasPreviouslyInside = (lastEvaluatedInside == true)
+
+                if (!hasInPunchToday || !isLastPunchIn || !wasPreviouslyInside) {
+                    Log.d(TAG, "Skipping auto OUT punch: employee is outside radius without active inside-to-outside transition or IN punch today (hasInToday=$hasInPunchToday, isLastIn=$isLastPunchIn, wasInside=$wasPreviouslyInside)")
+                    lastEvaluatedInside = false
+                    return
+                }
+            }
+
             // 1. Universal Transition Debounce & Rapid Flip Guard:
             // Prevent ANY auto punch (whether IN or OUT) within 3 minutes (180,000ms) of ANY prior punch today.
             // A person cannot auto clock-out right after an auto clock-in, nor auto clock-in right after clock-out.

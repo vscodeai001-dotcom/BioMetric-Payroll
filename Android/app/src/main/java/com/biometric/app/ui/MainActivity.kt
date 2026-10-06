@@ -199,10 +199,24 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.title = null
 
+        val intentTenantId = intent.getStringExtra("TENANT_ID")
         val initialCompanyName = intent.getStringExtra("COMPANY_NAME")
             ?: sessionStore.activeCompanyName()
         val initialCompanyCode = intent.getStringExtra("COMPANY_CODE")
             ?: sessionStore.activeCompanyCode()
+
+        if (!intentTenantId.isNullOrBlank()) {
+            sessionStore.saveActiveTenant(intentTenantId, initialCompanyName, initialCompanyCode)
+        } else {
+            val curTid = sessionStore.activeTenantId()
+            if (curTid.isNullOrBlank() || curTid.equals(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                val code = initialCompanyCode.takeIf { it.isNotBlank() && !it.equals("ACTIVE", ignoreCase = true) }
+                if (code != null) {
+                    val tid = if (code.startsWith("tenant_")) code else "tenant_$code"
+                    sessionStore.saveActiveTenant(tid, initialCompanyName, initialCompanyCode)
+                }
+            }
+        }
 
         val headers = setupDualHeader(binding.toolbar, "$initialCompanyName 🏢", "Real-time Operations • Code: ${initialCompanyCode.ifBlank { "ACTIVE" }}")
         headers.btnShop?.visibility = View.GONE
@@ -217,6 +231,16 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                     val tvLine2 = binding.toolbar.findViewById<android.widget.TextView>(R.id.tvHeaderLine2)
                     tvLine1?.text = "${cs.companyName} 🏢"
                     tvLine2?.text = "Real-time Operations • Code: $code"
+
+                    // Auto-heal active tenant if currently default or unassigned
+                    val curTid = sessionStore.activeTenantId()
+                    if (curTid.isNullOrBlank() || curTid.equals(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                        if (cs.companyName.contains("Sri Diyaa", ignoreCase = true) || code == "201") {
+                            sessionStore.saveActiveTenant("tenant_201", cs.companyName, if (code != "ACTIVE") code else "201")
+                            signalR.clearLiveState()
+                            signalR.start()
+                        }
+                    }
                 }
             }
         }
@@ -266,6 +290,30 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
             scheduleDailyBackup()
         }
         checkBatteryOptimizations()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val tenantId = intent.getStringExtra("TENANT_ID")
+        val companyName = intent.getStringExtra("COMPANY_NAME") ?: sessionStore.activeCompanyName()
+        val companyCode = intent.getStringExtra("COMPANY_CODE") ?: sessionStore.activeCompanyCode()
+        if (!tenantId.isNullOrBlank()) {
+            sessionStore.saveActiveTenant(tenantId, companyName, companyCode)
+        }
+        val tvLine1 = binding.toolbar.findViewById<android.widget.TextView>(R.id.tvHeaderLine1)
+        val tvLine2 = binding.toolbar.findViewById<android.widget.TextView>(R.id.tvHeaderLine2)
+        tvLine1?.text = "$companyName 🏢"
+        tvLine2?.text = "Real-time Operations • Code: ${companyCode.ifBlank { "ACTIVE" }}"
+
+        signalR.clearLiveState()
+        signalR.start()
+        runCatching {
+            firebaseRoomHydrator.stop()
+            firebaseRoomHydrator.start()
+        }
+        viewModel.triggerRefresh()
+        sharedViewModel.warmUpDashboard()
     }
 
     /**
@@ -1661,9 +1709,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 signalR.forceRebind("MainActivity onResume")
 
                 val currentLocs = signalR.liveLocations.value.values.toList()
-                if (currentLocs.isNotEmpty()) {
-                    updateAdminMarkers(currentLocs)
-                }
+                updateAdminMarkers(currentLocs)
             }
 
             // Standby live updater: Re-evaluates marker status (Live/Stale/Offline)
@@ -1673,9 +1719,7 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 if (isFinishing || isDestroyed) break
                 _binding?.let {
                     val currentLocs = signalR.liveLocations.value.values.toList()
-                    if (currentLocs.isNotEmpty()) {
-                        updateAdminMarkers(currentLocs)
-                    }
+                    updateAdminMarkers(currentLocs)
                     signalR.reconcileLiveLocationsNow()
                 }
             }

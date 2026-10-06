@@ -1874,15 +1874,30 @@ public sealed class FirebaseRealtimeService
         return normalized;
     }
 
+    private static readonly TimeZoneInfo IndiaTimeZone =
+        TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
+
     private static object? ToUnixMilliseconds(object? value, object? secondary = null)
     {
         if (value == null) return null;
-        if (value is DateTime dt) return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        if (value is DateTime dt)
+        {
+            var businessTime = DateTime.SpecifyKind(dt, DateTimeKind.Unspecified);
+            return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+        }
         if (value is DateTimeOffset dto) return dto.ToUnixTimeMilliseconds();
-        if (value is DateOnly d) return new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        if (value is DateOnly d)
+        {
+            var businessTime = d.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+            return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+        }
         if (value is TimeOnly t)
         {
-            if (secondary is DateOnly date) return new DateTimeOffset(date.ToDateTime(t, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            if (secondary is DateOnly date)
+            {
+                var businessTime = date.ToDateTime(t, DateTimeKind.Unspecified);
+                return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+            }
             return t.ToTimeSpan().TotalMilliseconds;
         }
         if (value is string s)
@@ -1892,15 +1907,28 @@ public sealed class FirebaseRealtimeService
             if (DateOnly.TryParse(s, out var date))
             {
                 if (secondary is TimeOnly time)
-                    return new DateTimeOffset(date.ToDateTime(time, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+                {
+                    var businessTime = date.ToDateTime(time, DateTimeKind.Unspecified);
+                    return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+                }
                 if (secondary is string secondaryText && TimeOnly.TryParse(secondaryText, out var secondaryTime))
-                    return new DateTimeOffset(date.ToDateTime(secondaryTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
-                return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+                {
+                    var businessTime = date.ToDateTime(secondaryTime, DateTimeKind.Unspecified);
+                    return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+                }
+                var businessDefault = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+                return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessDefault, IndiaTimeZone)).ToUnixTimeMilliseconds();
             }
             if (secondary is DateOnly secondaryDate && TimeOnly.TryParse(s, out var parsedTime))
-                return new DateTimeOffset(secondaryDate.ToDateTime(parsedTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            {
+                var businessTime = secondaryDate.ToDateTime(parsedTime, DateTimeKind.Unspecified);
+                return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+            }
             if (secondary is string secondaryDateText && DateOnly.TryParse(secondaryDateText, out var parsedDate) && TimeOnly.TryParse(s, out var parsedTime2))
-                return new DateTimeOffset(parsedDate.ToDateTime(parsedTime2, DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+            {
+                var businessTime = parsedDate.ToDateTime(parsedTime2, DateTimeKind.Unspecified);
+                return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(businessTime, IndiaTimeZone)).ToUnixTimeMilliseconds();
+            }
         }
         return value;
     }

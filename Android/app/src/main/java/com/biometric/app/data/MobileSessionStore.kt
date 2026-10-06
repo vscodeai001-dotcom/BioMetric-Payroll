@@ -19,7 +19,16 @@ class MobileSessionStore @Inject constructor(
             putInt(KEY_EMPLOYEE_ID, employeeId)
             putString(KEY_NAME, name)
             putString(KEY_EMAIL, email)
-            putString(KEY_FIREBASE_OWNER_UID, firebaseOwnerUid.orEmpty())
+            // Preserve the active tenant if one is already selected (e.g. for Admin/SuperAdmin)
+            val currentActiveTenant = prefs.getString(KEY_ACTIVE_TENANT_ID, null)?.takeIf { it.isNotBlank() }
+                ?: context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+                    .getString("selected_tenant_id", null)?.takeIf { it.isNotBlank() }
+            if (!currentActiveTenant.isNullOrBlank()) {
+                putString(KEY_ACTIVE_TENANT_ID, currentActiveTenant)
+                putString(KEY_FIREBASE_OWNER_UID, currentActiveTenant)
+            } else if (!firebaseOwnerUid.isNullOrBlank()) {
+                putString(KEY_FIREBASE_OWNER_UID, firebaseOwnerUid)
+            }
             putBoolean(KEY_ACTIVE, true)
         }
     }
@@ -31,7 +40,18 @@ class MobileSessionStore @Inject constructor(
     fun userEmail(): String = prefs.getString(KEY_EMAIL, "") ?: ""
     fun userRole(): String = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
         .getString("user_role", "") ?: ""
-    fun firebaseOwnerUid(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+
+    fun firebaseOwnerUid(): String? {
+        val role = userRole().trim().uppercase()
+        val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
+        if (isAdmin) {
+            val active = activeTenantId()
+            if (!active.isNullOrBlank()) return active
+        }
+        return prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+            ?: activeTenantId()
+    }
+
     fun userThemeKey(): String = userEmail().ifBlank { "employee-${employeeId()}" }
     fun isLoggedIn(): Boolean = prefs.getBoolean(KEY_ACTIVE, false) && !token().isNullOrBlank()
 
@@ -48,19 +68,49 @@ class MobileSessionStore @Inject constructor(
 
     fun saveActiveTenant(tenantId: String, name: String, code: String) {
         prefs.edit {
+            putString(KEY_ACTIVE_TENANT_ID, tenantId)
             putString(KEY_FIREBASE_OWNER_UID, tenantId)
             putString(KEY_ACTIVE_TENANT_NAME, name)
             putString(KEY_ACTIVE_TENANT_CODE, code)
         }
+        runCatching {
+            context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE).edit()
+                .putString("selected_tenant_id", tenantId)
+                .putString("selected_tenant_name", name)
+                .putString("selected_tenant_code", code)
+                .putString("firebase_owner_uid", tenantId)
+                .apply()
+        }
     }
 
-    fun activeTenantId(): String? = prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+    fun activeTenantId(): String? {
+        val active = prefs.getString(KEY_ACTIVE_TENANT_ID, null)?.takeIf { it.isNotBlank() }
+        if (!active.isNullOrBlank()) return active
+
+        val authTenant = context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+            .getString("selected_tenant_id", null)?.takeIf { it.isNotBlank() }
+        if (!authTenant.isNullOrBlank()) return authTenant
+
+        val code = activeCompanyCode().takeIf { it.isNotBlank() && !it.equals("ACTIVE", ignoreCase = true) }
+        if (code != null) return if (code.startsWith("tenant_")) code else "tenant_$code"
+
+        return prefs.getString(KEY_FIREBASE_OWNER_UID, null)?.takeIf { it.isNotBlank() }
+    }
 
     fun clearActiveTenant() {
         prefs.edit {
+            remove(KEY_ACTIVE_TENANT_ID)
             remove(KEY_FIREBASE_OWNER_UID)
             remove(KEY_ACTIVE_TENANT_NAME)
             remove(KEY_ACTIVE_TENANT_CODE)
+        }
+        runCatching {
+            context.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE).edit()
+                .remove("selected_tenant_id")
+                .remove("selected_tenant_name")
+                .remove("selected_tenant_code")
+                .remove("firebase_owner_uid")
+                .apply()
         }
     }
 
@@ -143,6 +193,7 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_NAME = "name"
         private const val KEY_EMAIL = "email"
         private const val KEY_FIREBASE_OWNER_UID = "firebase_owner_uid"
+        private const val KEY_ACTIVE_TENANT_ID = "active_tenant_id"
         private const val KEY_FIREBASE_PLAN_MODE = "firebase_plan_mode"
         private const val KEY_ACTIVE = "active"
         private const val KEY_GPS_SESSION = "gps_session_id"

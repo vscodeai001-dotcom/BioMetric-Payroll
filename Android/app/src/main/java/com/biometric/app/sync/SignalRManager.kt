@@ -417,7 +417,7 @@ class SignalRManager @Inject constructor(
         val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
         val altOwnerUid = firebaseSync.getAlternateOwnerUid()?.takeIf { it.isNotBlank() && it != ownerUid }
         if (!isEmployeeRole) {
-            if (isDefaultOwner && altOwnerUid != null) {
+            if (altOwnerUid != null) {
                 val altLiveRef = firebaseSync.getGlobalRef()
                     .child("owners")
                     .child(altOwnerUid)
@@ -486,7 +486,7 @@ class SignalRManager @Inject constructor(
             employeeListener = employeesListener
             employeesRef.addValueEventListener(employeesListener)
 
-            if (isDefaultOwner && altOwnerUid != null) {
+            if (altOwnerUid != null) {
                 val altEmployeesRef = firebaseSync.getGlobalRef()
                     .child("owners")
                     .child(altOwnerUid)
@@ -671,6 +671,7 @@ class SignalRManager @Inject constructor(
                 stop(clearState = false)
                 delay(100L)
                 start()
+                reconcileLiveLocationsNow(force = true)
             }
         }
     }
@@ -684,13 +685,13 @@ class SignalRManager @Inject constructor(
      */
     @Volatile private var lastReconcileTime = 0L
 
-    fun reconcileLiveLocationsNow() {
+    fun reconcileLiveLocationsNow(force: Boolean = false) {
         val role = sessionStore.userRole().orEmpty()
         val isEmployeeRole = role.equals("STAFF", true) || role.equals("EMPLOYEE", true)
         if (isEmployeeRole) return // Regular employees only produce GPS; never consume live markers
 
         val now = System.currentTimeMillis()
-        if (now - lastReconcileTime < 30_000L) return
+        if (!force && now - lastReconcileTime < 30_000L) return
         lastReconcileTime = now
 
         if (activeOwnerUid == null || locationListener == null) {
@@ -728,7 +729,7 @@ class SignalRManager @Inject constructor(
             }
 
             val isDefaultOwner = ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)
-            if (!isEmployeeRole && isDefaultOwner && altOwnerUid != null) {
+            if (!isEmployeeRole && altOwnerUid != null) {
                 runCatching {
                     val altLiveRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("tracking").child("live")
                     val altSnap = altLiveRef.get().await()
@@ -761,7 +762,7 @@ class SignalRManager @Inject constructor(
                 Log.d("SignalRManager", "Immediate employees directory reconciliation skipped (waiting for active listener sync): ${error.message}")
             }
 
-            if (!isEmployeeRole && isDefaultOwner && altOwnerUid != null) {
+            if (!isEmployeeRole && altOwnerUid != null) {
                 runCatching {
                     val altEmployeesRef = firebaseSync.getGlobalRef().child("owners").child(altOwnerUid).child("employees")
                     val altEmpSnapshot = altEmployeesRef.get().await()

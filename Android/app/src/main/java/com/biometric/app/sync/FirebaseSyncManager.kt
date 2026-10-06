@@ -73,6 +73,7 @@ class FirebaseSyncManager @Inject constructor(
     }
 
     fun getOwnerUid(): String? {
+        sessionStore.activeTenantId()?.takeIf { it.isNotBlank() }?.let { return it }
         sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }?.let { return it }
         return if (isAuthenticated() || sessionStore.isLoggedIn()) FirebaseSsotSchema.DEFAULT_OWNER_UID else null
     }
@@ -80,9 +81,10 @@ class FirebaseSyncManager @Inject constructor(
     fun getAlternateOwnerUid(): String? {
         val current = getOwnerUid() ?: FirebaseSsotSchema.DEFAULT_OWNER_UID
         val defaultOwner = FirebaseSsotSchema.DEFAULT_OWNER_UID
-        val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
+        val activeTid = sessionStore.activeTenantId()?.takeIf { it.isNotBlank() }
+            ?: sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
         return if (current.equals(defaultOwner, ignoreCase = true)) {
-            activeTid?.takeIf { it.isNotBlank() && !it.equals(defaultOwner, ignoreCase = true) }
+            activeTid?.takeIf { !it.equals(defaultOwner, ignoreCase = true) }
         } else {
             defaultOwner
         }

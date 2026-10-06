@@ -57,6 +57,7 @@ class TenantSelectionActivity : MotionBaseActivity() {
     @Inject lateinit var sharedViewModel: SharedViewModel
     @Inject lateinit var firebaseSync: FirebaseSyncManager
     @Inject lateinit var firebaseRoomHydrator: FirebaseRoomHydrator
+    @Inject lateinit var signalR: com.biometric.app.sync.SignalRManager
     @Inject lateinit var localSettingsDao: LocalSettingsDao
     @Inject lateinit var appDatabase: com.biometric.app.data.AppDatabase
     private val mainViewModel: MainViewModel by viewModels()
@@ -172,7 +173,9 @@ class TenantSelectionActivity : MotionBaseActivity() {
 
                     val currentTenantId = sessionStore.activeTenantId()
                     // Only clear tables if we have a valid non-empty list of tenants from Firebase AND active tenant was deleted
-                    if (effectiveList.isNotEmpty() && !currentTenantId.isNullOrBlank() && effectiveList.none { it.tenantId == currentTenantId }) {
+                    if (effectiveList.isNotEmpty() && !currentTenantId.isNullOrBlank() &&
+                        !currentTenantId.equals(com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true) &&
+                        effectiveList.none { it.tenantId == currentTenantId }) {
                         withContext(Dispatchers.IO) {
                             appDatabase.clearAllTables()
                         }
@@ -243,7 +246,12 @@ class TenantSelectionActivity : MotionBaseActivity() {
             .putString("firebase_owner_uid", tenant.tenantId)
             .apply()
 
-        // Restart Firebase Room Hydrator to listen to this specific tenant's owner root
+        // Restart SignalR and Firebase Room Hydrator to listen to this specific tenant's owner root
+        runCatching {
+            signalR.clearLiveState()
+            signalR.stop()
+            signalR.start()
+        }
         runCatching {
             firebaseRoomHydrator.stop()
             firebaseRoomHydrator.start()

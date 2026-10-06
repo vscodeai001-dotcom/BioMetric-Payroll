@@ -18,6 +18,7 @@ public sealed class FirebaseWorkerSyncService
     private const string CloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform";
     private const string DatabaseScope = "https://www.googleapis.com/auth/firebase.database";
     private const string UserInfoEmailScope = "https://www.googleapis.com/auth/userinfo.email";
+    private static readonly TimeZoneInfo IndiaTimeZone = TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata");
 
     private readonly IConfiguration _configuration;
     private readonly ILogger<FirebaseWorkerSyncService> _logger;
@@ -111,9 +112,9 @@ public sealed class FirebaseWorkerSyncService
                 ["staffId"] = log.EmployeeID?.ToString(CultureInfo.InvariantCulture),
                 ["biometricId"] = log.BiometricID,
                 ["date"] = log.PunchTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                ["checkInTime"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
-                ["timestamp"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
-                ["createdAt"] = new DateTimeOffset(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Utc)).ToUnixTimeMilliseconds(),
+                ["checkInTime"] = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Unspecified), IndiaTimeZone)).ToUnixTimeMilliseconds(),
+                ["timestamp"] = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Unspecified), IndiaTimeZone)).ToUnixTimeMilliseconds(),
+                ["createdAt"] = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(log.PunchTime, DateTimeKind.Unspecified), IndiaTimeZone)).ToUnixTimeMilliseconds(),
                 ["note"] = log.LogType ?? "Punch",
                 ["type"] = log.LogType ?? "Punch",
                 ["synced"] = true,
@@ -260,7 +261,7 @@ public sealed class FirebaseWorkerSyncService
             log.BiometricID = String(row, "biometricId") ?? log.BiometricID;
             var timestamp = Long(row, "checkInTime", 0);
             if (timestamp > 0)
-                log.PunchTime = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).UtcDateTime;
+                log.PunchTime = TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.FromUnixTimeMilliseconds(timestamp).UtcDateTime, IndiaTimeZone);
             log.LogType = String(row, "note") ?? log.LogType ?? "Punch";
             log.DeviceID ??= "ZKTeco_Firebase";
         }

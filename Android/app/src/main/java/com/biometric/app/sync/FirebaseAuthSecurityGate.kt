@@ -98,9 +98,14 @@ class FirebaseAuthSecurityGate @Inject constructor(
             return Result(false, message = "Firebase account has no supported application role.")
         }
 
-        val ownerUid = claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
-            ?: sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
-            ?: if (role == UserRole.SuperAdmin.name || isCanonicalSuperAdmin) FirebaseSsotSchema.DEFAULT_OWNER_UID else ""
+        val activeTenant = sessionStore.activeTenantId()?.takeIf { it.isNotBlank() }
+        val ownerUid = if (!activeTenant.isNullOrBlank() && (role == UserRole.SuperAdmin.name || role == UserRole.Admin.name)) {
+            activeTenant
+        } else {
+            claims["owner_uid"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: sessionStore.firebaseOwnerUid()?.takeIf { it.isNotBlank() }
+                ?: if (role == UserRole.SuperAdmin.name || isCanonicalSuperAdmin) FirebaseSsotSchema.DEFAULT_OWNER_UID else ""
+        }
 
         if (ownerUid.isBlank()) {
             return Result(false, message = "Firebase account is missing the required owner_uid claim.")
