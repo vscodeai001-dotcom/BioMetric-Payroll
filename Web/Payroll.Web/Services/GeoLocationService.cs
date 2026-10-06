@@ -368,7 +368,8 @@ public class GeoLocationService
         int allowedRadiusMeters,
         bool isWithinAllowedRadius,
         DateTime? capturedAtUtc = null,
-        bool allowSessionRecovery = true)
+        bool allowSessionRecovery = true,
+        bool publishToFirebase = true)
     {
         if (employeeId <= 0 ||
             sessionId == Guid.Empty ||
@@ -707,36 +708,39 @@ public class GeoLocationService
                  * committed. A Firebase outage must never break the existing
                  * Web attendance/GPS business flow.
                  */
-                try
+                if (publishToFirebase)
                 {
-                    var live = LiveLocationStore.Get(employeeId);
-                    var speed = live?.SpeedMps ?? 0;
+                    try
+                    {
+                        var live = LiveLocationStore.Get(employeeId);
+                        var speed = live?.SpeedMps ?? 0;
 
-                    var clientEventId =
-                        $"web-{effectiveSessionId:N}-{session.TotalPoints}";
+                        var clientEventId =
+                            $"web-{effectiveSessionId:N}-{session.TotalPoints}";
 
-                    await _firebase.PublishLiveLocationAsync(
-                        employeeId,
-                        effectiveSessionId,
-                        clientEventId,
-                        session.TotalPoints,
-                        latitude,
-                        longitude,
-                        safeAccuracy,
-                        speed,
-                        new DateTimeOffset(captureTime).ToUnixTimeMilliseconds(),
-                        allowedRadiusMeters,
-                        session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,
-                        session.StartedAtUtc,
-                        safeDistance);
-                }
-                catch (Exception firebaseEx)
-                {
-                    _logger.LogWarning(
-                        firebaseEx,
-                        "Firebase live-location publish failed after committed GPS update. EmployeeId={EmployeeId}, SessionId={SessionId}",
-                        employeeId,
-                        effectiveSessionId);
+                        await _firebase.PublishLiveLocationAsync(
+                            employeeId,
+                            effectiveSessionId,
+                            clientEventId,
+                            session.TotalPoints,
+                            latitude,
+                            longitude,
+                            safeAccuracy,
+                            speed,
+                            new DateTimeOffset(captureTime).ToUnixTimeMilliseconds(),
+                            allowedRadiusMeters,
+                            session.LastIsWithinAllowedRadius ?? isWithinAllowedRadius,
+                            session.StartedAtUtc,
+                            safeDistance);
+                    }
+                    catch (Exception firebaseEx)
+                    {
+                        _logger.LogWarning(
+                            firebaseEx,
+                            "Firebase live-location publish failed after committed GPS update. EmployeeId={EmployeeId}, SessionId={SessionId}",
+                            employeeId,
+                            effectiveSessionId);
+                    }
                 }
 
                 try

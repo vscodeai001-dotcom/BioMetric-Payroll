@@ -127,63 +127,29 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             val ownerUid = firebaseSync.getOwnerUid()
             val defaultUid = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
-            val altOwners = mutableListOf<String>()
-            if (ownerUid != null && ownerUid != defaultUid) {
-                altOwners.add(defaultUid)
-            }
-            val activeTid = sessionStore.activeTenantId()
-            if (!activeTid.isNullOrBlank() && activeTid != ownerUid && activeTid !in altOwners) {
-                altOwners.add(activeTid)
-            }
-            // Add short code or tenant prefix alias if active
-            val tenantPrefix = if (activeTid?.startsWith("tenant_") == true) activeTid.substring(7) else "tenant_${activeTid.orEmpty()}"
-            if (tenantPrefix.isNotBlank() && tenantPrefix != ownerUid && tenantPrefix !in altOwners) {
-                altOwners.add(tenantPrefix)
-            }
-            if ("tenant_201" !in altOwners && ownerUid != "tenant_201") {
-                altOwners.add("tenant_201")
-            }
-            if ("201" !in altOwners && ownerUid != "201") {
-                altOwners.add("201")
-            }
-
-            for (altUid in altOwners) {
-                val altRef = com.google.firebase.database.FirebaseDatabase.getInstance().getReference("owners").child(altUid)
-                observeValue("company_settings", query = altRef.child("company_settings"), existing = { emptyList() }, onDelete = { }) {
-                    if (it.key == "1") settingsDao.upsertCompanySettings(it.toLocalCompanySettings())
-                }
-                observeValue("feature_settings", query = altRef.child("feature_settings"), existing = { emptyList() }, onDelete = { }) {
-                    if (it.key == "1") settingsDao.upsertFeatureSettings(it.toLocalFeatureSettings())
-                }
-                observeValue("leave_requests", query = altRef.child("leave_requests"), existing = { emptyList() }, onDelete = { }) {
-                    it.toLeaveRequest().let { value -> leaveDao.upsert(value.toLocal()) }
-                }
-                observeValue("advance_payments", query = altRef.child("advance_payments"), existing = { emptyList() }, onDelete = { }) {
-                    it.toAdvancePayment().let { value -> advanceDao.upsert(value.toLocal()) }
-                }
-                observeValue("employees", query = altRef.child("employees"), existing = { emptyList() }, onDelete = { }) {
-                    it.toEmployee().let { value -> employeeDao.upsert(value.toLocal()) }
-                }
-                observeValue("regularizations", query = altRef.child("regularizations"), existing = { emptyList() }, onDelete = { }) {
-                    it.toRegularization().let { value -> regularizationDao.upsert(value.toLocal()) }
-                }
-                observeValue("attendance_punches", query = altRef.child("attendance_punches").limitToLast(500), existing = { emptyList() }, onDelete = { key -> punchDao.deleteById(key) }) {
-                    it.toAttendancePunch().let { value -> punchDao.upsert(value.toLocal()) }
-                }
-                observeValue("attendance", query = altRef.child("attendance").limitToLast(300), existing = { emptyList() }, onDelete = { key -> attendanceDao.deleteById(key) }) {
-                    it.toAttendance().let { value -> attendanceDao.upsert(value.toLocal()) }
-                }
-                observeValue("resignation_requests", query = altRef.child("resignation_requests"), existing = { emptyList() }, onDelete = { }) {
-                    it.toResignation().let { value -> resignationDao.upsert(value.toLocal()) }
-                }
-                observeValue("shops", query = altRef.child("shops"), existing = { emptyList() }, onDelete = { }) {
-                    it.toShop().let { value -> shopDao.upsert(value.toLocal()) }
-                }
-                observeValue("shop_closed_days", query = altRef.child("shop_closed_days"), existing = { emptyList() }, onDelete = { }) {
-                    it.toShopClosedDay().let { value -> closedDayDao.upsert(value.toLocal()) }
-                }
-                observeValue("employee_history", query = altRef.child("employee_history"), existing = { emptyList() }, onDelete = { }) {
-                    it.toEmployeeHistory().let { value -> historyDao.upsert(value.toLocal()) }
+            if (ownerUid != null && !ownerUid.equals(defaultUid, ignoreCase = true)) {
+                scope.launch {
+                    try {
+                        if (settingsDao.getCompanySettings() == null) {
+                            val defaultSnap = com.google.firebase.database.FirebaseDatabase.getInstance()
+                                .getReference("owners").child(defaultUid).child("company_settings").child("1").get().await()
+                            if (defaultSnap.exists()) {
+                                settingsDao.upsertCompanySettings(defaultSnap.toLocalCompanySettings())
+                            }
+                        }
+                        if (settingsDao.getFeatureSettings() == null) {
+                            val defaultFeatSnap = com.google.firebase.database.FirebaseDatabase.getInstance()
+                                .getReference("owners").child(defaultUid).child("feature_settings").child("1").get().await()
+                            if (defaultFeatSnap.exists()) {
+                                val fs = defaultFeatSnap.toLocalFeatureSettings()
+                                settingsDao.upsertFeatureSettings(fs)
+                                sessionStore.setDeploymentMode(fs.deploymentMode)
+                                sessionStore.setOfflineMode(fs.isOfflineMode)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.d("FirebaseRoomHydrator", "One-time default settings fallback read skipped: ${e.message}")
+                    }
                 }
             }
             observeValue("feature_settings", existing = { emptyList() }, onDelete = { }) { 
@@ -192,7 +158,6 @@ class FirebaseRoomHydrator @Inject constructor(
                     settingsDao.upsertFeatureSettings(fs)
                     sessionStore.setDeploymentMode(fs.deploymentMode)
                     sessionStore.setOfflineMode(fs.isOfflineMode)
-                    sessionStore.setFirebasePlanMode(fs.firebasePlanMode)
                 }
             }
 

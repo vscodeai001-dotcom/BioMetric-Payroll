@@ -40,9 +40,12 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
             {
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var activeTenant = await db.CompanyTenants.AsNoTracking()
+                    .FirstOrDefaultAsync(t => t.IsActive, stoppingToken);
+                var targetSettingId = activeTenant?.CompanySettingId > 0 ? activeTenant.CompanySettingId : 1;
                 var settings = await db.CompanySettings.AsNoTracking()
-                    .OrderBy(s => s.SettingID)
-                    .FirstOrDefaultAsync(stoppingToken);
+                    .FirstOrDefaultAsync(s => s.SettingID == targetSettingId, stoppingToken)
+                    ?? await db.CompanySettings.AsNoTracking().OrderBy(s => s.SettingID).FirstOrDefaultAsync(stoppingToken);
 
                 int intervalHours = settings?.AutoBackupIntervalHours ?? 24;
 
@@ -69,34 +72,43 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
                 var requiredInterval = TimeSpan.FromHours(intervalHours);
                 bool shouldBackup = false;
 
-                if (lastAutoBackup == null)
+                DateTime baselineUtc;
+                if (lastAutoBackup != null)
+                {
+                    baselineUtc = lastAutoBackup.CreatedAtUtc;
+                }
+                else
+                {
+                    // No prior auto-backup found. Use database file creation timestamp as baseline
+                    // so we do not run a premature backup immediately upon application launch.
+                    var dbPath = backupService.GetSqlitePath();
+                    baselineUtc = File.Exists(dbPath) ? File.GetCreationTimeUtc(dbPath) : now;
+                }
+
+                var elapsed = now - baselineUtc;
+                if (elapsed >= requiredInterval)
                 {
                     shouldBackup = true;
                 }
                 else
                 {
-                    var elapsed = now - lastAutoBackup.CreatedAtUtc;
-                    if (elapsed >= requiredInterval)
-                    {
-                        shouldBackup = true;
-                    }
-                    else
-                    {
-                        var remaining = requiredInterval - elapsed;
-                        _logger.LogInformation(
-                            "Auto-backup interval is {IntervalHours}h. Last backup was {ElapsedHours:F1}h ago ({LastBackupUtc:u}). Next backup due in {RemainingHours:F1}h.",
-                            intervalHours, elapsed.TotalHours, lastAutoBackup.CreatedAtUtc, remaining.TotalHours);
+                    var remaining = requiredInterval - elapsed;
+                    _logger.LogInformation(
+                        "Auto-backup interval is {IntervalHours}h ({IntervalDesc}). Baseline is {ElapsedHours:F1}h ago ({BaselineUtc:u}). Next backup due in {RemainingHours:F1}h.",
+                        intervalHours,
+                        intervalHours switch { 24 => "Daily", 168 => "Weekly", 720 => "Monthly (30 Days)", _ => $"{intervalHours}h" },
+                        elapsed.TotalHours,
+                        baselineUtc,
+                        remaining.TotalHours);
 
-                        // Check again when due or periodically every 15 minutes in case settings change
-                        delayUntilNextEvaluation = remaining < TimeSpan.FromMinutes(15) ? remaining : TimeSpan.FromMinutes(15);
-                    }
+                    // Check again when due or periodically every 15 minutes in case settings change
+                    delayUntilNextEvaluation = remaining < TimeSpan.FromMinutes(15) ? remaining : TimeSpan.FromMinutes(15);
                 }
 
                 if (shouldBackup)
                 {
                     var tag = intervalHours switch
                     {
-                        1 => "HourlyAuto",
                         24 => "DailyAuto",
                         168 => "WeeklyAuto",
                         720 => "MonthlyAuto",
@@ -105,7 +117,6 @@ public sealed class HourlyAutoBackupHostedService : BackgroundService
 
                     var intervalDesc = intervalHours switch
                     {
-                        1 => "Hourly",
                         24 => "Daily",
                         168 => "Weekly",
                         720 => "Monthly",

@@ -1,5 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Payroll.Shared.Data;
+using Payroll.Shared;
 
 namespace Payroll.Web.Services;
 
@@ -15,89 +18,206 @@ public sealed class FirebaseAdminDashboardService
 
     private readonly FirebaseRealtimeService _firebase;
     private readonly ILogger<FirebaseAdminDashboardService> _logger;
+    private readonly IDbContextFactory<AppDbContext>? _dbFactory;
+
+    private FirebaseAdminDashboardSnapshot? _cachedSnapshot;
+    private DateTime _cacheExpiryUtc = DateTime.MinValue;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public FirebaseAdminDashboardService(
         FirebaseRealtimeService firebase,
-        ILogger<FirebaseAdminDashboardService> logger)
+        ILogger<FirebaseAdminDashboardService> logger,
+        IDbContextFactory<AppDbContext>? dbFactory = null)
     {
         _firebase = firebase;
         _logger = logger;
+        _dbFactory = dbFactory;
+    }
+
+    public void InvalidateCache()
+    {
+        _cachedSnapshot = null;
+        _cacheExpiryUtc = DateTime.MinValue;
     }
 
     public async Task<FirebaseAdminDashboardSnapshot> GetSnapshotAsync(
         string actorUid,
         CancellationToken cancellationToken = default)
     {
-        var ownerUid = _firebase.ResolveOwnerUid(actorUid, "Admin");
+        if (_cachedSnapshot != null && DateTime.UtcNow < _cacheExpiryUtc)
+        {
+            return _cachedSnapshot;
+        }
 
-        var indiaTimeZone = s_indiaTimeZone;
-        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
-        var today = DateOnly.FromDateTime(now);
-        var monthStart = new DateOnly(today.Year, today.Month, 1);
-        var nextMonthStart = monthStart.AddMonths(1);
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_cachedSnapshot != null && DateTime.UtcNow < _cacheExpiryUtc)
+            {
+                return _cachedSnapshot;
+            }
 
-        var todayStartUtc = TimeZoneInfo.ConvertTimeToUtc(today.ToDateTime(TimeOnly.MinValue), indiaTimeZone);
-        var todayEndUtc = TimeZoneInfo.ConvertTimeToUtc(today.AddDays(1).ToDateTime(TimeOnly.MinValue), indiaTimeZone);
-        var todayStartMs = new DateTimeOffset(todayStartUtc).ToUnixTimeMilliseconds();
-        var todayEndMs = new DateTimeOffset(todayEndUtc).ToUnixTimeMilliseconds() - 1;
+            var indiaTimeZone = s_indiaTimeZone;
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, indiaTimeZone);
+            var today = DateOnly.FromDateTime(now);
+            var monthStart = new DateOnly(today.Year, today.Month, 1);
+            var nextMonthStart = monthStart.AddMonths(1);
 
-        // Dashboard KPI reads are deliberately bounded. The previous version
-        // downloaded the complete attendance/shift/summary collections every
-        // time a realtime event refreshed the dashboard. That produced large
-        // repeated Firebase downloads and unnecessary quota consumption.
-        // Attendance is needed only for today's presence; shifts/summaries are
-        // needed only for today's/month's KPI values.
-        var results = await Task.WhenAll(
-            _firebase.GetOwnerTableAsync(
-                ownerUid,
-                "employees",
-                cancellationToken),
+            // 1. FAST LOCAL PROJECTION: Check if SQLite local cache is available
+            if (_dbFactory != null)
+            {
+                try
+                {
+                    await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+                    var localEmployees = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).ToListAsync(cancellationToken);
+                    if (localEmployees.Count > 0)
+                    {
+                        var startOfToday = today.ToDateTime(TimeOnly.MinValue);
+                        var endOfToday = today.AddDays(1).ToDateTime(TimeOnly.MinValue);
 
-            _firebase.GetOwnerTableByChildRangeAsync(
-                ownerUid,
-                "attendance",
-                "checkInTime",
-                startAt: todayStartMs,
-                endAt: todayEndMs,
-                cancellationToken: cancellationToken),
+                        var activeEmployees = localEmployees.Where(e => e.TerminationDate == null || e.TerminationDate > today).ToList();
+                        var activeIds = activeEmployees.Select(e => e.EmployeeID).ToHashSet();
 
-            _firebase.GetOwnerTableAsync(
-                ownerUid,
-                "advance_payments",
-                cancellationToken),
+                        var presentFromAttendance = await db.AttendanceLogs.AsNoTracking()
+                            .Where(a => a.PunchTime >= startOfToday && a.PunchTime < endOfToday && a.EmployeeID.HasValue)
+                            .Select(a => a.EmployeeID!.Value)
+                            .ToListAsync(cancellationToken);
 
-            _firebase.GetOwnerTableAsync(
-                ownerUid,
-                "payroll_history",
-                cancellationToken),
+                        var presentFromAudits = await db.GeoPunchAudits.AsNoTracking()
+                            .Where(p => p.PunchTimeUtc >= startOfToday && p.PunchTimeUtc < endOfToday && p.Success)
+                            .Select(p => p.EmployeeId)
+                            .ToListAsync(cancellationToken);
 
-            _firebase.GetOwnerTableByChildRangeAsync(
-                ownerUid,
-                "shift_schedules",
-                "shiftDate",
-                startAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                endAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                cancellationToken: cancellationToken),
+                        var presentIds = presentFromAttendance.Concat(presentFromAudits)
+                            .Where(id => activeIds.Contains(id))
+                            .ToHashSet();
 
-            _firebase.GetOwnerTableByChildRangeAsync(
-                ownerUid,
-                "daily_summaries",
-                "shiftDate",
-                startAt: monthStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                endAt: nextMonthStart.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                cancellationToken: cancellationToken),
+                        var advances = await db.SalaryAdvances.AsNoTracking()
+                            .Where(a => a.PayrollID_Paid == null)
+                            .OrderByDescending(a => a.AdvanceDate)
+                            .ToListAsync(cancellationToken);
 
-            _firebase.GetOwnerTrackingLiveAsync(
-                ownerUid,
-                cancellationToken),
+                        var target = now.AddMonths(-1);
+                        var previous = now.AddMonths(-2);
 
-            _firebase.GetOwnerTableByChildRangeAsync(
-                ownerUid,
-                "attendance_punches",
-                "timestamp",
-                startAt: todayStartMs,
-                endAt: todayEndMs,
-                cancellationToken: cancellationToken));
+                        var currentPayrollCost = (await db.PayrollHistories.AsNoTracking()
+                            .Where(p => p.PayMonth == target.Month && p.PayYear == target.Year)
+                            .Select(p => p.NetSalary)
+                            .ToListAsync(cancellationToken)).Sum();
+
+                        var previousPayrollCost = (await db.PayrollHistories.AsNoTracking()
+                            .Where(p => p.PayMonth == previous.Month && p.PayYear == previous.Year)
+                            .Select(p => p.NetSalary)
+                            .ToListAsync(cancellationToken)).Sum();
+
+                        var variance = previousPayrollCost == 0m
+                            ? 100m
+                            : ((currentPayrollCost - previousPayrollCost) / previousPayrollCost) * 100m;
+
+                        var hasLastMonthPayroll = await db.PayrollHistories.AsNoTracking()
+                            .AnyAsync(p => p.PayMonth == target.Month && p.PayYear == target.Year, cancellationToken);
+
+                        var shiftsToday = await db.ShiftSchedules.AsNoTracking()
+                            .CountAsync(s => s.ShiftDate == today, cancellationToken);
+
+                        var summaries = await db.DailySummaries.AsNoTracking()
+                            .Where(s => s.ShiftDate >= monthStart && s.ShiftDate < nextMonthStart)
+                            .ToListAsync(cancellationToken);
+
+                        var scheduledMs = (long)summaries.Sum(s => s.ScheduledShiftDuration.TotalMilliseconds);
+                        var liveTrackingCount = LiveLocationStore.GetAll().Count(l => activeIds.Contains(l.EmployeeId));
+
+                        var localSnapshot = new FirebaseAdminDashboardSnapshot
+                        {
+                            TotalEmployees = localEmployees.Count,
+                            ActiveEmployees = activeEmployees.Count,
+                            PresentToday = presentIds.Count,
+                            AbsentToday = Math.Max(0, activeEmployees.Count - presentIds.Count),
+                            UnpaidAdvanceAmount = advances.Sum(a => a.Amount),
+                            RecentAdvances = advances.Take(4).Select(a => new FirebaseDashboardAdvance
+                            {
+                                EmployeeId = a.EmployeeID,
+                                Amount = a.Amount,
+                                AdvanceDate = a.AdvanceDate,
+                                AdvanceType = a.AdvanceType
+                            }).ToList(),
+                            EmployeeNames = localEmployees.ToDictionary(e => e.EmployeeID, e => string.IsNullOrWhiteSpace(e.Name) ? $"ID:{e.EmployeeID}" : e.Name),
+                            PendingPayrolls = hasLastMonthPayroll ? 0 : 1,
+                            CurrentPayrollCost = currentPayrollCost,
+                            PreviousPayrollCost = previousPayrollCost,
+                            PayrollVariancePercent = variance,
+                            ShiftsScheduledToday = shiftsToday,
+                            TotalMonthScheduledMs = scheduledMs,
+                            LiveTrackingCount = liveTrackingCount
+                        };
+
+                        _cachedSnapshot = localSnapshot;
+                        _cacheExpiryUtc = DateTime.UtcNow.AddSeconds(15);
+                        return localSnapshot;
+                    }
+                }
+                catch (Exception dbEx)
+                {
+                    _logger.LogWarning(dbEx, "Local DB snapshot read deferred; falling back to Firebase SSOT read.");
+                }
+            }
+
+            // 2. FALLBACK TO FIREBASE REALTIME REST (Cold boot or empty SQLite)
+            var ownerUid = _firebase.ResolveOwnerUid(actorUid, "Admin");
+            var todayStartUtc = TimeZoneInfo.ConvertTimeToUtc(today.ToDateTime(TimeOnly.MinValue), indiaTimeZone);
+            var todayEndUtc = TimeZoneInfo.ConvertTimeToUtc(today.AddDays(1).ToDateTime(TimeOnly.MinValue), indiaTimeZone);
+            var todayStartMs = new DateTimeOffset(todayStartUtc).ToUnixTimeMilliseconds();
+            var todayEndMs = new DateTimeOffset(todayEndUtc).ToUnixTimeMilliseconds() - 1;
+
+            var results = await Task.WhenAll(
+                _firebase.GetOwnerTableAsync(
+                    ownerUid,
+                    "employees",
+                    cancellationToken),
+
+                _firebase.GetOwnerTableByChildRangeAsync(
+                    ownerUid,
+                    "attendance",
+                    "checkInTime",
+                    startAt: todayStartMs,
+                    endAt: todayEndMs,
+                    cancellationToken: cancellationToken),
+
+                _firebase.GetOwnerTableAsync(
+                    ownerUid,
+                    "advance_payments",
+                    cancellationToken),
+
+                _firebase.GetOwnerTableAsync(
+                    ownerUid,
+                    "payroll_history",
+                    cancellationToken),
+
+                _firebase.GetOwnerTableByChildRangeAsync(
+                    ownerUid,
+                    "shift_schedules",
+                    "shiftDate",
+                    startAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    endAt: today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    cancellationToken: cancellationToken),
+
+                _firebase.GetOwnerTableByChildRangeAsync(
+                    ownerUid,
+                    "daily_summaries",
+                    "shiftDate",
+                    startAt: monthStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    endAt: nextMonthStart.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    cancellationToken: cancellationToken),
+
+                Task.FromResult<JsonElement?>(null), // Tracking live already maintained by LiveLocationStore
+
+                _firebase.GetOwnerTableByChildRangeAsync(
+                    ownerUid,
+                    "attendance_punches",
+                    "timestamp",
+                    startAt: todayStartMs,
+                    endAt: todayEndMs,
+                    cancellationToken: cancellationToken));
 
         try
         {
@@ -274,7 +394,7 @@ public sealed class FirebaseAdminDashboardService
                     Int(p, "payMonth") == target.Month &&
                     Int(p, "payYear") == target.Year);
 
-            return new FirebaseAdminDashboardSnapshot
+            var fallbackSnapshot = new FirebaseAdminDashboardSnapshot
             {
                 TotalEmployees = employees.Count,
 
@@ -315,8 +435,12 @@ public sealed class FirebaseAdminDashboardService
                     scheduledMs,
 
                 LiveTrackingCount =
-                    tracking.Count
+                    LiveLocationStore.GetAll().Count(l => activeIds.Contains(l.EmployeeId))
             };
+
+            _cachedSnapshot = fallbackSnapshot;
+            _cacheExpiryUtc = DateTime.UtcNow.AddSeconds(15);
+            return fallbackSnapshot;
         }
         catch (Exception ex)
         {
@@ -328,6 +452,11 @@ public sealed class FirebaseAdminDashboardService
             throw;
         }
     }
+    finally
+    {
+        _gate.Release();
+    }
+}
 
     // ---------------------------------------------------------------------
     // LIVE TRACKING

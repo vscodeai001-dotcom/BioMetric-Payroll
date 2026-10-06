@@ -128,18 +128,20 @@ public sealed class FirebaseAdvanceService
         {
             using var scope = _scopeFactory.CreateScope();
             var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var query = db.SalaryAdvances.AsNoTracking().AsQueryable();
+                if (employeeId > 0) query = query.Where(a => a.EmployeeID == employeeId);
+                if (from.HasValue) query = query.Where(a => a.AdvanceDate >= from.Value);
+                if (to.HasValue) query = query.Where(a => a.AdvanceDate <= to.Value);
+                if (unpaidOnly) query = query.Where(a => a.PayrollID_Paid == null);
+                var localList = await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
+                if (isOffline || localList.Count > 0)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    var query = db.SalaryAdvances.AsNoTracking().AsQueryable();
-                    if (employeeId > 0) query = query.Where(a => a.EmployeeID == employeeId);
-                    if (from.HasValue) query = query.Where(a => a.AdvanceDate >= from.Value);
-                    if (to.HasValue) query = query.Where(a => a.AdvanceDate <= to.Value);
-                    if (unpaidOnly) query = query.Where(a => a.PayrollID_Paid == null);
-                    return await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
+                    return localList;
                 }
             }
         }

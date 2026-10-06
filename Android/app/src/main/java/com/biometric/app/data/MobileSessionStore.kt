@@ -73,9 +73,6 @@ class MobileSessionStore @Inject constructor(
     fun deploymentMode(): String = prefs.getString(KEY_DEPLOYMENT_MODE, "CloudOnly") ?: "CloudOnly"
     fun setDeploymentMode(mode: String) { prefs.edit { putString(KEY_DEPLOYMENT_MODE, mode) } }
 
-    fun firebasePlanMode(): String = prefs.getString(KEY_FIREBASE_PLAN_MODE, "Spark") ?: "Spark"
-    fun setFirebasePlanMode(mode: String) { prefs.edit { putString(KEY_FIREBASE_PLAN_MODE, mode) } }
-
     private val syncStatePrefs get() = context.getSharedPreferences("app_sync_state", Context.MODE_PRIVATE)
 
     fun lastProcessedWipeTimestamp(): Long = syncStatePrefs.getLong("last_processed_wipe_timestamp", 0L)
@@ -137,12 +134,16 @@ class MobileSessionStore @Inject constructor(
         prefs.edit { clear() }
     }
 
+    fun firebasePlanMode(): String = prefs.getString(KEY_FIREBASE_PLAN_MODE, "Spark") ?: "Spark"
+    fun setFirebasePlanMode(mode: String) { prefs.edit { putString(KEY_FIREBASE_PLAN_MODE, mode) } }
+
     companion object {
         private const val KEY_TOKEN = "token"
         private const val KEY_EMPLOYEE_ID = "employee_id"
         private const val KEY_NAME = "name"
         private const val KEY_EMAIL = "email"
         private const val KEY_FIREBASE_OWNER_UID = "firebase_owner_uid"
+        private const val KEY_FIREBASE_PLAN_MODE = "firebase_plan_mode"
         private const val KEY_ACTIVE = "active"
         private const val KEY_GPS_SESSION = "gps_session_id"
         private const val KEY_RELIABILITY_DONE = "reliability_setup_done"
@@ -152,6 +153,5 @@ class MobileSessionStore @Inject constructor(
         private const val KEY_ACTIVE_TENANT_CODE = "active_tenant_code"
         private const val KEY_SAVED_AUTH_EMAIL = "saved_auth_email"
         private const val KEY_SAVED_AUTH_PASS = "saved_auth_pass"
-        private const val KEY_FIREBASE_PLAN_MODE = "firebase_plan_mode"
     }
 }

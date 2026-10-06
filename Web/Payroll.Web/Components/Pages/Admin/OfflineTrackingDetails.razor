@@ -511,10 +511,10 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            var allEmployeesDomain = (await FirebaseEmployees.GetEmployeesAsync())
+            var allEmployeesDomain = await db.Employees.AsNoTracking()
                 .Where(x => !x.IsDeleted)
                 .OrderBy(x => x.Name)
-                .ToList();
+                .ToListAsync();
 
             var allEmployees = allEmployeesDomain
                 .Select(x => new EmployeeOption { EmployeeID = x.EmployeeID, Name = x.Name })

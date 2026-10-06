@@ -181,7 +181,11 @@ public sealed class DatabaseBackupRestoreService
                     FilePath = file,
                     CreatedAtUtc = fi.CreationTimeUtc,
                     FileSizeBytes = fi.Length,
-                    TriggerType = file.Contains("hourlyauto", StringComparison.OrdinalIgnoreCase) ? "HourlyAuto" :
+                    TriggerType = file.Contains("dailyauto", StringComparison.OrdinalIgnoreCase) ? "DailyAuto" :
+                                  file.Contains("weeklyauto", StringComparison.OrdinalIgnoreCase) ? "WeeklyAuto" :
+                                  file.Contains("monthlyauto", StringComparison.OrdinalIgnoreCase) ? "MonthlyAuto" :
+                                  file.Contains("hourlyauto", StringComparison.OrdinalIgnoreCase) ? "HourlyAuto" :
+                                  file.Contains("auto", StringComparison.OrdinalIgnoreCase) ? "Auto" :
                                   file.Contains("prewipe", StringComparison.OrdinalIgnoreCase) ? "PreWipeSafety" :
                                   file.Contains("prerestore", StringComparison.OrdinalIgnoreCase) ? "PreRestoreSafety" : "Manual"
                 };

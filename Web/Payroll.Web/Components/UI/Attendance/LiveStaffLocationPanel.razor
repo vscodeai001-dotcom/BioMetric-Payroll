@@ -3558,7 +3558,31 @@
 
             if (!TryApplyLocationPayload(data, out var needsAuthoritativeRefresh))
             {
-                needsAuthoritativeRefresh = true;
+                if (payloadEmployeeId > 0)
+                {
+                    var storeLoc = LiveLocationStore.Get(payloadEmployeeId);
+                    if (storeLoc != null && storeLoc.Latitude != 0 && storeLoc.Longitude != 0)
+                    {
+                        var existingIdx = locations.FindIndex(x => x.EmployeeId == payloadEmployeeId);
+                        if (existingIdx >= 0)
+                        {
+                            locations[existingIdx] = storeLoc;
+                        }
+                        else
+                        {
+                            locations.Add(storeLoc);
+                        }
+                        needsAuthoritativeRefresh = false;
+                    }
+                    else
+                    {
+                        needsAuthoritativeRefresh = false;
+                    }
+                }
+                else
+                {
+                    needsAuthoritativeRefresh = false;
+                }
             }
 
             var membershipChanged =
@@ -4413,9 +4437,6 @@ foreach (var point in ordered)
 
                 if (token.IsCancellationRequested || disposed)
                     break;
-
-                // EOF without an exception. Reconcile before reconnecting.
-                await RefreshLocations();
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -5141,6 +5162,23 @@ foreach (var point in ordered)
                 currentOfficeRadius = office.Radius;
                 useSpeedBasedMarkers = office.UseSpeedBasedMarkers;
 
+                var validEmployeeIds =
+                    employees.Select(e => e.EmployeeID).ToHashSet();
+
+                var inMemoryLive = LiveLocationStore.GetAll()
+                    .Where(x => validEmployeeIds.Contains(x.EmployeeId) && x.Latitude != 0 && x.Longitude != 0)
+                    .ToList();
+
+                if (inMemoryLive.Count > 0)
+                {
+                    locations.Clear();
+                    locations.AddRange(inMemoryLive);
+                    lastRefresh = DateTime.Now;
+                    mapNeedsUpdate = true;
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+
                 /*
                  * Firebase is the single live-location wire shared by Web and
                  * Android. Only owner-scoped tracking/live records are read.
@@ -5176,8 +5214,6 @@ foreach (var point in ordered)
                 // the server provisioning path appear on the map without a
                 // manual page refresh. Re-hydrate the employee master list
                 // if an unknown location ID arrives.
-                var validEmployeeIds =
-                    employees.Select(e => e.EmployeeID).ToHashSet();
 
                 if (validEmployeeIds.Count == 0)
                 {
@@ -5541,14 +5577,27 @@ foreach (var point in ordered)
         }
     }
 
+    private DateTime _lastReconcileLiveSnapshotUtc = DateTime.MinValue;
     private async Task ReconcileLiveSnapshotAfterTransientGapAsync()
     {
         if (disposed)
             return;
 
+        if (DateTime.UtcNow - _lastReconcileLiveSnapshotUtc < TimeSpan.FromSeconds(60))
+            return;
+
+        _lastReconcileLiveSnapshotUtc = DateTime.UtcNow;
+
         try
         {
-            await Task.Delay(500);
+            var inMemoryLocations = LiveLocationStore.GetAll();
+            if (inMemoryLocations.Count > 0)
+            {
+                // In-memory store already holds current active positions; no Firebase REST read needed
+                return;
+            }
+
+            await Task.Delay(1000);
 
             var snapshot =
                 await FirebaseRealtime.GetOwnerTrackingLiveAsync(

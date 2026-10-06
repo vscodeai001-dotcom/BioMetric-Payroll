@@ -105,15 +105,17 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 {
                     await StartTenantSyncAsync(tid);
                 }
+
+                if (tenantIds.Count == 0)
+                {
+                    await StartTenantSyncAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed initial tenant discovery for FirebaseSqliteSyncService.");
         }
-
-        // Always ensure default primary tenant is streaming (if not offline)
-        await StartTenantSyncAsync(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
 
         // Global mobile auth events stream (Online mode only)
         var authTask = Task.Run(async () =>
@@ -246,29 +248,31 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
 
                 if (entityName.Equals("CompanySetting", StringComparison.Ordinal))
                 {
-                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
-
                     using var scope = _scopeFactory.CreateScope();
                     var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
                     if (dbFactory != null)
                     {
                         using var db = await dbFactory.CreateDbContextAsync(ct);
-                        var cs = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(s => s.SettingID == 1, ct);
-                        if (cs != null)
+                        var localSetting = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync(ct);
+                        if (localSetting != null)
                         {
-                            await _refreshService.NotifyGeoSettingsChangedAsync(cs.OfficeLatitude, cs.OfficeLongitude, cs.GeoRadiusMeters, cs.UseSpeedBasedMarkers);
+                            await _refreshService.NotifyGeoSettingsChangedAsync(
+                                localSetting.OfficeLatitude,
+                                localSetting.OfficeLongitude,
+                                localSetting.GeoRadiusMeters,
+                                localSetting.UseSpeedBasedMarkers);
                             await scope.ServiceProvider.GetRequiredService<GeoLocationService>().RebaselineAllActiveSessionsAsync();
                         }
                     }
                 }
-                else if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
-                {
-                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
-                    await _refreshService.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
-                }
                 else if (entityName.Equals("Employee", StringComparison.Ordinal))
                 {
-                    FirebaseEmployeeManagementService.InvalidateCache(ownerUid);
+                    using var scope = _scopeFactory.CreateScope();
+                    scope.ServiceProvider.GetService<FirebaseEmployeeManagementService>()?.InvalidateCache(ownerUid);
+                }
+                else if (entityName.Equals("FeatureSettings", StringComparison.Ordinal))
+                {
+                    await _refreshService.NotifyGlobalRefreshAsync("FEATURE_TOGGLES_UPDATED");
                 }
                 else if (entityName.Equals("AttendanceLog", StringComparison.Ordinal) ||
                          entityName.Equals("AttendancePunch", StringComparison.Ordinal))
@@ -561,7 +565,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             // attendance, preventing an old GPS snapshot from creating a new
             // punch or resurrecting an old session.
             await geoLocationService.UpdateGpsSessionAsync(
-                employeeId, sessionId, latitude, longitude, accuracy, distance, radius, within, captured);
+                employeeId, sessionId, latitude, longitude, accuracy, distance, radius, within, captured,
+                allowSessionRecovery: true,
+                publishToFirebase: false);
         }
 
         await geoLocationService.SaveLocationHistoryAsync(
@@ -754,6 +760,13 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (eventData.Value.ValueKind != JsonValueKind.Object)
             return;
 
+        var source = GetString(eventData.Value, "Source", "source");
+        if (string.Equals(source, "FIREBASE_WEB", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(source, "WEB", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
         var employeeId = GetInt(eventData.Value, "EmployeeId", "employeeId");
         if (employeeId <= 0)
         {
@@ -823,7 +836,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             distance,
             radius,
             within,
-            captured);
+            captured,
+            allowSessionRecovery: true,
+            publishToFirebase: false);
 
         if (accepted)
         {
@@ -1122,6 +1137,9 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
             "EmployeeGpsSession",       // tracking/sessions  — append-only, large
             "PayrollHistory",           // payroll_history    — historical, large
             "SalarySnapshot",           // salary_snapshots   — historical, large
+            "AttendancePunch",          // attendance_punches — streamed via SSE initial snapshot
+            "AttendanceLog",            // attendance         — streamed via SSE initial snapshot
+            "GeoPunchAudit",            // geo_punch_audits   — streamed via SSE initial snapshot
         };
 
         var priorityOrder = new[]

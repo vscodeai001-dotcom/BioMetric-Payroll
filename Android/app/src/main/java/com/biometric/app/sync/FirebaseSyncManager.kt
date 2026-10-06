@@ -43,10 +43,10 @@ class FirebaseSyncManager @Inject constructor(
 
     private val gson = Gson()
     val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val verifiedActiveSessions = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     private val auth = FirebaseAuth.getInstance()
     private val database = FirebaseDatabase.getInstance().reference
+    private val verifiedActiveSessions = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     fun getGlobalRef() = database
 
@@ -851,14 +851,10 @@ class FirebaseSyncManager @Inject constructor(
             // Keep the legacy compatibility path, but only after the owner-scoped
             // session has accepted the start.
             if (committed) {
-                verifiedActiveSessions["$employeeId:$sessionId"] = true
-                val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
-                if (!isSpark) {
-                    try {
-                        getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
-                    } catch (legacyEx: Exception) {
-                        Log.d("FirebaseSyncManager", "Legacy tracking/sessions write skipped: ${legacyEx.message}")
-                    }
+                try {
+                    getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(payload).await()
+                } catch (legacyEx: Exception) {
+                    Log.d("FirebaseSyncManager", "Legacy tracking/sessions write skipped: ${legacyEx.message}")
                 }
 
                 // Live marker is established exclusively by pushLiveLocation when genuine
@@ -877,7 +873,8 @@ class FirebaseSyncManager @Inject constructor(
         endReason: String = "LOGGED_OUT"
     ): Boolean {
         if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
-        verifiedActiveSessions.remove("$employeeId:$sessionId")
+        val sessionCacheKey = "$employeeId:$sessionId"
+        verifiedActiveSessions.remove(sessionCacheKey)
         val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
         val ref = getGlobalRef().child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
         return try {
@@ -907,10 +904,7 @@ class FirebaseSyncManager @Inject constructor(
                     "Source" to "ANDROID_FIREBASE"
                 )
 
-                val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
-                if (!isSpark) {
-                    getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(endPayload).await()
-                }
+                getGlobalRef().child("tracking/sessions/$employeeId/$sessionId").updateChildren(endPayload).await()
 
                 // REQUIREMENT: Prevent late GPS points from resurrecting a ghost marker.
                 // Only mark the live node as ENDED if it is currently bound to 
@@ -937,7 +931,7 @@ class FirebaseSyncManager @Inject constructor(
                         .equals("ENDED", ignoreCase = true) &&
                     snapshot.child("SessionId").getValue(String::class.java).orEmpty() == sessionId
                 }
-                if (ownerLiveClosed && !isSpark) {
+                if (ownerLiveClosed) {
                     if (ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
                         getGlobalRef().child("tracking/live/$employeeId").updateChildren(endPayload).await()
                     }
@@ -1035,17 +1029,23 @@ class FirebaseSyncManager @Inject constructor(
             "CaptureSource" to if (isOffline) "OfflineSync" else "ANDROID_FIREBASE"
         )
 
-        val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
         return try {
+            val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
+            val sessionCacheKey = "$employeeId:$sessionId"
+
             // Offline/replayed GPS is immutable historical evidence.
             if (isOffline) {
-                val sessionState = getGlobalRef()
-                    .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
-                    .get()
-                    .await()
-                    .child("State")
-                    .getValue(String::class.java)
-                    .orEmpty()
+                val sessionState = if (verifiedActiveSessions[sessionCacheKey] == true) {
+                    "ACTIVE"
+                } else {
+                    getGlobalRef()
+                        .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
+                        .get()
+                        .await()
+                        .child("State")
+                        .getValue(String::class.java)
+                        .orEmpty()
+                }
                 getGlobalRef()
                     .child("owners/$ownerUid/tracking/history/$employeeId/$clientEventId")
                     .setValue(payload + ("SessionState" to if (sessionState.isBlank()) "OFFLINE_UNBOUND" else sessionState))
@@ -1084,7 +1084,6 @@ class FirebaseSyncManager @Inject constructor(
                 return true
             }
 
-            val sessionCacheKey = "$employeeId:$sessionId"
             if (verifiedActiveSessions[sessionCacheKey] != true) {
                 val sessionRef = getGlobalRef()
                     .child("owners/$ownerUid/tracking/sessions/$employeeId/$sessionId")
@@ -1170,8 +1169,8 @@ class FirebaseSyncManager @Inject constructor(
 
             if (!accepted) return false
 
-            // Mirror to alternate owner so Admin sees live employee regardless of tenant node
             if (!isSpark) {
+                // Mirror to alternate owner so Admin sees live employee regardless of tenant node
                 getAlternateOwnerUid()?.let { altUid ->
                     runCatching {
                         getGlobalRef()

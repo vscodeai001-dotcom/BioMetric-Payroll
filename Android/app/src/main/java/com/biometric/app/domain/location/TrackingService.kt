@@ -69,8 +69,6 @@ class TrackingService : Service() {
     private var lastLocation: Location? = null
     private var lastHistoryLocation: Location? = null
     private var lastHistoryRecordedTimeMs: Long = 0L
-    private var lastLiveLocation: Location? = null
-    private var lastLiveRecordedTimeMs: Long = 0L
     private var currentInterval = 30_000L
     private var serverSessionStarted = false
     private var heartbeatJob: Job? = null
@@ -286,9 +284,7 @@ class TrackingService : Service() {
     }
 
     private fun applyTrackingConfiguration(config: TrackingConfigurationRepository.Config) {
-        val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
-        val configInterval = config.intervalSeconds.coerceIn(15, 3600) * 1000L
-        val newInterval = if (isSpark) configInterval.coerceAtLeast(60_000L) else configInterval
+        val newInterval = config.intervalSeconds.coerceIn(15, 3600) * 1000L
         val intervalChanged = currentInterval != newInterval
         currentInterval = newInterval
 
@@ -504,16 +500,13 @@ else if (locationUpdatesStarted) {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
-        val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
-        val configInterval = trackingConfiguration.cached().intervalSeconds.coerceIn(15, 3600) * 1000L
-        currentInterval = if (isSpark) configInterval.coerceAtLeast(60_000L) else configInterval
+        currentInterval = trackingConfiguration.cached().intervalSeconds.coerceIn(15, 3600) * 1000L
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return
         }
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        val minInterval = if (isSpark) 30_000L else 10_000L
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, currentInterval)
-            .setMinUpdateIntervalMillis(minInterval)
+            .setMinUpdateIntervalMillis(10_000L)
             .setWaitForAccurateLocation(true)
             .build()
         
@@ -612,33 +605,11 @@ else if (locationUpdatesStarted) {
         // 4. Significant displacement: >= 30s elapsed AND moved >= 25m
         // 5. Stationary heartbeat: >= 300s (5 minutes) elapsed
         val isOnline = offlineMonitor.isOnline()
-        val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
         val isHistoryDue = prevHistory == null ||
             (!isOnline && (timeSinceLastHistory >= 15_000L || distSinceLastHistory >= 5f)) ||
             (timeSinceLastHistory >= 60_000L && distSinceLastHistory >= 10f) ||
             (timeSinceLastHistory >= 30_000L && distSinceLastHistory >= 25f) ||
             (timeSinceLastHistory >= 300_000L)
-
-        // Evaluate if this fix qualifies for a live location update (pushLiveLocation):
-        val prevLive = lastLiveLocation
-        val timeSinceLastLive = now - lastLiveRecordedTimeMs
-        val distSinceLastLive = if (prevLive != null) location.distanceTo(prevLive) else Float.MAX_VALUE
-
-        val isLiveDue = if (!isSpark) {
-            true // Blaze mode: keep configured real-time interval (15-30s)
-        } else {
-            // Spark mode: strict bandwidth optimization
-            when {
-                prevLive == null -> true // First fix of session
-                isHistoryDue -> true     // Sync live whenever history breadcrumb is recorded
-                // High-speed transit (> 25 km/h ≈ 6.94 m/s):
-                location.speed >= 6.94f -> (timeSinceLastLive >= 45_000L || distSinceLastLive >= 100f)
-                // Stationary (< 0.5 m/s and minimal displacement < 15m):
-                location.speed < 0.5f && distSinceLastLive < 15f -> (timeSinceLastLive >= 300_000L) // 5-minute heartbeat
-                // Normal movement (walking / city travel):
-                else -> (timeSinceLastLive >= 60_000L || distSinceLastLive >= 30f)
-            }
-        }
 
         // Evaluate automatic geofence punch independently on Android
         serviceScope.launch {
@@ -647,10 +618,6 @@ else if (locationUpdatesStarted) {
             } catch (e: Exception) {
                 Log.w("TrackingService", "Auto punch evaluation error", e)
             }
-        }
-
-        if (!isLiveDue && !isHistoryDue) {
-            return
         }
 
         processLocationCapture(smoothedLocation, isHistoryDue)
@@ -715,8 +682,6 @@ else if (locationUpdatesStarted) {
             }
 
             if (delivered) {
-                lastLiveLocation = location
-                lastLiveRecordedTimeMs = System.currentTimeMillis()
                 if (recordHistory) {
                     lastHistoryLocation = location
                     lastHistoryRecordedTimeMs = System.currentTimeMillis()
@@ -728,8 +693,6 @@ else if (locationUpdatesStarted) {
 
             // Only queue for offline retry if this fix was designated as a route history breadcrumb
             if (recordHistory) {
-                lastLiveLocation = location
-                lastLiveRecordedTimeMs = System.currentTimeMillis()
                 lastHistoryLocation = location
                 lastHistoryRecordedTimeMs = System.currentTimeMillis()
                 queueLocationForRetry(capture.copy(isOfflineCapture = !isOnline))
@@ -806,8 +769,6 @@ else if (locationUpdatesStarted) {
                 accuracy = location.accuracy,
                 correlationId = location.clientEventId
             )
-        } else {
-            serverSessionStarted = false
         }
 
         return uploaded
@@ -891,10 +852,6 @@ else if (locationUpdatesStarted) {
     private suspend fun ensureFirebaseGpsSessionStarted(sessionId: String): String? {
         val employeeId = sessionStore.employeeId()
         if (employeeId <= 0 || sessionId.isBlank()) return null
-
-        if (serverSessionStarted && sessionId == sessionStore.gpsSessionId()) {
-            return sessionId
-        }
 
         var effectiveSessionId = sessionId
         val remoteState = firebaseSync.getTrackingSessionState(
@@ -989,11 +946,6 @@ else if (locationUpdatesStarted) {
     private fun stopTracking(endReason: String = "LOGGED_OUT", keepRecovery: Boolean = false) {
         isManualStopping = !keepRecovery
         heartbeatJob?.cancel()
-        serverSessionStarted = false
-        lastLiveLocation = null
-        lastLiveRecordedTimeMs = 0L
-        lastHistoryLocation = null
-        lastHistoryRecordedTimeMs = 0L
 
         // REQUIREMENT: "never automatically session ended".
         // If keepRecovery is true (e.g. shift transition, restart tick), we 

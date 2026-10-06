@@ -292,10 +292,10 @@
             // Load the employee list independently of the in-memory GPS store.
             // This keeps the page useful even when an employee has no active
             // GPS session or when the app has just restarted.
-            var employeeList = (await FirebaseEmployees.GetEmployeesAsync())
+            var employeeList = await db.Employees.AsNoTracking()
                 .Where(e => !e.IsDeleted)
                 .OrderBy(e => e.Name)
-                .ToList();
+                .ToListAsync();
 
             var employeeMap = employeeList.ToDictionary(x => x.EmployeeID);
             var employeeNames = employeeList.ToDictionary(x => x.EmployeeID, x => x.Name);

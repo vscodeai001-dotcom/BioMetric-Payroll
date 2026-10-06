@@ -57,7 +57,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (isOffline)
+                if (isOffline || localList.Count > 0)
                 {
                     return localList
                         .GroupBy(x => (x.EmployeeID, x.ShiftDate))
@@ -331,7 +331,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (isOffline && localPunches.Count > 0)
+                if (isOffline || localPunches.Count > 0)
                 {
                     return localPunches;
                 }
@@ -485,7 +485,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (isOffline && localPunches.Count > 0)
+                if (isOffline || localPunches.Count > 0)
                 {
                     return localPunches;
                 }
