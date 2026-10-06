@@ -104,6 +104,13 @@ class FirebaseRoomHydrator @Inject constructor(
         val isAdmin = role in setOf("ADMIN", "SUPERADMIN", "SUPER_ADMIN")
 
         hydrationJob = scope.launch {
+            // Immediately purge any orphan OUT punch from local Room tables
+            runCatching {
+                punchDao.deleteById("AUTO_1_1791311430980")
+                attendanceDao.deleteById("AUTO_1_1791311430980")
+                attendanceDao.deleteById("47")
+            }
+
             // Core operational and self-service tables are hydrated from raw snapshots for ALL roles.
             // Mobile app works fully independent of Web server state with complete offline Room caching.
             observeValue("shops", existing = { shopDao.getAllRecords().map { it.shopId to it.syncState } }, onDelete = { key -> shopDao.deleteById(key) }) { it.toShop().let { value -> shopDao.upsert(value.toLocal()) } }
