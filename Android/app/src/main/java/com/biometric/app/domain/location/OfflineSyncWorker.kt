@@ -14,6 +14,10 @@ import com.biometric.app.data.entity.AttendancePunch
 import com.biometric.app.sync.FirebaseSyncManager
 import com.biometric.app.sync.FirebaseRoomHydrator
 import kotlinx.coroutines.tasks.await
+import android.location.Location
+import com.biometric.app.data.dao.LocalAttendanceDao
+import com.biometric.app.data.entity.Attendance
+import com.biometric.app.domain.attendance.AttendancePolicyRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.Dispatchers
@@ -33,10 +37,12 @@ class OfflineSyncWorker @AssistedInject constructor(
     private val locationDao: LocationDao,
     private val eventDao: OfflineTrackingEventDao,
     private val punchDao: LocalAttendancePunchDao,
+    private val attendanceDao: LocalAttendanceDao,
     private val sessionStore: MobileSessionStore,
     private val monitor: OfflineTrackingMonitor,
     private val firebaseSync: FirebaseSyncManager,
-    private val hydrator: FirebaseRoomHydrator
+    private val hydrator: FirebaseRoomHydrator,
+    private val attendancePolicy: AttendancePolicyRepository
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -79,6 +85,11 @@ class OfflineSyncWorker @AssistedInject constructor(
             return if (eventDao.getPendingCount() == 0) Result.success() else Result.retry()
         }
 
+        val policy = runCatching { attendancePolicy.readFromLocal() }.getOrNull()
+        val officeLat = policy?.officeLatitude ?: 0.0
+        val officeLon = policy?.officeLongitude ?: 0.0
+        val allowedRadius = policy?.geoRadiusMeters ?: 100
+
         var failed = false
         var synced = 0
 
@@ -94,6 +105,25 @@ class OfflineSyncWorker @AssistedInject constructor(
             )
 
             try {
+                var distanceMeters = 0.0
+                var isWithinAllowedRadius = true
+                if (officeLat != 0.0 && officeLon != 0.0) {
+                    val distResults = FloatArray(1)
+                    Location.distanceBetween(
+                        loc.latitude, loc.longitude,
+                        officeLat, officeLon,
+                        distResults
+                    )
+                    distanceMeters = distResults[0].toDouble().coerceAtLeast(0.0)
+                    isWithinAllowedRadius = if (allowedRadius > 0) distanceMeters <= allowedRadius else true
+                }
+                val movementState = when {
+                    loc.speed < 0.2f -> "Stopped"
+                    loc.speed < 1.4f -> "Walking"
+                    loc.speed < 5.5f -> "Running"
+                    else -> "Moving"
+                }
+
                 // A queue retry must also have a bounded Firebase attempt.
                 // A reachable network does not guarantee that Firebase itself is
                 // responsive. Timeout simply leaves this same stable event in
@@ -113,7 +143,12 @@ class OfflineSyncWorker @AssistedInject constructor(
                         timestamp = loc.timestamp,
                         // Queued records are historical evidence. They must
                         // never overwrite the current live marker.
-                        isOffline = true
+                        isOffline = true,
+                        recordHistory = true,
+                        distanceMeters = distanceMeters,
+                        allowedRadiusMeters = allowedRadius,
+                        isWithinAllowedRadius = isWithinAllowedRadius,
+                        movementState = movementState
                     )
                 } ?: false
 
@@ -329,8 +364,27 @@ class OfflineSyncWorker @AssistedInject constructor(
                 }
                 Log.i("OfflineSyncWorker", "Reconciled offline punch ${local.punchId} to Firebase")
             }
+
+            val unsyncedAttendance = withContext(Dispatchers.IO) {
+                attendanceDao.getUnsynced()
+            }
+            for (localAtt in unsyncedAttendance) {
+                val att = Attendance(
+                    attendanceId = localAtt.attendanceId,
+                    employeeId = localAtt.employeeId,
+                    checkInTime = localAtt.checkInTime,
+                    checkOutTime = localAtt.checkOutTime,
+                    syncState = 1,
+                    lastModified = localAtt.lastModified
+                )
+                firebaseSync.pushAttendance(att)
+                withContext(Dispatchers.IO) {
+                    attendanceDao.upsert(localAtt.copy(syncState = 1))
+                }
+                Log.i("OfflineSyncWorker", "Reconciled offline attendance session ${localAtt.attendanceId} to Firebase")
+            }
         }.onFailure {
-            Log.w("OfflineSyncWorker", "Failed syncing offline punches", it)
+            Log.w("OfflineSyncWorker", "Failed syncing offline punches/attendance", it)
         }
     }
 

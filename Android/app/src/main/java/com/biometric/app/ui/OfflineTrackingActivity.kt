@@ -1124,6 +1124,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 }
             }
 
+            val periodStays = detectPeriodStays(c, officeLat, officeLng, officeRadiusMeters)
+
             result.add(
                 OfflinePeriodItem(
                     id = "${employeeId}_${first.sessionId}_${first.timestamp}",
@@ -1139,6 +1141,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     isSynced = isSynced,
                     points = c,
                     punches = punchesInGap,
+                    stays = periodStays,
                     isOffShift = isOffShift,
                     shiftTag = shiftTag,
                     liveImpactSummary = liveImpact,
@@ -1148,6 +1151,82 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         }
 
         return result
+    }
+
+    private fun detectPeriodStays(
+        points: List<LocalLocation>,
+        officeLat: Double,
+        officeLng: Double,
+        radiusMeters: Int
+    ): List<OfflineStayPoint> {
+        val stays = mutableListOf<OfflineStayPoint>()
+        if (points.isEmpty()) return stays
+
+        val ordered = points.sortedBy { it.timestamp }
+        var curCluster = mutableListOf(ordered[0])
+
+        for (i in 1 until ordered.size) {
+            val prev = ordered[i - 1]
+            val curr = ordered[i]
+            val dist = calculateDistance(prev.latitude, prev.longitude, curr.latitude, curr.longitude)
+            val gap = curr.timestamp - prev.timestamp
+
+            if (dist <= 40.0 && gap <= 15 * 60 * 1000L) {
+                curCluster.add(curr)
+            } else {
+                addStayIfValid(curCluster, stays, officeLat, officeLng, radiusMeters)
+                curCluster = mutableListOf(curr)
+            }
+        }
+        addStayIfValid(curCluster, stays, officeLat, officeLng, radiusMeters)
+        return stays
+    }
+
+    private fun addStayIfValid(
+        points: List<LocalLocation>,
+        stays: MutableList<OfflineStayPoint>,
+        officeLat: Double,
+        officeLng: Double,
+        radiusMeters: Int
+    ) {
+        if (points.isEmpty()) return
+        val first = points.first()
+        val last = points.last()
+        val duration = last.timestamp - first.timestamp
+
+        if (duration >= 2 * 60 * 1000L || (points.size >= 3 && points.all { it.speed < 0.5f })) {
+            val avgLat = points.map { it.latitude }.average()
+            val avgLng = points.map { it.longitude }.average()
+            val distToOffice = if (officeLat != 0.0 && officeLng != 0.0) {
+                calculateDistance(avgLat, avgLng, officeLat, officeLng).toInt()
+            } else 0
+            val isInside = if (officeLat != 0.0 && officeLng != 0.0 && radiusMeters > 0) {
+                distToOffice <= radiusMeters
+            } else {
+                true
+            }
+
+            val desc = if (officeLat != 0.0 && officeLng != 0.0) {
+                if (isInside) "Inside Office Geofence (${distToOffice}m from center)"
+                else "Outside Geofence (${distToOffice}m from office)"
+            } else {
+                if (isInside) "Within Radius" else "Outside Radius"
+            }
+
+            stays.add(
+                OfflineStayPoint(
+                    startTime = first.timestamp,
+                    endTime = last.timestamp,
+                    durationMs = duration.coerceAtLeast(60_000L),
+                    latitude = avgLat,
+                    longitude = avgLng,
+                    pointCount = points.size,
+                    isInsideGeofence = isInside,
+                    distanceFromOffice = distToOffice,
+                    locationDescription = desc
+                )
+            )
+        }
     }
 
     private fun isTimeBetween(currentTime: String, startTime: String, endTime: String): Boolean {
@@ -1206,7 +1285,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             )
         }
 
-        // 2. Offline Periods
+        // 2. Offline Periods & Stay Details
         for (period in offlinePeriods) {
             val distText = if (period.distanceMeters >= 1000) String.format(Locale.US, "%.1f km", period.distanceMeters / 1000.0) else "${period.distanceMeters.toInt()}m"
             val syncLabel = if (period.isSynced) "✓ Reconciled & Synced to Cloud" else "⏳ Queued in Local Memory"
@@ -1215,17 +1294,54 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 val pStr = period.punches.joinToString(", ") { p -> "${p.type.uppercase()} at ${formatTimeOnly(p.timestamp)} (${p.changeDetail})" }
                 "Punches: $pStr • "
             } else ""
+            val staySummary = if (period.stays.isNotEmpty()) {
+                val sStr = period.stays.joinToString("; ") { s -> "${s.durationMs / 60000}m at ${s.locationDescription}" }
+                "\nStops: $sStr"
+            } else ""
+
             steps.add(
                 TimelineStepItem(
                     time = period.startTime,
                     icon = if (period.reason.contains("airplane", true)) "✈️" else "📴",
                     badge = badgeLabel,
                     title = "Offline Disconnection: ${period.reason} [${period.shiftTag}]",
-                    description = "${punchSummary}Duration: ${formatDuration(period.durationMs)} • ${period.pointsCount} points captured offline ($distText traveled)\n${period.liveImpactSummary}",
+                    description = "${punchSummary}Duration: ${formatDuration(period.durationMs)} • ${period.pointsCount} points captured offline ($distText traveled)$staySummary\n${period.liveImpactSummary}",
                     syncStatus = syncLabel,
                     isSuccess = false
                 )
             )
+
+            // Individual stay points during offline window
+            for (stay in period.stays) {
+                steps.add(
+                    TimelineStepItem(
+                        time = stay.startTime,
+                        icon = "📍",
+                        badge = "STAY / STOP",
+                        title = "Stationary Stay: ${stay.durationMs / 60000} mins",
+                        description = "${stay.locationDescription} • ${stay.pointCount} points captured",
+                        syncStatus = syncLabel,
+                        isSuccess = stay.isInsideGeofence
+                    )
+                )
+            }
+
+            // Explicit auto-punches taken during offline window
+            for (p in period.punches) {
+                val isOut = p.type.equals("OUT", ignoreCase = true)
+                steps.add(
+                    TimelineStepItem(
+                        time = p.timestamp,
+                        icon = if (isOut) "🔴" else "🟢",
+                        badge = if (isOut) "AUTO OUT" else "AUTO IN",
+                        title = "Offline Punch: ${p.type.uppercase()} at ${formatTimeOnly(p.timestamp)}",
+                        description = "${p.changeDetail} • Applied to Live Attendance on reconnect",
+                        syncStatus = if (p.isSynced) "✓ Synced to Cloud" else "⏳ Pending Sync",
+                        isSuccess = !isOut
+                    )
+                )
+            }
+
             if (period.isSynced) {
                 steps.add(
                     TimelineStepItem(
@@ -1641,6 +1757,18 @@ data class OfflinePunchInfo(
     val changeDetail: String = ""
 )
 
+data class OfflineStayPoint(
+    val startTime: Long,
+    val endTime: Long,
+    val durationMs: Long,
+    val latitude: Double,
+    val longitude: Double,
+    val pointCount: Int,
+    val isInsideGeofence: Boolean,
+    val distanceFromOffice: Int,
+    val locationDescription: String
+)
+
 data class OfflinePeriodItem(
     val id: String,
     val employeeId: Int = 0,
@@ -1655,6 +1783,7 @@ data class OfflinePeriodItem(
     val isSynced: Boolean,
     val points: List<LocalLocation>,
     val punches: List<OfflinePunchInfo> = emptyList(),
+    val stays: List<OfflineStayPoint> = emptyList(),
     val isOffShift: Boolean = false,
     val shiftTag: String = "Active Shift Disconnection",
     val liveImpactSummary: String = "",
@@ -1972,7 +2101,18 @@ private class OfflinePeriodAdapter(
                 String.format(Locale.US, "%.0f m", item.distanceMeters)
             }
 
-            tvStats.text = "${item.pointsCount} points captured • Distance: $distText • Within geofence: ${item.inRadiusCount} / Outside: ${item.pointsCount - item.inRadiusCount}"
+            val statsHeader = "${item.pointsCount} points captured • Distance: $distText • Within geofence: ${item.inRadiusCount} / Outside: ${item.pointsCount - item.inRadiusCount}"
+            if (item.stays.isNotEmpty()) {
+                val staySummary = item.stays.joinToString("\n") { s ->
+                    val durM = s.durationMs / 60000
+                    val durStr = if (durM > 0) "${durM}m" else "1m"
+                    val timeRange = "${timeFmt.format(Date(s.startTime))} - ${timeFmt.format(Date(s.endTime))}"
+                    "📍 Stayed $durStr ($timeRange): ${s.locationDescription}"
+                }
+                tvStats.text = "$statsHeader\n$staySummary"
+            } else {
+                tvStats.text = statsHeader
+            }
 
             btnInspect.setOnClickListener {
                 onInspect(item)

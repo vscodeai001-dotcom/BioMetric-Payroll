@@ -20,6 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -334,8 +335,61 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             )
             localAttendancePunchDao.upsert(local)
 
-            // 2. Publish directly to Firebase RTDB (attendance_punches & attendance nodes)
-            firebaseSync.pushAttendancePunch(punch)
+            // 2. Immediately update local attendance session in Room so offline status reflects IN/OUT
+            val attId = "ATT_${employeeId}_${todayStr}"
+            if (isInside) {
+                val existingAtt = localAttendanceDao.getById(attId)
+                if (existingAtt == null) {
+                    localAttendanceDao.upsert(
+                        com.biometric.app.data.entity.LocalAttendance(
+                            attendanceId = attId,
+                            employeeId = staffIdStr,
+                            checkInTime = nowMs,
+                            checkOutTime = null,
+                            syncState = 0,
+                            lastModified = nowMs
+                        )
+                    )
+                } else if (existingAtt.checkOutTime != null && existingAtt.checkOutTime > 0L) {
+                    val subAttId = "ATT_${employeeId}_${todayStr}_${nowMs}"
+                    localAttendanceDao.upsert(
+                        com.biometric.app.data.entity.LocalAttendance(
+                            attendanceId = subAttId,
+                            employeeId = staffIdStr,
+                            checkInTime = nowMs,
+                            checkOutTime = null,
+                            syncState = 0,
+                            lastModified = nowMs
+                        )
+                    )
+                }
+            } else {
+                val existingAtt = localAttendanceDao.getById(attId)
+                if (existingAtt != null && (existingAtt.checkOutTime == null || existingAtt.checkOutTime == 0L)) {
+                    localAttendanceDao.upsert(existingAtt.copy(
+                        checkOutTime = nowMs,
+                        syncState = 0,
+                        lastModified = nowMs
+                    ))
+                } else {
+                    val allOpen = localAttendanceDao.getAll().filter { 
+                        (it.employeeId == staffIdStr || it.employeeId.toIntOrNull() == employeeId) &&
+                        (it.checkOutTime == null || it.checkOutTime == 0L)
+                    }
+                    allOpen.lastOrNull()?.let { openAtt ->
+                        localAttendanceDao.upsert(openAtt.copy(
+                            checkOutTime = nowMs,
+                            syncState = 0,
+                            lastModified = nowMs
+                        ))
+                    }
+                }
+            }
+
+            // 3. Publish directly to Firebase RTDB with a bounded timeout so offline does not block
+            withTimeoutOrNull(4000L) {
+                runCatching { firebaseSync.pushAttendancePunch(punch) }
+            }
 
             lastEvaluatedInside = isInside
             if (isInside) {

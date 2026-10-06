@@ -957,7 +957,7 @@
                                 sStartDt,
                                 sEndDt);
                             var effectiveLogs = (pr.Ordered != null && pr.Ordered.Count > 0) ? pr.Ordered : dayPunchLogs;
-                            var displayLogs = (effectiveLogs != null && effectiveLogs.Count >= dayPunchLogs.Count) ? effectiveLogs : dayPunchLogs;
+                            var displayLogs = effectiveLogs;
                             var dayPunches = displayLogs.Select(l => l.PunchTime).ToList();
 
                             dto.Punches =
@@ -990,7 +990,7 @@
                                     }
                                     else
                                     {
-                                        if (dto.Status == "Absent" || dto.FinalWorkedHours == 0)
+                                        if (dto.Status == "Absent" || dto.Status == "Missing Punch" || dto.FinalWorkedHours == 0 || displayLogs.Count % 2 == 0)
                                         {
                                             dto.Status = (displayLogs.Count % 2 != 0) ? "Missing Punch" : "Present";
                                             dto.ShiftWorkedDuration = TimeSpan.FromMinutes(punchWorkedMinutes);

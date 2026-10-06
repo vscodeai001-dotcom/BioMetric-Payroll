@@ -169,19 +169,19 @@
             <!-- Start Date -->
             <div class="col-12 col-sm-6 col-lg-3">
                 <label class="form-label small fw-bold text-hub-muted mb-1">📅 Start Date</label>
-                <input type="date" class="form-control rounded-3 hub-input" @bind="startDate" @bind:after="ApplyFilter" />
+                <input type="date" class="form-control rounded-3 hub-input" @bind="startDate" @bind:after="OnCriteriaChangedAsync" />
             </div>
 
             <!-- End Date -->
             <div class="col-12 col-sm-6 col-lg-3">
                 <label class="form-label small fw-bold text-hub-muted mb-1">📅 End Date</label>
-                <input type="date" class="form-control rounded-3 hub-input" @bind="endDate" @bind:after="ApplyFilter" />
+                <input type="date" class="form-control rounded-3 hub-input" @bind="endDate" @bind:after="OnCriteriaChangedAsync" />
             </div>
 
             <!-- Employee Dropdown -->
             <div class="col-12 col-sm-6 col-lg-3">
                 <label class="form-label small fw-bold text-hub-muted mb-1">👤 Employee</label>
-                <select class="form-select rounded-3 hub-input" @bind="selectedEmployeeId" @bind:after="ApplyFilter">
+                <select class="form-select rounded-3 hub-input" @bind="selectedEmployeeId" @bind:after="OnCriteriaChangedAsync">
                     <option value="0">All Employees (@employees.Count)</option>
                     @foreach (var emp in employees.OrderBy(e => e.Name))
                     {
@@ -231,13 +231,13 @@
             <!-- Status Filter Chips -->
             <div class="d-flex align-items-center gap-1.5 flex-wrap">
                 <span class="small fw-bold text-hub-muted me-2">Status:</span>
-                <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == null ? "btn-secondary" : "btn-outline-secondary")"
-                        @onclick="() => SetStatusFilter(null)">
-                    All Status
-                </button>
                 <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == true ? "btn-success" : "btn-outline-success")"
                         @onclick="() => SetStatusFilter(true)">
                     ✅ Accepted Only
+                </button>
+                <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == null ? "btn-secondary" : "btn-outline-secondary")"
+                        @onclick="() => SetStatusFilter(null)">
+                    All (Inc. Duplicates)
                 </button>
                 <button class="btn btn-sm rounded-pill px-3 py-1 @(statusFilter == false ? "btn-danger" : "btn-outline-danger")"
                         @onclick="() => SetStatusFilter(false)">
@@ -831,7 +831,7 @@
     private DateOnly endDate = new DateOnly(2026, 10, 31);
     private int selectedEmployeeId = 0;
     private PunchSourceTier? sourceFilter = null;
-    private bool? statusFilter = null;
+    private bool? statusFilter = true; // Default to Accepted Only: suppresses duplicate/redundant entries
     private string? directionFilter = null;
     private string searchQuery = "";
 
@@ -845,13 +845,18 @@
     // Inspection Modal
     private EvaluatedPunchRecord? selectedPunchForInspection = null;
 
-    // KPI Counters
-    private int totalRawCount => filteredPunches.Count;
-    private int acceptedCount => filteredPunches.Count(p => p.IsAccepted);
-    private int suppressedCount => filteredPunches.Count(p => !p.IsAccepted);
-    private int physicalCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.PhysicalMachine);
-    private int manualCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.ManualAdmin);
-    private int autoGeofenceCount => filteredPunches.Count(p => p.SourceTier == PunchSourceTier.GeofenceAuto);
+    // KPI Counters (computed across all evaluated punches in range)
+    private int totalRawCount => allEvaluatedPunches.Count;
+    private int acceptedCount => allEvaluatedPunches.Count(p => p.IsAccepted);
+    private int suppressedCount => allEvaluatedPunches.Count(p => !p.IsAccepted);
+    private int physicalCount => allEvaluatedPunches.Count(p => p.SourceTier == PunchSourceTier.PhysicalMachine);
+    private int manualCount => allEvaluatedPunches.Count(p => p.SourceTier == PunchSourceTier.ManualAdmin);
+    private int autoGeofenceCount => allEvaluatedPunches.Count(p => p.SourceTier == PunchSourceTier.GeofenceAuto);
+
+    private async Task OnCriteriaChangedAsync()
+    {
+        await LoadDataAsync();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -1210,7 +1215,7 @@
         endDate = new DateOnly(2026, 10, 31);
         selectedEmployeeId = 0;
         sourceFilter = null;
-        statusFilter = null;
+        statusFilter = true;
         directionFilter = null;
         searchQuery = "";
         await LoadDataAsync();

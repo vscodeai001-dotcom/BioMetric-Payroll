@@ -277,6 +277,7 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
                 else if (entityName.Equals("AttendanceLog", StringComparison.Ordinal) ||
                          entityName.Equals("AttendancePunch", StringComparison.Ordinal))
                 {
+                    await _refreshService.NotifyAttendanceChangedAsync();
                     await _refreshService.NotifyGlobalRefreshAsync("PUNCH_SYNCED");
                 }
             }
