@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Google.Apis.Auth.OAuth2;
+using Microsoft.Data.Sqlite;
 
 namespace CloudCleaner;
 
@@ -162,6 +163,184 @@ class Program
                 var tContent = await http1.GetStringAsync($"{DatabaseUrl}/tenants/{t}.json?access_token={token1}");
                 Console.WriteLine($"  Tenant '{t}': {tContent}");
             }
+            return;
+        }
+
+        if (args.Length >= 1 && args[0] == "--inspect-punches")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+            var owners = new[] { "tenant_201", "biometricpayroll" };
+            foreach (var o in owners)
+            {
+                var punches = await GetShallowKeysAsync(http1, token1, $"owners/{o}/attendance_punches");
+                Console.WriteLine($"\nOwner '{o}' attendance_punches keys ({punches.Count}): {string.Join(", ", punches)}");
+                var att = await GetShallowKeysAsync(http1, token1, $"owners/{o}/attendance");
+                Console.WriteLine($"Owner '{o}' attendance keys ({att.Count}): {string.Join(", ", att)}");
+                var ds = await GetShallowKeysAsync(http1, token1, $"owners/{o}/daily_summaries");
+                Console.WriteLine($"Owner '{o}' daily_summaries keys ({ds.Count}): {string.Join(", ", ds)}");
+            }
+            return;
+        }
+
+        if (args.Length >= 1 && args[0] == "--restore-missing-punches")
+        {
+            var credential1 = GoogleCredential.FromFile(ServiceAccountPath)
+                .CreateScoped("https://www.googleapis.com/auth/firebase.database", "https://www.googleapis.com/auth/userinfo.email");
+            var token1 = await credential1.UnderlyingCredential.GetAccessTokenForRequestAsync();
+            using var http1 = new HttpClient();
+
+            Console.WriteLine("=== Restoring Missing Punches for Oct 1 to Oct 6 ===");
+
+            var seeds = new List<(int LogId, int EmpId, string BiometricId, DateTime PunchTime, string LogType)>
+            {
+                // Emp 1 (Nevetha S, BiometricID: 301, Shift: 06:30 to 20:00)
+                (19, 1, "MANUAL_1_20261001_063000_IN", new DateTime(2026, 10, 1, 6, 30, 0), "IN"),
+                (20, 1, "MANUAL_1_20261001_200000_OUT", new DateTime(2026, 10, 1, 20, 0, 0), "OUT"),
+                (15, 1, "MANUAL_1_20261002_063000_IN", new DateTime(2026, 10, 2, 6, 30, 0), "IN"),
+                (16, 1, "MANUAL_1_20261002_200000_OUT", new DateTime(2026, 10, 2, 20, 0, 0), "OUT"),
+                (11, 1, "MANUAL_1_20261003_063000_IN", new DateTime(2026, 10, 3, 6, 30, 0), "IN"),
+                (12, 1, "MANUAL_1_20261003_200000_OUT", new DateTime(2026, 10, 3, 20, 0, 0), "OUT"),
+                // Oct 4 is Sunday (Weekly Off for Emp 1)
+                (5, 1, "MANUAL_1_20261005_063000_IN", new DateTime(2026, 10, 5, 6, 30, 0), "IN"),
+                (6, 1, "MANUAL_1_20261005_200000_OUT", new DateTime(2026, 10, 5, 20, 0, 0), "OUT"),
+                (1, 1, "MANUAL_1_20261006_063000_IN", new DateTime(2026, 10, 6, 6, 30, 0), "IN"),
+                (2, 1, "MANUAL_1_20261006_200000_OUT", new DateTime(2026, 10, 6, 20, 0, 0), "OUT"),
+
+                // Emp 2 (Prakash J, BiometricID: 302, Shift: 08:30 to 17:30)
+                (21, 2, "MANUAL_2_20261001_083000_IN", new DateTime(2026, 10, 1, 8, 30, 0), "IN"),
+                (22, 2, "MANUAL_2_20261001_173000_OUT", new DateTime(2026, 10, 1, 17, 30, 0), "OUT"),
+                (17, 2, "MANUAL_2_20261002_083000_IN", new DateTime(2026, 10, 2, 8, 30, 0), "IN"),
+                (18, 2, "MANUAL_2_20261002_173000_OUT", new DateTime(2026, 10, 2, 17, 30, 0), "OUT"),
+                (13, 2, "MANUAL_2_20261003_083000_IN", new DateTime(2026, 10, 3, 8, 30, 0), "IN"),
+                (14, 2, "MANUAL_2_20261003_173000_OUT", new DateTime(2026, 10, 3, 17, 30, 0), "OUT"),
+                (9, 2, "MANUAL_2_20261004_083000_IN", new DateTime(2026, 10, 4, 8, 30, 0), "IN"),
+                (10, 2, "MANUAL_2_20261004_173000_OUT", new DateTime(2026, 10, 4, 17, 30, 0), "OUT"),
+                (7, 2, "MANUAL_2_20261005_083000_IN", new DateTime(2026, 10, 5, 8, 30, 0), "IN"),
+                (8, 2, "MANUAL_2_20261005_173000_OUT", new DateTime(2026, 10, 5, 17, 30, 0), "OUT"),
+                (3, 2, "MANUAL_2_20261006_083000_IN", new DateTime(2026, 10, 6, 8, 30, 0), "IN"),
+                (4, 2, "MANUAL_2_20261006_173000_OUT", new DateTime(2026, 10, 6, 17, 30, 0), "OUT")
+            };
+
+            TimeZoneInfo istTz;
+            try
+            {
+                istTz = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            }
+            catch
+            {
+                istTz = TimeZoneInfo.CreateCustomTimeZone("IST", TimeSpan.FromHours(5.5), "India Standard Time", "IST");
+            }
+
+            // 1. Push punches to Firebase RTDB for both tenant_201 and biometricpayroll
+            var targetOwners = new[] { "tenant_201", "biometricpayroll" };
+            foreach (var s in seeds)
+            {
+                var utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(s.PunchTime, DateTimeKind.Unspecified), istTz);
+                long tsMs = new DateTimeOffset(utc).ToUnixTimeMilliseconds();
+
+                var row = new Dictionary<string, object?>
+                {
+                    ["punchId"] = s.LogId.ToString(),
+                    ["attendanceId"] = s.LogId.ToString(),
+                    ["employeeId"] = s.EmpId,
+                    ["staffId"] = s.EmpId.ToString(),
+                    ["biometricId"] = s.BiometricId,
+                    ["timestamp"] = tsMs,
+                    ["checkInTime"] = tsMs,
+                    ["createdAt"] = tsMs,
+                    ["date"] = s.PunchTime.ToString("yyyy-MM-dd"),
+                    ["deviceId"] = "ManualCorrection",
+                    ["type"] = s.LogType,
+                    ["source"] = "MANUAL_CORRECTION",
+                    ["note"] = s.LogType,
+                    ["logType"] = s.LogType,
+                    ["status"] = "APPROVED",
+                    ["isApproved"] = true,
+                    ["latitude"] = 0.0,
+                    ["longitude"] = 0.0,
+                    ["_entity"] = "AttendancePunch",
+                    ["_key"] = s.LogId.ToString(),
+                    ["_updatedUtc"] = DateTime.UtcNow.ToString("O")
+                };
+
+                var json = JsonSerializer.Serialize(row);
+                foreach (var o in targetOwners)
+                {
+                    var c1 = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    await http1.PutAsync($"{DatabaseUrl}/owners/{o}/attendance_punches/{s.LogId}.json?access_token={token1}", c1);
+                    var c2 = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+                    await http1.PutAsync($"{DatabaseUrl}/owners/{o}/attendance/{s.LogId}.json?access_token={token1}", c2);
+                }
+                Console.WriteLine($"Pushed punch #{s.LogId} (Emp {s.EmpId}, {s.PunchTime:yyyy-MM-dd HH:mm}, {s.LogType}) to Firebase");
+            }
+
+            // 2. Synchronize daily_summaries 1..12 to tenant_201
+            for (int summaryId = 1; summaryId <= 14; summaryId++)
+            {
+                try
+                {
+                    var sourceJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/biometricpayroll/daily_summaries/{summaryId}.json?access_token={token1}");
+                    if (!string.IsNullOrWhiteSpace(sourceJson) && sourceJson != "null")
+                    {
+                        var content = new StringContent(sourceJson, System.Text.Encoding.UTF8, "application/json");
+                        await http1.PutAsync($"{DatabaseUrl}/owners/tenant_201/daily_summaries/{summaryId}.json?access_token={token1}", content);
+                        Console.WriteLine($"Synced daily_summary #{summaryId} to owners/tenant_201/daily_summaries");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error syncing summary #{summaryId}: {ex.Message}");
+                }
+            }
+
+            // 3. Write into SQLite DB
+            var possiblePaths = new[]
+            {
+                @"Web\Payroll.Web\data\biometricpayroll-cache.db",
+                @"..\Payroll.Web\data\biometricpayroll-cache.db",
+                @"E:\Project\Android App Projects\BioMetric+Payroll\BioMetric+Payroll\Web\Payroll.Web\data\biometricpayroll-cache.db"
+            };
+            string? dbPath = possiblePaths.FirstOrDefault(File.Exists);
+            if (dbPath != null)
+            {
+                Console.WriteLine($"Writing punches to SQLite at {dbPath}...");
+                using var conn = new SqliteConnection($"Data Source={dbPath}");
+                await conn.OpenAsync();
+                foreach (var s in seeds)
+                {
+                    using var checkCmd = conn.CreateCommand();
+                    checkCmd.CommandText = "SELECT COUNT(1) FROM attendancelogs WHERE logid = @id;";
+                    checkCmd.Parameters.AddWithValue("@id", s.LogId);
+                    var count = Convert.ToInt64(await checkCmd.ExecuteScalarAsync());
+                    if (count == 0)
+                    {
+                        using var insertCmd = conn.CreateCommand();
+                        insertCmd.CommandText = @"
+                            INSERT INTO attendancelogs (logid, employeeid, biometricid, punchtime, DeviceID, LogType, is_approved, latitude, longitude)
+                            VALUES (@logid, @empid, @bioid, @time, 'ManualCorrection', @type, 1, 0.0, 0.0);";
+                        insertCmd.Parameters.AddWithValue("@logid", s.LogId);
+                        insertCmd.Parameters.AddWithValue("@empid", s.EmpId);
+                        insertCmd.Parameters.AddWithValue("@bioid", s.BiometricId);
+                        insertCmd.Parameters.AddWithValue("@time", s.PunchTime.ToString("yyyy-MM-dd HH:mm:ss"));
+                        insertCmd.Parameters.AddWithValue("@type", s.LogType);
+                        await insertCmd.ExecuteNonQueryAsync();
+                        Console.WriteLine($"Inserted SQLite attendancelogs row for LogId {s.LogId}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"SQLite attendancelogs already has LogId {s.LogId}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine("⚠️ Could not find biometricpayroll-cache.db file.");
+            }
+
+            Console.WriteLine("\n✅ Done restoring missing punches for Oct 1 to Oct 6!");
             return;
         }
 

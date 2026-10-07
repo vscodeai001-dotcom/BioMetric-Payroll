@@ -449,6 +449,39 @@ class StaffViewModel @Inject constructor(
                         salaryRate = employee.salaryRate
                     )
                 )
+
+                // SYNC TO ATTENDANCE_PUNCHES SSOT:
+                // Ensure raw punches exist in attendance_punches so that both Web and Android
+                // attendance logs display the raw punches and calculate daily presence consistently.
+                val sdfDate = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+                }
+                val dateStr = sdfDate.format(Date(inTime))
+
+                val inPunch = AttendancePunch(
+                    punchId = UUID.randomUUID().toString(),
+                    staffId = employee.employeeId,
+                    date = dateStr,
+                    timestamp = inTime,
+                    type = "IN",
+                    source = "MANUAL_CORRECTION",
+                    status = "APPROVED"
+                )
+                sharedViewModel.insertPunch(inPunch)
+
+                if (outTime > 0) {
+                    val outPunch = AttendancePunch(
+                        punchId = UUID.randomUUID().toString(),
+                        staffId = employee.employeeId,
+                        date = dateStr,
+                        timestamp = outTime,
+                        type = "OUT",
+                        source = "MANUAL_CORRECTION",
+                        status = "APPROVED"
+                    )
+                    sharedViewModel.insertPunch(outPunch)
+                }
+
                 sharedViewModel.triggerDashboardRefresh()
             } catch (e: Exception) { Log.e("StaffViewModel", "Manual entry failed", e) }
         }

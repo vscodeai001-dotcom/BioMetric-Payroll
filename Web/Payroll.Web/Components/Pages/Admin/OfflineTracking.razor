@@ -8,8 +8,6 @@
 @implements IAsyncDisposable
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IJSRuntime JSRuntime
-@inject FirebaseEmployeeManagementService FirebaseEmployees
-@inject FirebaseRealtimeService FirebaseRealtime
 @inject ILogger<OfflineTracking> Logger
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
@@ -37,7 +35,7 @@
                     <a href="/admin/offline-tracking-details" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-box-arrow-up-right me-1"></i>Full Audit Details
                     </a>
-                    <button class="btn btn-sm btn-primary" @onclick="Refresh" disabled="@loading">
+                    <button class="btn btn-sm btn-primary" @onclick="() => Refresh(force: true)" disabled="@loading">
                         <i class="bi bi-arrow-clockwise @(loading ? "spin" : "") me-1"></i>@(loading ? "Synchronizing..." : "Refresh")
                     </button>
                 </div>
@@ -221,7 +219,7 @@
                             <button class="btn btn-sm btn-outline-primary" @onclick="ScrollToMap">
                                 <i class="bi bi-compass me-1"></i>Focus on Map
                             </button>
-                            <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh">
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => Refresh(force: true)">
                                 <i class="bi bi-arrow-repeat me-1"></i>Reload Cloud History
                             </button>
                         </div>
@@ -329,7 +327,7 @@
                         Cached map tiles + locally retained GPS ledger with SSOT Realtime Sync
                     </small>
                     <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-primary" @onclick="Refresh">
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => Refresh(force: true)">
                             <i class="bi bi-arrow-repeat me-1"></i>Refresh
                         </button>
                         @if (selectedEmployeeId > 0)
@@ -521,6 +519,117 @@
                 </div>
             </div>
 
+            <!-- Offline Route / Point Ledger (ONLY OFFLINE DATA) -->
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <h6 class="fw-bold mb-0">
+                            <i class="bi bi-map me-2 text-primary"></i>Offline Route / Point Ledger
+                        </h6>
+                        <small class="text-muted">
+                            Dedicated ledger of breadcrumb points, dwell stops, and attendance impact captured during offline disconnection windows.
+                        </small>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="ClearSelectedOfflinePeriod">
+                                <i class="bi bi-x-circle me-1"></i>Show All Offline Points
+                            </button>
+                        }
+                        <span class="badge bg-warning text-dark px-3 py-2 fs-6">
+                            @displayedLedgerRows.Count offline event@(displayedLedgerRows.Count == 1 ? "" : "s")
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    @if (!displayedLedgerRows.Any())
+                    {
+                        <div class="p-4 text-center text-muted">
+                            <div class="fs-1 mb-2">🟢</div>
+                            <h6 class="fw-bold text-dark">No Offline Disconnection Events Recorded</h6>
+                            <p class="text-muted small mb-0">
+                                All active employees are communicating online in real-time. Continuous GPS streams are synchronized with zero buffered points.
+                            </p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height: 480px; overflow-y: auto;">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>Offline Time (IST)</th>
+                                        <th>Employee</th>
+                                        <th>Event / Reason</th>
+                                        <th>Coordinates</th>
+                                        <th>Office Dist</th>
+                                        <th>Geofence</th>
+                                        <th>State &amp; Dwell</th>
+                                        <th>Impact on Live Attendance</th>
+                                        <th class="text-end">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in displayedLedgerRows)
+                                    {
+                                        var isSelected = !string.IsNullOrEmpty(selectedOfflinePeriodId) && row.PeriodId == selectedOfflinePeriodId;
+                                        <tr class="@(isSelected ? "table-warning fw-semibold" : "")">
+                                            <td class="nowrap">
+                                                <small class="fw-bold text-dark">@ToLocal(row.TimestampUtc).ToString("dd-MMM-yyyy")</small>
+                                                <div class="text-muted very-small">@ToLocal(row.TimestampUtc).ToString("hh:mm:ss tt") IST</div>
+                                            </td>
+                                            <td>
+                                                <strong>@row.EmployeeName</strong>
+                                                <div class="text-muted very-small">#@row.EmployeeId</div>
+                                            </td>
+                                            <td>
+                                                <span class="badge @row.EventBadgeClass">@row.EventType</span>
+                                                <div class="text-muted very-small mt-1">@row.DisconnectReason</div>
+                                            </td>
+                                            <td>
+                                                <code class="very-small">@row.Latitude.ToString("F6"), @row.Longitude.ToString("F6")</code>
+                                            </td>
+                                            <td class="nowrap very-small">
+                                                @FormatDistance(row.DistanceFromOfficeMeters)
+                                            </td>
+                                            <td>
+                                                @if (row.IsWithinRadius)
+                                                {
+                                                    <span class="badge bg-success-subtle text-success">🟢 IN (Safe)</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-danger-subtle text-danger">🔴 OUT (Breached)</span>
+                                                }
+                                            </td>
+                                            <td class="very-small">
+                                                @row.StateAndDwell
+                                            </td>
+                                            <td class="very-small">
+                                                <span class="fw-semibold text-dark">@row.LiveImpact</span>
+                                            </td>
+                                            <td class="text-end nowrap">
+                                                @if (!string.IsNullOrEmpty(row.PeriodId))
+                                                {
+                                                    var targetPeriod = allOfflinePeriods.FirstOrDefault(p => p.Id == row.PeriodId);
+                                                    if (targetPeriod != null)
+                                                    {
+                                                        <button class="btn btn-xs btn-outline-primary py-0 px-2" @onclick="() => InspectPeriodOnMap(targetPeriod)">
+                                                            <i class="bi bi-map me-1"></i>Map
+                                                        </button>
+                                                    }
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+
             <!-- Today's Journey & Sync Timeline -->
             <div class="card border-0 shadow-sm mb-3">
                 <div class="card-header bg-transparent py-3 d-flex justify-content-between align-items-center">
@@ -639,6 +748,7 @@
     private List<Employee> allEmployees = new();
     private List<EmployeeStatusRowModel> employeeRows = new();
     private List<OfflinePeriodDisplayModel> allOfflinePeriods = new();
+    private List<OfflineLedgerRowModel> offlineLedgerRows = new();
     private List<EnterpriseEventModel> enterpriseEventLogs = new();
     private List<EmployeeGpsSession> activeSessions = new();
 
@@ -668,9 +778,24 @@
         employeeRows.FirstOrDefault(e => e.EmployeeId == selectedEmployeeId);
 
     private List<OfflinePeriodDisplayModel> displayedPeriods =>
-        selectedEmployeeId > 0
-            ? allOfflinePeriods.Where(p => p.EmployeeId == selectedEmployeeId).ToList()
-            : allOfflinePeriods;
+        !string.IsNullOrEmpty(selectedOfflinePeriodId)
+            ? allOfflinePeriods.Where(p => p.Id == selectedOfflinePeriodId).ToList()
+            : (selectedEmployeeId > 0
+                ? allOfflinePeriods.Where(p => p.EmployeeId == selectedEmployeeId).ToList()
+                : allOfflinePeriods);
+
+    private List<OfflineLedgerRowModel> displayedLedgerRows
+    {
+        get
+        {
+            var q = offlineLedgerRows.AsEnumerable();
+            if (selectedEmployeeId > 0)
+                q = q.Where(r => r.EmployeeId == selectedEmployeeId);
+            if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
+                q = q.Where(r => r.PeriodId == selectedOfflinePeriodId);
+            return q.OrderByDescending(r => r.TimestampUtc).ToList();
+        }
+    }
 
     private List<OfflinePointModel> selectedEmployeeHistory =>
         selectedEmployeeRow?.LocationPoints ?? new List<OfflinePointModel>();
@@ -687,11 +812,15 @@
         }
     }
 
+    private DateTime lastRefreshInvokedUtc = DateTime.MinValue;
+    private static readonly TimeSpan RefreshCooldown = TimeSpan.FromSeconds(10);
+
     protected override async Task OnInitializedAsync()
     {
-        await Refresh();
+        await Refresh(force: true);
         cts = new CancellationTokenSource();
-        timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        // Bandwidth Storm Control: 60s background cadence + in-memory LiveLocationStore (0 Firebase REST egress)
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         _ = PeriodicLoopAsync(cts.Token);
     }
 
@@ -712,7 +841,7 @@
             {
                 await InvokeAsync(async () =>
                 {
-                    await Refresh();
+                    await Refresh(force: false);
                     StateHasChanged();
                 });
             }
@@ -750,6 +879,13 @@
         selectedOfflinePeriodId = period.Id;
         selectedEmployeeId = period.EmployeeId;
         _ = RenderMapAsync(period);
+        _ = ScrollToMap();
+    }
+
+    private void ClearSelectedOfflinePeriod()
+    {
+        selectedOfflinePeriodId = null;
+        _ = RenderMapAsync();
     }
 
     private async Task ScrollToMap()
@@ -761,10 +897,14 @@
         catch { }
     }
 
-    private async Task Refresh()
+    private Task Refresh() => Refresh(force: false);
+
+    private async Task Refresh(bool force)
     {
         if (loading) return;
+        if (!force && (DateTime.UtcNow - lastRefreshInvokedUtc) < RefreshCooldown) return;
         loading = true;
+        lastRefreshInvokedUtc = DateTime.UtcNow;
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
@@ -806,33 +946,10 @@
             totalPointsCount = dbPoints.Count;
             lastCaptureTime = dbPoints.FirstOrDefault()?.CapturedAtUtc;
 
-            // In-Memory LiveLocationStore
+            // Bandwidth Storm Control: In-Memory LiveLocationStore
+            // Maintained in real-time by the persistent SSE stream & mobile GPS pings.
+            // Reading it locally eliminates high-volume REST GET downloads on owners/{owner}/tracking/live.
             var inMemoryLive = LiveLocationStore.GetAll().ToDictionary(x => x.EmployeeId);
-
-            // Firebase Live & History
-            var resolvedOwner = FirebaseRealtime.ResolveOwnerUid();
-            if (string.IsNullOrWhiteSpace(resolvedOwner)) resolvedOwner = FirebaseSsotSchema.DefaultOwnerUid;
-
-            var firebaseLiveMap = new Dictionary<int, JsonElement>();
-            try
-            {
-                var liveSnap = await FirebaseRealtime.GetGlobalRecordAsync($"owners/{resolvedOwner}/tracking/live");
-                if (liveSnap == null || liveSnap.Value.ValueKind != JsonValueKind.Object)
-                {
-                    liveSnap = await FirebaseRealtime.GetGlobalRecordAsync("tracking/live");
-                }
-                if (liveSnap.HasValue && liveSnap.Value.ValueKind == JsonValueKind.Object)
-                {
-                    foreach (var prop in liveSnap.Value.EnumerateObject())
-                    {
-                        if (int.TryParse(prop.Name, out var eId))
-                        {
-                            firebaseLiveMap[eId] = prop.Value;
-                        }
-                    }
-                }
-            }
-            catch { }
 
             // Build Employee Rows
             var now = DateTime.UtcNow;
@@ -842,36 +959,15 @@
             foreach (var emp in allEmployees)
             {
                 inMemoryLive.TryGetValue(emp.EmployeeID, out var memLoc);
-                firebaseLiveMap.TryGetValue(emp.EmployeeID, out var fbLoc);
 
                 double lat = memLoc?.Latitude ?? 0;
                 double lon = memLoc?.Longitude ?? 0;
-                double speedMps = 0;
-                string movement = "Stopped";
-                DateTime lastSeenUtc = DateTime.MinValue;
-                bool isWithin = true;
+                double speedMps = memLoc?.SpeedMps ?? 0;
+                string movement = memLoc?.MovementState ?? "Stopped";
+                DateTime lastSeenUtc = memLoc?.LastUpdatedUtc ?? DateTime.MinValue;
+                bool isWithin = memLoc?.IsWithinAllowedRadius ?? true;
 
-                if (fbLoc.ValueKind == JsonValueKind.Object)
-                {
-                    if (fbLoc.TryGetProperty("Latitude", out var pLat)) lat = pLat.GetDouble();
-                    if (fbLoc.TryGetProperty("Longitude", out var pLon)) lon = pLon.GetDouble();
-                    if (fbLoc.TryGetProperty("SpeedMps", out var pSp)) speedMps = pSp.GetDouble();
-                    if (fbLoc.TryGetProperty("MovementState", out var pMv)) movement = pMv.GetString() ?? movement;
-                    if (fbLoc.TryGetProperty("Timestamp", out var pTs))
-                    {
-                        if (DateTime.TryParse(pTs.GetString(), out var dt)) lastSeenUtc = dt.ToUniversalTime();
-                        else if (pTs.TryGetInt64(out var epoch)) lastSeenUtc = DateTimeOffset.FromUnixTimeMilliseconds(epoch).UtcDateTime;
-                    }
-                }
-
-                if (lat == 0 && lon == 0 && memLoc != null)
-                {
-                    lat = memLoc.Latitude;
-                    lon = memLoc.Longitude;
-                    lastSeenUtc = memLoc.LastUpdatedUtc;
-                    isWithin = memLoc.IsWithinAllowedRadius;
-                }
-                else if (lat != 0 && lon != 0 && officeLat != 0)
+                if (lat != 0 && lon != 0 && officeLat != 0)
                 {
                     var d = CalculateDistance(lat, lon, officeLat, officeLng);
                     isWithin = d <= officeRadiusMeters;
@@ -997,8 +1093,8 @@
             employeeRows = rows.OrderBy(r => r.Status switch { "Live" => 0, "Stale" => 1, _ => 2 })
                                .ThenBy(r => r.EmployeeName).ToList();
 
-            // Offline Periods Detection
-            allOfflinePeriods = BuildAllOfflinePeriods(dbPoints, allEmployees, todayPunches);
+            // Offline Periods & Offline Ledger Detection
+            (allOfflinePeriods, offlineLedgerRows) = BuildAllOfflineData(dbPoints, allEmployees, todayPunches);
 
             // Enterprise Events
             enterpriseEventLogs = BuildEnterpriseEventLogs(dbPoints, allOfflinePeriods);
@@ -1044,15 +1140,15 @@
                         time = selectedEmployeeRow.PunchOutTimeUtc.HasValue ? ToLocal(selectedEmployeeRow.PunchOutTimeUtc.Value).ToString("hh:mm tt") : ""
                     };
                 }
+            }
 
-                if (focusedPeriod != null)
-                {
-                    pointsForMap = focusedPeriod.Points.Select(p => (object)new { lat = p.Latitude, lng = p.Longitude, isOffline = true }).ToList();
-                }
-                else
-                {
-                    pointsForMap = selectedEmployeeHistory.Select(p => (object)new { lat = p.Latitude, lng = p.Longitude, isOffline = p.IsOffline }).ToList();
-                }
+            if (focusedPeriod != null)
+            {
+                pointsForMap = focusedPeriod.Points.Select(p => (object)new { lat = p.Latitude, lng = p.Longitude, isOffline = true }).ToList();
+            }
+            else if (selectedEmployeeRow != null)
+            {
+                pointsForMap = selectedEmployeeHistory.Select(p => (object)new { lat = p.Latitude, lng = p.Longitude, isOffline = p.IsOffline }).ToList();
             }
 
             var liveStaff = employeeRows
@@ -1088,137 +1184,327 @@
         }
     }
 
-    private List<OfflinePeriodDisplayModel> BuildAllOfflinePeriods(
+    private (List<OfflinePeriodDisplayModel> periods, List<OfflineLedgerRowModel> ledger) BuildAllOfflineData(
         List<EmployeeLocationHistory> points,
         List<Employee> employees,
         List<AttendanceLog> punches)
     {
-        var result = new List<OfflinePeriodDisplayModel>();
+        var periods = new List<OfflinePeriodDisplayModel>();
+        var ledger = new List<OfflineLedgerRowModel>();
         var empMap = employees.ToDictionary(e => e.EmployeeID);
+        var pointsByEmp = points.GroupBy(p => p.EmployeeId).ToDictionary(g => g.Key, g => g.OrderBy(p => p.CapturedAtUtc).ToList());
 
-        foreach (var group in points.GroupBy(p => p.EmployeeId))
+        foreach (var emp in employees)
         {
-            var empId = group.Key;
-            empMap.TryGetValue(empId, out var empProfile);
-            var empName = empProfile?.Name ?? $"Employee #{empId}";
+            var empId = emp.EmployeeID;
+            var empName = emp.Name;
+            var empProfile = emp;
 
-            var sorted = group.OrderBy(p => p.CapturedAtUtc).ToList();
-            if (!sorted.Any()) continue;
+            var trackingMode = (empProfile?.TrackingMode ?? "24/7").Trim().ToUpperInvariant();
+            var isShiftMode = trackingMode.Contains("SHIFT");
+            var shiftStart = empProfile?.ShiftStartTime;
+            var shiftEnd = empProfile?.ShiftEndTime;
 
-            var clusters = new List<List<EmployeeLocationHistory>>();
-            var cur = new List<EmployeeLocationHistory>();
-
-            for (int i = 0; i < sorted.Count; i++)
+            if (!pointsByEmp.TryGetValue(empId, out var sorted) || !sorted.Any())
             {
-                var pt = sorted[i];
-                var last = cur.LastOrDefault();
-                var gap = last != null ? pt.CapturedAtUtc - last.CapturedAtUtc : TimeSpan.Zero;
-                var isOffline = pt.CaptureSource?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true;
+                continue;
+            }
 
-                if (isOffline || (gap > TimeSpan.FromMinutes(15) && gap < TimeSpan.FromHours(24)))
+            // 1. Detect Gaps between consecutive points (>= 10 mins)
+            for (int i = 1; i < sorted.Count; i++)
+            {
+                var prev = sorted[i - 1];
+                var curr = sorted[i];
+                var gap = curr.CapturedAtUtc - prev.CapturedAtUtc;
+
+                if (gap >= TimeSpan.FromMinutes(10) && gap <= TimeSpan.FromDays(2))
                 {
-                    if (cur.Any() && gap > TimeSpan.FromMinutes(30))
+                    var startUtc = prev.CapturedAtUtc;
+                    var endUtc = curr.CapturedAtUtc;
+
+                    var gapPoints = sorted
+                        .Where(p => p.CapturedAtUtc >= startUtc && p.CapturedAtUtc <= endUtc)
+                        .ToList();
+
+                    if (gapPoints.Count < 2)
                     {
-                        clusters.Add(cur);
-                        cur = new();
+                        gapPoints = new List<EmployeeLocationHistory> { prev, curr };
                     }
-                    cur.Add(pt);
-                }
-                else
-                {
-                    if (cur.Any()) { clusters.Add(cur); cur = new(); }
+
+                    double dist = 0;
+                    for (int j = 1; j < gapPoints.Count; j++)
+                    {
+                        dist += CalculateDistance(gapPoints[j - 1].Latitude, gapPoints[j - 1].Longitude, gapPoints[j].Latitude, gapPoints[j].Longitude);
+                    }
+
+                    double startDist = (officeLat != 0) ? CalculateDistance(prev.Latitude, prev.Longitude, officeLat, officeLng) : 0;
+                    double endDist = (officeLat != 0) ? CalculateDistance(curr.Latitude, curr.Longitude, officeLat, officeLng) : 0;
+
+                    int inRadius = (officeLat != 0)
+                        ? gapPoints.Count(p => CalculateDistance(p.Latitude, p.Longitude, officeLat, officeLng) <= officeRadiusMeters)
+                        : gapPoints.Count;
+
+                    var stays = DetectPeriodStays(gapPoints);
+
+                    // Punches during gap
+                    var punchesInGap = punches.Where(p => p.EmployeeID == empId &&
+                                                          p.PunchTime >= startUtc.AddMinutes(-2) &&
+                                                          p.PunchTime <= endUtc.AddMinutes(2)).ToList();
+
+                    var hasAutoOut = punchesInGap.Any(p => IsOutType(p.LogType));
+                    var hasPunches = punchesInGap.Any();
+
+                    // Shift evaluation
+                    bool isOffShift = false;
+                    string shiftTag = isShiftMode ? "Active Shift Disconnection" : "24/7 Active Tracking";
+                    if (isShiftMode && shiftStart.HasValue && shiftEnd.HasValue)
+                    {
+                        var localTime = ToLocal(startUtc);
+                        var timeOnly = TimeOnly.FromDateTime(localTime);
+                        bool inShift = shiftEnd >= shiftStart
+                            ? (timeOnly >= shiftStart && timeOnly <= shiftEnd)
+                            : (timeOnly >= shiftStart || timeOnly <= shiftEnd);
+                        if (!inShift)
+                        {
+                            isOffShift = true;
+                            shiftTag = "Off-Duty / Non-Shift Gap";
+                        }
+                    }
+
+                    string impactAlertClass;
+                    string impactTitle;
+                    string impactIcon;
+                    string impactSummary;
+
+                    if (hasAutoOut)
+                    {
+                        impactAlertClass = "alert-danger border-danger-subtle";
+                        impactTitle = "⚡ Auto OUT Punch Triggered";
+                        impactIcon = "⚡";
+                        impactSummary = $"Employee stepped outside the {officeRadiusMeters}m office perimeter while disconnected. Live attendance closed automatically upon reconnection.";
+                    }
+                    else if (hasPunches)
+                    {
+                        impactAlertClass = "alert-success border-success-subtle";
+                        impactTitle = "🟢 Reconciled Attendance Punch";
+                        impactIcon = "🟢";
+                        impactSummary = $"{punchesInGap.Count} attendance punch(es) captured locally merged into cloud attendance.";
+                    }
+                    else if (isOffShift)
+                    {
+                        impactAlertClass = "alert-secondary border-secondary-subtle";
+                        impactTitle = "⏸️ Off-Duty Disconnection";
+                        impactIcon = "⏸️";
+                        impactSummary = $"Disconnection occurred outside scheduled shift hours. No attendance penalty or tracking deduction applied.";
+                    }
+                    else if (inRadius == gapPoints.Count)
+                    {
+                        impactAlertClass = "alert-success border-success-subtle";
+                        impactTitle = "🛡️ Safe Inside Geofence (Zero Live Impact)";
+                        impactIcon = "🛡️";
+                        impactSummary = $"Employee remained safely inside {officeRadiusMeters}m office radius throughout offline window. Active IN shift preserved.";
+                    }
+                    else if (inRadius == 0)
+                    {
+                        impactAlertClass = "alert-secondary border-secondary-subtle";
+                        impactTitle = "🛡️ No Attendance State Change";
+                        impactIcon = "🛡️";
+                        impactSummary = $"Stationary / Moving Outside: Stayed outside {officeRadiusMeters}m radius • Attendance remained OUT (No punch created).";
+                    }
+                    else
+                    {
+                        impactAlertClass = "alert-warning border-warning-subtle";
+                        impactTitle = "⚠️ Perimeter Transition During Gap";
+                        impactIcon = "⚠️";
+                        impactSummary = $"Crossed geofence boundary ({inRadius} points inside, {gapPoints.Count - inRadius} points outside). Reconciled with live shift policy.";
+                    }
+
+                    string step1Loc = (officeLat != 0 && startDist <= officeRadiusMeters)
+                        ? $"Inside Office Zone ({startDist:N0}m from center)"
+                        : $"Outside Office Zone ({startDist:N0}m from center)";
+
+                    var periodId = $"{empId}_{startUtc:yyyyMMddHHmmss}";
+
+                    periods.Add(new OfflinePeriodDisplayModel
+                    {
+                        Id = periodId,
+                        EmployeeId = empId,
+                        EmployeeName = empName,
+                        StartTimeUtc = startUtc,
+                        EndTimeUtc = endUtc,
+                        Duration = gap,
+                        Reason = "Network Disconnected / Signal Loss",
+                        PointsCount = gapPoints.Count,
+                        DistanceMeters = dist,
+                        InRadiusCount = inRadius,
+                        ShiftTag = shiftTag,
+                        SyncStatus = "✓ Reconciled into Live SSOT",
+                        Step1LocationDescription = step1Loc,
+                        ImpactAlertClass = impactAlertClass,
+                        ImpactTitle = impactTitle,
+                        ImpactIcon = impactIcon,
+                        LiveImpactSummary = impactSummary,
+                        Stays = stays,
+                        Points = gapPoints.Select(p => new OfflinePointModel
+                        {
+                            Latitude = p.Latitude,
+                            Longitude = p.Longitude,
+                            TimestampUtc = p.CapturedAtUtc,
+                            IsOffline = true
+                        }).ToList()
+                    });
+
+                    // Add Ledger Rows for this offline period
+                    // 1. Disconnection event
+                    ledger.Add(new OfflineLedgerRowModel
+                    {
+                        TimestampUtc = startUtc,
+                        EmployeeId = empId,
+                        EmployeeName = empName,
+                        EventType = "📴 Disconnected (Signal Lost)",
+                        EventBadgeClass = "bg-warning text-dark",
+                        Latitude = prev.Latitude,
+                        Longitude = prev.Longitude,
+                        DistanceFromOfficeMeters = startDist,
+                        IsWithinRadius = (officeLat == 0) || (startDist <= officeRadiusMeters),
+                        StateAndDwell = "Stationary at Disconnect Position",
+                        LiveImpact = impactTitle,
+                        DisconnectReason = "Network Disconnected / Signal Loss",
+                        PeriodId = periodId
+                    });
+
+                    // 2. Intermediate Stays (if any)
+                    foreach (var s in stays)
+                    {
+                        var stayDist = (officeLat != 0) ? CalculateDistance(s.Latitude, s.Longitude, officeLat, officeLng) : 0;
+                        ledger.Add(new OfflineLedgerRowModel
+                        {
+                            TimestampUtc = s.StartUtc,
+                            EmployeeId = empId,
+                            EmployeeName = empName,
+                            EventType = "📍 Offline Dwell / Stay",
+                            EventBadgeClass = "bg-info text-dark",
+                            Latitude = s.Latitude,
+                            Longitude = s.Longitude,
+                            DistanceFromOfficeMeters = stayDist,
+                            IsWithinRadius = (officeLat == 0) || (stayDist <= officeRadiusMeters),
+                            StateAndDwell = $"Stayed {FormatDuration(s.Duration)} ({s.LocationDescription})",
+                            LiveImpact = impactTitle,
+                            DisconnectReason = "Stationary Stop during Gap",
+                            PeriodId = periodId
+                        });
+                    }
+
+                    // 3. Reconciled punches in gap (if any)
+                    foreach (var p in punchesInGap)
+                    {
+                        var isOut = IsOutType(p.LogType);
+                        var pDist = (p.Latitude.HasValue && p.Longitude.HasValue && officeLat != 0) ? CalculateDistance(p.Latitude.Value, p.Longitude.Value, officeLat, officeLng) : endDist;
+                        ledger.Add(new OfflineLedgerRowModel
+                        {
+                            TimestampUtc = p.PunchTime,
+                            EmployeeId = empId,
+                            EmployeeName = empName,
+                            EventType = isOut ? "⚡ Auto OUT Punch Triggered" : "🟢 Punch IN Reconciled",
+                            EventBadgeClass = isOut ? "bg-danger text-white" : "bg-success text-white",
+                            Latitude = p.Latitude ?? curr.Latitude,
+                            Longitude = p.Longitude ?? curr.Longitude,
+                            DistanceFromOfficeMeters = pDist,
+                            IsWithinRadius = (officeLat == 0) || (pDist <= officeRadiusMeters),
+                            StateAndDwell = "Reconciled Punch Event",
+                            LiveImpact = isOut ? "Shift Closed Automatically" : "Active Shift Opened",
+                            DisconnectReason = "Offline Reconciled Attendance",
+                            PeriodId = periodId
+                        });
+                    }
+
+                    // 4. Reconnection event
+                    ledger.Add(new OfflineLedgerRowModel
+                    {
+                        TimestampUtc = endUtc,
+                        EmployeeId = empId,
+                        EmployeeName = empName,
+                        EventType = "📶 Reconnected (Sync Merged)",
+                        EventBadgeClass = "bg-success text-white",
+                        Latitude = curr.Latitude,
+                        Longitude = curr.Longitude,
+                        DistanceFromOfficeMeters = endDist,
+                        IsWithinRadius = (officeLat == 0) || (endDist <= officeRadiusMeters),
+                        StateAndDwell = "Reconnected to Central Cloud SSOT",
+                        LiveImpact = impactSummary,
+                        DisconnectReason = "Network Connection Restored",
+                        PeriodId = periodId
+                    });
                 }
             }
-            if (cur.Any()) clusters.Add(cur);
 
-            foreach (var c in clusters)
+            // 2. Ongoing actively offline employee (> 10 mins since latest point)
+            var latest = sorted.LastOrDefault();
+            if (latest != null)
             {
-                if (!c.Any()) continue;
-                var first = c.First();
-                var last = c.Last();
-                var dur = last.CapturedAtUtc - first.CapturedAtUtc;
-                if (dur < TimeSpan.FromMinutes(1)) dur = TimeSpan.FromMinutes(1);
-
-                double dist = 0;
-                for (int j = 1; j < c.Count; j++)
+                var ongoingGap = DateTime.UtcNow - latest.CapturedAtUtc;
+                if (ongoingGap >= TimeSpan.FromMinutes(10) && ongoingGap <= TimeSpan.FromHours(48))
                 {
-                    dist += CalculateDistance(c[j - 1].Latitude, c[j - 1].Longitude, c[j].Latitude, c[j].Longitude);
-                }
+                    double distFromOffice = (officeLat != 0) ? CalculateDistance(latest.Latitude, latest.Longitude, officeLat, officeLng) : 0;
+                    bool isInside = officeLat == 0 || distFromOffice <= officeRadiusMeters;
 
-                int inRadius = (officeLat != 0)
-                    ? c.Count(p => CalculateDistance(p.Latitude, p.Longitude, officeLat, officeLng) <= officeRadiusMeters)
-                    : c.Count;
+                    string impactAlertClass = isInside ? "alert-success border-success-subtle" : "alert-secondary border-secondary-subtle";
+                    string impactTitle = isInside ? "🛡️ Active Shift Preserved Inside Geofence" : "🛡️ Outside Geofence (No Punch Created)";
+                    string impactIcon = isInside ? "🛡️" : "📡";
+                    string impactSummary = isInside
+                        ? $"Employee was inside {officeRadiusMeters}m radius when connection was lost. Shift remains active in buffer awaiting reconnection."
+                        : $"Employee is currently outside {officeRadiusMeters}m radius ({distFromOffice:N0}m away). Device is offline.";
 
-                // Stays
-                var stays = DetectPeriodStays(c);
+                    var ongoingPeriodId = $"{empId}_{latest.CapturedAtUtc:yyyyMMddHHmmss}_active";
 
-                // Punches in gap
-                var punchesInGap = punches.Where(p => p.EmployeeID == empId &&
-                                                      p.PunchTime >= first.CapturedAtUtc.AddMinutes(-2) &&
-                                                      p.PunchTime <= last.CapturedAtUtc.AddMinutes(2)).ToList();
-
-                var hasAutoOut = punchesInGap.Any(p => IsOutType(p.LogType));
-                var hasPunches = punchesInGap.Any();
-
-                string impactAlertClass = "alert-success border-success-subtle";
-                string impactTitle = "🛡️ No Live Attendance Impact";
-                string impactIcon = "🛡️";
-                string impactSummary = "Employee remained safely inside office radius throughout offline window. Active IN shift preserved.";
-
-                if (hasAutoOut)
-                {
-                    impactAlertClass = "alert-danger border-danger-subtle";
-                    impactTitle = "⚡ Auto OUT Punch Triggered";
-                    impactIcon = "⚡";
-                    impactSummary = "Employee stepped outside the 800m office perimeter while disconnected. Live attendance closed automatically upon reconnection.";
-                }
-                else if (hasPunches)
-                {
-                    impactAlertClass = "alert-success border-success-subtle";
-                    impactTitle = "🟢 Reconciled Attendance Punch";
-                    impactIcon = "🟢";
-                    impactSummary = $"{punchesInGap.Count} attendance punch(es) captured locally merged into cloud attendance.";
-                }
-                else if (inRadius == 0)
-                {
-                    impactAlertClass = "alert-secondary border-secondary-subtle";
-                    impactTitle = "🛡️ No Attendance State Change";
-                    impactIcon = "🛡️";
-                    impactSummary = "Employee stayed outside 800m radius throughout offline period. Attendance remained OUT (No punch created).";
-                }
-
-                result.Add(new OfflinePeriodDisplayModel
-                {
-                    Id = $"{empId}_{first.CapturedAtUtc:yyyyMMddHHmmss}",
-                    EmployeeId = empId,
-                    EmployeeName = empName,
-                    StartTimeUtc = first.CapturedAtUtc,
-                    EndTimeUtc = last.CapturedAtUtc,
-                    Duration = dur,
-                    Reason = "Wi-Fi & Mobile Data Turned Off",
-                    PointsCount = c.Count,
-                    DistanceMeters = dist,
-                    InRadiusCount = inRadius,
-                    ShiftTag = "24/7 Active Tracking",
-                    SyncStatus = "✓ Reconciled into Live Data",
-                    Step1LocationDescription = inRadius > 0 ? "Inside Office Zone" : "Outside Office Perimeter",
-                    ImpactAlertClass = impactAlertClass,
-                    ImpactTitle = impactTitle,
-                    ImpactIcon = impactIcon,
-                    LiveImpactSummary = impactSummary,
-                    Stays = stays,
-                    Points = c.Select(p => new OfflinePointModel
+                    periods.Add(new OfflinePeriodDisplayModel
                     {
-                        Latitude = p.Latitude,
-                        Longitude = p.Longitude,
-                        TimestampUtc = p.CapturedAtUtc,
-                        IsOffline = true
-                    }).ToList()
-                });
+                        Id = ongoingPeriodId,
+                        EmployeeId = empId,
+                        EmployeeName = empName,
+                        StartTimeUtc = latest.CapturedAtUtc,
+                        EndTimeUtc = DateTime.UtcNow,
+                        Duration = ongoingGap,
+                        Reason = "Network Disconnected / Signal Loss (Currently Offline)",
+                        PointsCount = 1,
+                        DistanceMeters = 0,
+                        InRadiusCount = isInside ? 1 : 0,
+                        ShiftTag = isShiftMode ? "Active Shift Disconnection" : "24/7 Active Tracking",
+                        SyncStatus = "⏳ Local Queue (Pending Sync)",
+                        Step1LocationDescription = isInside ? $"Inside Office Zone ({distFromOffice:N0}m from center)" : $"Outside Office Zone ({distFromOffice:N0}m away)",
+                        ImpactAlertClass = impactAlertClass,
+                        ImpactTitle = impactTitle,
+                        ImpactIcon = impactIcon,
+                        LiveImpactSummary = impactSummary,
+                        Stays = new List<OfflineStayModel>(),
+                        Points = new List<OfflinePointModel>
+                        {
+                            new() { Latitude = latest.Latitude, Longitude = latest.Longitude, TimestampUtc = latest.CapturedAtUtc, IsOffline = true }
+                        }
+                    });
+
+                    ledger.Add(new OfflineLedgerRowModel
+                    {
+                        TimestampUtc = latest.CapturedAtUtc,
+                        EmployeeId = empId,
+                        EmployeeName = empName,
+                        EventType = "📴 Disconnected (Currently Offline)",
+                        EventBadgeClass = "bg-danger text-white",
+                        Latitude = latest.Latitude,
+                        Longitude = latest.Longitude,
+                        DistanceFromOfficeMeters = distFromOffice,
+                        IsWithinRadius = isInside,
+                        StateAndDwell = "Device Currently Offline",
+                        LiveImpact = impactSummary,
+                        DisconnectReason = "Network Disconnected / Signal Loss",
+                        PeriodId = ongoingPeriodId
+                    });
+                }
             }
         }
 
-        return result.OrderByDescending(p => p.StartTimeUtc).ToList();
+        return (periods.OrderByDescending(p => p.StartTimeUtc).ToList(),
+                ledger.OrderByDescending(r => r.TimestampUtc).ToList());
     }
 
     private List<OfflineStayModel> DetectPeriodStays(List<EmployeeLocationHistory> points)
@@ -1586,5 +1872,22 @@
         public string Message { get; set; } = "";
         public DateTime Timestamp { get; set; }
         public bool IsOnline { get; set; }
+    }
+
+    public sealed class OfflineLedgerRowModel
+    {
+        public DateTime TimestampUtc { get; set; }
+        public int EmployeeId { get; set; }
+        public string EmployeeName { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public string EventBadgeClass { get; set; } = "bg-warning text-dark";
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
+        public double DistanceFromOfficeMeters { get; set; }
+        public bool IsWithinRadius { get; set; }
+        public string StateAndDwell { get; set; } = "Stopped";
+        public string LiveImpact { get; set; } = "";
+        public string DisconnectReason { get; set; } = "";
+        public string PeriodId { get; set; } = "";
     }
 }

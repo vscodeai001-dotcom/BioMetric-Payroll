@@ -34,11 +34,17 @@ class ManualAttendanceDialogFragment : DialogFragment() {
         const val TAG = "ManualAttendanceDialog"
         private const val ARG_EMPLOYEE = "employee"
         private const val ARG_ATTENDANCE = "attendance"
+        private const val ARG_TARGET_DATE = "target_date"
 
-        fun newInstance(employee: Employee, attendance: Attendance? = null): ManualAttendanceDialogFragment {
+        fun newInstance(
+            employee: Employee,
+            attendance: Attendance? = null,
+            targetDateMillis: Long? = null
+        ): ManualAttendanceDialogFragment {
             val args = Bundle().apply {
                 putSerializable(ARG_EMPLOYEE, employee)
                 if (attendance != null) putSerializable(ARG_ATTENDANCE, attendance)
+                if (targetDateMillis != null && targetDateMillis > 0L) putLong(ARG_TARGET_DATE, targetDateMillis)
             }
             return ManualAttendanceDialogFragment().apply {
                 arguments = args
@@ -57,15 +63,18 @@ class ManualAttendanceDialogFragment : DialogFragment() {
         val employee = requireArguments().getSerializable(ARG_EMPLOYEE) as Employee
         @Suppress("DEPRECATION")
         val attendanceToEdit = requireArguments().getSerializable(ARG_ATTENDANCE) as? Attendance
+        val targetDateMillis = arguments?.getLong(ARG_TARGET_DATE, 0L) ?: 0L
 
         if (attendanceToEdit != null) {
             isEditMode = true
             existingRecord = attendanceToEdit
             selectedDate.timeInMillis = attendanceToEdit.checkInTime
+        } else if (targetDateMillis > 0L) {
+            selectedDate.timeInMillis = targetDateMillis
         }
 
         setupListeners()
-        updateUIForRecord()
+        updateUIForRecord(employee)
 
         val builder = AlertDialog.Builder(requireActivity())
             .setTitle(if (isEditMode) "Edit Attendance Entry" else "Attendance: ${employee.name}")
@@ -142,7 +151,7 @@ class ManualAttendanceDialogFragment : DialogFragment() {
         binding.btnDate.text = df.format(selectedDate.time)
     }
 
-    private fun updateUIForRecord() {
+    private fun updateUIForRecord(employee: Employee) {
         val tf = SimpleDateFormat("HH:mm", Locale.getDefault())
         updateDateButton()
 
@@ -169,10 +178,35 @@ class ManualAttendanceDialogFragment : DialogFragment() {
             binding.rbGap.isEnabled = true
 
         } else {
-            // New entry logic
+            // New entry logic: prefill from employee's configured shift
+            val startParts = employee.shiftStart?.split(":")
+            val endParts = employee.shiftEnd?.split(":")
+            val startH = startParts?.getOrNull(0)?.toIntOrNull() ?: 9
+            val startM = startParts?.getOrNull(1)?.toIntOrNull() ?: 0
+            val endH = endParts?.getOrNull(0)?.toIntOrNull() ?: 18
+            val endM = endParts?.getOrNull(1)?.toIntOrNull() ?: 0
+
+            inCal = (selectedDate.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, startH)
+                set(Calendar.MINUTE, startM)
+                set(Calendar.SECOND, 0)
+            }
+            binding.btnInTime.text = "IN: %02d:%02d".format(startH, startM)
+
+            outCal = (selectedDate.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, endH)
+                set(Calendar.MINUTE, endM)
+                set(Calendar.SECOND, 0)
+            }
+            if (outCal!!.timeInMillis < inCal!!.timeInMillis) {
+                outCal!!.add(Calendar.DATE, 1)
+            }
+            binding.btnOutTime.text = "OUT: %02d:%02d".format(endH, endM)
+
             binding.btnInTime.isEnabled = true
             binding.btnOutTime.isEnabled = true
             binding.btnDate.isEnabled = true
+            binding.rbWork.isChecked = true
             binding.rbWork.isEnabled = true
             binding.rbGap.isEnabled = true
         }

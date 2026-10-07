@@ -128,6 +128,13 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 true
             }
         }
+        binding.toolbar.menu.add(0, 1002, 0, "Punch Correction ✏️").apply {
+            setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            setOnMenuItemClickListener {
+                startActivity(android.content.Intent(this@AdminAttendanceActivity, AdminManualPunchCorrectionActivity::class.java))
+                true
+            }
+        }
     }
 
     private fun setupDatePickers() {
@@ -166,10 +173,16 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
     private fun setupRecyclerView() {
         adapter = AttendanceAdapter { row ->
-            // On correction requested, find employee and open manual attendance correction dialog
+            // On correction requested, find employee and open manual attendance correction dialog for that specific date
             val employee = sharedViewModel.allEmployees.value.find { it.employeeId.toIntOrNull() == row.employeeID }
             if (employee != null) {
-                ManualAttendanceDialogFragment.newInstance(employee).show(
+                val rowDateMillis = runCatching {
+                    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("Asia/Kolkata")
+                    }.parse(row.date)?.time
+                }.getOrNull()
+
+                ManualAttendanceDialogFragment.newInstance(employee, null, rowDateMillis).show(
                     supportFragmentManager,
                     ManualAttendanceDialogFragment.TAG
                 )

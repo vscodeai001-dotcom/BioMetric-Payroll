@@ -985,28 +985,33 @@ class OfflineTrackingActivity : MotionBaseActivity() {
 
         val result = mutableListOf<OfflinePeriodItem>()
         val clusters = mutableListOf<MutableList<LocalLocation>>()
-        var curCluster = mutableListOf<LocalLocation>()
 
-        for (i in sorted.indices) {
-            val loc = sorted[i]
-            val last = curCluster.lastOrNull()
-
-            val gap = if (last != null) loc.timestamp - last.timestamp else 0L
-            if (loc.isOfflineCapture || (gap > 15 * 60 * 1000L && gap < 24 * 3600 * 1000L)) {
-                if (curCluster.isNotEmpty() && gap > 30 * 60 * 1000L) {
-                    clusters.add(curCluster)
-                    curCluster = mutableListOf()
-                }
-                curCluster.add(loc)
-            } else {
-                if (curCluster.isNotEmpty()) {
-                    clusters.add(curCluster)
-                    curCluster = mutableListOf()
+        // 1. Detect gaps between consecutive points in sorted (>= 10 mins)
+        for (i in 1 until sorted.size) {
+            val prev = sorted[i - 1]
+            val curr = sorted[i]
+            val gap = curr.timestamp - prev.timestamp
+            if (gap in (10 * 60 * 1000L)..(48 * 3600 * 1000L)) {
+                val gapPoints = sorted.filter { it.timestamp in prev.timestamp..curr.timestamp }
+                if (gapPoints.size >= 2) {
+                    clusters.add(gapPoints.toMutableList())
+                } else {
+                    clusters.add(mutableListOf(prev, curr))
                 }
             }
         }
-        if (curCluster.isNotEmpty()) {
-            clusters.add(curCluster)
+
+        // 2. Also clusters of explicit offline points
+        val explicitOffline = sorted.filter { it.isOfflineCapture }
+        if (explicitOffline.isNotEmpty()) {
+            clusters.add(explicitOffline.toMutableList())
+        }
+
+        // 3. Ongoing active offline disconnection (latest point > 10m ago)
+        val latest = sorted.lastOrNull()
+        val now = System.currentTimeMillis()
+        if (latest != null && (now - latest.timestamp) in (10 * 60 * 1000L)..(48 * 3600 * 1000L)) {
+            clusters.add(mutableListOf(latest))
         }
 
         val tz = TimeZone.getTimeZone("Asia/Kolkata")
@@ -1031,7 +1036,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     c[i].longitude
                 )
             }
-            val duration = (last.timestamp - first.timestamp).coerceAtLeast(60_000L)
+            val isOngoing = c.size == 1 && (System.currentTimeMillis() - first.timestamp > 10 * 60 * 1000L)
+            val duration = if (isOngoing) (System.currentTimeMillis() - first.timestamp) else (last.timestamp - first.timestamp).coerceAtLeast(60_000L)
 
             // Shift vs 24/7 evaluation
             var isOffShift = false
