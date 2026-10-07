@@ -8812,5 +8812,180 @@ window.payrollGeofencePicker = {
     }, true);
 })();
 
+// ============================================================================
+// OFFLINE GPS TRACKING & RECONCILIATION LEAFLET MAP
+// Cloned 1:1 from Android OfflineTrackingActivity OSM Map
+// ============================================================================
+window.offlineTrackingMaps = window.offlineTrackingMaps || {};
 
+window.initializeOfflineTrackingMap = async function (mapId, payload) {
+    try {
+        await window.loadPayrollLeaflet();
+        const element = document.getElementById(mapId);
+        if (!element || !window.L) return;
 
+        const existing = window.offlineTrackingMaps[mapId];
+        if (existing?.map) {
+            try { existing.map.remove(); } catch { }
+            delete window.offlineTrackingMaps[mapId];
+        }
+
+        const map = L.map(element, { zoomControl: true, attributionControl: true });
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        const bounds = [];
+
+        // 1. Office Location & Geofence Circle
+        const officeLat = Number(payload?.officeLat);
+        const officeLng = Number(payload?.officeLng);
+        const officeRadius = Number(payload?.officeRadiusMeters || 100);
+
+        if (Number.isFinite(officeLat) && Number.isFinite(officeLng) && officeLat !== 0 && officeLng !== 0) {
+            const officeLatLng = [officeLat, officeLng];
+            bounds.push(officeLatLng);
+
+            L.circle(officeLatLng, {
+                radius: officeRadius,
+                color: '#2563eb',
+                fillColor: '#3b82f6',
+                fillOpacity: 0.15,
+                weight: 2
+            }).addTo(map);
+
+            const officeIcon = L.divIcon({
+                className: 'offline-map-office-icon',
+                html: '<div style="background:#1d4ed8;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:18px;">🏢</div>',
+                iconSize: [34, 34],
+                iconAnchor: [17, 17]
+            });
+            L.marker(officeLatLng, { icon: officeIcon })
+                .bindPopup(`<b>🏢 Office Center</b><br>Geofence Radius: ${officeRadius}m`)
+                .addTo(map);
+        }
+
+        // 2. Punch In Marker
+        if (payload?.punchIn && Number.isFinite(payload.punchIn.lat) && Number.isFinite(payload.punchIn.lng) && payload.punchIn.lat !== 0) {
+            const pInLatLng = [payload.punchIn.lat, payload.punchIn.lng];
+            bounds.push(pInLatLng);
+            const pInIcon = L.divIcon({
+                className: 'offline-map-punch-in-icon',
+                html: '<div style="background:#15803d;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🟢</div>',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            L.marker(pInLatLng, { icon: pInIcon })
+                .bindPopup(`<b>🟢 Punch In</b><br>Time: ${payload.punchIn.time || '—'}<br>Source: ${payload.punchIn.source || 'Mobile'}`)
+                .addTo(map);
+        }
+
+        // 3. Punch Out Marker
+        if (payload?.punchOut && Number.isFinite(payload.punchOut.lat) && Number.isFinite(payload.punchOut.lng) && payload.punchOut.lat !== 0) {
+            const pOutLatLng = [payload.punchOut.lat, payload.punchOut.lng];
+            bounds.push(pOutLatLng);
+            const pOutIcon = L.divIcon({
+                className: 'offline-map-punch-out-icon',
+                html: '<div style="background:#b91c1c;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🔴</div>',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            L.marker(pOutLatLng, { icon: pOutIcon })
+                .bindPopup(`<b>🔴 Punch Out</b><br>Time: ${payload.punchOut.time || '—'}`)
+                .addTo(map);
+        }
+
+        // 4. Route polylines
+        const points = Array.isArray(payload?.routePoints) ? payload.routePoints : [];
+        if (points.length > 0) {
+            const normalSegments = [];
+            const offlineSegments = [];
+            let curNormal = [];
+            let curOffline = [];
+
+            points.forEach(pt => {
+                const lat = Number(pt.lat ?? pt.latitude);
+                const lng = Number(pt.lng ?? pt.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+
+                const latLng = [lat, lng];
+                bounds.push(latLng);
+
+                if (pt.isOffline) {
+                    if (curNormal.length > 0) {
+                        normalSegments.push(curNormal);
+                        curNormal = [];
+                    }
+                    curOffline.push(latLng);
+                } else {
+                    if (curOffline.length > 0) {
+                        offlineSegments.push(curOffline);
+                        curOffline = [];
+                    }
+                    curNormal.push(latLng);
+                }
+            });
+
+            if (curNormal.length > 0) normalSegments.push(curNormal);
+            if (curOffline.length > 0) offlineSegments.push(curOffline);
+
+            normalSegments.forEach(seg => {
+                if (seg.length > 1) {
+                    L.polyline(seg, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(map);
+                }
+            });
+
+            offlineSegments.forEach(seg => {
+                if (seg.length > 1) {
+                    L.polyline(seg, { color: '#ea580c', weight: 5, opacity: 0.9, dashArray: '6, 8' }).addTo(map);
+                }
+            });
+        }
+
+        // 5. Live Locations / Employee Markers
+        const staff = Array.isArray(payload?.liveLocations) ? payload.liveLocations : [];
+        staff.forEach(s => {
+            const lat = Number(s.lat ?? s.latitude);
+            const lng = Number(s.lng ?? s.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+
+            const latLng = [lat, lng];
+            bounds.push(latLng);
+
+            const isLive = s.status === 'Live';
+            const badgeBg = isLive ? '#15803d' : (s.status === 'Stale' ? '#b45309' : '#64748b');
+
+            const empIcon = L.divIcon({
+                className: 'offline-map-emp-marker',
+                html: `<div style="background:${badgeBg};color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
+                    <span>📍</span>
+                    <span>${s.name || 'Staff'}</span>
+                </div>`,
+                iconSize: [100, 30],
+                iconAnchor: [50, 15]
+            });
+
+            L.marker(latLng, { icon: empIcon })
+                .bindPopup(`<b>${s.name || 'Employee'} (#${s.employeeId || '—'})</b><br>
+                    Status: <b>${s.status || 'Offline'}</b><br>
+                    Speed: ${Number(s.speedKmh || 0).toFixed(1)} km/h<br>
+                    Movement: ${s.movement || 'Stopped'}<br>
+                    Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
+                .addTo(map);
+        });
+
+        // 6. Fit Bounds or fallback
+        if (bounds.length > 0) {
+            map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 16 });
+        } else if (Number.isFinite(officeLat) && officeLat !== 0) {
+            map.setView([officeLat, officeLng], 15);
+        } else {
+            map.setView([11.9428, 79.7972], 13);
+        }
+
+        window.offlineTrackingMaps[mapId] = { map };
+    } catch (err) {
+        console.error('Error initializing offline tracking map:', err);
+    }
+};

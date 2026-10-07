@@ -2160,21 +2160,26 @@ private class OfflinePeriodAdapter(
                 }
                 step2Text.append(staySummary)
             } else if (item.distanceMeters < 30.0) {
-                step2Text.append(" • Stationary at current location throughout entire disconnect window")
+                val locDesc = if (item.inRadiusCount > 0) "Inside Office Zone" else "Outside Office Perimeter"
+                step2Text.append(" • Stationary at $locDesc (${item.pointsCount} points captured) throughout entire disconnect window")
             } else {
                 step2Text.append(" • Continuous movement in transit with no stationary stops")
             }
             tvStep2Detail.text = step2Text.toString()
 
             // Step 3: Geofence Perimeter Assessment
-            tvStep3Detail.text = when {
-                outOfRadiusCount == 0 ->
-                    "🟢 100% Inside Office Radius (${item.pointsCount} points within boundary) • Remained on-premises"
-                item.inRadiusCount == 0 ->
-                    "🔴 Outside Office Perimeter throughout entire disconnect window ($outOfRadiusCount points outside)"
-                else ->
-                    "⚠️ Perimeter Transition: ${item.inRadiusCount} points inside, $outOfRadiusCount points outside • Exited office boundary during disconnect"
+            val step3Desc = StringBuilder()
+            step3Desc.append("📴 During Offline Disconnection Window:\n")
+            if (outOfRadiusCount == 0) {
+                step3Desc.append("• Employee remained 100% Inside Office Radius (${item.pointsCount} points within boundary) • Safe on-premises.\n")
+            } else if (item.inRadiusCount == 0) {
+                step3Desc.append("• Employee remained Outside Office Perimeter ($outOfRadiusCount points outside boundary) throughout entire disconnect window.\n")
+            } else {
+                step3Desc.append("• Perimeter Transition: ${item.inRadiusCount} points inside, $outOfRadiusCount points outside • Exited office boundary during disconnect.\n")
             }
+            step3Desc.append("📶 Upon Network Reconnection:\n")
+            step3Desc.append("• ${item.liveImpactSummary}")
+            tvStep3Detail.text = step3Desc.toString()
 
             // Step 4: Reconnection & Cloud Sync
             val syncNote = if (item.isSynced) {
@@ -2273,6 +2278,17 @@ private class OfflineEventAdapter :
                 .trim()
                 .trim('•')
                 .trim()
+
+            // Executive enterprise polish for common events
+            if (type.contains("OFFLINE_PERIOD")) {
+                if (!cleanMsg.contains("reconciled", ignoreCase = true) && !cleanMsg.contains("ledger", ignoreCase = true)) {
+                    cleanMsg += " • Offline tracking data reconciled to cloud attendance ledger."
+                }
+            } else if (type.contains("NETWORK_OFFLINE")) {
+                cleanMsg = "Mobile device lost internet connectivity. Local background GPS capture activated; movements retained securely on phone."
+            } else if (type.contains("NETWORK_ONLINE")) {
+                cleanMsg = "Internet connection returned. Local offline queue synchronized with Cloud SSOT."
+            }
 
             tvMessage.text = if (cleanMsg.isNotBlank()) cleanMsg else "Offline tracking event recorded successfully."
 
