@@ -15,6 +15,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -119,10 +123,13 @@ class OfflineTrackingMonitor @Inject constructor(
                         val mins = durationMs / 60000
                         val secs = (durationMs % 60000) / 1000
                         val formattedDuration = if (mins > 0) "${mins}m ${secs}s" else "${secs}s"
+                        val timeFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Kolkata") }
+                        val startStr = timeFmt.format(Date(offlinePeriod.first))
+                        val endStr = timeFmt.format(Date(now))
                         record(
                             eventType = "OFFLINE_PERIOD",
                             severity = INFO,
-                            message = "Offline Window Completed: $formattedDuration • Reason: ${offlinePeriod.second} • Start: ${offlinePeriod.first} • End: $now",
+                            message = "Offline Window: $startStr – $endStr ($formattedDuration) • Cause: ${offlinePeriod.second}",
                             correlationId = UUID.randomUUID().toString()
                         )
                     }

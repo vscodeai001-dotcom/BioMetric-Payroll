@@ -3,8 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="10dp"
-    app:cardCornerRadius="14dp"
+    android:layout_marginBottom="12dp"
+    app:cardCornerRadius="16dp"
     app:cardElevation="2dp"
     app:strokeWidth="1dp"
     app:strokeColor="?attr/colorOutline">
@@ -13,27 +13,26 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="14dp">
+        android:padding="16dp">
 
-        <!-- Header: Employee + Disconnected & Reconnected Interval + Duration Badge -->
+        <!-- Top Header: Employee Name + Disconnected/Reconnected Range + Duration Badge -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
-            <ImageView
-                android:id="@+id/ivPeriodIcon"
-                android:layout_width="22dp"
-                android:layout_height="22dp"
-                android:src="@drawable/ic_clock"
-                app:tint="?attr/colorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="20sp"
+                android:text="👤"
+                android:layout_marginEnd="8dp" />
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:layout_marginStart="8dp"
                 android:orientation="vertical">
 
                 <TextView
@@ -41,7 +40,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:textStyle="bold"
-                    android:textSize="13sp"
+                    android:textSize="14sp"
                     android:textColor="?attr/colorOnSurface"
                     android:text="Employee Name" />
 
@@ -51,7 +50,7 @@
                     android:layout_height="wrap_content"
                     android:textSize="11sp"
                     android:textColor="?attr/colorOnSurfaceVariant"
-                    android:text="Disconnected: 10:15:30 → Reconnected: 11:00:15 IST" />
+                    android:text="Disconnected: 03:41 PM → Reconnected: 03:58 PM IST" />
             </LinearLayout>
 
             <TextView
@@ -60,16 +59,16 @@
                 android:layout_height="wrap_content"
                 android:paddingStart="10dp"
                 android:paddingEnd="10dp"
-                android:paddingTop="3dp"
-                android:paddingBottom="3dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
                 android:background="@drawable/bg_rounded_card_outline"
                 android:textStyle="bold"
                 android:textSize="11sp"
                 android:textColor="?attr/colorPrimary"
-                android:text="44m 45s" />
+                android:text="16m 37s" />
         </LinearLayout>
 
-        <!-- Disconnection Cause, Shift Tag & Sync Badge -->
+        <!-- Disconnection Cause & Mode Chips -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -92,7 +91,7 @@
                 android:text="Active Shift Disconnection" />
 
             <Space
-                android:layout_width="8dp"
+                android:layout_width="6dp"
                 android:layout_height="1dp" />
 
             <TextView
@@ -105,67 +104,258 @@
                 android:text="✈️ Airplane Mode" />
 
             <Space
-                android:layout_width="8dp"
+                android:layout_width="6dp"
                 android:layout_height="1dp" />
 
             <TextView
                 android:id="@+id/tvPeriodSyncStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 android:textStyle="bold"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:background="@drawable/bg_rounded_card_outline"
                 android:textColor="#2E7D32"
                 android:text="✓ Reconciled into Live Data" />
         </LinearLayout>
 
-        <!-- Offline Attendance Punches Section -->
+        <!-- PROMINENT LIVE DATA IMPACT BOX (Primary Requirement) -->
         <LinearLayout
-            android:id="@+id/llOfflinePunchesContainer"
+            android:id="@+id/llPeriodLiveImpactBox"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:orientation="vertical"
             android:background="@drawable/bg_rounded_card_outline"
-            android:padding="8dp">
+            android:padding="10dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Attendance Punches during this Disconnection Gap:"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:textColor="?attr/colorOnSurface" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvPeriodLiveImpactBadge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:background="@drawable/bg_rounded_card_outline"
+                    android:textColor="#2E7D32"
+                    android:text="🛡️ No Live Attendance Impact" />
+            </LinearLayout>
 
             <TextView
-                android:id="@+id/tvPeriodPunches"
+                android:id="@+id/tvPeriodLiveImpact"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:textSize="11sp"
-                android:textColor="?attr/colorOnSurfaceVariant"
-                android:text="No attendance punches taken during this gap" />
+                android:layout_marginTop="4dp"
+                android:textSize="12sp"
+                android:textColor="?attr/colorOnSurface"
+                android:text="Employee remained safely inside office radius throughout offline window. Active IN shift preserved." />
+
+            <!-- Sub-container for punch changes if any -->
+            <LinearLayout
+                android:id="@+id/llOfflinePunchesContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvPeriodPunches"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#C62828"
+                    android:text="Auto OUT punch triggered at 03:48 PM" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- Live Reconciliation Impact / Changes Summary -->
-        <TextView
-            android:id="@+id/tvPeriodLiveImpact"
+        <!-- STEP-BY-STEP AUDIT TIMELINE -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textSize="11sp"
-            android:textColor="#1565C0"
-            android:text="Live Impact: Punches &amp; breadcrumbs synced to cloud upon reconnection" />
+            android:layout_marginTop="12dp"
+            android:orientation="vertical">
 
-        <!-- Movement Breadcrumbs Stats -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TIMELINE AUDIT OF THIS OFFLINE PERIOD"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05"
+                android:textColor="?attr/colorPrimary" />
+
+            <!-- Step 1: Disconnection Event -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="24dp"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:text="📴" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="Step 1 • Disconnection Event" />
+
+                    <TextView
+                        android:id="@+id/tvStep1Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:text="Disconnected at 03:41 PM IST • Cause: Airplane Mode" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Step 2: Journey & Stay Stops -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="24dp"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:text="🗺️" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="Step 2 • Journey Stops &amp; Stay Points" />
+
+                    <TextView
+                        android:id="@+id/tvStep2Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:text="Traversed 1.4 km across 18 points • Stayed 12 mins at Outside Geofence" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Step 3: Geofence Perimeter Assessment -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="24dp"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:text="🏢" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="Step 3 • Geofence Perimeter Assessment" />
+
+                    <TextView
+                        android:id="@+id/tvStep3Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:text="Remained 100% inside office radius throughout offline window" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Step 4: Reconnection & Cloud Sync -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="24dp"
+                    android:layout_height="wrap_content"
+                    android:textSize="14sp"
+                    android:text="📶" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textStyle="bold"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurface"
+                        android:text="Step 4 • Reconnection &amp; Cloud Sync" />
+
+                    <TextView
+                        android:id="@+id/tvStep4Detail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:text="Reconnected at 03:58 PM IST • Reconciled into Live Cloud Data" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Summary Statistics line -->
         <TextView
             android:id="@+id/tvPeriodStats"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
+            android:layout_marginTop="10dp"
             android:textSize="11sp"
             android:textColor="?attr/colorOnSurfaceVariant"
             android:text="18 points captured • 2.4 km • Within office: 14 / Outside: 4" />
 
+        <!-- Inspect Map Button -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewPeriodRoute"
             style="@style/Widget.Material3.Button.TonalButton"
@@ -173,6 +363,6 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:textSize="12sp"
-            android:text="Inspect Offline Path on Map" />
+            android:text="🗺️ Inspect Offline Path on Map" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

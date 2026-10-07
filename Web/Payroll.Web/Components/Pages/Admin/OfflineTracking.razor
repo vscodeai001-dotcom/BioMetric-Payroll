@@ -1,206 +1,337 @@
 @page "/admin/offline-tracking"
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
+@using System.Text.Json
 @using global::Payroll.Shared.Data
+@using global::Payroll.Shared.Firebase
 @using global::Payroll.Web.Services
 @implements IAsyncDisposable
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IJSRuntime JSRuntime
 @inject Payroll.Web.Services.FirebaseEmployeeManagementService FirebaseEmployees
+@inject Payroll.Web.Services.FirebaseRealtimeService FirebaseRealtime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
-<PageTitle>GPS Connection & Offline Tracking</PageTitle>
+<PageTitle>Offline GPS Tracking & Disconnection Reconciliation</PageTitle>
 
 <AttendanceRefreshListener OnAttendanceChanged="Refresh" OnLocationChanged="Refresh" />
 
 <div class="container-fluid py-3 offline-tracking-page">
+    <!-- Header -->
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <div>
-            <h3 class="fw-bold mb-1"><i class="bi bi-cloud-slash text-primary me-2"></i>GPS Connection & Offline Tracking</h3>
-            <p class="text-muted mb-0">Live connection health and the last known employee GPS state.</p>
+            <h3 class="fw-bold mb-1">
+                <i class="bi bi-cloud-slash text-danger me-2"></i>Offline GPS Tracking &amp; Attendance Reconciliation
+            </h3>
+            <p class="text-muted mb-0">
+                Audited mobile offline windows (airplane mode, network disconnected) captured locally on mobile and reconciled to cloud attendance.
+            </p>
         </div>
-        <button class="btn btn-outline-primary" @onclick="Refresh" disabled="@loading">
-            <i class="bi bi-arrow-clockwise @(loading ? "spin" : "") me-1"></i>Refresh
-        </button>
+        <div class="d-flex align-items-center gap-2">
+            <a href="/admin/offline-tracking-details" class="btn btn-outline-secondary">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Full Audit Details
+            </a>
+            <button class="btn btn-outline-primary" @onclick="Refresh" disabled="@loading">
+                <i class="bi bi-arrow-clockwise @(loading ? "spin" : "") me-1"></i>@(loading ? "Reconciling..." : "Refresh")
+            </button>
+        </div>
     </div>
 
+    <!-- Pure Offline Metrics Row (NO live data) -->
     <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm p-3"><small class="text-muted">Live</small><strong class="fs-3 text-success">@liveCount</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm p-3"><small class="text-muted">Stale</small><strong class="fs-3 text-warning">@staleCount</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm p-3"><small class="text-muted">Offline</small><strong class="fs-3 text-danger">@offlineCount</strong></div></div>
-        <div class="col-6 col-lg-3"><div class="card border-0 shadow-sm p-3"><small class="text-muted">Last refresh</small><strong class="fs-6">@lastRefreshText</strong></div></div>
-    </div>
-
-    @if (loading)
-    {
-        <div class="card border-0 shadow-sm p-4 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading GPS connection status...</div>
-    }
-    else if (rows.Count == 0)
-    {
-        <div class="card border-0 shadow-sm p-4 text-center text-muted">No active GPS sessions are currently registered.</div>
-    }
-    else
-    {
-        <div class="card border-0 shadow-sm overflow-hidden">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead><tr><th>Employee</th><th>Status</th><th>Last update</th><th>Age</th><th>Movement</th><th>Speed</th><th>Last location</th></tr></thead>
-                    <tbody>
-                    @foreach (var row in rows)
-                    {
-                        <tr>
-                            <td><strong>@row.EmployeeName</strong><div class="small text-muted">ID @row.EmployeeId</div></td>
-                            <td><span class="badge @row.StatusClass">@row.Status</span></td>
-                            <td>@(row.LastUpdatedUtc.HasValue ? ToLocal(row.LastUpdatedUtc.Value).ToString("dd MMM yyyy HH:mm:ss") : "Never")</td>
-                            <td>@FormatAge(row.Age)</td>
-                            <td>@row.MovementState</td>
-                            <td>@FormatSpeed(row.SpeedMps)</td>
-                            <td><code>@row.Latitude.ToString("F6"), @row.Longitude.ToString("F6")</code><div class="small text-muted">@row.Geofence</div></td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">📴</span>
+                    <small class="text-muted fw-semibold">Offline Intervals</small>
+                </div>
+                <strong class="fs-4 text-dark">@filteredPeriods.Count</strong>
+                <small class="text-secondary">Detected windows</small>
             </div>
         </div>
-    }
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">⏱️</span>
+                    <small class="text-muted fw-semibold">Total Offline Time</small>
+                </div>
+                <strong class="fs-4 text-warning-emphasis">@FormatAge(totalOfflineDuration)</strong>
+                <small class="text-secondary">Across disconnections</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">⚡</span>
+                    <small class="text-muted fw-semibold">Auto Punches</small>
+                </div>
+                <strong class="fs-4 text-danger">@autoPunchCount</strong>
+                <small class="text-secondary">Triggered while offline</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">🛡️</span>
+                    <small class="text-muted fw-semibold">Zero-Impact Safe</small>
+                </div>
+                <strong class="fs-4 text-success">@zeroImpactCount</strong>
+                <small class="text-secondary">Safe inside geofence</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">📍</span>
+                    <small class="text-muted fw-semibold">GPS Breadcrumbs</small>
+                </div>
+                <strong class="fs-4 text-primary">@totalBreadcrumbs</strong>
+                <small class="text-secondary">Saved offline &amp; synced</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 shadow-sm p-3 h-100">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="fs-4">☁️</span>
+                    <small class="text-muted fw-semibold">Reconciled Rate</small>
+                </div>
+                <strong class="fs-4 text-info-emphasis">@reconciledPercent%</strong>
+                <small class="text-secondary">Merged to live database</small>
+            </div>
+        </div>
+    </div>
 
-    <div class="card border-0 shadow-sm mt-4">
+    <!-- Filter Bar -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-12 col-md-3">
+                    <label class="form-label small text-muted mb-1"><i class="bi bi-person me-1"></i>Employee</label>
+                    <select class="form-select form-select-sm" @bind="employeeFilter">
+                        <option value="0">All Employees</option>
+                        @foreach (var emp in allEmployees)
+                        {
+                            <option value="@emp.EmployeeID">@emp.Name (#@emp.EmployeeID)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small text-muted mb-1"><i class="bi bi-calendar-event me-1"></i>Date</label>
+                    <input type="date" class="form-control form-control-sm" @bind="selectedDate" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small text-muted mb-1"><i class="bi bi-funnel me-1"></i>Impact Filter</label>
+                    <select class="form-select form-select-sm" @bind="impactFilter">
+                        <option value="ALL">All Disconnection Events</option>
+                        <option value="AUTO_OUT">⚡ Auto OUT Punch Triggered</option>
+                        <option value="RECONCILED">🟢 Attendance Punch Reconciled</option>
+                        <option value="ZERO_IMPACT">🛡️ No Live Attendance Impact</option>
+                        <option value="OFF_SHIFT">🌙 Off-Duty / Non-Shift Gap</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-4 text-md-end mt-3 mt-md-0 d-flex gap-2 justify-content-md-end">
+                    <button class="btn btn-sm btn-primary" @onclick="Refresh">
+                        <i class="bi bi-filter me-1"></i>Apply Filters
+                    </button>
+                    @if (employeeFilter != 0 || impactFilter != "ALL" || selectedDate != DateTime.Today)
+                    {
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="ResetFilters">
+                            <i class="bi bi-x-circle me-1"></i>Reset
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Centerpiece: Offline Disconnection Intervals Table -->
+    <div class="card border-0 shadow-sm">
         <div class="card-header bg-transparent d-flex justify-content-between align-items-center flex-wrap gap-2 py-3">
             <div>
-                <h5 class="fw-bold mb-0"><i class="bi bi-clock-history text-warning me-2"></i>Offline Disconnection Intervals (Missing Window Reconciliation)</h5>
-                <small class="text-muted">Detected mobile offline windows (airplane mode, network disconnected) captured locally and synced to cloud.</small>
+                <h5 class="fw-bold mb-0">
+                    <i class="bi bi-clock-history text-warning me-2"></i>Offline Disconnection Intervals (Missing Window Reconciliation)
+                </h5>
+                <small class="text-muted">
+                    Time windows where employee phone lost connectivity (airplane mode, network off), logged movements locally, and reconciled back to cloud.
+                </small>
             </div>
             <div class="d-flex align-items-center gap-2">
-                <a href="/admin/offline-tracking-details" class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-box-arrow-up-right me-1"></i>Full Audit Details
-                </a>
-                <span class="badge bg-warning text-dark">@offlinePeriods.Count offline periods</span>
+                <span class="badge bg-warning text-dark fs-6 px-3 py-2">
+                    @filteredPeriods.Count offline period@(filteredPeriods.Count == 1 ? "" : "s")
+                </span>
             </div>
         </div>
         <div class="card-body p-0">
-            @if (offlinePeriods.Count == 0)
+            @if (loading)
             {
-                <div class="p-4 text-center text-muted">
-                    <i class="bi bi-check-circle text-success fs-3 d-block mb-2"></i>
-                    No offline tracking periods recorded today. All mobile tracking has been streaming live.
+                <div class="p-5 text-center text-muted">
+                    <span class="spinner-border text-primary me-2"></span>
+                    <span>Reconciling mobile offline tracking data from Firebase &amp; local records...</span>
+                </div>
+            }
+            else if (filteredPeriods.Count == 0)
+            {
+                <div class="p-5 text-center text-muted">
+                    <div class="fs-1 mb-2">🛡️</div>
+                    <h5 class="fw-bold text-dark">No Offline Disconnection Intervals Detected</h5>
+                    <p class="text-muted mb-3">
+                        No mobile offline intervals were recorded for the selected filter. Tracking remained online or no disconnection gaps exceeded 15 minutes.
+                    </p>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="Refresh">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Re-check Cloud Ledger
+                    </button>
                 </div>
             }
             else
             {
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
-                        <thead>
+                        <thead class="table-light">
                             <tr>
                                 <th>Employee</th>
-                                <th>Offline Started</th>
-                                <th>Reconnected</th>
-                                <th>Duration & Mode</th>
-                                <th>Changes Made to Live Attendance</th>
-                                <th>GPS Breadcrumbs</th>
-                                <th>Live Data Reconciliation</th>
-                                <th class="text-end">Inspect</th>
+                                <th>When (Offline Window)</th>
+                                <th>Why (Disconnect Reason)</th>
+                                <th>Where &amp; Geofence</th>
+                                <th>What Changes Made to Live Data</th>
+                                <th>GPS Points</th>
+                                <th>Cloud Sync</th>
+                                <th class="text-end">5-Step Audit</th>
                             </tr>
                         </thead>
                         <tbody>
-                        @foreach (var period in offlinePeriods)
+                        @foreach (var period in filteredPeriods)
                         {
                             var isSelected = period.Id == selectedOfflinePeriodId;
                             <tr class="@(isSelected ? "table-warning fw-semibold" : "")">
                                 <td>
                                     <strong>@period.EmployeeName</strong>
-                                    <div class="small text-muted">ID @period.EmployeeId</div>
+                                    <div class="small text-muted">ID #@period.EmployeeId</div>
                                 </td>
                                 <td>
-                                    <div><i class="bi bi-wifi-off text-danger me-1"></i>@ToLocal(period.StartUtc).ToString("dd MMM HH:mm:ss")</div>
-                                    <span class="badge bg-secondary-subtle text-secondary small">@period.DisconnectReason</span>
-                                </td>
-                                <td>
-                                    <div><i class="bi bi-wifi text-success me-1"></i>@ToLocal(period.EndUtc).ToString("dd MMM HH:mm:ss")</div>
-                                    <small class="text-success"><i class="bi bi-check2 me-1"></i>Connection restored</small>
-                                </td>
-                                <td>
-                                    <span class="badge bg-dark-subtle text-dark">@FormatAge(period.Duration)</span>
+                                    <div><i class="bi bi-wifi-off text-danger me-1"></i><strong>@ToLocal(period.StartUtc).ToString("hh:mm tt")</strong> <small class="text-muted">IST</small></div>
+                                    <div><i class="bi bi-wifi text-success me-1"></i><strong>@ToLocal(period.EndUtc).ToString("hh:mm tt")</strong> <small class="text-muted">IST</small></div>
                                     <div class="mt-1">
+                                        <span class="badge bg-dark-subtle text-dark">⏱️ @FormatAge(period.Duration)</span>
                                         @if (period.IsOffShift)
                                         {
-                                            <span class="badge bg-secondary-subtle text-secondary border">@period.ShiftTag</span>
+                                            <span class="badge bg-secondary-subtle text-secondary ms-1">🌙 @period.ShiftTag</span>
                                         }
                                         else
                                         {
-                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">@period.ShiftTag</span>
+                                            <span class="badge bg-primary-subtle text-primary ms-1">💼 @period.ShiftTag</span>
                                         }
                                     </div>
                                 </td>
                                 <td>
-                                    @if (period.Punches.Any())
-                                    {
-                                        <div class="d-flex flex-column gap-1">
-                                        @foreach (var p in period.Punches)
+                                    <span class="badge @GetReasonBadgeClass(period.DisconnectReason) p-2 text-start">
+                                        @GetReasonIcon(period.DisconnectReason) @period.DisconnectReason
+                                    </span>
+                                </td>
+                                <td>
+                                    <div>
+                                        <strong>@FormatDistance(period.DistanceMeters)</strong> traversed
+                                    </div>
+                                    <div class="mt-1">
+                                        @if (period.PointCount - period.InRadiusCount == 0)
                                         {
-                                            var isOut = p.Type.Equals("OUT", StringComparison.OrdinalIgnoreCase);
-                                            <span class="badge @(isOut ? "bg-danger-subtle text-danger border border-danger-subtle" : "bg-success-subtle text-success border border-success-subtle") text-start">
-                                                @(isOut ? "🔴 OUT Punch Added" : "🟢 IN Punch Added"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt")
-                                                <small class="d-block fw-normal text-muted">@p.ChangeDetail</small>
+                                            <span class="badge bg-success-subtle text-success border border-success-subtle">
+                                                🏢 100% Inside Office
                                             </span>
                                         }
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="small text-muted">
-                                            <i class="bi bi-shield-check text-secondary me-1"></i>
-                                            @period.LiveImpactSummary
-                                        </div>
-                                    }
+                                        else if (period.InRadiusCount == 0)
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle">
+                                                🚨 Outside Perimeter
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                                ⚠️ Boundary Transition (@period.InRadiusCount In / @(period.PointCount - period.InRadiusCount) Out)
+                                            </span>
+                                        }
+                                    </div>
                                     @if (period.Stays.Any())
                                     {
                                         <div class="small text-secondary mt-1">
-                                            <i class="bi bi-geo-alt-fill text-primary me-1"></i>
-                                            @period.Stays.Count stop(s) during offline window
+                                            📍 @period.Stays.Count stationary stop(s)
                                         </div>
                                     }
                                 </td>
                                 <td>
-                                    <div><span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span> · @FormatDistance(period.DistanceMeters)</div>
-                                    <div class="small mt-1">
-                                        <span class="badge bg-success-subtle text-success">@period.InRadiusCount In</span>
-                                        @if (period.PointCount - period.InRadiusCount > 0)
-                                        {
-                                            <span class="badge bg-danger-subtle text-danger ms-1">@(period.PointCount - period.InRadiusCount) Out</span>
-                                        }
-                                        @if (period.Stays.Any())
-                                        {
-                                            <span class="badge bg-secondary-subtle text-secondary ms-1">@period.Stays.Count stops</span>
-                                        }
+                                    @{
+                                        var hasAutoOut = period.Punches.Any(p => IsOutType(p.Type) && p.ChangeDetail.Contains("radius", StringComparison.OrdinalIgnoreCase)) ||
+                                                         period.LiveImpactSummary.Contains("Auto OUT", StringComparison.OrdinalIgnoreCase);
+                                        var hasPunches = period.Punches.Any();
+                                    }
+
+                                    @if (hasAutoOut)
+                                    {
+                                        <div class="badge bg-danger p-2 text-start mb-1 d-inline-block">
+                                            ⚡ Auto OUT Punch Triggered
+                                        </div>
+                                    }
+                                    else if (hasPunches)
+                                    {
+                                        <div class="badge bg-success p-2 text-start mb-1 d-inline-block">
+                                            🟢 Reconciled Attendance Punch
+                                        </div>
+                                    }
+                                    else if (period.IsOffShift)
+                                    {
+                                        <div class="badge bg-secondary p-2 text-start mb-1 d-inline-block">
+                                            🌙 Off-Duty Window (No Impact)
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="badge bg-success-subtle text-success border border-success-subtle p-2 text-start mb-1 d-inline-block">
+                                            🛡️ No Live Attendance Impact
+                                        </div>
+                                    }
+
+                                    <div class="small text-muted mt-1">
+                                        @period.LiveImpactSummary
+                                    </div>
+
+                                    @if (period.Punches.Any())
+                                    {
+                                        <div class="d-flex flex-column gap-1 mt-1">
+                                            @foreach (var p in period.Punches)
+                                            {
+                                                var isOut = IsOutType(p.Type);
+                                                <div class="small fw-semibold @(isOut ? "text-danger" : "text-success")">
+                                                    @(isOut ? "🔴 OUT Punch" : "🟢 IN Punch"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt") (@p.ChangeDetail)
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="badge bg-info-subtle text-info-emphasis">@period.PointCount points</span>
+                                    <div class="small text-muted mt-1">
+                                        @(period.Points.Count(x => x.SpeedMps < 0.5)) stop / @(period.Points.Count(x => x.SpeedMps >= 0.5)) move
                                     </div>
                                 </td>
                                 <td>
                                     @if (period.IsSynced)
                                     {
                                         <div>
-                                            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Reconciled to Live</span>
-                                            <div class="small text-primary mt-1">
-                                                <i class="bi bi-cloud-arrow-up me-1"></i>Pushed from mobile to live upon reconnection
-                                                @if (period.Punches.Any())
-                                                {
-                                                    <div class="fw-semibold text-success">(@period.Punches.Count punches added & @period.PointCount points merged)</div>
-                                                }
-                                            </div>
+                                            <span class="badge bg-success"><i class="bi bi-cloud-check me-1"></i>Reconciled to Live</span>
+                                            <div class="small text-muted mt-1">All points merged</div>
                                         </div>
                                     }
                                     else
                                     {
                                         <div>
                                             <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending Sync</span>
-                                            <div class="small text-warning-emphasis mt-1">
-                                                <i class="bi bi-phone me-1"></i>Buffered in mobile local storage
-                                            </div>
+                                            <div class="small text-muted mt-1">Buffered on phone</div>
                                         </div>
                                     }
                                 </td>
                                 <td class="text-end">
                                     <button class="btn btn-sm @(isSelected ? "btn-warning" : "btn-outline-primary")" @onclick="() => TogglePeriod(period.Id)">
-                                        <i class="bi @(isSelected ? "bi-check2-circle" : "bi-map") me-1"></i>@(isSelected ? "Selected" : "View Route")
+                                        <i class="bi @(isSelected ? "bi-chevron-up" : "bi-eye") me-1"></i>@(isSelected ? "Collapse" : "Inspect")
                                     </button>
                                 </td>
                             </tr>
@@ -209,33 +340,68 @@
                     </table>
                 </div>
 
+                <!-- Expanded 5-Step Linear Timeline Card -->
                 @if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
                 {
                     var activePeriod = offlinePeriods.FirstOrDefault(x => x.Id == selectedOfflinePeriodId);
                     if (activePeriod != null)
                     {
-                        <div class="border-top p-3 bg-light-subtle">
+                        var hasAutoOut = activePeriod.Punches.Any(p => IsOutType(p.Type) && p.ChangeDetail.Contains("radius", StringComparison.OrdinalIgnoreCase)) ||
+                                         activePeriod.LiveImpactSummary.Contains("Auto OUT", StringComparison.OrdinalIgnoreCase);
+                        var hasPunches = activePeriod.Punches.Any();
+                        var outOfRadiusCount = Math.Max(0, activePeriod.PointCount - activePeriod.InRadiusCount);
+
+                        string impactBadgeText;
+                        string impactAlertClass;
+                        string impactBadgeClass;
+
+                        if (hasAutoOut)
+                        {
+                            impactBadgeText = "⚡ Auto OUT Punch Triggered";
+                            impactAlertClass = "alert-danger border-danger-subtle";
+                            impactBadgeClass = "bg-danger";
+                        }
+                        else if (hasPunches)
+                        {
+                            impactBadgeText = "🟢 Reconciled Attendance Punch";
+                            impactAlertClass = "alert-success border-success-subtle";
+                            impactBadgeClass = "bg-success";
+                        }
+                        else if (activePeriod.IsOffShift)
+                        {
+                            impactBadgeText = "🌙 Off-Duty Window (No Impact)";
+                            impactAlertClass = "alert-secondary border-secondary-subtle";
+                            impactBadgeClass = "bg-secondary";
+                        }
+                        else
+                        {
+                            impactBadgeText = "🛡️ No Live Attendance Impact";
+                            impactAlertClass = "alert-success border-success-subtle";
+                            impactBadgeClass = "bg-success";
+                        }
+
+                        <div class="border-top p-4 bg-light-subtle">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <div>
-                                    <h6 class="fw-bold mb-0 text-primary">
-                                        <i class="bi bi-clock-history me-1"></i>Offline Disconnection Breakdown for @activePeriod.EmployeeName
-                                    </h6>
-                                    <small class="text-muted">
-                                        Disconnected: @ToLocal(activePeriod.StartUtc).ToString("dd MMM hh:mm:ss tt") → Reconnected: @ToLocal(activePeriod.EndUtc).ToString("hh:mm:ss tt") IST (@FormatAge(activePeriod.Duration)) • Mode: @activePeriod.DisconnectReason
-                                    </small>
+                                    <h5 class="fw-bold mb-1 text-primary">
+                                        <i class="bi bi-clock-history me-2"></i>Detailed 5-Step Disconnection Audit: @activePeriod.EmployeeName
+                                    </h5>
+                                    <div class="text-muted small">
+                                        Disconnected: <strong>@ToLocal(activePeriod.StartUtc).ToString("dd MMM hh:mm:ss tt")</strong> → Reconnected: <strong>@ToLocal(activePeriod.EndUtc).ToString("hh:mm:ss tt") IST</strong> (Duration: <strong>@FormatAge(activePeriod.Duration)</strong>) • Mode: <span class="badge bg-secondary-subtle text-secondary">@activePeriod.DisconnectReason</span>
+                                    </div>
                                 </div>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => selectedOfflinePeriodId = null">
-                                    <i class="bi bi-x-lg me-1"></i>Close
+                                    <i class="bi bi-x-lg me-1"></i>Close Breakdown
                                 </button>
                             </div>
 
-                            <!-- Punches and Live Reconciliation -->
-                            <div class="alert alert-light border shadow-sm mb-3">
-                                <div class="d-flex align-items-start gap-2">
-                                    <i class="bi bi-shield-check text-success fs-5 mt-1"></i>
-                                    <div>
-                                        <strong>Live Attendance Reconciliation</strong>
-                                        <div class="text-muted small">@activePeriod.LiveImpactSummary</div>
+                            <!-- Prominent Live Data Impact Status Box -->
+                            <div class="alert @impactAlertClass border shadow-sm mb-4">
+                                <div class="d-flex align-items-start gap-3">
+                                    <span class="badge @impactBadgeClass px-3 py-2 fs-6">@impactBadgeText</span>
+                                    <div class="flex-grow-1">
+                                        <div class="fw-bold fs-6 mb-1">What Changes Impacted Live Attendance:</div>
+                                        <div class="text-dark">@activePeriod.LiveImpactSummary</div>
                                         @if (activePeriod.Punches.Any())
                                         {
                                             <div class="d-flex flex-wrap gap-2 mt-2">
@@ -244,63 +410,169 @@
                                                     var isOut = IsOutType(p.Type);
                                                     <span class="badge @(isOut ? "bg-danger" : "bg-success") p-2 text-start">
                                                         <i class="bi @(isOut ? "bi-box-arrow-right" : "bi-box-arrow-in-right") me-1"></i>
-                                                        @(isOut ? "🔴 OUT Punch" : "🟢 IN Punch"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt")
-                                                        <small class="d-block fw-normal opacity-75">@p.ChangeDetail • Applied to live shift logs</small>
+                                                        @(isOut ? "🔴 Auto OUT Punch" : "🟢 IN Punch"): @ToLocal(p.PunchTimeUtc).ToString("hh:mm tt") IST
+                                                        <small class="d-block fw-normal opacity-90">@p.ChangeDetail • Applied to live shift records upon reconnection</small>
                                                     </span>
                                                 }
+                                            </div>
+                                        }
+                                        else if (outOfRadiusCount == 0 && !activePeriod.IsOffShift)
+                                        {
+                                            <div class="small text-success mt-1">
+                                                <i class="bi bi-shield-check me-1"></i>The employee never breached the permitted office boundary during the entire disconnected period. Attendance status remained intact.
                                             </div>
                                         }
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Detected Stays During Offline Window -->
-                            <div class="card border-0 shadow-sm mb-3">
-                                <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
-                                    <strong class="small text-uppercase text-secondary">
-                                        <i class="bi bi-geo-alt-fill text-danger me-1"></i>Stationary Stops & Stays During Disconnect (@activePeriod.Stays.Count detected)
+                            <!-- 5-Step Linear Audit Timeline Feed -->
+                            <div class="card border-0 shadow-sm mb-4">
+                                <div class="card-header bg-white py-2">
+                                    <strong class="small text-uppercase text-primary">
+                                        <i class="bi bi-diagram-3-fill me-1"></i>Step-by-Step Reconstruction (Where, When, What, Why &amp; Live Impact)
                                     </strong>
-                                    <span class="badge bg-secondary-subtle text-secondary small">Dwell ≥ 2 mins</span>
                                 </div>
                                 <div class="card-body p-3">
-                                    @if (activePeriod.Stays.Any())
-                                    {
-                                        <div class="row g-2">
-                                            @foreach (var stay in activePeriod.Stays)
-                                            {
-                                                <div class="col-12 col-md-6 col-xl-4">
-                                                    <div class="p-2 rounded border bg-white shadow-sm h-100">
-                                                        <div class="d-flex justify-content-between align-items-center mb-1">
-                                                            <span class="badge @(stay.IsWithinAllowedRadius ? "bg-success-subtle text-success border border-success-subtle" : "bg-warning-subtle text-warning-emphasis border border-warning-subtle")">
-                                                                <i class="bi @(stay.IsWithinAllowedRadius ? "bi-building-check" : "bi-geo-alt") me-1"></i>
-                                                                @(stay.IsWithinAllowedRadius ? "Inside Geofence" : "Outside Geofence")
-                                                            </span>
-                                                            <strong class="text-primary small">@FormatAge(stay.Duration) dwell</strong>
-                                                        </div>
-                                                        <div class="fw-semibold small">@ToLocal(stay.StartUtc).ToString("hh:mm tt") → @ToLocal(stay.EndUtc).ToString("hh:mm tt")</div>
-                                                        <div class="text-muted small mt-1">@stay.LocationDescription</div>
-                                                        <div class="small text-secondary mt-1">
-                                                            <code>@stay.Latitude.ToString("F5"), @stay.Longitude.ToString("F5")</code> · @stay.PointCount points
-                                                        </div>
-                                                    </div>
+                                    <div class="timeline-audit-feed">
+                                        <!-- Step 1: Disconnection Event -->
+                                        <div class="timeline-step">
+                                            <div class="timeline-step-icon bg-warning text-dark">📴</div>
+                                            <div class="timeline-step-content">
+                                                <div class="fw-bold">Step 1 · Disconnection Event (When &amp; Why)</div>
+                                                <div class="text-muted small">
+                                                    Lost internet connection at <strong>@ToLocal(activePeriod.StartUtc).ToString("hh:mm:ss tt") IST</strong>.
+                                                    <br />
+                                                    Reason: <span class="badge bg-secondary-subtle text-secondary">@activePeriod.DisconnectReason</span> ·
+                                                    Starting Location: <strong>@(activePeriod.InRadiusCount > 0 ? "Inside Office Radius" : "Outside Office")</strong>.
                                                 </div>
-                                            }
+                                            </div>
                                         </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="text-muted small text-center py-2">
-                                            <i class="bi bi-arrow-repeat me-1"></i>Continuous movement without stationary stops during this offline window.
+
+                                        <!-- Step 2: Journey Stops & Stay Points -->
+                                        <div class="timeline-step">
+                                            <div class="timeline-step-icon bg-info text-white">🗺️</div>
+                                            <div class="timeline-step-content">
+                                                <div class="fw-bold">Step 2 · Journey Stops &amp; Stay Points (Where &amp; What)</div>
+                                                <div class="small text-muted mb-1">
+                                                    Traversed <strong>@FormatDistance(activePeriod.DistanceMeters)</strong> across <strong>@activePeriod.PointCount breadcrumb points</strong> logged locally into mobile storage.
+                                                </div>
+                                                @if (activePeriod.Stays.Any())
+                                                {
+                                                    <div class="row g-2 mt-1">
+                                                        @foreach (var stay in activePeriod.Stays)
+                                                        {
+                                                            <div class="col-12 col-md-6 col-xl-4">
+                                                                <div class="p-2 rounded border bg-light small">
+                                                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                                                        <span class="badge @(stay.IsWithinAllowedRadius ? "bg-success-subtle text-success border border-success-subtle" : "bg-warning-subtle text-warning-emphasis border border-warning-subtle")">
+                                                                            <i class="bi @(stay.IsWithinAllowedRadius ? "bi-building-check" : "bi-geo-alt") me-1"></i>
+                                                                            @(stay.IsWithinAllowedRadius ? "Inside Geofence" : "Outside Geofence")
+                                                                        </span>
+                                                                        <strong class="text-primary">@FormatAge(stay.Duration) dwell</strong>
+                                                                    </div>
+                                                                    <div class="fw-semibold">@ToLocal(stay.StartUtc).ToString("hh:mm tt") → @ToLocal(stay.EndUtc).ToString("hh:mm tt")</div>
+                                                                    <div class="text-muted mt-1">@stay.LocationDescription</div>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                }
+                                                else if (activePeriod.DistanceMeters < 30)
+                                                {
+                                                    <div class="small text-secondary"><i class="bi bi-geo-alt me-1"></i>Stationary at current location throughout the offline window (minimal displacement).</div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="small text-secondary"><i class="bi bi-arrow-repeat me-1"></i>Continuous transit across route with no prolonged stationary stops.</div>
+                                                }
+                                            </div>
                                         </div>
-                                    }
+
+                                        <!-- Step 3: Geofence Perimeter Assessment -->
+                                        <div class="timeline-step">
+                                            <div class="timeline-step-icon bg-primary text-white">🏢</div>
+                                            <div class="timeline-step-content">
+                                                <div class="fw-bold">Step 3 · Geofence Perimeter Assessment (Where)</div>
+                                                <div class="small">
+                                                    @if (outOfRadiusCount == 0)
+                                                    {
+                                                        <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i><strong>100% Inside Office Radius</strong> — Remained safely within permitted office boundary (@activePeriod.PointCount points inside).</span>
+                                                    }
+                                                    else if (activePeriod.InRadiusCount == 0)
+                                                    {
+                                                        <span class="text-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i><strong>Outside Office Perimeter</strong> — Remained outside office boundary for entire duration (@outOfRadiusCount points outside).</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Perimeter Transition</strong> — @activePeriod.InRadiusCount points inside boundary, @outOfRadiusCount points outside. Crossed office geofence threshold during offline period.</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Step 4: Reconnection & Cloud Sync -->
+                                        <div class="timeline-step">
+                                            <div class="timeline-step-icon bg-success text-white">📶</div>
+                                            <div class="timeline-step-content">
+                                                <div class="fw-bold">Step 4 · Reconnection &amp; Cloud Sync (When &amp; Recovery)</div>
+                                                <div class="small text-muted">
+                                                    Internet connectivity restored at <strong>@ToLocal(activePeriod.EndUtc).ToString("hh:mm:ss tt") IST</strong>.
+                                                    <br />
+                                                    @if (activePeriod.IsSynced)
+                                                    {
+                                                        <span class="text-success fw-semibold"><i class="bi bi-cloud-check-fill me-1"></i>All @activePeriod.PointCount breadcrumb points and offline events successfully merged into live database.</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-warning fw-semibold"><i class="bi bi-hourglass-split me-1"></i>Buffered in mobile local queue — Pending cloud sync.</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Step 5: Live Attendance Impact -->
+                                        <div class="timeline-step">
+                                            <div class="timeline-step-icon @(hasAutoOut ? "bg-danger" : "bg-success") text-white">⚡</div>
+                                            <div class="timeline-step-content">
+                                                <div class="fw-bold">Step 5 · Live Attendance Impact (What Changes Made in Live Data)</div>
+                                                <div class="small text-dark">
+                                                    @if (hasAutoOut)
+                                                    {
+                                                        <span class="text-danger fw-semibold">
+                                                            <i class="bi bi-lightning-charge-fill me-1"></i>Auto OUT punch was triggered because employee was outside the geofence radius while disconnected. Live shift was properly closed.
+                                                        </span>
+                                                    }
+                                                    else if (hasPunches)
+                                                    {
+                                                        <span class="text-success fw-semibold">
+                                                            <i class="bi bi-check-circle-fill me-1"></i>Offline attendance punches were reconciled and added to live attendance records upon reconnection.
+                                                        </span>
+                                                    }
+                                                    else if (activePeriod.IsOffShift)
+                                                    {
+                                                        <span class="text-secondary fw-semibold">
+                                                            <i class="bi bi-moon-stars-fill me-1"></i>Disconnection was during off-shift hours. No changes made to live attendance.
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-success fw-semibold">
+                                                            <i class="bi bi-shield-check me-1"></i>Employee stayed within office geofence. Active shift remained IN without interruption. Zero impact on live attendance.
+                                                        </span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <!-- Breadcrumb points ledger -->
+                            <!-- Breadcrumbs Ledger Table -->
                             <div class="card border-0 shadow-sm overflow-hidden">
                                 <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
                                     <strong class="small text-uppercase text-secondary">
-                                        <i class="bi bi-broadcast text-primary me-1"></i>Captured Breadcrumb Points (@activePeriod.Points.Count points)
+                                        <i class="bi bi-broadcast text-primary me-1"></i>Captured Breadcrumb Points Ledger (@activePeriod.Points.Count points)
                                     </strong>
                                 </div>
                                 <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
@@ -326,8 +598,12 @@
                                                 <td><code>@pt.Latitude.ToString("F5"), @pt.Longitude.ToString("F5")</code></td>
                                                 <td>@pt.MovementState</td>
                                                 <td>@FormatSpeed(pt.SpeedMps)</td>
-                                                <td><span class="badge @(pt.IsWithinAllowedRadius ? "bg-success-subtle text-success border border-success-subtle" : "bg-danger-subtle text-danger border border-danger-subtle")">@(pt.IsWithinAllowedRadius ? "Within" : "Outside")</span></td>
-                                                <td>@(pt.SyncedAtUtc.HasValue ? ToLocal(pt.SyncedAtUtc.Value).ToString("HH:mm:ss") : "Pending")</td>
+                                                <td>
+                                                    <span class="badge @(pt.IsWithinAllowedRadius ? "bg-success-subtle text-success border border-success-subtle" : "bg-danger-subtle text-danger border border-danger-subtle")">
+                                                        @(pt.IsWithinAllowedRadius ? "Inside Geofence" : "Outside Geofence")
+                                                    </span>
+                                                </td>
+                                                <td>@(pt.SyncedAtUtc.HasValue ? ToLocal(pt.SyncedAtUtc.Value).ToString("HH:mm:ss") : "Reconciled")</td>
                                             </tr>
                                         }
                                         </tbody>
@@ -346,15 +622,25 @@
     .offline-tracking-page .card { border-radius: 14px; }
     .offline-tracking-page .table thead th { white-space: nowrap; font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; }
     .offline-tracking-page code { font-size: .78rem; }
+    .timeline-audit-feed { display: flex; flex-direction: column; gap: 14px; }
+    .timeline-step { display: flex; align-items: flex-start; gap: 12px; }
+    .timeline-step-icon { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .timeline-step-content { flex: 1; min-width: 0; }
+    .spin { animation: spinAnim 1s linear infinite; }
+    @@keyframes spinAnim { 100% { transform: rotate(360deg); } }
 </style>
 
 @code {
     private bool loading;
-    private DateTime? lastRefresh;
-    private List<Row> rows = new();
+    private DateTime selectedDate = DateTime.Today;
+    private int employeeFilter = 0;
+    private string impactFilter = "ALL";
+    private string? selectedOfflinePeriodId;
+
+    private List<Employee> allEmployees = new();
     private List<OfflineSyncRow> offlineSyncRows = new();
     private List<OfflinePeriodDisplay> offlinePeriods = new();
-    private string? selectedOfflinePeriodId;
+    private List<OfflineTrackingEventRecord> trackingEvents = new();
     private PeriodicTimer? timer;
     private CancellationTokenSource? cts;
 
@@ -363,11 +649,48 @@
         selectedOfflinePeriodId = selectedOfflinePeriodId == id ? null : id;
     }
 
-    private int liveCount => rows.Count(x => x.Status == "Live");
-    private int staleCount => rows.Count(x => x.Status == "Stale");
-    private int offlineCount => rows.Count(x => x.Status == "Offline");
-    private int offlineSyncCount => offlineSyncRows.Count;
-    private string lastRefreshText => lastRefresh.HasValue ? ToLocal(lastRefresh.Value).ToString("HH:mm:ss") : "-";
+    private void ResetFilters()
+    {
+        employeeFilter = 0;
+        selectedDate = DateTime.Today;
+        impactFilter = "ALL";
+        selectedOfflinePeriodId = null;
+    }
+
+    private List<OfflinePeriodDisplay> filteredPeriods
+    {
+        get
+        {
+            var q = offlinePeriods.AsEnumerable();
+            if (employeeFilter > 0)
+            {
+                q = q.Where(x => x.EmployeeId == employeeFilter);
+            }
+            if (impactFilter == "AUTO_OUT")
+            {
+                q = q.Where(x => x.Punches.Any(p => IsOutType(p.Type)) || x.LiveImpactSummary.Contains("Auto OUT", StringComparison.OrdinalIgnoreCase));
+            }
+            else if (impactFilter == "RECONCILED")
+            {
+                q = q.Where(x => x.Punches.Any());
+            }
+            else if (impactFilter == "ZERO_IMPACT")
+            {
+                q = q.Where(x => !x.Punches.Any() && !x.IsOffShift && (x.PointCount - x.InRadiusCount == 0));
+            }
+            else if (impactFilter == "OFF_SHIFT")
+            {
+                q = q.Where(x => x.IsOffShift);
+            }
+            return q.ToList();
+        }
+    }
+
+    private TimeSpan totalOfflineDuration => TimeSpan.FromTicks(filteredPeriods.Sum(x => x.Duration.Ticks));
+    private int autoPunchCount => filteredPeriods.Sum(x => x.Punches.Count(p => IsOutType(p.Type)));
+    private int zeroImpactCount => filteredPeriods.Count(x => !x.Punches.Any() && !x.IsOffShift && (x.PointCount - x.InRadiusCount == 0));
+    private int totalBreadcrumbs => filteredPeriods.Sum(x => x.PointCount);
+    private int reconciledPercent => filteredPeriods.Count == 0 ? 100 : (int)Math.Round((double)filteredPeriods.Count(x => x.IsSynced) / filteredPeriods.Count * 100);
 
     protected override async Task OnInitializedAsync()
     {
@@ -375,6 +698,23 @@
         cts = new CancellationTokenSource();
         timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         _ = RefreshLoopAsync(cts.Token);
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken token)
+    {
+        if (timer == null) return;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                await InvokeAsync(async () =>
+                {
+                    await Refresh();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     private async Task Refresh()
@@ -385,129 +725,137 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            // Load the employee list independently of the in-memory GPS store.
-            // This keeps the page useful even when an employee has no active
-            // GPS session or when the app has just restarted.
-            var employeeList = await db.Employees.AsNoTracking()
+            allEmployees = await db.Employees.AsNoTracking()
                 .Where(e => !e.IsDeleted)
                 .OrderBy(e => e.Name)
                 .ToListAsync();
 
-            var employeeMap = employeeList.ToDictionary(x => x.EmployeeID);
-            var employeeNames = employeeList.ToDictionary(x => x.EmployeeID, x => x.Name);
-            offlineSyncRows = await db.EmployeeLocationHistory.AsNoTracking()
-                .Where(point => point.CaptureSource == "OfflineSync" &&
-                                point.CapturedAtUtc >= DateTime.UtcNow.Date)
-                .OrderByDescending(point => point.CapturedAtUtc)
-                .Select(point => new OfflineSyncRow
-                {
-                    EmployeeId = point.EmployeeId,
-                    CapturedAtUtc = point.CapturedAtUtc,
-                    SyncedAtUtc = point.SyncedAtUtc,
-                    IsWithinAllowedRadius = point.IsWithinAllowedRadius,
-                    Latitude = point.Latitude,
-                    Longitude = point.Longitude
-                }).Take(500).ToListAsync();
-
-            foreach (var row in offlineSyncRows)
-                row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee {row.EmployeeId}";
-
-            var todayPunches = await db.AttendanceLogs.AsNoTracking()
-                .Where(point => point.PunchTime >= DateTime.UtcNow.Date.AddDays(-1))
-                .ToListAsync();
+            var employeeMap = allEmployees.ToDictionary(x => x.EmployeeID);
+            var employeeNames = allEmployees.ToDictionary(x => x.EmployeeID, x => x.Name);
 
             var companySetting = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync();
             double officeLat = companySetting?.OfficeLatitude ?? 0.0;
             double officeLon = companySetting?.OfficeLongitude ?? 0.0;
             int radiusMeters = companySetting?.GeoRadiusMeters ?? 100;
 
-            offlineSyncRows.Reverse();
-            CalculateOfflineMovement();
-            BuildOfflinePeriods(todayPunches, employeeMap, officeLat, officeLon, radiusMeters);
+            var fromUtc = IndiaToUtc(selectedDate.Date);
+            var toUtc = IndiaToUtc(selectedDate.Date.AddDays(1));
 
-            var trackedEmployees = employeeList;
-
-            var trackedEmpIds = trackedEmployees.Select(e => e.EmployeeID).ToList();
-            var recentPoints = await db.EmployeeLocationHistory.AsNoTracking()
-                .Where(x => trackedEmpIds.Contains(x.EmployeeId))
-                .OrderByDescending(x => x.CapturedAtUtc)
-                .Take(500)
+            var datePunches = await db.AttendanceLogs.AsNoTracking()
+                .Where(p => p.PunchTime >= fromUtc.AddHours(-6) && p.PunchTime <= toUtc.AddHours(6))
                 .ToListAsync();
 
-            var lastPointsMap = recentPoints
-                .GroupBy(x => x.EmployeeId)
-                .ToDictionary(g => g.Key, g => g.First());
-
-            var liveLocations = LiveLocationStore.GetAll()
-                .ToDictionary(x => x.EmployeeId);
-
-            rows = trackedEmployees.Select(employee =>
-            {
-                if (!liveLocations.TryGetValue(employee.EmployeeID, out var location))
+            // 1. Fetch points from SQLite
+            var dbPoints = await db.EmployeeLocationHistory.AsNoTracking()
+                .Where(point => point.CapturedAtUtc >= fromUtc && point.CapturedAtUtc <= toUtc)
+                .OrderBy(point => point.CapturedAtUtc)
+                .Select(point => new OfflineSyncRow
                 {
-                    if (lastPointsMap.TryGetValue(employee.EmployeeID, out var lastPoint))
-                    {
-                        var pointAge = DateTime.UtcNow - lastPoint.CapturedAtUtc;
-                        return new Row
-                        {
-                            EmployeeId = employee.EmployeeID,
-                            EmployeeName = employee.Name,
-                            Status = "Offline",
-                            StatusClass = "bg-danger-subtle text-danger",
-                            LastUpdatedUtc = lastPoint.CapturedAtUtc,
-                            Age = pointAge,
-                            MovementState = "No active session",
-                            SpeedMps = 0,
-                            Latitude = lastPoint.Latitude,
-                            Longitude = lastPoint.Longitude,
-                            Geofence = lastPoint.IsWithinAllowedRadius ? "Within range" : "Outside range"
-                        };
-                    }
+                    EmployeeId = point.EmployeeId,
+                    CapturedAtUtc = point.CapturedAtUtc,
+                    SyncedAtUtc = point.SyncedAtUtc ?? point.RecordedAtUtc,
+                    IsWithinAllowedRadius = point.IsWithinAllowedRadius,
+                    Latitude = point.Latitude,
+                    Longitude = point.Longitude,
+                    CaptureSource = point.CaptureSource ?? "OfflineSync",
+                    SpeedMps = 0,
+                    MovementState = "Stopped"
+                }).Take(2000).ToListAsync();
 
-                    return new Row
-                    {
-                        EmployeeId = employee.EmployeeID,
-                        EmployeeName = employee.Name,
-                        Status = "Offline",
-                        StatusClass = "bg-danger-subtle text-danger",
-                        LastUpdatedUtc = null,
-                        Age = TimeSpan.MaxValue,
-                        MovementState = "No GPS session",
-                        SpeedMps = 0,
-                        Latitude = 0,
-                        Longitude = 0,
-                        Geofence = "-"
-                    };
+            // 2. Fetch points & events from Firebase Realtime Database
+            var firebasePoints = new List<OfflineSyncRow>();
+            var resolvedOwnerUid = FirebaseRealtime.ResolveOwnerUid();
+            if (string.IsNullOrWhiteSpace(resolvedOwnerUid))
+            {
+                resolvedOwnerUid = FirebaseSsotSchema.DefaultOwnerUid;
+            }
+
+            try
+            {
+                // Fetch history from owners/{ownerUid}/tracking/history
+                var historyJson = await FirebaseRealtime.GetGlobalRecordAsync($"owners/{resolvedOwnerUid}/tracking/history");
+                if (historyJson == null || historyJson.Value.ValueKind != JsonValueKind.Object)
+                {
+                    historyJson = await FirebaseRealtime.GetGlobalRecordAsync("tracking/history");
                 }
 
-                var status = LiveLocationStore.GetStatus(location);
-                var age = LiveLocationStore.GetAge(location);
-
-                return new Row
+                if (historyJson.HasValue && historyJson.Value.ValueKind == JsonValueKind.Object)
                 {
-                    EmployeeId = location.EmployeeId,
-                    EmployeeName = employee.Name,
-                    Status = status.ToString(),
-                    StatusClass = status switch
+                    foreach (var empProp in historyJson.Value.EnumerateObject())
                     {
-                        LiveLocationStatus.Live => "bg-success-subtle text-success",
-                        LiveLocationStatus.Stale => "bg-warning-subtle text-warning-emphasis",
-                        _ => "bg-danger-subtle text-danger"
-                    },
-                    LastUpdatedUtc = location.LastUpdatedUtc,
-                    Age = age,
-                    MovementState = location.MovementState,
-                    SpeedMps = location.SpeedMps,
-                    Latitude = location.Latitude,
-                    Longitude = location.Longitude,
-                    Geofence = location.IsWithinAllowedRadius ? "Within range" : "Outside range"
-                };
-            })
-            .OrderBy(x => x.Status == "Live" ? 0 : x.Status == "Stale" ? 1 : 2)
-            .ThenBy(x => x.EmployeeName)
-            .ToList();
+                        if (empProp.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            int.TryParse(empProp.Name, out var empIdKey);
 
-            lastRefresh = DateTime.UtcNow;
+                            foreach (var pointProp in empProp.Value.EnumerateObject())
+                            {
+                                if (pointProp.Value.ValueKind == JsonValueKind.Object)
+                                {
+                                    var row = ParseFirebaseHistoryPoint(pointProp.Value, empIdKey, officeLat, officeLon, radiusMeters);
+                                    if (row != null && row.CapturedAtUtc >= fromUtc && row.CapturedAtUtc <= toUtc)
+                                    {
+                                        firebasePoints.Add(row);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fetch tracking events for disconnect reasons
+                trackingEvents.Clear();
+                var eventsJson = await FirebaseRealtime.GetGlobalRecordAsync($"owners/{resolvedOwnerUid}/tracking/events");
+                if (eventsJson == null || eventsJson.Value.ValueKind != JsonValueKind.Object)
+                {
+                    eventsJson = await FirebaseRealtime.GetGlobalRecordAsync("tracking/events");
+                }
+
+                if (eventsJson.HasValue && eventsJson.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var empProp in eventsJson.Value.EnumerateObject())
+                    {
+                        if (empProp.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            int.TryParse(empProp.Name, out var evEmpId);
+                            foreach (var evProp in empProp.Value.EnumerateObject())
+                            {
+                                if (evProp.Value.ValueKind == JsonValueKind.Object)
+                                {
+                                    var evRec = ParseFirebaseEvent(evProp.Value, evEmpId);
+                                    if (evRec != null)
+                                    {
+                                        trackingEvents.Add(evRec);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception fbEx)
+            {
+                Console.WriteLine($"Firebase tracking history fetch error: {fbEx.Message}");
+            }
+
+            // 3. Merge & Deduplicate
+            var combined = new List<OfflineSyncRow>();
+            combined.AddRange(dbPoints);
+            combined.AddRange(firebasePoints);
+
+            var deduped = combined
+                .GroupBy(x => $"{x.EmployeeId}_{Math.Round(x.Latitude, 5)}_{Math.Round(x.Longitude, 5)}_{x.CapturedAtUtc:yyyyMMddHHmmss}")
+                .Select(g => g.First())
+                .OrderBy(x => x.CapturedAtUtc)
+                .ToList();
+
+            foreach (var row in deduped)
+            {
+                row.EmployeeName = employeeNames.TryGetValue(row.EmployeeId, out var n) ? n : $"Employee #{row.EmployeeId}";
+            }
+
+            offlineSyncRows = deduped;
+            CalculateOfflineMovement();
+            BuildOfflinePeriods(datePunches, employeeMap, officeLat, officeLon, radiusMeters);
         }
         catch (Exception ex)
         {
@@ -519,35 +867,134 @@
         }
     }
 
+    private static OfflineSyncRow? ParseFirebaseHistoryPoint(JsonElement el, int fallbackEmpId, double officeLat, double officeLon, int radiusMeters)
+    {
+        try
+        {
+            int empId = fallbackEmpId;
+            if (el.TryGetProperty("EmployeeId", out var ep))
+            {
+                if (ep.ValueKind == JsonValueKind.Number) empId = ep.GetInt32();
+                else if (int.TryParse(ep.GetString(), out var parsedId)) empId = parsedId;
+            }
+
+            double lat = 0, lon = 0;
+            if (el.TryGetProperty("Latitude", out var latP) && latP.ValueKind == JsonValueKind.Number) lat = latP.GetDouble();
+            if (el.TryGetProperty("Longitude", out var lonP) && lonP.ValueKind == JsonValueKind.Number) lon = lonP.GetDouble();
+
+            if (Math.Abs(lat) < 0.0001 && Math.Abs(lon) < 0.0001) return null;
+
+            DateTime capturedAt = DateTime.UtcNow;
+            if (el.TryGetProperty("Timestamp", out var tsP))
+            {
+                if (tsP.ValueKind == JsonValueKind.String && DateTime.TryParse(tsP.GetString(), out var dt))
+                    capturedAt = dt.ToUniversalTime();
+                else if (tsP.ValueKind == JsonValueKind.Number && tsP.TryGetInt64(out var epochMs))
+                    capturedAt = DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime;
+            }
+
+            DateTime? syncedAt = capturedAt;
+            if (el.TryGetProperty("SyncedAt", out var syP) && syP.ValueKind == JsonValueKind.String && DateTime.TryParse(syP.GetString(), out var sdt))
+            {
+                syncedAt = sdt.ToUniversalTime();
+            }
+
+            double speedMps = 0;
+            if (el.TryGetProperty("SpeedMps", out var spP) && spP.ValueKind == JsonValueKind.Number) speedMps = spP.GetDouble();
+
+            string movState = "Stopped";
+            if (el.TryGetProperty("MovementState", out var mvP) && mvP.ValueKind == JsonValueKind.String) movState = mvP.GetString() ?? "Stopped";
+
+            string source = "OfflineSync";
+            if (el.TryGetProperty("CaptureSource", out var csP) && csP.ValueKind == JsonValueKind.String) source = csP.GetString() ?? "OfflineSync";
+            else if (el.TryGetProperty("Source", out var sP) && sP.ValueKind == JsonValueKind.String) source = sP.GetString() ?? "OfflineSync";
+
+            bool isWithin = true;
+            if (el.TryGetProperty("IsWithinAllowedRadius", out var wrP))
+            {
+                if (wrP.ValueKind == JsonValueKind.True) isWithin = true;
+                else if (wrP.ValueKind == JsonValueKind.False) isWithin = false;
+            }
+            else if (officeLat != 0 && officeLon != 0 && radiusMeters > 0)
+            {
+                var dist = CalculateDistanceMeters(lat, lon, officeLat, officeLon);
+                isWithin = dist <= radiusMeters;
+            }
+
+            return new OfflineSyncRow
+            {
+                EmployeeId = empId,
+                Latitude = lat,
+                Longitude = lon,
+                CapturedAtUtc = capturedAt,
+                SyncedAtUtc = syncedAt,
+                SpeedMps = speedMps,
+                MovementState = movState,
+                IsWithinAllowedRadius = isWithin,
+                CaptureSource = source
+            };
+        }
+        catch { return null; }
+    }
+
+    private static OfflineTrackingEventRecord? ParseFirebaseEvent(JsonElement el, int fallbackEmpId)
+    {
+        try
+        {
+            var target = el;
+            if (el.TryGetProperty("event", out var evSub) && evSub.ValueKind == JsonValueKind.Object)
+            {
+                target = evSub;
+            }
+
+            int empId = fallbackEmpId;
+            if (el.TryGetProperty("employeeId", out var ep))
+            {
+                if (ep.ValueKind == JsonValueKind.Number) empId = ep.GetInt32();
+                else if (int.TryParse(ep.GetString(), out var pid)) empId = pid;
+            }
+
+            string msg = target.TryGetProperty("message", out var mP) ? mP.GetString() ?? "" : "";
+            string evType = target.TryGetProperty("eventType", out var etP) ? etP.GetString() ?? "" : "";
+
+            DateTime evTime = DateTime.UtcNow;
+            if (target.TryGetProperty("eventTime", out var timeP))
+            {
+                if (timeP.ValueKind == JsonValueKind.Number && timeP.TryGetInt64(out var epochMs))
+                    evTime = DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime;
+                else if (timeP.ValueKind == JsonValueKind.String && DateTime.TryParse(timeP.GetString(), out var dt))
+                    evTime = dt.ToUniversalTime();
+            }
+
+            return new OfflineTrackingEventRecord
+            {
+                EmployeeId = empId,
+                Message = msg,
+                EventType = evType,
+                EventTimeUtc = evTime
+            };
+        }
+        catch { return null; }
+    }
+
     private void CalculateOfflineMovement()
     {
-        if (offlineSyncRows.Count == 0)
-            return;
+        if (offlineSyncRows.Count == 0) return;
 
         var previousByEmployee = new Dictionary<int, OfflineSyncRow>();
-
-        foreach (var row in offlineSyncRows)
+        foreach (var row in offlineSyncRows.OrderBy(x => x.CapturedAtUtc))
         {
             if (previousByEmployee.TryGetValue(row.EmployeeId, out var previous))
             {
                 var elapsed = (row.CapturedAtUtc - previous.CapturedAtUtc).TotalSeconds;
-                var distance = CalculateDistanceMeters(
-                    previous.Latitude,
-                    previous.Longitude,
-                    row.Latitude,
-                    row.Longitude);
+                var distance = CalculateDistanceMeters(previous.Latitude, previous.Longitude, row.Latitude, row.Longitude);
 
-                row.SpeedMps = elapsed > 0.25 && elapsed <= 300 && distance <= 5000
-                    ? distance / elapsed
-                    : 0;
-                row.MovementState = GetMovementState(row.SpeedMps);
+                if (row.SpeedMps <= 0.05 && elapsed > 0.25 && elapsed <= 300 && distance <= 5000)
+                {
+                    row.SpeedMps = distance / elapsed;
+                    row.MovementState = GetMovementState(row.SpeedMps);
+                }
             }
-            else
-            {
-                row.SpeedMps = 0;
-                row.MovementState = "Stopped";
-            }
-
             previousByEmployee[row.EmployeeId] = row;
         }
     }
@@ -574,23 +1021,11 @@
         return earthRadiusMeters * 2d * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1d - a));
     }
 
-    private async Task RefreshLoopAsync(CancellationToken token)
-    {
-        if (timer == null) return;
-        try
-        {
-            while (await timer.WaitForNextTickAsync(token))
-            {
-                await InvokeAsync(async () => { await Refresh(); StateHasChanged(); });
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
     private static string FormatSpeed(double speedMps) => !double.IsFinite(speedMps) || speedMps <= .05 ? "0 km/h" : $"{speedMps * 3.6:F1} km/h";
     private static string FormatAge(TimeSpan age) => age == TimeSpan.MaxValue ? "Never" : age.TotalDays >= 1 ? $"{(int)age.TotalDays}d {age.Hours}h" : age.TotalHours >= 1 ? $"{(int)age.TotalHours}h {age.Minutes}m" : $"{Math.Max(0, (int)age.TotalMinutes)}m {Math.Max(0, age.Seconds)}s";
     private static string FormatDistance(double m) => m >= 1000 ? $"{m / 1000:F2} km" : $"{m:F0} m";
     private static DateTime ToLocal(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"));
+    private static DateTime IndiaToUtc(DateTime local) => TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(local, DateTimeKind.Unspecified), TimeZoneInfo.FindSystemTimeZoneById(OperatingSystem.IsWindows() ? "India Standard Time" : "Asia/Kolkata"));
 
     private void BuildOfflinePeriods(List<AttendanceLog> todayPunches, Dictionary<int, Employee> employeeMap, double officeLat, double officeLon, int radiusMeters)
     {
@@ -602,25 +1037,46 @@
             var empId = group.Key;
             employeeMap.TryGetValue(empId, out var empProfile);
 
-            var cluster = new List<OfflineSyncRow>();
-            OfflineSyncRow? last = null;
+            var sortedPoints = group.OrderBy(x => x.CapturedAtUtc).ToList();
+            var clusters = new List<List<OfflineSyncRow>>();
+            var currentCluster = new List<OfflineSyncRow>();
 
-            foreach (var pt in group.OrderBy(x => x.CapturedAtUtc))
+            for (int i = 0; i < sortedPoints.Count; i++)
             {
-                if (last == null || (pt.CapturedAtUtc - last.CapturedAtUtc).TotalMinutes > 15)
+                var pt = sortedPoints[i];
+                var last = currentCluster.LastOrDefault();
+
+                var gap = last != null ? pt.CapturedAtUtc - last.CapturedAtUtc : TimeSpan.Zero;
+                var isExplicitOffline = pt.CaptureSource.Contains("offline", StringComparison.OrdinalIgnoreCase) ||
+                                       pt.MovementState.Contains("offline", StringComparison.OrdinalIgnoreCase);
+
+                if (isExplicitOffline || (gap > TimeSpan.FromMinutes(15) && gap < TimeSpan.FromHours(24)))
                 {
-                    if (cluster.Any())
+                    if (currentCluster.Any() && gap > TimeSpan.FromMinutes(30))
                     {
-                        offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches, empProfile, officeLat, officeLon, radiusMeters));
-                        cluster = new List<OfflineSyncRow>();
+                        clusters.Add(currentCluster);
+                        currentCluster = new List<OfflineSyncRow>();
+                    }
+                    currentCluster.Add(pt);
+                }
+                else
+                {
+                    if (currentCluster.Any())
+                    {
+                        clusters.Add(currentCluster);
+                        currentCluster = new List<OfflineSyncRow>();
                     }
                 }
-                cluster.Add(pt);
-                last = pt;
             }
 
-            if (cluster.Any())
+            if (currentCluster.Any())
             {
+                clusters.Add(currentCluster);
+            }
+
+            foreach (var cluster in clusters)
+            {
+                if (cluster.Count == 0) continue;
                 offlinePeriods.Add(CreateOfflinePeriod(cluster, todayPunches, empProfile, officeLat, officeLon, radiusMeters));
             }
         }
@@ -628,7 +1084,7 @@
         offlinePeriods = offlinePeriods.OrderByDescending(x => x.StartUtc).ToList();
     }
 
-    private static OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster, List<AttendanceLog> todayPunches, Employee? empProfile, double officeLat, double officeLon, int radiusMeters)
+    private OfflinePeriodDisplay CreateOfflinePeriod(List<OfflineSyncRow> cluster, List<AttendanceLog> todayPunches, Employee? empProfile, double officeLat, double officeLon, int radiusMeters)
     {
         var first = cluster.First();
         var last = cluster.Last();
@@ -651,7 +1107,7 @@
             var sStart = empProfile.ShiftStartTime.Value;
             var sEnd = empProfile.ShiftEndTime.Value;
 
-            bool inShift = sEnd >= sStart 
+            bool inShift = sEnd >= sStart
                 ? (timeOnly >= sStart && timeOnly <= sEnd)
                 : (timeOnly >= sStart || timeOnly <= sEnd);
 
@@ -681,14 +1137,29 @@
                 Type = p.LogType ?? "PUNCH",
                 PunchTimeUtc = p.PunchTime,
                 IsApproved = p.IsApproved,
-                ChangeDetail = IsOutType(p.LogType) 
-                    ? "Exited allowed radius → Closed shift" 
-                    : "Entered allowed radius → Opened shift"
+                ChangeDetail = IsOutType(p.LogType)
+                    ? "Exited allowed radius → Shift Closed"
+                    : "Entered allowed radius → Shift Opened"
             })
             .ToList();
 
         var isSynced = cluster.All(x => x.SyncedAtUtc.HasValue);
         var detectedStays = DetectPeriodStays(cluster, officeLat, officeLon, radiusMeters);
+
+        // Find disconnect reason from matching tracking events
+        var matchingEv = trackingEvents.FirstOrDefault(e =>
+            e.EmployeeId == first.EmployeeId &&
+            Math.Abs((e.EventTimeUtc - first.CapturedAtUtc).TotalMinutes) < 30);
+
+        string reason = "Network Signal Loss";
+        if (matchingEv != null)
+        {
+            if (matchingEv.Message.Contains("airplane", StringComparison.OrdinalIgnoreCase)) reason = "Airplane Mode Activated";
+            else if (matchingEv.Message.Contains("wifi", StringComparison.OrdinalIgnoreCase) || matchingEv.Message.Contains("manual", StringComparison.OrdinalIgnoreCase) || matchingEv.Message.Contains("data", StringComparison.OrdinalIgnoreCase)) reason = "Mobile Data / Wi-Fi Disabled";
+            else if (matchingEv.Message.Contains("power", StringComparison.OrdinalIgnoreCase) || matchingEv.Message.Contains("battery", StringComparison.OrdinalIgnoreCase)) reason = "Battery Saver / Restraint";
+            else if (matchingEv.Message.Contains("boundary", StringComparison.OrdinalIgnoreCase)) reason = "Geofence Perimeter Breach";
+            else reason = "Network Disconnected / Signal Loss";
+        }
 
         string liveImpact;
         if (punchesInGap.Any())
@@ -697,8 +1168,8 @@
                 $"{(IsOutType(p.Type) ? "🔴 OUT" : "🟢 IN")} at {ToLocal(p.PunchTimeUtc):hh:mm tt} ({p.ChangeDetail})"));
             var stayNote = detectedStays.Any() ? $" • {detectedStays.Count} stop(s) recorded" : "";
             liveImpact = isSynced
-                ? $"Live Attendance Updated: {punchSummary}{stayNote} • Successfully reconciled into live attendance ledger"
-                : $"Pending Sync: {punchSummary}{stayNote} • Buffered on mobile";
+                ? $"Live Attendance Updated: {punchSummary}{stayNote} • Reconciled into live shift logs upon reconnection"
+                : $"Pending Sync: {punchSummary}{stayNote} • Buffered on mobile local storage";
         }
         else if (isOffShift)
         {
@@ -707,14 +1178,14 @@
                 : "Off-duty hours";
             liveImpact = $"Off-Duty Window: Outside scheduled shift ({sRange}) • Tracking idle, no attendance punch created";
         }
-        else if (priorState == "IN" && cluster.Any(x => x.IsWithinAllowedRadius))
+        else if (priorState == "IN" && cluster.All(x => x.IsWithinAllowedRadius))
         {
             var staySummary = detectedStays.Any() ? $" (Stayed {FormatAge(detectedStays.First().Duration)})" : "";
-            liveImpact = $"Continuous Presence: Employee remained inside allowed radius{staySummary} • Active shift remained IN (No punches changed)";
+            liveImpact = $"Continuous Presence: Remained inside {radiusMeters}m office radius{staySummary} • Active shift remained IN (No punches changed)";
         }
         else if (priorState == "OUT")
         {
-            liveImpact = "Stationary / Moving Outside: Employee stayed outside allowed radius • Attendance remained OUT (No punches changed)";
+            liveImpact = "Stationary / Moving Outside: Employee stayed outside office perimeter • Attendance remained OUT (No punches changed)";
         }
         else
         {
@@ -735,7 +1206,7 @@
             Points = cluster,
             Punches = punchesInGap,
             Stays = detectedStays,
-            DisconnectReason = "Network Disconnected / Signal Loss",
+            DisconnectReason = reason,
             IsOffShift = isOffShift,
             ShiftTag = shiftTag,
             LiveImpactSummary = liveImpact,
@@ -816,6 +1287,23 @@
         }
     }
 
+    private static string GetReasonIcon(string reason)
+    {
+        if (reason.Contains("airplane", StringComparison.OrdinalIgnoreCase)) return "✈️";
+        if (reason.Contains("wifi", StringComparison.OrdinalIgnoreCase) || reason.Contains("data", StringComparison.OrdinalIgnoreCase)) return "📶";
+        if (reason.Contains("power", StringComparison.OrdinalIgnoreCase) || reason.Contains("battery", StringComparison.OrdinalIgnoreCase)) return "🔋";
+        if (reason.Contains("breach", StringComparison.OrdinalIgnoreCase) || reason.Contains("boundary", StringComparison.OrdinalIgnoreCase)) return "🏢";
+        return "📡";
+    }
+
+    private static string GetReasonBadgeClass(string reason)
+    {
+        if (reason.Contains("airplane", StringComparison.OrdinalIgnoreCase)) return "bg-danger-subtle text-danger border border-danger-subtle";
+        if (reason.Contains("wifi", StringComparison.OrdinalIgnoreCase) || reason.Contains("data", StringComparison.OrdinalIgnoreCase)) return "bg-warning-subtle text-warning-emphasis border border-warning-subtle";
+        if (reason.Contains("breach", StringComparison.OrdinalIgnoreCase)) return "bg-danger-subtle text-danger border border-danger-subtle";
+        return "bg-secondary-subtle text-secondary border border-secondary-subtle";
+    }
+
     private static bool IsInType(string? type)
     {
         var t = type?.Trim().ToUpperInvariant() ?? "";
@@ -855,21 +1343,7 @@
         public bool IsWithinAllowedRadius { get; set; }
         public double Latitude { get; set; }
         public double Longitude { get; set; }
-    }
-
-    private sealed class Row
-    {
-        public int EmployeeId { get; set; }
-        public string EmployeeName { get; set; } = "";
-        public string Status { get; set; } = "Offline";
-        public string StatusClass { get; set; } = "bg-secondary";
-        public DateTime? LastUpdatedUtc { get; set; }
-        public TimeSpan Age { get; set; }
-        public string MovementState { get; set; } = "Stopped";
-        public double SpeedMps { get; set; }
-        public double Latitude { get; set; }
-        public double Longitude { get; set; }
-        public string Geofence { get; set; } = "-";
+        public string CaptureSource { get; set; } = "OfflineSync";
     }
 
     private sealed class OfflineStay
@@ -906,5 +1380,13 @@
         public string ShiftTag { get; set; } = "Active Shift Disconnection";
         public string LiveImpactSummary { get; set; } = "";
         public string PriorState { get; set; } = "OUT";
+    }
+
+    private sealed class OfflineTrackingEventRecord
+    {
+        public int EmployeeId { get; set; }
+        public string Message { get; set; } = "";
+        public string EventType { get; set; } = "";
+        public DateTime EventTimeUtc { get; set; }
     }
 }

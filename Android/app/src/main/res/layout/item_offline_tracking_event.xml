@@ -3,16 +3,77 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="6dp"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="1dp">
+    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="14dp"
+    app:cardElevation="1dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="?attr/colorOutline">
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="11dp">
-        <TextView android:id="@+id/tvEventTitle" android:layout_width="match_parent" android:layout_height="wrap_content" android:textStyle="bold" android:textSize="12sp" android:textColor="?attr/colorOnSurface" />
-        <TextView android:id="@+id/tvEventMessage" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:textSize="12sp" android:textColor="?attr/colorOnSurfaceVariant" />
-        <TextView android:id="@+id/tvEventMeta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp" android:textSize="10sp" android:textColor="?attr/colorOnSurfaceVariant" />
+        android:padding="12dp">
+
+        <!-- Top Row: Icon + Friendly Title + Status Badge -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvEventIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="18sp"
+                android:text="📋"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/tvEventTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:textColor="?attr/colorOnSurface"
+                android:text="Event Title" />
+
+            <TextView
+                android:id="@+id/tvEventBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:background="@drawable/bg_rounded_card_outline"
+                android:textColor="?attr/colorPrimary"
+                android:text="INFO" />
+        </LinearLayout>
+
+        <!-- Message Body -->
+        <TextView
+            android:id="@+id/tvEventMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textSize="12sp"
+            android:lineSpacingExtra="2dp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:text="Human readable description of the offline or connectivity change." />
+
+        <!-- Footer Meta: Timestamp, Mode & Sync Security -->
+        <TextView
+            android:id="@+id/tvEventMeta"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textSize="11sp"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:text="🕒 06-Oct-2026, 03:58 PM IST • 🌐 Online" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

@@ -787,7 +787,9 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             val total = locationDao.getTotalCount()
             val recent = locationDao.getRecent(50)
             val lastSynced = locationDao.getLastSynced()
-            val events = eventDao.recent(50)
+            val events = eventDao.recent(50).filterNot {
+                it.message.contains("monitor started online", ignoreCase = true)
+            }
             val currentSession = sessionStore.gpsSessionId()
 
             withContext(Dispatchers.Main) {
@@ -2024,15 +2026,21 @@ private class OfflinePeriodAdapter(
         private val tvDuration = view.findViewById<TextView>(R.id.tvPeriodDuration)
         private val tvReason = view.findViewById<TextView>(R.id.tvPeriodReason)
         private val tvSyncStatus = view.findViewById<TextView>(R.id.tvPeriodSyncStatus)
-        private val tvPunches = view.findViewById<TextView>(R.id.tvPeriodPunches)
+        private val tvLiveImpactBadge = view.findViewById<TextView>(R.id.tvPeriodLiveImpactBadge)
         private val tvLiveImpact = view.findViewById<TextView>(R.id.tvPeriodLiveImpact)
+        private val llOfflinePunchesContainer = view.findViewById<View>(R.id.llOfflinePunchesContainer)
+        private val tvPunches = view.findViewById<TextView>(R.id.tvPeriodPunches)
+        private val tvStep1Detail = view.findViewById<TextView>(R.id.tvStep1Detail)
+        private val tvStep2Detail = view.findViewById<TextView>(R.id.tvStep2Detail)
+        private val tvStep3Detail = view.findViewById<TextView>(R.id.tvStep3Detail)
+        private val tvStep4Detail = view.findViewById<TextView>(R.id.tvStep4Detail)
         private val tvStats = view.findViewById<TextView>(R.id.tvPeriodStats)
         private val btnInspect = view.findViewById<MaterialButton>(R.id.btnViewPeriodRoute)
 
         fun bind(item: OfflinePeriodItem, onInspect: (OfflinePeriodItem) -> Unit) {
             val tz = TimeZone.getTimeZone("Asia/Kolkata")
-            val fmt = SimpleDateFormat("dd-MMM HH:mm:ss", Locale.US).apply { timeZone = tz }
-            val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.US).apply { timeZone = tz }
+            val fmt = SimpleDateFormat("dd-MMM hh:mm a", Locale.US).apply { timeZone = tz }
+            val timeFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
             val punchFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
 
             tvTitle.text = if (item.employeeName.isNotBlank()) item.employeeName else "Employee #${item.employeeId}"
@@ -2065,8 +2073,59 @@ private class OfflinePeriodAdapter(
                 tvSyncStatus.setTextColor(Color.parseColor("#F57C00"))
             }
 
-            // Punches taken during the offline period:
+            // Live Attendance Impact Badge & Detailed Summary
+            val hasAutoOut = item.punches.any { it.type.equals("OUT", ignoreCase = true) && it.changeDetail.contains("radius", ignoreCase = true) } ||
+                    item.liveImpactSummary.contains("Auto OUT", ignoreCase = true)
+            val hasPunches = item.punches.isNotEmpty()
+            val outOfRadiusCount = (item.pointsCount - item.inRadiusCount).coerceAtLeast(0)
+
+            when {
+                hasAutoOut -> {
+                    tvLiveImpactBadge.text = "⚡ Auto OUT Punch Triggered"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#C62828"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#FFEBEE"))
+                }
+                hasPunches -> {
+                    tvLiveImpactBadge.text = "🟢 Reconciled Attendance Punch"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#2E7D32"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+                }
+                item.isOffShift -> {
+                    tvLiveImpactBadge.text = "🌙 Off-Duty Window (No Impact)"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#616161"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#EEEEEE"))
+                }
+                item.priorState == "IN" && outOfRadiusCount == 0 -> {
+                    tvLiveImpactBadge.text = "🛡️ No Live Attendance Impact"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#2E7D32"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+                }
+                item.priorState == "OUT" -> {
+                    tvLiveImpactBadge.text = "🛡️ No Attendance State Change"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#455A64"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#ECEFF1"))
+                }
+                else -> {
+                    tvLiveImpactBadge.text = "🛡️ No Live Attendance Impact"
+                    tvLiveImpactBadge.setTextColor(Color.parseColor("#1565C0"))
+                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E3F2FD"))
+                }
+            }
+
+            tvLiveImpact.text = item.liveImpactSummary.ifBlank {
+                when {
+                    hasAutoOut -> "Shift automatically closed upon exiting office geofence. Reconciled to cloud attendance ledger."
+                    hasPunches -> "${item.punches.size} punch(es) captured during offline gap reconciled to cloud upon reconnection."
+                    item.isOffShift -> "Outside assigned shift hours. Tracking was idle; no attendance punches were generated."
+                    item.priorState == "IN" && outOfRadiusCount == 0 -> "Employee remained safely inside office radius throughout offline window. Active IN shift preserved."
+                    item.priorState == "OUT" -> "Employee was already clocked OUT. Remained outside office perimeter; no change to attendance status."
+                    else -> "${item.pointsCount} offline breadcrumb points merged into cloud route upon reconnection."
+                }
+            }
+
+            // Sub-container for punch changes
             if (item.punches.isNotEmpty()) {
+                llOfflinePunchesContainer.visibility = View.VISIBLE
                 val punchText = item.punches.joinToString("\n") { p ->
                     val icon = if (p.type.equals("OUT", ignoreCase = true)) "🔴" else "🟢"
                     val syncLabel = if (p.isSynced) "Synced to Live" else "Pending Local"
@@ -2074,45 +2133,59 @@ private class OfflinePeriodAdapter(
                     "$icon ${p.type.uppercase()} Punch at ${punchFmt.format(Date(p.timestamp))} ($syncLabel)$detail"
                 }
                 tvPunches.text = punchText
-                tvPunches.setTextColor(Color.parseColor("#1B5E20"))
+                tvPunches.setTextColor(if (hasAutoOut) Color.parseColor("#C62828") else Color.parseColor("#2E7D32"))
             } else {
-                tvPunches.text = if (item.isOffShift) {
-                    "Off-Duty Window • Tracking paused (No punches taken)"
-                } else {
-                    "No attendance punches taken during this gap (Maintained previous state: ${item.priorState})"
-                }
-                tvPunches.setTextColor(Color.parseColor("#757575"))
+                llOfflinePunchesContainer.visibility = View.GONE
             }
 
-            // How gap was reconciled to live data:
-            tvLiveImpact.text = item.liveImpactSummary.ifBlank {
-                if (item.isSynced) {
-                    val punchNote = if (item.punches.isNotEmpty()) "${item.punches.size} punch(es) reconciled & " else ""
-                    "Live Data Impact: ${punchNote}${item.pointsCount} offline breadcrumbs uploaded to cloud upon reconnection"
-                } else {
-                    "Live Data Impact: Pending sync - ${item.pointsCount} breadcrumbs and punches stored in local queue"
-                }
-            }
-            tvLiveImpact.setTextColor(if (item.punches.isNotEmpty()) Color.parseColor("#1565C0") else Color.parseColor("#424242"))
+            // Step 1: Disconnection Event
+            val firstPt = item.points.firstOrNull()
+            val step1Loc = if (item.inRadiusCount > 0 && firstPt != null) "Inside Office Zone" else "Outside Office"
+            tvStep1Detail.text = "Disconnected at ${timeFmt.format(Date(item.startTime))} IST • Cause: ${item.reason} • Position: $step1Loc"
 
+            // Step 2: Journey & Stay Stops
             val distText = if (item.distanceMeters >= 1000) {
                 String.format(Locale.US, "%.2f km", item.distanceMeters / 1000.0)
             } else {
                 String.format(Locale.US, "%.0f m", item.distanceMeters)
             }
-
-            val statsHeader = "${item.pointsCount} points captured • Distance: $distText • Within geofence: ${item.inRadiusCount} / Outside: ${item.pointsCount - item.inRadiusCount}"
+            val step2Text = StringBuilder()
+            step2Text.append("Traversed $distText across ${item.pointsCount} points captured locally")
             if (item.stays.isNotEmpty()) {
+                step2Text.append("\n")
                 val staySummary = item.stays.joinToString("\n") { s ->
-                    val durM = s.durationMs / 60000
-                    val durStr = if (durM > 0) "${durM}m" else "1m"
-                    val timeRange = "${timeFmt.format(Date(s.startTime))} - ${timeFmt.format(Date(s.endTime))}"
-                    "📍 Stayed $durStr ($timeRange): ${s.locationDescription}"
+                    val durM = (s.durationMs / 60000).coerceAtLeast(1)
+                    val sTime = "${timeFmt.format(Date(s.startTime))} – ${timeFmt.format(Date(s.endTime))}"
+                    "📍 Stayed ${durM}m ($sTime): ${s.locationDescription}"
                 }
-                tvStats.text = "$statsHeader\n$staySummary"
+                step2Text.append(staySummary)
+            } else if (item.distanceMeters < 30.0) {
+                step2Text.append(" • Stationary at current location throughout entire disconnect window")
             } else {
-                tvStats.text = statsHeader
+                step2Text.append(" • Continuous movement in transit with no stationary stops")
             }
+            tvStep2Detail.text = step2Text.toString()
+
+            // Step 3: Geofence Perimeter Assessment
+            tvStep3Detail.text = when {
+                outOfRadiusCount == 0 ->
+                    "🟢 100% Inside Office Radius (${item.pointsCount} points within boundary) • Remained on-premises"
+                item.inRadiusCount == 0 ->
+                    "🔴 Outside Office Perimeter throughout entire disconnect window ($outOfRadiusCount points outside)"
+                else ->
+                    "⚠️ Perimeter Transition: ${item.inRadiusCount} points inside, $outOfRadiusCount points outside • Exited office boundary during disconnect"
+            }
+
+            // Step 4: Reconnection & Cloud Sync
+            val syncNote = if (item.isSynced) {
+                "✓ All ${item.pointsCount} offline breadcrumbs & punch events reconciled into cloud database"
+            } else {
+                "⏳ ${item.pointsCount} points stored in local offline queue • Awaiting cloud transmission"
+            }
+            tvStep4Detail.text = "Reconnected at ${timeFmt.format(Date(item.endTime))} IST\n$syncNote"
+
+            // Summary Statistics line
+            tvStats.text = "${item.pointsCount} points captured • Distance: $distText • Within geofence: ${item.inRadiusCount} / Outside: $outOfRadiusCount"
 
             btnInspect.setOnClickListener {
                 onInspect(item)
@@ -2144,24 +2217,81 @@ private class OfflineEventAdapter :
     override fun getItemCount(): Int = items.size
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
-        private val title = view.findViewById<TextView>(R.id.tvEventTitle)
-        private val message = view.findViewById<TextView>(R.id.tvEventMessage)
-        private val meta = view.findViewById<TextView>(R.id.tvEventMeta)
+        private val tvIcon = view.findViewById<TextView>(R.id.tvEventIcon)
+        private val tvTitle = view.findViewById<TextView>(R.id.tvEventTitle)
+        private val tvBadge = view.findViewById<TextView>(R.id.tvEventBadge)
+        private val tvMessage = view.findViewById<TextView>(R.id.tvEventMessage)
+        private val tvMeta = view.findViewById<TextView>(R.id.tvEventMeta)
 
         fun bind(event: OfflineTrackingEvent) {
-            title.text = "${event.eventType} • ${event.severity}"
-            message.text = event.message
+            val tz = TimeZone.getTimeZone("Asia/Kolkata")
+            val timeFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
+            val metaFmt = SimpleDateFormat("dd-MMM, hh:mm:ss a", Locale.US).apply { timeZone = tz }
 
-            val time = SimpleDateFormat(
-                "dd-MMM-yyyy HH:mm:ss.SSS",
-                Locale.US
-            ).apply {
-                timeZone = TimeZone.getTimeZone("Asia/Kolkata")
-            }.format(Date(event.eventTime))
+            val type = event.eventType.uppercase()
+            val (icon, titleText, badgeText, badgeColor, badgeBg) = when {
+                type.contains("OFFLINE_PERIOD") ->
+                    EventStyle("📴", "Offline Tracking Period Completed", "OFFLINE SESSION", "#E65100", "#FFF3E0")
+                type.contains("NETWORK_OFFLINE") || type.contains("LOST") || type.contains("DISCONNECT") ->
+                    EventStyle("⚠️", "Network Connection Lost", "OFFLINE", "#C62828", "#FFEBEE")
+                type.contains("NETWORK_ONLINE") || type.contains("RESTORE") || type.contains("RECONNECT") ->
+                    EventStyle("📶", "Network Connection Restored", "ONLINE", "#2E7D32", "#E8F5E9")
+                type.contains("SYNC") ->
+                    EventStyle("☁️", "Cloud Synchronization Completed", "SYNCED", "#1565C0", "#E3F2FD")
+                type.contains("GEOFENCE") ->
+                    EventStyle("🏢", "Geofence Perimeter Event", "GEOFENCE", "#6A1B9A", "#F3E5F5")
+                type.contains("PUNCH") || type.contains("ATTENDANCE") ->
+                    EventStyle("🕒", "Attendance Punch Recorded", "ATTENDANCE", "#00695C", "#E0F2F1")
+                else ->
+                    EventStyle("📋", formatEventName(event.eventType), event.severity.uppercase(), "#1565C0", "#E3F2FD")
+            }
 
-            meta.text =
-                "$time IST  •  network=${if (event.networkAvailable) "ONLINE" else "OFFLINE"}  •  queue=${event.queueDepth}" +
-                        (event.correlationId?.let { "  •  id=${it.take(8)}…" } ?: "")
+            tvIcon.text = icon
+            tvTitle.text = titleText
+            tvBadge.text = badgeText
+            tvBadge.setTextColor(Color.parseColor(badgeColor))
+            tvBadge.setBackgroundColor(Color.parseColor(badgeBg))
+
+            // Sanitize raw epoch millisecond ranges like "Start: 1791281503086 • End: 1791282501085"
+            var cleanMsg = event.message
+            val epochRegex = Regex("""Start:\s*(\d{12,14})\s*•\s*End:\s*(\d{12,14})""")
+            cleanMsg = epochRegex.replace(cleanMsg) { match ->
+                val startMs = match.groupValues[1].toLongOrNull() ?: 0L
+                val endMs = match.groupValues[2].toLongOrNull() ?: 0L
+                val sStr = if (startMs > 0) timeFmt.format(Date(startMs)) else "—"
+                val eStr = if (endMs > 0) timeFmt.format(Date(endMs)) else "—"
+                "Offline Window: $sStr – $eStr IST"
+            }
+
+            // Strip developer tokens (network=ONLINE, queue=0, id=...)
+            cleanMsg = cleanMsg
+                .replace(Regex("""network=\w+""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""queue=\d+""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""queued=\d+""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""id=[a-f0-9\-]+""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""•\s*•"""), "•")
+                .trim()
+                .trim('•')
+                .trim()
+
+            tvMessage.text = if (cleanMsg.isNotBlank()) cleanMsg else "Offline tracking event recorded successfully."
+
+            val timeStr = metaFmt.format(Date(event.eventTime))
+            tvMeta.text = "🕒 $timeStr IST • ${if (event.networkAvailable) "🌐 Online" else "📴 Offline"}"
         }
+
+        private fun formatEventName(name: String): String {
+            return name.replace('_', ' ')
+                .split(' ')
+                .joinToString(" ") { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
+        }
+
+        private data class EventStyle(
+            val icon: String,
+            val title: String,
+            val badge: String,
+            val badgeColor: String,
+            val badgeBg: String
+        )
     }
 }
