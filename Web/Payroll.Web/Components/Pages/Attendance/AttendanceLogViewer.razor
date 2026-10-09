@@ -1139,7 +1139,7 @@
                     sStartDt,
                     sEndDt,
                     featureSettings);
-                var effectiveLogs = pr.Ordered;
+                var effectiveLogs = (pr.Ordered != null && pr.Ordered.Count > 0) ? pr.Ordered : dayPunchLogs;
 
                 string status = effectiveLogs.Count % 2 == 1 ? "Missing Punch" : "Present";
                 bool isWeeklyOff = emp != null && (emp.CompOffDayOfWeek.HasValue && pDate.DayOfWeek == emp.CompOffDayOfWeek.Value ||

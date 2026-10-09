@@ -34,6 +34,18 @@ namespace Payroll.Shared.Services
             var bioId = log.BiometricID?.Trim() ?? string.Empty;
             var logType = log.LogType?.Trim() ?? string.Empty;
 
+            // Tier 3: Geofence Auto (Server GeofenceAuto, AndroidGeofenceAuto, AUTO_* keys)
+            if (bioId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                bioId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) ||
+                device.Equals("GeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                device.Equals("AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                device.Contains("Geofence", StringComparison.OrdinalIgnoreCase) ||
+                logType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                logType.Contains("GEOFENCE", StringComparison.OrdinalIgnoreCase))
+            {
+                return PunchSourceTier.GeofenceAuto;
+            }
+
             // Tier 2: Manual Admin Override or Approved Correction
             if (device.Equals("ManualCorrection", StringComparison.OrdinalIgnoreCase) ||
                 device.Equals("Admin", StringComparison.OrdinalIgnoreCase) ||
@@ -41,17 +53,6 @@ namespace Payroll.Shared.Services
                 logType.Equals("Manual Correction", StringComparison.OrdinalIgnoreCase))
             {
                 return PunchSourceTier.ManualAdmin;
-            }
-
-            // Tier 3: Geofence Auto (Server GeofenceAuto, AndroidGeofenceAuto, AUTO_* keys)
-            if (device.Equals("GeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
-                device.Equals("AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
-                device.Contains("Geofence", StringComparison.OrdinalIgnoreCase) ||
-                bioId.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase) ||
-                bioId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
-                logType.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase))
-            {
-                return PunchSourceTier.GeofenceAuto;
             }
 
             // Tier 1: Physical Biometric Machine
@@ -170,10 +171,11 @@ namespace Payroll.Shared.Services
                             (x.PunchTime == p.PunchTime && IsExplicitOutPunch(x) == IsExplicitOutPunch(p)) ||
                             // 2. Same-minute collision between different tiers (higher tier wins)
                             (x.PunchTime == p.PunchTime && GetPunchTier(x) != GetPunchTier(p)) ||
-                            // 3. Geofence rapid oscillation / jitter within 3 minutes (180s)
+                            // 3. Geofence rapid oscillation / jitter within 3 minutes (180s) for SAME direction punches
                             (Math.Abs((x.PunchTime - p.PunchTime).TotalSeconds) <= 180 &&
                              GetPunchTier(x) == PunchSourceTier.GeofenceAuto &&
-                             GetPunchTier(p) == PunchSourceTier.GeofenceAuto)
+                             GetPunchTier(p) == PunchSourceTier.GeofenceAuto &&
+                             IsExplicitOutPunch(x) == IsExplicitOutPunch(p))
                         ));
 
                     if (match != null)
@@ -352,9 +354,9 @@ namespace Payroll.Shared.Services
                             }
                         }
                     }
-                    else
+                    else if (isOut)
                     {
-                        // Explicit OUT or neutral second punch -> forms an attendance pair!
+                        // Explicit OUT -> forms an attendance pair!
                         ordered.Add(pendingIn);
                         ordered.Add(p);
                         pendingIn = null;

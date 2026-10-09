@@ -134,6 +134,22 @@ class FirebaseRoomHydrator @Inject constructor(
             }
             val ownerUid = firebaseSync.getOwnerUid()
             val defaultUid = com.biometric.app.sync.ssot.FirebaseSsotSchema.DEFAULT_OWNER_UID
+            val extraTargets = setOf(defaultUid, "tenant_201")
+            for (extraUid in extraTargets) {
+                if (ownerUid != null && ownerUid.equals(extraUid, ignoreCase = true)) continue
+                val extraRef = com.google.firebase.database.FirebaseDatabase.getInstance()
+                    .getReference("owners").child(extraUid).child("company_settings").child("1")
+                extraRef.addValueEventListener(object : ValueEventListener {
+                    override fun onDataChange(snapshot: DataSnapshot) {
+                        if (snapshot.exists()) {
+                            scope.launch {
+                                settingsDao.upsertCompanySettings(snapshot.toLocalCompanySettings())
+                            }
+                        }
+                    }
+                    override fun onCancelled(error: DatabaseError) = Unit
+                })
+            }
             if (ownerUid != null && !ownerUid.equals(defaultUid, ignoreCase = true)) {
                 scope.launch {
                     try {

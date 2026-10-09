@@ -124,6 +124,7 @@ public sealed class FirebaseAdvanceService
         bool unpaidOnly = false,
         CancellationToken ct = default)
     {
+        List<SalaryAdvance> localList = new();
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
@@ -138,39 +139,64 @@ public sealed class FirebaseAdvanceService
                 if (from.HasValue) query = query.Where(a => a.AdvanceDate >= from.Value);
                 if (to.HasValue) query = query.Where(a => a.AdvanceDate <= to.Value);
                 if (unpaidOnly) query = query.Where(a => a.PayrollID_Paid == null);
-                var localList = await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
-                if (isOffline || localList.Count > 0)
+                localList = await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
+                if (isOffline)
                 {
                     return localList;
                 }
             }
         }
 
-        var json = employeeId > 0
-            ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, ct)
-            : await _firebase.GetOwnerTableAsync(OwnerUid, Table, ct);
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
+        var candidateOwners = new List<string>();
+        if (!string.IsNullOrWhiteSpace(OwnerUid)) candidateOwners.Add(OwnerUid);
+        if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+        if (!candidateOwners.Contains("tenant_201", StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add("tenant_201");
+        if (!candidateOwners.Contains("201", StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add("201");
 
         var result = new List<SalaryAdvance>();
-        if (json.Value.ValueKind == JsonValueKind.Object)
+        foreach (var owner in candidateOwners)
         {
-            foreach (var item in json.Value.EnumerateObject())
+            var json = employeeId > 0
+                ? await _firebase.GetOwnerTableByChildValueAsync(owner, Table, "employeeId", employeeId, ct)
+                : await _firebase.GetOwnerTableAsync(owner, Table, ct);
+            if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) continue;
+
+            if (json.Value.ValueKind == JsonValueKind.Object)
             {
-                if (item.Value.ValueKind != JsonValueKind.Object) continue;
-                var advance = ParseAdvance(item.Value, item.Name, employeeId, from, to, unpaidOnly);
-                if (advance != null) result.Add(advance);
+                foreach (var item in json.Value.EnumerateObject())
+                {
+                    if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                    var advance = ParseAdvance(item.Value, item.Name, employeeId, from, to, unpaidOnly);
+                    if (advance != null) result.Add(advance);
+                }
+            }
+            else
+            {
+                var index = 0;
+                foreach (var row in json.Value.EnumerateArray())
+                {
+                    var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                    index++;
+                    if (row.ValueKind != JsonValueKind.Object) continue;
+                    var advance = ParseAdvance(row, fallbackId, employeeId, from, to, unpaidOnly);
+                    if (advance != null) result.Add(advance);
+                }
             }
         }
-        else
+
+        if (localList.Count > 0)
         {
-            var index = 0;
-            foreach (var row in json.Value.EnumerateArray())
+            var existingKeys = new HashSet<string>(result.Select(r => !string.IsNullOrWhiteSpace(r.FirebaseKey) ? r.FirebaseKey : r.AdvanceID.ToString(CultureInfo.InvariantCulture)));
+            foreach (var local in localList)
             {
-                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
-                index++;
-                if (row.ValueKind != JsonValueKind.Object) continue;
-                var advance = ParseAdvance(row, fallbackId, employeeId, from, to, unpaidOnly);
-                if (advance != null) result.Add(advance);
+                var key = !string.IsNullOrWhiteSpace(local.FirebaseKey) ? local.FirebaseKey : local.AdvanceID.ToString(CultureInfo.InvariantCulture);
+                if (existingKeys.Add(key))
+                {
+                    result.Add(local);
+                }
             }
         }
 
@@ -207,8 +233,7 @@ public sealed class FirebaseAdvanceService
         var status = String(row, "status") ?? String(row, "Status");
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (string.Equals(status, "Pending", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) ||
+            if (string.Equals(status, "Rejected", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(status, "Deleted", StringComparison.OrdinalIgnoreCase))
             {

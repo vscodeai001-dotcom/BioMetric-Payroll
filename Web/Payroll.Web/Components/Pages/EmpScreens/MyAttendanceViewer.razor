@@ -333,11 +333,12 @@ else
 
             foreach (var ds in loadedSummaries)
             {
-                var isWeeklyOffWorked = ds.Status == "Weekly Off (Worked)";
+                var isWeeklyOff = ds.Status.Contains("Weekly Off", StringComparison.OrdinalIgnoreCase);
+                var isWeeklyOffWorked = ds.Status == "Weekly Off (Worked)" || (isWeeklyOff && ds.TotalOvertimeDuration > TimeSpan.Zero);
                 decimal workedHours = isWeeklyOffWorked
                     ? (decimal)ds.TotalOvertimeDuration.TotalHours
                     : ds.EarnedStandardHours + (decimal)ds.TotalOvertimeDuration.TotalHours;
-                cumulative.TotalScheduledHours += isWeeklyOffWorked
+                cumulative.TotalScheduledHours += isWeeklyOff
                     ? TimeSpan.Zero
                     : ds.ScheduledShiftDuration;
                 cumulative.TotalWorkedHours += workedHours;
@@ -346,19 +347,21 @@ else
 
                 var punchesForDay = relevantLogs
                     .Where(l => l.PunchTime.Date == ds.ShiftDate.ToDateTime(TimeOnly.MinValue).Date)
-                    .Select(l => l.PunchTime.ToString("HH:mm"));
+                    .OrderBy(l => l.PunchTime)
+                    .Select(l => $"{l.PunchTime:HH:mm} {(string.IsNullOrWhiteSpace(l.LogType) ? "" : l.LogType.Trim())}".Trim())
+                    .ToList();
 
                 dailySummaries.Add(new DailyAttendanceRecord
                 {
                     Date = ds.ShiftDate,
-                    Status = ds.Status,
-                    ScheduledShiftDuration = isWeeklyOffWorked
+                    Status = isWeeklyOffWorked ? "Weekly Off (Worked)" : ds.Status,
+                    ScheduledShiftDuration = isWeeklyOff
                         ? TimeSpan.Zero
                         : ds.ScheduledShiftDuration,
                     TotalPenalty = ds.TotalPenaltyDuration,
                     OvertimeDuration = ds.TotalOvertimeDuration,
                     FinalWorkedHours = workedHours,
-                    Punches = string.Join(" / ", punchesForDay)
+                    Punches = punchesForDay.Count > 0 ? string.Join(" • ", punchesForDay) : "—"
                 });
             }
 

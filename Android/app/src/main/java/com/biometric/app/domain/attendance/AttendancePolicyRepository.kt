@@ -8,6 +8,7 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -109,15 +110,17 @@ class AttendancePolicyRepository @Inject constructor(
 
         val defaultOwner = FirebaseSsotSchema.DEFAULT_OWNER_UID
         val activeTid = sessionStore.activeTenantId() ?: sessionStore.firebaseOwnerUid()
-        val altUid = if (owner.key == defaultOwner) {
-            activeTid?.takeIf { it.isNotBlank() && it != defaultOwner }
-        } else {
-            defaultOwner
-        }
-        val altCompanyRef = if (altUid != null) {
+        val targets = mutableSetOf<String>()
+        owner.key?.let { targets.add(it) }
+        targets.add(defaultOwner)
+        if (!activeTid.isNullOrBlank()) targets.add(activeTid)
+        targets.add("tenant_201")
+        targets.add("201")
+
+        val companyRefs = targets.map { targetUid ->
             com.google.firebase.database.FirebaseDatabase.getInstance()
-                .reference.child("owners").child(altUid).child("company_settings").child("1")
-        } else null
+                .reference.child("owners").child(targetUid).child("company_settings").child("1")
+        }
 
         fun emitPolicy() {
             val f = featureSnapshot
@@ -138,20 +141,46 @@ class AttendancePolicyRepository @Inject constructor(
                 if (snapshot.exists()) {
                     companySnapshot = snapshot
                     emitPolicy()
+                    launch(Dispatchers.IO) {
+                        val local = localSettingsDao.getCompanySettings()
+                        if (local != null) {
+                            val rad = snapshot.child("geoRadiusMeters").value?.toString()?.toIntOrNull()
+                                ?: snapshot.child("radius").value?.toString()?.toIntOrNull()
+                                ?: snapshot.child("geo_radius_meters").value?.toString()?.toIntOrNull()
+                            val lat = snapshot.child("officeLatitude").value?.toString()?.toDoubleOrNull()
+                                ?: snapshot.child("latitude").value?.toString()?.toDoubleOrNull()
+                            val lon = snapshot.child("officeLongitude").value?.toString()?.toDoubleOrNull()
+                                ?: snapshot.child("longitude").value?.toString()?.toDoubleOrNull()
+                            var changed = false
+                            if (rad != null && rad > 0 && local.geoRadiusMeters != rad) {
+                                local.geoRadiusMeters = rad
+                                changed = true
+                            }
+                            if (lat != null && lat != 0.0 && local.officeLatitude != lat) {
+                                local.officeLatitude = lat
+                                changed = true
+                            }
+                            if (lon != null && lon != 0.0 && local.officeLongitude != lon) {
+                                local.officeLongitude = lon
+                                changed = true
+                            }
+                            if (changed) {
+                                localSettingsDao.upsertCompanySettings(local)
+                            }
+                        }
+                    }
                 }
             }
             override fun onCancelled(error: DatabaseError) = Unit
         }
 
         featureRef.addValueEventListener(featureListener)
-        companyRef.addValueEventListener(companyListener)
-        altCompanyRef?.addValueEventListener(companyListener)
+        companyRefs.forEach { it.addValueEventListener(companyListener) }
 
         awaitClose {
             roomJob.cancel()
             featureRef.removeEventListener(featureListener)
-            companyRef.removeEventListener(companyListener)
-            altCompanyRef?.removeEventListener(companyListener)
+            companyRefs.forEach { it.removeEventListener(companyListener) }
         }
     }.distinctUntilChanged()
 

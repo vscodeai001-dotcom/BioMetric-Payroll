@@ -190,7 +190,7 @@ else
         try
         {
             var freshAdvances = await FirebaseAdvances.GetAsync(
-                selectedEmployeeId, startDate, endDate, unpaidOnly: true);
+                selectedEmployeeId, unpaidOnly: true);
             unpaidAdvances = freshAdvances;
         }
         catch (Exception ex)

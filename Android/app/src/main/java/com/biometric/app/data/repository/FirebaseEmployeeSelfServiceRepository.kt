@@ -52,7 +52,9 @@ import kotlin.math.abs
 @Singleton
 class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     private val firebaseSync: FirebaseSyncManager,
-    private val sessionStore: MobileSessionStore
+    private val sessionStore: MobileSessionStore,
+    private val punchDao: com.biometric.app.data.dao.LocalAttendancePunchDao,
+    private val attendanceDao: com.biometric.app.data.dao.LocalAttendanceDao
 ) {
     private val auth = FirebaseAuth.getInstance()
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -362,11 +364,22 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 ownerRef().child(table).orderByChild("employeeId").equalTo(numId)
             else -> ownerRef().child(table)
         }
-        val primarySnapshot = runCatching { primaryQuery.get().await() }.getOrNull()
         val results = mutableListOf<T>()
-        if (primarySnapshot != null && primarySnapshot.hasChildren()) {
-            results.addAll(primarySnapshot.children.mapNotNull { mapper(it) })
+        val seenKeys = mutableSetOf<String>()
+
+        fun addFromSnapshot(snapshot: DataSnapshot?) {
+            if (snapshot == null || !snapshot.hasChildren()) return
+            for (child in snapshot.children) {
+                val key = child.key ?: UUID.randomUUID().toString()
+                if (seenKeys.add(key)) {
+                    mapper(child)?.let { results.add(it) }
+                }
+            }
         }
+
+        val primarySnapshot = runCatching { primaryQuery.get().await() }.getOrNull()
+        addFromSnapshot(primarySnapshot)
+
         // Fallback for cross-platform schema compatibility (e.g. if saved with String employeeId or alternate key)
         if (results.isEmpty()) {
             val fallbackQuery = when (table) {
@@ -380,20 +393,22 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             }
             if (fallbackQuery != null) {
                 val fallbackSnapshot = runCatching { fallbackQuery.get().await() }.getOrNull()
-                if (fallbackSnapshot != null && fallbackSnapshot.hasChildren()) {
-                    results.addAll(fallbackSnapshot.children.mapNotNull { mapper(it) })
-                }
+                addFromSnapshot(fallbackSnapshot)
             }
         }
-        if (results.isEmpty() && table == "attendance_punches") {
+        if (results.isEmpty() && (table == "attendance_punches" || table == "attendance")) {
             val extra1 = runCatching { ownerRef().child(table).orderByChild("employeeId").equalTo(strId).get().await() }.getOrNull()
             if (extra1 != null && extra1.hasChildren()) {
-                results.addAll(extra1.children.mapNotNull { mapper(it) })
+                addFromSnapshot(extra1)
             } else {
                 val extra2 = runCatching { ownerRef().child(table).orderByChild("staffId").equalTo(numId).get().await() }.getOrNull()
                 if (extra2 != null && extra2.hasChildren()) {
-                    results.addAll(extra2.children.mapNotNull { mapper(it) })
+                    addFromSnapshot(extra2)
                 }
+            }
+            if (results.isEmpty()) {
+                val fullSnap = runCatching { ownerRef().child(table).limitToLast(1000).get().await() }.getOrNull()
+                addFromSnapshot(fullSnap)
             }
         }
 
@@ -409,12 +424,10 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
             if (altQuery != null) {
                 val altSnapshot = runCatching { altQuery.get().await() }.getOrNull()
                 if (altSnapshot != null && altSnapshot.hasChildren()) {
-                    results.addAll(altSnapshot.children.mapNotNull { mapper(it) })
+                    addFromSnapshot(altSnapshot)
                 } else if (table in listOf("leave_requests", "advance_payments")) {
                     val altFb = runCatching { altOwner.child(table).orderByChild("employeeId").equalTo(strId).get().await() }.getOrNull()
-                    if (altFb != null && altFb.hasChildren()) {
-                        results.addAll(altFb.children.mapNotNull { mapper(it) })
-                    }
+                    addFromSnapshot(altFb)
                 }
             }
         }
@@ -570,25 +583,118 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val emp = employee() ?: return emptyList()
         val start = LocalDate.parse(from, dateFormatter)
         val end = LocalDate.parse(to, dateFormatter)
-        val attendance = readList("attendance") { it.toAttendance() }
-            .filter { it.employeeId == emp.employeeId || it.employeeId == emp.employeeId.toIntOrNull()?.toString() || it.employeeId.toIntOrNull() == emp.employeeId.toIntOrNull() }
-        val punches = readList("attendance_punches") { it.toAttendancePunch() }
-            .filter { it.staffId == emp.employeeId || it.staffId == emp.employeeId.toIntOrNull()?.toString() || it.staffId.toIntOrNull() == emp.employeeId.toIntOrNull() }
-        val summaries = ownerRef().child("daily_summaries")
-            .orderByChild("employeeId")
-            .equalTo(sessionStore.employeeId().toDouble())
-            .get().await().children
-            .associateBy { it.string("shiftDate").orEmpty() }
+
+        val idMatchesAttendance: (String) -> Boolean = { attEmpId ->
+            attEmpId == emp.employeeId ||
+            attEmpId == emp.employeeId.toIntOrNull()?.toString() ||
+            attEmpId.toIntOrNull() == emp.employeeId.toIntOrNull() ||
+            (!emp.biometricId.isNullOrBlank() && (attEmpId == emp.biometricId || attEmpId.toIntOrNull() == emp.biometricId.toIntOrNull()))
+        }
+        val idMatchesPunch: (String) -> Boolean = { staffId ->
+            staffId == emp.employeeId ||
+            staffId == emp.employeeId.toIntOrNull()?.toString() ||
+            staffId.toIntOrNull() == emp.employeeId.toIntOrNull() ||
+            (!emp.biometricId.isNullOrBlank() && (staffId == emp.biometricId || staffId.toIntOrNull() == emp.biometricId.toIntOrNull()))
+        }
+
+        val fbAttendance = readList("attendance") { it.toAttendance() }.filter { idMatchesAttendance(it.employeeId) }
+        val fbPunches = readList("attendance_punches") { it.toAttendancePunch() }.filter { idMatchesPunch(it.staffId) }
+
+        val roomAttendance = runCatching {
+            attendanceDao.getAll().filter { idMatchesAttendance(it.employeeId) }.map {
+                Attendance(
+                    attendanceId = it.attendanceId,
+                    employeeId = it.employeeId,
+                    checkInTime = it.checkInTime,
+                    checkOutTime = it.checkOutTime
+                )
+            }
+        }.getOrDefault(emptyList())
+
+        val roomPunches = runCatching {
+            punchDao.getAll().filter { idMatchesPunch(it.staffId) }.map {
+                AttendancePunch(
+                    punchId = it.punchId,
+                    staffId = it.staffId,
+                    date = it.date,
+                    type = it.type,
+                    timestamp = it.timestamp,
+                    latitude = it.latitude,
+                    longitude = it.longitude,
+                    accuracy = it.accuracy,
+                    source = it.source,
+                    status = it.status
+                )
+            }
+        }.getOrDefault(emptyList())
+
+        val attendance = (fbAttendance + roomAttendance)
+            .distinctBy { it.attendanceId.ifBlank { "${it.employeeId}_${it.checkInTime}" } }
+
+        val punches = (fbPunches + roomPunches)
+            .distinctBy { it.punchId.ifBlank { "${it.staffId}_${it.timestamp}_${it.type}" } }
+
+        val summaries = runCatching {
+            ownerRef().child("daily_summaries")
+                .orderByChild("employeeId")
+                .equalTo(sessionStore.employeeId().toDouble())
+                .get().await().children
+                .associateBy { it.string("shiftDate").orEmpty() }
+        }.getOrDefault(emptyMap())
 
         return generateSequence(start) { if (it < end) it.plusDays(1) else null }.map { day ->
             val date = day.format(dateFormatter)
-            val dayAttendance = attendance.filter { formatDate(it.checkInTime) == date }
-            val rawPunches = punches.filter { it.date == date || formatDate(it.timestamp) == date }
-            val dayPunches = if (rawPunches.isNotEmpty()) {
-                // Dedup: same-direction within 60 s → keep first.
-                // Opposite-direction within 60 s (geofence/Android sync race) →
-                // keep whichever fits the expected alternating position (even=IN, odd=OUT).
-                val sorted = rawPunches.sortedBy { it.timestamp }
+            val dayAttendance = attendance.filter { it.checkInTime > 0 && formatDate(it.checkInTime) == date }
+            val rawPunches = punches.filter { it.date == date || (it.timestamp > 0 && formatDate(it.timestamp) == date) }
+
+            // Synthesize from dayAttendance if checkInTime/checkOutTime exist
+            val synthesized = dayAttendance.flatMap { att ->
+                val list = mutableListOf<AttendancePunch>()
+                if (att.checkInTime > 0) {
+                    list.add(
+                        AttendancePunch(
+                            punchId = "${att.attendanceId}_IN",
+                            staffId = att.employeeId,
+                            date = date,
+                            type = "IN",
+                            timestamp = att.checkInTime,
+                            source = att.type.ifBlank { "GEOFENCE" },
+                            status = "APPROVED"
+                        )
+                    )
+                }
+                att.checkOutTime?.takeIf { it > 0 }?.let { outTime ->
+                    list.add(
+                        AttendancePunch(
+                            punchId = "${att.attendanceId}_OUT",
+                            staffId = att.employeeId,
+                            date = date,
+                            type = "OUT",
+                            timestamp = outTime,
+                            source = att.type.ifBlank { "GEOFENCE" },
+                            status = "APPROVED"
+                        )
+                    )
+                }
+                list
+            }
+
+            // Merge raw punches and synthesized attendance sessions
+            val combinedPunches = mutableListOf<AttendancePunch>()
+            combinedPunches.addAll(rawPunches)
+            for (syn in synthesized) {
+                val isOutSyn = syn.type.contains("OUT", ignoreCase = true)
+                val exists = combinedPunches.any {
+                    val isOutExist = it.type.contains("OUT", ignoreCase = true)
+                    isOutExist == isOutSyn && Math.abs(it.timestamp - syn.timestamp) < 60_000L
+                }
+                if (!exists) {
+                    combinedPunches.add(syn)
+                }
+            }
+
+            val dayPunches = if (combinedPunches.isNotEmpty()) {
+                val sorted = combinedPunches.sortedBy { it.timestamp }
                 val deduped = mutableListOf<AttendancePunch>()
                 for (punch in sorted) {
                     val isOutNew = punch.type.contains("OUT", ignoreCase = true)
@@ -601,61 +707,58 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                     }
                     val isOutExist = deduped[matchIdx].type.contains("OUT", ignoreCase = true)
                     if (isOutExist == isOutNew) {
-                        // Same direction within 60 s — keep existing, skip duplicate.
                         continue
                     } else {
-                        // Opposite direction within 60 s — geofence sync race.
                         val expectedOutAtIdx = (matchIdx % 2 != 0)
                         if (expectedOutAtIdx == isOutExist) {
-                            continue // existing is correct
+                            continue
                         } else {
-                            deduped[matchIdx] = punch // incoming fits better
+                            deduped[matchIdx] = punch
                         }
                     }
                 }
                 deduped
             } else {
-                // Defensive fallback: synthesize punches from attendance record if raw punches table was not yet synced
-                dayAttendance.flatMap { att ->
-                    val list = mutableListOf<AttendancePunch>()
-                    if (att.checkInTime > 0) {
-                        list.add(
-                            AttendancePunch(
-                                punchId = "${att.attendanceId}_IN",
-                                staffId = att.employeeId,
-                                date = date,
-                                type = "IN",
-                                timestamp = att.checkInTime,
-                                source = att.type.ifBlank { "GEOFENCE" },
-                                status = "APPROVED"
-                            )
-                        )
-                    }
-                    att.checkOutTime?.takeIf { it > 0 }?.let { outTime ->
-                        list.add(
-                            AttendancePunch(
-                                punchId = "${att.attendanceId}_OUT",
-                                staffId = att.employeeId,
-                                date = date,
-                                type = "OUT",
-                                timestamp = outTime,
-                                source = att.type.ifBlank { "GEOFENCE" },
-                                status = "APPROVED"
-                            )
-                        )
-                    }
-                    list
-                }.sortedBy { it.timestamp }
+                emptyList()
             }
             val summary = summaries[date]
             val scheduled = summary?.long("scheduledShiftDurationMs")?.div(3_600_000.0)
                 ?: scheduledHours(emp.shiftStart, emp.shiftEnd, emp.breakHours)
-            val worked = dayAttendance.sumOf {
+
+            // Worked hours calculation:
+            // 1. Prefer summary.totalWorkedHours (or earnedStandardHours + overtime) if summary is available
+            // 2. Fall back to alternating IN/OUT pairs from dayPunches
+            // 3. Fall back to dayAttendance checkIn/checkOut
+            val summaryEarned = summary?.double("earnedStandardHours") ?: 0.0
+            val summaryOtHours = (summary?.long("totalOvertimeMs") ?: 0L) / 3_600_000.0
+            val summaryWorked = summary?.double("totalWorkedHours")?.takeIf { it > 0 }
+                ?: (summaryEarned + summaryOtHours).takeIf { it > 0 }
+
+            val punchWorked = if (dayPunches.isNotEmpty()) {
+                val sortedPunches = dayPunches.sortedBy { it.timestamp }
+                var totalPunchMs = 0L
+                var inTime: Long? = null
+                for (p in sortedPunches) {
+                    if (p.type.equals("IN", true)) {
+                        inTime = p.timestamp
+                    } else if (p.type.equals("OUT", true) && inTime != null) {
+                        if (p.timestamp > inTime) {
+                            totalPunchMs += (p.timestamp - inTime)
+                        }
+                        inTime = null
+                    }
+                }
+                totalPunchMs / 3_600_000.0
+            } else 0.0
+
+            val attWorked = dayAttendance.sumOf {
                 if (it.hoursWorked > 0) it.hoursWorked
                 else it.checkOutTime?.let { out ->
                     if (out > it.checkInTime) (out - it.checkInTime) / 3_600_000.0 else 0.0
                 } ?: 0.0
             }
+
+            val worked = summaryWorked ?: punchWorked.takeIf { it > 0 } ?: attWorked
             val status = summary?.string("status")?.takeIf { it.isNotBlank() } ?: run {
                     // Check if this day is the employee's weekly off day.
                     // compOffDayOfWeek: 1=Monday, 7=Sunday (ISO-8601 DayOfWeek.value)
@@ -730,6 +833,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
         val id = employeeId()
         val requests = readList("leave_requests") { it.toLeaveRequest() }
             .filter { it.staffId == id || it.employeeId == id }
+            .distinctBy { it.id.ifBlank { "${it.staffId}_${it.startDate}_${it.leaveDate}_${it.leaveType}" } }
         val result = mutableListOf<LeaveDto>()
         requests.forEach { req ->
             val start = parseLocalDate(req.startDate, req.leaveDate)
@@ -748,7 +852,7 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 )
             }
         }
-        return result.sortedByDescending { it.date }
+        return result.distinctBy { it.id }.sortedByDescending { it.date }
     }
 
     suspend fun createLeave(leaveDate: String, leaveType: String, isHalfDay: Boolean, notes: String?) {
@@ -797,7 +901,9 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
     suspend fun advances(): List<MoneyEntryDto> {
         val id = employeeId()
         return readList("advance_payments") { it.toAdvancePayment() }
-            .filter { it.employeeId == id || it.staffId == id }.sortedByDescending { it.date }
+            .filter { it.employeeId == id || it.staffId == id }
+            .distinctBy { it.advanceId.ifBlank { "${it.employeeId}_${it.date}_${it.amount}" } }
+            .sortedByDescending { it.date }
             .map {
                 MoneyEntryDto(
                     id = stableIntId(it.advanceId),

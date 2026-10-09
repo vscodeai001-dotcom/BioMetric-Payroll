@@ -26,7 +26,7 @@ import com.biometric.app.domain.attendance.ProcessedPunchItem
 import com.biometric.app.ui.adapter.RawPunchAdapter
 import com.biometric.app.ui.viewmodel.SharedViewModel
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import com.google.android.material.chip.Chip
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.textfield.TextInputEditText
 import dagger.hilt.android.AndroidEntryPoint
@@ -50,8 +50,9 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
     private lateinit var rvPunches: RecyclerView
     private lateinit var tvEmpty: TextView
     private lateinit var progressBar: ProgressBar
+    private lateinit var tvResultsCount: TextView
 
-    // KPI views
+    // KPI Views & Clickable containers
     private lateinit var tvKpiTotal: TextView
     private lateinit var tvKpiAccepted: TextView
     private lateinit var tvKpiSuppressed: TextView
@@ -61,24 +62,37 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
     private lateinit var tvKpiAcceptedPct: TextView
     private lateinit var tvKpiSuppressedPct: TextView
 
-    // Filter views
+    private lateinit var cardKpiTotal: View
+    private lateinit var cardKpiAccepted: View
+    private lateinit var cardKpiSuppressed: View
+    private lateinit var cardKpiPhysical: View
+    private lateinit var cardKpiManual: View
+    private lateinit var cardKpiGeo: View
+
+    // Filter Views
     private lateinit var etStartDate: EditText
     private lateinit var etEndDate: EditText
     private lateinit var spEmployee: Spinner
     private lateinit var etSearch: TextInputEditText
+    private lateinit var btnToggleFilters: MaterialButton
+    private lateinit var btnResetFilters: TextView
+    private lateinit var llAdvancedFilters: LinearLayout
     private lateinit var chipGroupMode: ChipGroup
     private lateinit var chipGroupStatus: ChipGroup
     private lateinit var chipGroupDirection: ChipGroup
     private lateinit var chipGroupQuick: ChipGroup
-    private lateinit var btnRefresh: Button
-    private lateinit var btnExportCsv: Button
-    private lateinit var btnOctMatrix: Button
+
+    // Action Buttons
+    private lateinit var btnRefresh: MaterialButton
+    private lateinit var btnExportCsv: MaterialButton
+    private lateinit var btnOctMatrix: MaterialButton
 
     // ------- State -------
     private val adapter = RawPunchAdapter { punch -> showInspectionBottomSheet(punch) }
 
     private var allEvaluated: List<EvaluatedPunchRecord> = emptyList()
     private var employees: List<Employee> = emptyList()
+    private var sortedEmployees: List<Employee> = emptyList()
 
     private val istTz = TimeZone.getTimeZone("Asia/Kolkata")
     private val isoFmt = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = istTz }
@@ -87,13 +101,13 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
 
     private var startCal: Calendar = Calendar.getInstance(istTz).apply {
         set(Calendar.DAY_OF_MONTH, 1)
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
+        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
     }
     private var endCal: Calendar = Calendar.getInstance(istTz).apply {
-        set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59)
+        set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
     }
 
-    private var selectedEmployeeId: String? = null
+    private var selectedEmployee: Employee? = null
     private var sourceTierFilter: PunchSourceTier? = null
     private var statusFilter: Boolean? = null   // null=all, true=accepted, false=suppressed
     private var directionFilter: String? = null  // null=all, "IN", "OUT"
@@ -112,12 +126,14 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         setupFilterChips()
         setupSearchBox()
         setupActionButtons()
+        setupKpiClickFilters()
         observeData()
     }
 
     private fun setupWindowInsets() {
+        val root = findViewById<View>(R.id.llRawPunchRoot)
         val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbarRawPunch)
-        ViewCompat.setOnApplyWindowInsetsListener(swipeRefresh) { _, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val statusBarTop = insets.getInsets(
                 WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
             ).top
@@ -126,10 +142,10 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
             )
 
             toolbar.updatePadding(top = statusBarTop)
-            nestedScroll.updatePadding(bottom = navBars.bottom + (24 * resources.displayMetrics.density).toInt())
+            nestedScroll.updatePadding(bottom = navBars.bottom + (32 * resources.displayMetrics.density).toInt())
             insets
         }
-        ViewCompat.requestApplyInsets(swipeRefresh)
+        ViewCompat.requestApplyInsets(root)
     }
 
     // ------- Binding -------
@@ -139,6 +155,7 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         rvPunches = findViewById(R.id.rvRawPunches)
         tvEmpty = findViewById(R.id.tvRawPunchEmpty)
         progressBar = findViewById(R.id.progressRawPunch)
+        tvResultsCount = findViewById(R.id.tvResultsCount)
 
         tvKpiTotal = findViewById(R.id.tvKpiTotalCount)
         tvKpiAccepted = findViewById(R.id.tvKpiAcceptedCount)
@@ -149,14 +166,25 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         tvKpiAcceptedPct = findViewById(R.id.tvKpiAcceptedPct)
         tvKpiSuppressedPct = findViewById(R.id.tvKpiSuppressedPct)
 
+        cardKpiTotal = findViewById(R.id.cardKpiTotal)
+        cardKpiAccepted = findViewById(R.id.cardKpiAccepted)
+        cardKpiSuppressed = findViewById(R.id.cardKpiSuppressed)
+        cardKpiPhysical = findViewById(R.id.cardKpiPhysical)
+        cardKpiManual = findViewById(R.id.cardKpiManual)
+        cardKpiGeo = findViewById(R.id.cardKpiGeo)
+
         etStartDate = findViewById(R.id.etStartDate)
         etEndDate = findViewById(R.id.etEndDate)
         spEmployee = findViewById(R.id.spEmployee)
         etSearch = findViewById(R.id.etSearchTelemetry)
+        btnToggleFilters = findViewById(R.id.btnToggleFilters)
+        btnResetFilters = findViewById(R.id.btnResetFilters)
+        llAdvancedFilters = findViewById(R.id.llAdvancedFilters)
         chipGroupMode = findViewById(R.id.chipGroupMode)
         chipGroupStatus = findViewById(R.id.chipGroupStatus)
         chipGroupDirection = findViewById(R.id.chipGroupDirection)
         chipGroupQuick = findViewById(R.id.chipGroupQuickRange)
+
         btnRefresh = findViewById(R.id.btnRefreshTelemetry)
         btnExportCsv = findViewById(R.id.btnExportCsv)
         btnOctMatrix = findViewById(R.id.btnOctMatrix)
@@ -172,25 +200,56 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         rvPunches.adapter = adapter
     }
 
-    // ------- Date pickers -------
+    // ------- Date Pickers -------
     private fun setupDatePickers() {
         etStartDate.setText(displayFmt.format(startCal.time))
         etEndDate.setText(displayFmt.format(endCal.time))
 
-        etStartDate.setOnClickListener { pickDate(startCal) { cal -> startCal = cal; etStartDate.setText(displayFmt.format(cal.time)); reloadData() } }
-        etEndDate.setOnClickListener { pickDate(endCal) { cal -> endCal = cal; etEndDate.setText(displayFmt.format(cal.time)); reloadData() } }
+        etStartDate.setOnClickListener {
+            pickDate(startCal) { cal ->
+                startCal = cal.apply {
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                etStartDate.setText(displayFmt.format(startCal.time))
+                chipGroupQuick.clearCheck()
+                reloadData()
+            }
+        }
+        etEndDate.setOnClickListener {
+            pickDate(endCal) { cal ->
+                endCal = cal.apply {
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                etEndDate.setText(displayFmt.format(endCal.time))
+                chipGroupQuick.clearCheck()
+                reloadData()
+            }
+        }
     }
 
     private fun pickDate(base: Calendar, onPicked: (Calendar) -> Unit) {
         android.app.DatePickerDialog(this, { _, y, m, d ->
-            onPicked(Calendar.getInstance(istTz).apply { set(y, m, d) })
+            onPicked(Calendar.getInstance(istTz).apply {
+                set(y, m, d)
+            })
         }, base.get(Calendar.YEAR), base.get(Calendar.MONTH), base.get(Calendar.DAY_OF_MONTH)).show()
     }
 
-    // ------- Filter Chips -------
+    // ------- Filter Chips & Controls -------
     private fun setupFilterChips() {
+        // Toggle advanced filters
+        btnToggleFilters.setOnClickListener {
+            val isExpanded = llAdvancedFilters.isVisible
+            llAdvancedFilters.isVisible = !isExpanded
+            btnToggleFilters.text = if (!isExpanded) "Less ▴" else "More ▾"
+        }
+
+        btnResetFilters.setOnClickListener {
+            resetAllFilters()
+        }
+
         // Mode chips
-        chipGroupMode.setOnCheckedStateChangeListener { group, checkedIds ->
+        chipGroupMode.setOnCheckedStateChangeListener { group, _ ->
             sourceTierFilter = when (group.checkedChipId) {
                 R.id.chipModePhysical -> PunchSourceTier.PhysicalMachine
                 R.id.chipModeManual -> PunchSourceTier.ManualAdmin
@@ -220,41 +279,138 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
             applyFilter()
         }
 
-        // Quick range chips
+        // Quick range chips - wire direct click listeners and checked state listeners
+        findViewById<View>(R.id.chipQuickToday)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickToday) }
+        findViewById<View>(R.id.chipQuickYesterday)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickYesterday) }
+        findViewById<View>(R.id.chipQuickLast7)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickLast7) }
+        findViewById<View>(R.id.chipQuickLast30)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickLast30) }
+        findViewById<View>(R.id.chipQuickThisMonth)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickThisMonth) }
+        findViewById<View>(R.id.chipQuickOctMatrix)?.setOnClickListener { applyQuickDateRange(R.id.chipQuickOctMatrix) }
+
         chipGroupQuick.setOnCheckedStateChangeListener { group, _ ->
-            val today = Calendar.getInstance(istTz)
-            when (group.checkedChipId) {
-                R.id.chipQuickToday -> {
-                    startCal = today.clone() as Calendar
-                    endCal = today.clone() as Calendar
-                }
-                R.id.chipQuickYesterday -> {
-                    val yest = today.clone() as Calendar; yest.add(Calendar.DAY_OF_MONTH, -1)
-                    startCal = yest; endCal = yest.clone() as Calendar
-                }
-                R.id.chipQuickLast7 -> {
-                    startCal = today.clone() as Calendar; startCal.add(Calendar.DAY_OF_MONTH, -7)
-                    endCal = today.clone() as Calendar
-                }
-                R.id.chipQuickLast30 -> {
-                    startCal = today.clone() as Calendar; startCal.add(Calendar.DAY_OF_MONTH, -30)
-                    endCal = today.clone() as Calendar
-                }
-                R.id.chipQuickOctMatrix -> {
-                    startCal = Calendar.getInstance(istTz).apply { set(2026, 9, 1) }
-                    endCal = Calendar.getInstance(istTz).apply { set(2026, 9, 31) }
-                }
-                else -> return@setOnCheckedStateChangeListener
+            if (group.checkedChipId != View.NO_ID) {
+                applyQuickDateRange(group.checkedChipId)
             }
-            etStartDate.setText(displayFmt.format(startCal.time))
-            etEndDate.setText(displayFmt.format(endCal.time))
-            reloadData()
+        }
+    }
+
+    private fun applyQuickDateRange(chipId: Int) {
+        val now = Calendar.getInstance(istTz)
+        var label = ""
+        when (chipId) {
+            R.id.chipQuickToday -> {
+                startCal = (now.clone() as Calendar).apply {
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = (now.clone() as Calendar).apply {
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "Today"
+            }
+            R.id.chipQuickYesterday -> {
+                startCal = (now.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_MONTH, -1)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = (now.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_MONTH, -1)
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "Yesterday"
+            }
+            R.id.chipQuickLast7 -> {
+                startCal = (now.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_MONTH, -6)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = (now.clone() as Calendar).apply {
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "Last 7 Days"
+            }
+            R.id.chipQuickLast30 -> {
+                startCal = (now.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_MONTH, -29)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = (now.clone() as Calendar).apply {
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "Last 30 Days"
+            }
+            R.id.chipQuickThisMonth -> {
+                startCal = (now.clone() as Calendar).apply {
+                    set(Calendar.DAY_OF_MONTH, 1)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = (now.clone() as Calendar).apply {
+                    set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
+                    set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "This Month"
+            }
+            R.id.chipQuickOctMatrix -> {
+                startCal = Calendar.getInstance(istTz).apply {
+                    set(2026, Calendar.OCTOBER, 1, 0, 0, 0); set(Calendar.MILLISECOND, 0)
+                }
+                endCal = Calendar.getInstance(istTz).apply {
+                    set(2026, Calendar.OCTOBER, 31, 23, 59, 59); set(Calendar.MILLISECOND, 999)
+                }
+                label = "Oct 2026"
+            }
+            else -> return
+        }
+
+        chipGroupQuick.check(chipId)
+        etStartDate.setText(displayFmt.format(startCal.time))
+        etEndDate.setText(displayFmt.format(endCal.time))
+        reloadData()
+        if (label.isNotBlank()) {
+            Toast.makeText(this, "📅 Range: $label", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun setupKpiClickFilters() {
+        cardKpiTotal.setOnClickListener {
+            sourceTierFilter = null
+            statusFilter = null
+            chipGroupMode.check(R.id.chipModeAll)
+            chipGroupStatus.check(R.id.chipStatusAll)
+            applyFilter()
+        }
+        cardKpiAccepted.setOnClickListener {
+            statusFilter = true
+            chipGroupStatus.check(R.id.chipStatusAccepted)
+            applyFilter()
+        }
+        cardKpiSuppressed.setOnClickListener {
+            statusFilter = false
+            chipGroupStatus.check(R.id.chipStatusSuppressed)
+            applyFilter()
+        }
+        cardKpiPhysical.setOnClickListener {
+            sourceTierFilter = PunchSourceTier.PhysicalMachine
+            chipGroupMode.check(R.id.chipModePhysical)
+            applyFilter()
+        }
+        cardKpiManual.setOnClickListener {
+            sourceTierFilter = PunchSourceTier.ManualAdmin
+            chipGroupMode.check(R.id.chipModeManual)
+            applyFilter()
+        }
+        cardKpiGeo.setOnClickListener {
+            sourceTierFilter = PunchSourceTier.GeofenceAuto
+            chipGroupMode.check(R.id.chipModeGeo)
+            applyFilter()
         }
     }
 
     private fun setupSearchBox() {
         etSearch.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) { searchQuery = s?.toString() ?: ""; applyFilter() }
+            override fun afterTextChanged(s: Editable?) {
+                searchQuery = s?.toString() ?: ""
+                applyFilter()
+            }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
         })
@@ -265,18 +421,33 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         swipeRefresh.setOnRefreshListener { reloadData() }
         btnExportCsv.setOnClickListener { exportCsv() }
         btnOctMatrix.setOnClickListener {
-            startCal = Calendar.getInstance(istTz).apply { set(2026, 9, 1) }
-            endCal = Calendar.getInstance(istTz).apply { set(2026, 9, 31) }
-            etStartDate.setText(displayFmt.format(startCal.time))
-            etEndDate.setText(displayFmt.format(endCal.time))
-            selectedEmployeeId = null
-            sourceTierFilter = null; statusFilter = null; directionFilter = null; searchQuery = ""
+            selectedEmployee = null
+            spEmployee.setSelection(0)
+            sourceTierFilter = null
+            statusFilter = null
+            directionFilter = null
+            searchQuery = ""
             etSearch.text?.clear()
-            chipGroupMode.clearCheck(); chipGroupStatus.clearCheck()
-            chipGroupDirection.clearCheck(); chipGroupQuick.clearCheck()
-            reloadData()
-            Toast.makeText(this, "🧪 Oct 2026 Matrix loaded!", Toast.LENGTH_SHORT).show()
+            chipGroupMode.check(R.id.chipModeAll)
+            chipGroupStatus.check(R.id.chipStatusAll)
+            chipGroupDirection.check(R.id.chipDirectionAll)
+            applyQuickDateRange(R.id.chipQuickOctMatrix)
         }
+    }
+
+    private fun resetAllFilters() {
+        applyQuickDateRange(R.id.chipQuickThisMonth)
+        selectedEmployee = null
+        spEmployee.setSelection(0)
+        sourceTierFilter = null
+        statusFilter = null
+        directionFilter = null
+        searchQuery = ""
+        etSearch.text?.clear()
+        chipGroupMode.check(R.id.chipModeAll)
+        chipGroupStatus.check(R.id.chipStatusAll)
+        chipGroupDirection.check(R.id.chipDirectionAll)
+        chipGroupQuick.clearCheck()
     }
 
     // ------- Data Loading -------
@@ -284,7 +455,8 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             sharedViewModel.allEmployees.collectLatest { empList ->
                 employees = empList
-                setupEmployeeSpinner(empList)
+                sortedEmployees = empList.sortedBy { it.name }
+                setupEmployeeSpinner(sortedEmployees)
                 reloadData()
             }
         }
@@ -293,19 +465,55 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         }
     }
 
-    private fun setupEmployeeSpinner(empList: List<Employee>) {
-        val items = mutableListOf("👤 All Employees")
-        items += empList.sortedBy { it.name }.map { "👤 ${it.name} (#${it.employeeId})" }
+    private fun setupEmployeeSpinner(sortedList: List<Employee>) {
+        val items = mutableListOf("👤 All Staff (${sortedList.size})")
+        items += sortedList.map { "👤 ${it.name} (#${it.employeeId})" }
         val spinnerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
         spEmployee.adapter = spinnerAdapter
         spEmployee.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: AdapterView<*>?) { selectedEmployeeId = null; reloadData() }
+            override fun onNothingSelected(parent: AdapterView<*>?) {
+                selectedEmployee = null
+                reloadData()
+            }
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                selectedEmployeeId = if (position == 0) null
-                    else empList.sortedBy { it.name }.getOrNull(position - 1)?.employeeId
+                selectedEmployee = if (position == 0) null else sortedList.getOrNull(position - 1)
                 reloadData()
             }
         }
+    }
+
+    // Flexible employee matching (employeeId, numeric ID, biometricId)
+    private fun findEmployeeForStaffId(staffId: String): Employee? {
+        val s = staffId.trim()
+        if (s.isEmpty()) return null
+        val sInt = s.toIntOrNull()
+        return employees.firstOrNull { emp ->
+            val empId = emp.employeeId.trim()
+            val empIdInt = empId.toIntOrNull()
+            val bioId = emp.biometricId.trim()
+            val bioIdInt = bioId.toIntOrNull()
+
+            s.equals(empId, ignoreCase = true) ||
+            (sInt != null && empIdInt != null && sInt == empIdInt) ||
+            (bioId.isNotEmpty() && s.equals(bioId, ignoreCase = true)) ||
+            (sInt != null && bioIdInt != null && sInt == bioIdInt)
+        }
+    }
+
+    private fun isPunchForEmployee(punchStaffId: String, emp: Employee?): Boolean {
+        if (emp == null) return true
+        val s = punchStaffId.trim()
+        if (s.isEmpty()) return false
+        val sInt = s.toIntOrNull()
+        val empId = emp.employeeId.trim()
+        val empIdInt = empId.toIntOrNull()
+        val bioId = emp.biometricId.trim()
+        val bioIdInt = bioId.toIntOrNull()
+
+        return s.equals(empId, ignoreCase = true) ||
+               (sInt != null && empIdInt != null && sInt == empIdInt) ||
+               (bioId.isNotEmpty() && s.equals(bioId, ignoreCase = true)) ||
+               (sInt != null && bioIdInt != null && sInt == bioIdInt)
     }
 
     private fun reloadData() {
@@ -315,15 +523,16 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         lifecycleScope.launch {
             val startStr = isoFmt.format(startCal.time)
             val endStr = isoFmt.format(endCal.time)
-            val startMs = startCal.apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }.timeInMillis
-            val endMs = endCal.apply { set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999) }.timeInMillis
+            val startMs = startCal.timeInMillis
+            val endMs = endCal.timeInMillis
 
             val result = withContext(Dispatchers.Default) {
                 val rawPunches = sharedViewModel.allAttendancePunches.value
                     .filter { p ->
-                        val dateOk = p.date in startStr..endStr ||
+                        val punchDate = if (p.date.isNotBlank()) p.date else (if (p.timestamp > 0) isoFmt.format(Date(p.timestamp)) else "")
+                        val dateOk = (punchDate.isNotBlank() && punchDate in startStr..endStr) ||
                             (p.timestamp in startMs..endMs)
-                        val empOk = selectedEmployeeId == null || p.staffId == selectedEmployeeId
+                        val empOk = selectedEmployee == null || isPunchForEmployee(p.staffId, selectedEmployee)
                         dateOk && empOk
                     }
                 evaluateAllPunches(rawPunches)
@@ -337,7 +546,6 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
 
     private fun evaluateAllPunches(rawPunches: List<AttendancePunch>): List<EvaluatedPunchRecord> {
         val result = mutableListOf<EvaluatedPunchRecord>()
-        val empMap = employees.associateBy { it.employeeId }
 
         // Group by (staffId, date)
         val grouped = rawPunches
@@ -345,11 +553,11 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
 
         for ((key, dayPunches) in grouped) {
             val (staffId, dateStr) = key
-            val emp = empMap[staffId]
+            val emp = findEmployeeForStaffId(staffId)
             val empName = emp?.name ?: "Employee #$staffId"
             val role = emp?.role
 
-            // Build ProcessedPunchItems
+            // Build ProcessedPunchItems passing punchId as biometricId and original source
             val punchItems = dayPunches.map { p ->
                 ProcessedPunchItem(
                     id = p.punchId,
@@ -369,7 +577,8 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
             val sortedDay = dayPunches.sortedBy { it.timestamp }
 
             sortedDay.forEachIndexed { idx, raw ->
-                val tier = AttendancePunchProcessor.getPunchTier(raw.deviceId, null, raw.type)
+                // Pass punchId and source for 100% accurate tier identification
+                val tier = AttendancePunchProcessor.getPunchTier(raw.deviceId, raw.punchId, raw.type, raw.source)
 
                 // Check accepted
                 val isRawOut = AttendancePunchProcessor.isExplicitOutPunch(raw.type)
@@ -447,16 +656,16 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         val collision = dayPunches.firstOrNull { o ->
             o.punchId != raw.punchId &&
                 Math.abs(o.timestamp - raw.timestamp) < 60_000L &&
-                AttendancePunchProcessor.getPunchTier(o.deviceId, null, o.type).priority < tier.priority
+                AttendancePunchProcessor.getPunchTier(o.deviceId, o.punchId, o.type, o.source).priority < tier.priority
         }
         if (collision != null) {
-            val colliderTier = AttendancePunchProcessor.getPunchTier(collision.deviceId, null, collision.type)
+            val colliderTier = AttendancePunchProcessor.getPunchTier(collision.deviceId, collision.punchId, collision.type, collision.source)
             return "🚫 Suppressed: Collided at ${timeFmt.format(Date(raw.timestamp))} with higher priority $colliderTier (Physical > Manual > Geofence)" to "Priority Collision"
         }
 
         // Manual admin override window
-        val mIns = punchItems.filter { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.isExplicitInPunch(it.type) }.sortedBy { it.timestamp }
-        val mOuts = punchItems.filter { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.isExplicitOutPunch(it.type) }.sortedBy { it.timestamp }
+        val mIns = punchItems.filter { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type, it.source) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.isExplicitInPunch(it.type) }.sortedBy { it.timestamp }
+        val mOuts = punchItems.filter { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type, it.source) == PunchSourceTier.ManualAdmin && AttendancePunchProcessor.isExplicitOutPunch(it.type) }.sortedBy { it.timestamp }
         if (mIns.isNotEmpty() && mOuts.isNotEmpty() && raw.timestamp > mIns.first().timestamp && raw.timestamp < mOuts.last().timestamp) {
             val mStart = timeFmt.format(Date(mIns.first().timestamp))
             val mEnd = timeFmt.format(Date(mOuts.last().timestamp))
@@ -467,7 +676,7 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
             val rapidFlip = dayPunches.firstOrNull { o ->
                 o.punchId != raw.punchId &&
                     kotlin.math.abs(o.timestamp - raw.timestamp) < 180_000L &&
-                    AttendancePunchProcessor.getPunchTier(o.deviceId, null, o.type) == PunchSourceTier.GeofenceAuto &&
+                    AttendancePunchProcessor.getPunchTier(o.deviceId, o.punchId, o.type, o.source) == PunchSourceTier.GeofenceAuto &&
                     AttendancePunchProcessor.isExplicitOutPunch(o.type) != AttendancePunchProcessor.isExplicitOutPunch(raw.type)
             }
             if (rapidFlip != null) {
@@ -475,8 +684,8 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
                 return "🚫 Suppressed: GPS perimeter jitter / rapid flip within 3m of $priorTime ${rapidFlip.type}" to "GPS Perimeter Jitter"
             }
 
-            val authIn = punchItems.firstOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitInPunch(it.type) }
-            val authOut = punchItems.lastOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitOutPunch(it.type) }
+            val authIn = punchItems.firstOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type, it.source).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitInPunch(it.type) }
+            val authOut = punchItems.lastOrNull { AttendancePunchProcessor.getPunchTier(it.deviceId, it.biometricId, it.type, it.source).priority <= PunchSourceTier.ManualAdmin.priority && AttendancePunchProcessor.isExplicitOutPunch(it.type) }
             if (authIn != null && authOut != null && raw.timestamp > authIn.timestamp && raw.timestamp < authOut.timestamp) {
                 return "🚫 Suppressed: GPS geofence drift suppressed during active authoritative shift" to "GPS Drift Suppression"
             }
@@ -499,8 +708,8 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
     private fun applyFilter() {
         var filtered = allEvaluated.asSequence()
 
-        if (selectedEmployeeId != null) {
-            filtered = filtered.filter { it.staffId == selectedEmployeeId }
+        if (selectedEmployee != null) {
+            filtered = filtered.filter { isPunchForEmployee(it.staffId, selectedEmployee) }
         }
         if (sourceTierFilter != null) {
             filtered = filtered.filter { it.sourceTier == sourceTierFilter }
@@ -523,7 +732,10 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
                     p.deviceId.lowercase().contains(q) ||
                     p.biometricId.lowercase().contains(q) ||
                     p.reason.lowercase().contains(q) ||
-                    p.ruleCategory.lowercase().contains(q)
+                    p.ruleCategory.lowercase().contains(q) ||
+                    p.timeStr.lowercase().contains(q) ||
+                    p.dateStr.lowercase().contains(q) ||
+                    p.evaluationStatus.lowercase().contains(q)
             }
         }
 
@@ -545,6 +757,8 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
         tvKpiGeo.text = geo.toString()
         tvKpiAcceptedPct.text = if (total > 0) "${(accepted * 100.0 / total).toInt()}% acceptance" else "0%"
         tvKpiSuppressedPct.text = if (total > 0) "${(suppressed * 100.0 / total).toInt()}% suppressed" else "0%"
+
+        tvResultsCount.text = "Telemetry Records ($total) • $accepted Accepted, $suppressed Suppressed"
 
         tvEmpty.isVisible = list.isEmpty()
         rvPunches.isVisible = list.isNotEmpty()
@@ -599,7 +813,10 @@ class RawPunchInspectorActivity : MotionBaseActivity() {
     // ------- CSV Export -------
     private fun exportCsv() {
         val filtered = adapter.currentList
-        if (filtered.isEmpty()) { Toast.makeText(this, "No data to export", Toast.LENGTH_SHORT).show(); return }
+        if (filtered.isEmpty()) {
+            Toast.makeText(this, "No data to export", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         lifecycleScope.launch(Dispatchers.IO) {
             val sb = StringBuilder()

@@ -331,7 +331,7 @@ public sealed class FirebaseAttendanceService
                 var appMode = scope.ServiceProvider.GetService<IAppModeService>();
                 var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
 
-                if (isOffline || localPunches.Count > 0)
+                if (isOffline)
                 {
                     return localPunches;
                 }
@@ -344,54 +344,80 @@ public sealed class FirebaseAttendanceService
         var startUtcMs = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(startLocal, indiaZone)).ToUnixTimeMilliseconds();
         var endUtcMs = new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(endLocal, indiaZone)).ToUnixTimeMilliseconds() - 1;
 
-        // Attendance punches are an unbounded ledger. Read only the requested
-        // date window from the indexed timestamp field.
-        var json = await _firebase.GetOwnerTableByChildRangeAsync(
-            OwnerUid,
-            "attendance_punches",
-            "timestamp",
-            startUtcMs,
-            endUtcMs,
-            limitToLast: 10000,
-            cancellationToken: ct);
-        if ((json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) &&
-            !string.Equals(OwnerUid, Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparison.OrdinalIgnoreCase))
+        // Build biometric to EmployeeID mapping for string staffId resolution
+        var biometricMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (_scopeFactory != null)
         {
-            json = await _firebase.GetOwnerTableByChildRangeAsync(
-                Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid,
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var emps = await db.Employees.AsNoTracking().ToListAsync(ct);
+                foreach (var e in emps)
+                {
+                    biometricMap[e.EmployeeID.ToString(CultureInfo.InvariantCulture)] = e.EmployeeID;
+                    if (!string.IsNullOrWhiteSpace(e.BiometricID))
+                    {
+                        biometricMap[e.BiometricID.Trim()] = e.EmployeeID;
+                    }
+                }
+            }
+        }
+
+        // Try reading punches across active OwnerUid and fallback tenant owners
+        var candidateOwners = new List<string>();
+        if (!string.IsNullOrWhiteSpace(OwnerUid))
+            candidateOwners.Add(OwnerUid);
+        if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+        if (!candidateOwners.Contains("tenant_201", StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add("tenant_201");
+        if (!candidateOwners.Contains("201", StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add("201");
+
+        var result = new List<AttendanceLog>();
+
+        foreach (var owner in candidateOwners)
+        {
+            // 1. Try attendance_punches by range
+            var json = await _firebase.GetOwnerTableByChildRangeAsync(
+                owner,
                 "attendance_punches",
                 "timestamp",
                 startUtcMs,
                 endUtcMs,
                 limitToLast: 10000,
                 cancellationToken: ct);
-        }
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
-        {
-            return localPunches;
-        }
 
-        var result = new List<AttendanceLog>();
-        if (json.Value.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var item in json.Value.EnumerateObject())
+            // If range query returns null or empty, read full table as fallback
+            if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array) ||
+                (json.Value.ValueKind == JsonValueKind.Object && !json.Value.EnumerateObject().Any()) ||
+                (json.Value.ValueKind == JsonValueKind.Array && json.Value.GetArrayLength() == 0))
             {
-                if (item.Value.ValueKind != JsonValueKind.Object) continue;
-                var punch = ParseAttendancePunch(item.Value, item.Name, from, to, employeeId);
-                if (punch != null) result.Add(punch);
+                json = await _firebase.GetOwnerTableAsync(owner, "attendance_punches", ct);
             }
-        }
-        else
-        {
-            var index = 0;
-            foreach (var row in json.Value.EnumerateArray())
+
+            ParseAndCollectPunches(json, from, to, employeeId, result, biometricMap);
+
+            // 2. Also inspect the companion attendance table (where checkInTime / checkOutTime reside)
+            var attJson = await _firebase.GetOwnerTableByChildRangeAsync(
+                owner,
+                "attendance",
+                "checkInTime",
+                startUtcMs,
+                endUtcMs,
+                limitToLast: 10000,
+                cancellationToken: ct);
+
+            if (attJson is null || (attJson.Value.ValueKind != JsonValueKind.Object && attJson.Value.ValueKind != JsonValueKind.Array) ||
+                (attJson.Value.ValueKind == JsonValueKind.Object && !attJson.Value.EnumerateObject().Any()) ||
+                (attJson.Value.ValueKind == JsonValueKind.Array && attJson.Value.GetArrayLength() == 0))
             {
-                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
-                index++;
-                if (row.ValueKind != JsonValueKind.Object) continue;
-                var punch = ParseAttendancePunch(row, fallbackId, from, to, employeeId);
-                if (punch != null) result.Add(punch);
+                attJson = await _firebase.GetOwnerTableAsync(owner, "attendance", ct);
             }
+
+            ParseAndCollectPunches(attJson, from, to, employeeId, result, biometricMap);
         }
 
         if (localPunches.Count > 0)
@@ -418,32 +444,282 @@ public sealed class FirebaseAttendanceService
             }
         }
 
-        return result.OrderBy(x => x.PunchTime).ThenBy(x => x.EmployeeID).ToList();
+        return result
+            .GroupBy(x => $"{x.EmployeeID}_{x.PunchTime:yyyyMMdd_HHmmss}_{x.LogType?.ToUpperInvariant()}")
+            .Select(g => g.First())
+            .OrderBy(x => x.PunchTime)
+            .ThenBy(x => x.EmployeeID)
+            .ToList();
+    }
+
+    private static void ParseAndCollectPunches(
+        JsonElement? json,
+        DateOnly from,
+        DateOnly to,
+        int? employeeId,
+        List<AttendanceLog> destination,
+        Dictionary<string, int>? biometricMap = null)
+    {
+        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
+            return;
+
+        var existingKeys = new HashSet<string>(destination.Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmmss}_{r.LogType?.ToUpperInvariant()}"));
+        var seenBioKeys = new HashSet<string>(
+            destination
+                .Where(r => !string.IsNullOrEmpty(r.BiometricID) &&
+                            (r.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                             r.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase)))
+                .Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{r.BiometricID.ToUpperInvariant()}")
+        );
+        var seenMinuteDirKeys = new HashSet<string>(
+            destination.Select(r =>
+            {
+                bool isOut = (r.LogType ?? string.Empty).ToUpperInvariant().Contains("OUT");
+                return $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{(isOut ? "OUT" : "IN")}";
+            })
+        );
+
+        void AddIfNew(AttendanceLog? log)
+        {
+            if (log == null) return;
+            var key = $"{log.EmployeeID}_{log.PunchTime:yyyyMMdd_HHmmss}_{log.LogType?.ToUpperInvariant()}";
+            bool isOut = (log.LogType ?? string.Empty).ToUpperInvariant().Contains("OUT");
+            var minDirKey = $"{log.EmployeeID}_{log.PunchTime:yyyyMMdd_HHmm}_{(isOut ? "OUT" : "IN")}";
+
+            string? bioKey = null;
+            if (!string.IsNullOrEmpty(log.BiometricID) &&
+                (log.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                 log.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase)))
+            {
+                bioKey = $"{log.EmployeeID}_{log.PunchTime:yyyyMMdd_HHmm}_{log.BiometricID.ToUpperInvariant()}";
+            }
+
+            // If punch with identical BiometricID or exact minute+direction was already collected
+            if ((bioKey != null && seenBioKeys.Contains(bioKey)) || seenMinuteDirKeys.Contains(minDirKey))
+            {
+                // Check if existing punch is a fallback ManualCorrection while incoming is genuine GeofenceAuto/Physical
+                var existingIdx = destination.FindIndex(x =>
+                    x.EmployeeID == log.EmployeeID &&
+                    Math.Abs((x.PunchTime - log.PunchTime).TotalMinutes) < 1.0 &&
+                    ((x.LogType?.ToUpperInvariant().Contains("OUT") ?? false) == isOut));
+
+                if (existingIdx >= 0)
+                {
+                    var existing = destination[existingIdx];
+                    bool existingIsFallback = string.Equals(existing.DeviceID, "ManualCorrection", StringComparison.OrdinalIgnoreCase);
+                    bool incomingIsSpecific = string.Equals(log.DeviceID, "GeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                                             string.Equals(log.DeviceID, "AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                                             (log.DeviceID != null && (log.DeviceID.StartsWith("ZKTeco", StringComparison.OrdinalIgnoreCase) ||
+                                                                      log.DeviceID.StartsWith("Machine", StringComparison.OrdinalIgnoreCase)));
+
+                    if (existingIsFallback && incomingIsSpecific)
+                    {
+                        // Replace fallback with genuine punch
+                        destination[existingIdx] = log;
+                        if (bioKey != null) seenBioKeys.Add(bioKey);
+                        existingKeys.Add(key);
+                        seenMinuteDirKeys.Add(minDirKey);
+                    }
+                }
+                return;
+            }
+
+            if (existingKeys.Add(key))
+            {
+                if (bioKey != null) seenBioKeys.Add(bioKey);
+                seenMinuteDirKeys.Add(minDirKey);
+                destination.Add(log);
+            }
+        }
+
+        if (json.Value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var item in json.Value.EnumerateObject())
+            {
+                if (item.Value.ValueKind != JsonValueKind.Object) continue;
+                var punches = ParseAttendancePunches(item.Value, item.Name, from, to, employeeId, biometricMap, destination);
+                foreach (var p in punches) AddIfNew(p);
+            }
+        }
+        else
+        {
+            var index = 0;
+            foreach (var row in json.Value.EnumerateArray())
+            {
+                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
+                index++;
+                if (row.ValueKind != JsonValueKind.Object) continue;
+                var punches = ParseAttendancePunches(row, fallbackId, from, to, employeeId, biometricMap, destination);
+                foreach (var p in punches) AddIfNew(p);
+            }
+        }
+    }
+
+    private static List<AttendanceLog> ParseAttendancePunches(
+        JsonElement row,
+        string key,
+        DateOnly from,
+        DateOnly to,
+        int? employeeId,
+        Dictionary<string, int>? biometricMap = null,
+        List<AttendanceLog>? existingDestination = null)
+    {
+        var punches = new List<AttendanceLog>();
+        var emp = Int(row, "staffId", "employeeId", "EmployeeID");
+        if (!emp.HasValue)
+        {
+            var rawStaff = String(row, "staffId", "employeeId", "EmployeeID", "biometricId", "BiometricID");
+            if (!string.IsNullOrWhiteSpace(rawStaff) && biometricMap != null && biometricMap.TryGetValue(rawStaff.Trim(), out var mappedId))
+            {
+                emp = mappedId;
+            }
+        }
+        if (!emp.HasValue) return punches;
+        if (employeeId.HasValue && emp.Value != employeeId.Value) return punches;
+
+        var startLocal = from.ToDateTime(TimeOnly.MinValue).Date;
+        var endLocal = to.ToDateTime(TimeOnly.MinValue).Date;
+
+        var checkInTs = ParseToIndiaDateTime(row, "timestamp", "createdAt", "checkInTime");
+        var checkOutTs = ParseToIndiaDateTime(row, "checkOutTime");
+
+        var rawDevice = String(row, "deviceId", "DeviceID");
+        var rawSource = String(row, "source", "punchSource", "Source");
+        var rawBioId = String(row, "biometricId", "BiometricID", "punchId", "attendanceId") ?? key;
+        
+        string resolvedDevice;
+        if (!string.IsNullOrWhiteSpace(rawDevice))
+        {
+            resolvedDevice = rawDevice;
+        }
+        else if ((rawSource != null && rawSource.Contains("GEOFENCE", StringComparison.OrdinalIgnoreCase)) ||
+                 (rawBioId != null && rawBioId.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase)) ||
+                 key.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                 key.StartsWith("ATT_", StringComparison.OrdinalIgnoreCase))
+        {
+            resolvedDevice = "GeofenceAuto";
+        }
+        else
+        {
+            resolvedDevice = "ManualCorrection";
+        }
+
+        var effectiveBioId = !string.IsNullOrWhiteSpace(String(row, "biometricId", "BiometricID"))
+            ? String(row, "biometricId", "BiometricID")!
+            : (!string.IsNullOrWhiteSpace(rawBioId) ? rawBioId : string.Empty);
+
+        // If this is an ATT_ summary session record and raw punches already exist for this employee on this date,
+        // do not duplicate or corrupt the punch stream.
+        bool isSummarySession = key.StartsWith("ATT_", StringComparison.OrdinalIgnoreCase) ||
+                                (String(row, "attendanceId")?.StartsWith("ATT_", StringComparison.OrdinalIgnoreCase) ?? false);
+        if (isSummarySession && existingDestination != null &&
+            existingDestination.Any(x => x.EmployeeID == emp.Value &&
+                                          x.PunchTime.Date >= startLocal && x.PunchTime.Date <= endLocal &&
+                                          !string.IsNullOrEmpty(x.BiometricID) &&
+                                          (x.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                                           x.BiometricID.StartsWith("MANUAL_", StringComparison.OrdinalIgnoreCase))))
+        {
+            return punches;
+        }
+
+        // Primary punch (or check-in)
+        if (checkInTs.HasValue)
+        {
+            var punchDate = checkInTs.Value.Date;
+            if (punchDate >= startLocal && punchDate <= endLocal)
+            {
+                var explicitType = String(row, "type", "logType", "note", "source", "LogType");
+                string resolvedType;
+                if (!string.IsNullOrWhiteSpace(explicitType) &&
+                    (explicitType.Contains("OUT", StringComparison.OrdinalIgnoreCase) ||
+                     explicitType.Contains("EXIT", StringComparison.OrdinalIgnoreCase) ||
+                     explicitType.Equals("CHECKOUT", StringComparison.OrdinalIgnoreCase)))
+                {
+                    resolvedType = "OUT";
+                }
+                else
+                {
+                    resolvedType = "IN";
+                }
+                punches.Add(new AttendanceLog
+                {
+                    LogID = Int(row, "punchId", "attendanceId", "LogID") ?? IntFromKey(key) ?? 0,
+                    EmployeeID = emp.Value,
+                    BiometricID = effectiveBioId,
+                    PunchTime = checkInTs.Value,
+                    DeviceID = resolvedDevice,
+                    LogType = resolvedType,
+                    IsApproved = Bool(row, "isApproved", "IsApproved")
+                        ?? !string.Equals(String(row, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
+                    Latitude = Double(row, "latitude", "Latitude"),
+                    Longitude = Double(row, "longitude", "Longitude")
+                });
+            }
+        }
+
+        // Secondary check-out punch if row contains paired checkOutTime
+        if (checkOutTs.HasValue)
+        {
+            var punchDate = checkOutTs.Value.Date;
+            if (punchDate >= startLocal && punchDate <= endLocal)
+            {
+                punches.Add(new AttendanceLog
+                {
+                    LogID = (Int(row, "punchId", "attendanceId", "LogID") ?? IntFromKey(key) ?? 0) + 1,
+                    EmployeeID = emp.Value,
+                    BiometricID = effectiveBioId,
+                    PunchTime = checkOutTs.Value,
+                    DeviceID = resolvedDevice,
+                    LogType = "OUT",
+                    IsApproved = Bool(row, "isApproved", "IsApproved")
+                        ?? !string.Equals(String(row, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
+                    Latitude = Double(row, "latitude", "Latitude"),
+                    Longitude = Double(row, "longitude", "Longitude")
+                });
+            }
+        }
+
+        return punches;
+    }
+
+    private static DateTime? ParseToIndiaDateTime(JsonElement element, params string[] names)
+    {
+        var value = Raw(element, names);
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null) return null;
+        var indiaZone = TimeZoneInfo.FindSystemTimeZoneById(GetIndiaTimeZoneId());
+
+        if (value.Value.ValueKind == JsonValueKind.Number && value.Value.TryGetInt64(out var ms))
+        {
+            var utc = DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
+            return TimeZoneInfo.ConvertTimeFromUtc(utc, indiaZone);
+        }
+
+        var text = value.Value.ToString();
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pMs))
+        {
+            var utc = DateTimeOffset.FromUnixTimeMilliseconds(pMs).UtcDateTime;
+            return TimeZoneInfo.ConvertTimeFromUtc(utc, indiaZone);
+        }
+
+        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto))
+        {
+            return TimeZoneInfo.ConvertTimeFromUtc(dto.UtcDateTime, indiaZone);
+        }
+
+        if (DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt))
+        {
+            return dt;
+        }
+
+        return null;
     }
 
     private static AttendanceLog? ParseAttendancePunch(JsonElement row, string key, DateOnly from, DateOnly to, int? employeeId)
     {
-        var emp = Int(row, "staffId", "employeeId", "EmployeeID");
-        var timestamp = UnixDateTime(row, "timestamp", "createdAt", "checkInTime");
-        if (!emp.HasValue || timestamp is null) return null;
-        if (employeeId.HasValue && emp.Value != employeeId.Value) return null;
-
-        var localDate = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(timestamp.Value, GetIndiaTimeZoneId()).Date;
-        if (localDate < from.ToDateTime(TimeOnly.MinValue).Date || localDate > to.ToDateTime(TimeOnly.MinValue).Date) return null;
-
-        return new AttendanceLog
-        {
-            LogID = Int(row, "punchId", "attendanceId", "LogID") ?? IntFromKey(key) ?? 0,
-            EmployeeID = emp.Value,
-            BiometricID = String(row, "biometricId", "BiometricID") ?? string.Empty,
-            PunchTime = timestamp.Value,
-            DeviceID = String(row, "deviceId", "DeviceID"),
-            LogType = String(row, "type", "source", "note", "LogType"),
-            IsApproved = Bool(row, "isApproved", "IsApproved")
-                ?? !string.Equals(String(row, "status"), "PENDING", StringComparison.OrdinalIgnoreCase),
-            Latitude = Double(row, "latitude", "Latitude"),
-            Longitude = Double(row, "longitude", "Longitude")
-        };
+        var list = ParseAttendancePunches(row, key, from, to, employeeId);
+        return list.FirstOrDefault();
     }
 
     private static string GetIndiaTimeZoneId()
@@ -465,78 +741,7 @@ public sealed class FirebaseAttendanceService
         DateOnly to,
         CancellationToken ct = default)
     {
-        if (employeeId <= 0 || from > to) return new();
-
-        List<AttendanceLog> localPunches = new();
-        if (_scopeFactory != null)
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-            if (dbFactory != null)
-            {
-                using var db = await dbFactory.CreateDbContextAsync(ct);
-                var startDt = from.ToDateTime(TimeOnly.MinValue);
-                var endDt = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
-                localPunches = await db.AttendanceLogs.AsNoTracking()
-                    .Where(x => x.EmployeeID == employeeId && x.PunchTime >= startDt && x.PunchTime < endDt)
-                    .OrderBy(x => x.PunchTime)
-                    .ToListAsync(ct);
-
-                var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-                var isOffline = appMode != null && await appMode.IsOfflineModeAsync();
-
-                if (isOffline || localPunches.Count > 0)
-                {
-                    return localPunches;
-                }
-            }
-        }
-
-        var json = await _firebase.GetOwnerTableByChildValueAsync(
-            OwnerUid, "attendance_punches", "staffId", employeeId, ct);
-
-        if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
-        {
-            return localPunches;
-        }
-
-        var result = new List<AttendanceLog>();
-        if (json.Value.ValueKind == JsonValueKind.Object)
-        {
-            foreach (var item in json.Value.EnumerateObject())
-            {
-                if (item.Value.ValueKind != JsonValueKind.Object) continue;
-                var punch = ParseAttendancePunchForEmployee(item.Value, item.Name, employeeId, from, to);
-                if (punch != null) result.Add(punch);
-            }
-        }
-        else
-        {
-            var index = 0;
-            foreach (var row in json.Value.EnumerateArray())
-            {
-                var fallbackId = index.ToString(CultureInfo.InvariantCulture);
-                index++;
-                if (row.ValueKind != JsonValueKind.Object) continue;
-                var punch = ParseAttendancePunchForEmployee(row, fallbackId, employeeId, from, to);
-                if (punch != null) result.Add(punch);
-            }
-        }
-
-        if (localPunches.Count > 0)
-        {
-            var existingKeys = new HashSet<string>(result.Select(r => $"{r.EmployeeID}_{r.PunchTime:yyyyMMdd_HHmm}_{r.LogType?.ToUpperInvariant()}"));
-            foreach (var lp in localPunches)
-            {
-                var key = $"{lp.EmployeeID}_{lp.PunchTime:yyyyMMdd_HHmm}_{lp.LogType?.ToUpperInvariant()}";
-                if (existingKeys.Add(key))
-                {
-                    result.Add(lp);
-                }
-            }
-        }
-
-        return result.OrderBy(x => x.PunchTime).ToList();
+        return await GetAttendancePunchesAsync(from, to, employeeId, ct);
     }
 
     private static AttendanceLog? ParseAttendancePunchForEmployee(JsonElement row, string key, int employeeId, DateOnly from, DateOnly to)

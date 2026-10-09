@@ -38,16 +38,20 @@ object AttendancePunchProcessor {
     fun getPunchTier(
         deviceId: String?,
         biometricId: String?,
-        logType: String?
+        logType: String?,
+        source: String? = null
     ): PunchSourceTier {
         val dev = deviceId?.trim() ?: ""
         val bio = biometricId?.trim() ?: ""
         val type = logType?.trim() ?: ""
+        val src = source?.trim() ?: ""
 
         // Tier 2: Manual Admin Override or Approved Correction
         if (dev.equals("ManualCorrection", ignoreCase = true) ||
             dev.equals("Admin", ignoreCase = true) ||
             bio.startsWith("MANUAL_", ignoreCase = true) ||
+            src.equals("MANUAL", ignoreCase = true) ||
+            src.equals("ADMIN", ignoreCase = true) ||
             type.equals("Manual Correction", ignoreCase = true)
         ) {
             return PunchSourceTier.ManualAdmin
@@ -59,6 +63,7 @@ object AttendancePunchProcessor {
             dev.contains("Geofence", ignoreCase = true) ||
             bio.equals("GEOFENCE_AUTO", ignoreCase = true) ||
             bio.startsWith("AUTO_", ignoreCase = true) ||
+            src.equals("GEOFENCE", ignoreCase = true) ||
             type.startsWith("AUTO_", ignoreCase = true)
         ) {
             return PunchSourceTier.GeofenceAuto
@@ -105,7 +110,7 @@ object AttendancePunchProcessor {
             }
             p.copy(
                 timestamp = cal.timeInMillis,
-                tier = getPunchTier(p.deviceId, p.biometricId, p.type)
+                tier = getPunchTier(p.deviceId, p.biometricId, p.type, p.source)
             )
         }.sortedWith(
             compareBy<ProcessedPunchItem> { it.timestamp }
@@ -138,10 +143,11 @@ object AttendancePunchProcessor {
                         (it.timestamp == p.timestamp && isExplicitOutPunch(it.type) == isExplicitOutPunch(p.type)) ||
                         // 2. Same-minute collision between different tiers (higher tier wins)
                         (it.timestamp == p.timestamp && it.tier != p.tier) ||
-                        // 3. Geofence rapid oscillation / jitter within 3 minutes (180s)
+                        // 3. Geofence rapid oscillation / jitter within 3 minutes (180s) for SAME direction punches
                         (Math.abs(it.timestamp - p.timestamp) <= 180_000L &&
                          it.tier == PunchSourceTier.GeofenceAuto &&
-                         p.tier == PunchSourceTier.GeofenceAuto)
+                         p.tier == PunchSourceTier.GeofenceAuto &&
+                         isExplicitOutPunch(it.type) == isExplicitOutPunch(p.type))
                     )
                 }
                 if (matchIdx >= 0) {
@@ -255,8 +261,8 @@ object AttendancePunchProcessor {
                             pendingIn = p
                         }
                     }
-                } else {
-                    // Explicit OUT or neutral second punch -> forms an attendance pair!
+                } else if (isOut) {
+                    // Explicit OUT -> forms an attendance pair!
                     ordered.add(pendingIn)
                     ordered.add(p)
                     pendingIn = null

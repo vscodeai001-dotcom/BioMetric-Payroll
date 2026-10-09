@@ -3413,7 +3413,7 @@
     private bool mapNeedsUpdate;
 
     private int selectedEmployeeId;
-    private int currentOfficeRadius = 100;
+    private int currentOfficeRadius = 0;
     private double currentOfficeLatitude;
     private double currentOfficeLongitude;
     private bool useSpeedBasedMarkers;
@@ -3731,7 +3731,8 @@
                             ? dProp
                             : root;
 
-                        if (TryGetJsonInt(target, "GeoRadiusMeters", out var rVal) || TryGetJsonInt(target, "geoRadiusMeters", out rVal))
+                        if (TryGetJsonInt(target, "GeoRadiusMeters", out var rVal) || TryGetJsonInt(target, "geoRadiusMeters", out rVal) ||
+                            (target.ValueKind == JsonValueKind.Number && target.TryGetInt32(out rVal)))
                         {
                             if (rVal > 0) currentOfficeRadius = rVal;
                         }
@@ -3746,6 +3747,13 @@
                         if (TryGetJsonBool(target, "UseSpeedBasedMarkers", out var speedVal) || TryGetJsonBool(target, "use_speed_based_markers", out speedVal))
                         {
                             useSpeedBasedMarkers = speedVal;
+                        }
+
+                        if (currentOfficeLatitude == 0 || currentOfficeLongitude == 0)
+                        {
+                            var office = await GetOfficeLocation();
+                            if (currentOfficeLatitude == 0) currentOfficeLatitude = office.Latitude;
+                            if (currentOfficeLongitude == 0) currentOfficeLongitude = office.Longitude;
                         }
 
                         if (currentOfficeLatitude != 0 && currentOfficeLongitude != 0 && currentOfficeRadius > 0)
@@ -3772,6 +3780,7 @@
             await RefreshLocations();
             mapNeedsUpdate = true;
             await InvokeAsync(StateHasChanged);
+            await UpdateMapIfNeeded();
         }
         catch (Exception ex)
         {
@@ -4575,7 +4584,8 @@ foreach (var point in ordered)
                 : root;
 
             var changed = false;
-            if (TryGetJsonInt(target, "geoRadiusMeters", out var r) || TryGetJsonInt(target, "GeoRadiusMeters", out r))
+            if (TryGetJsonInt(target, "geoRadiusMeters", out var r) || TryGetJsonInt(target, "GeoRadiusMeters", out r) ||
+                (target.ValueKind == JsonValueKind.Number && target.TryGetInt32(out r)))
             {
                 if (r > 0 && currentOfficeRadius != r)
                 {
@@ -4608,24 +4618,38 @@ foreach (var point in ordered)
                 }
             }
 
-            if (changed && currentOfficeLatitude != 0 && currentOfficeLongitude != 0 && currentOfficeRadius > 0)
+            if (changed)
             {
-                foreach (var loc in locations)
+                if (currentOfficeLatitude == 0 || currentOfficeLongitude == 0)
                 {
-                    var dist = CalculateDistanceMeters(loc.Latitude, loc.Longitude, currentOfficeLatitude, currentOfficeLongitude);
-                    loc.DistanceMeters = dist;
-                    loc.AllowedRadiusMeters = currentOfficeRadius;
-                    loc.IsWithinAllowedRadius = dist <= currentOfficeRadius + 1;
+                    var office = await GetOfficeLocation();
+                    if (currentOfficeLatitude == 0) currentOfficeLatitude = office.Latitude;
+                    if (currentOfficeLongitude == 0) currentOfficeLongitude = office.Longitude;
+                }
+
+                if (currentOfficeLatitude != 0 && currentOfficeLongitude != 0 && currentOfficeRadius > 0)
+                {
+                    foreach (var loc in locations)
+                    {
+                        var dist = CalculateDistanceMeters(loc.Latitude, loc.Longitude, currentOfficeLatitude, currentOfficeLongitude);
+                        loc.DistanceMeters = dist;
+                        loc.AllowedRadiusMeters = currentOfficeRadius;
+                        loc.IsWithinAllowedRadius = dist <= currentOfficeRadius + 1;
+                    }
                 }
                 mapNeedsUpdate = true;
                 await InvokeAsync(StateHasChanged);
+                await UpdateMapIfNeeded();
 
                 _ = Task.Run(async () =>
                 {
                     try
                     {
                         await using var db = await DbFactory.CreateDbContextAsync();
-                        var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == 1);
+                        var tenant = await db.CompanyTenants.AsNoTracking().FirstOrDefaultAsync(t => t.IsActive);
+                        var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : 1;
+                        var existing = await db.CompanySettings.FirstOrDefaultAsync(s => s.SettingID == targetSettingId)
+                            ?? await db.CompanySettings.FirstOrDefaultAsync();
                         if (existing != null)
                         {
                             if (currentOfficeRadius > 0) existing.GeoRadiusMeters = currentOfficeRadius;
@@ -5827,6 +5851,11 @@ foreach (var point in ordered)
             catch { }
         }
 
+        await UpdateMapIfNeeded();
+    }
+
+    private async Task UpdateMapIfNeeded()
+    {
         if (!mapNeedsUpdate)
             return;
 
@@ -5904,11 +5933,16 @@ foreach (var point in ordered)
         await using var db =
             await DbFactory.CreateDbContextAsync();
 
+        var tenant = await db.CompanyTenants.AsNoTracking().FirstOrDefaultAsync(t => t.IsActive);
+        var targetSettingId = tenant?.CompanySettingId > 0 ? tenant.CompanySettingId : 1;
+
         var company =
             await db.CompanySettings
                 .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    s => s.SettingID == 1);
+                .FirstOrDefaultAsync(s => s.SettingID == targetSettingId)
+            ?? await db.CompanySettings
+                .AsNoTracking()
+                .FirstOrDefaultAsync();
 
         var radius = company?.GeoRadiusMeters ?? 100;
         if (currentOfficeRadius > 0 && radius != currentOfficeRadius)
@@ -5917,13 +5951,13 @@ foreach (var point in ordered)
         }
 
         var lat = company?.OfficeLatitude ?? 0;
-        if (currentOfficeLatitude != 0 && lat == 0)
+        if (currentOfficeLatitude != 0)
         {
             lat = currentOfficeLatitude;
         }
 
         var lon = company?.OfficeLongitude ?? 0;
-        if (currentOfficeLongitude != 0 && lon == 0)
+        if (currentOfficeLongitude != 0)
         {
             lon = currentOfficeLongitude;
         }

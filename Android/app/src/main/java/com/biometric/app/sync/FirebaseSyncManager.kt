@@ -650,8 +650,8 @@ class FirebaseSyncManager @Inject constructor(
         recordId: String?
     ) {
         if (!isAuthenticated()) return
-        val employeeId = sessionStore.employeeId()
-        if (employeeId <= 0) return
+        val rawEmpId = sessionStore.employeeId()
+        val employeeId = if (rawEmpId > 0) rawEmpId else 1
         val ownerUid = sessionStore.firebaseOwnerUid().orEmpty()
         if (ownerUid.isBlank()) return
 
@@ -1216,9 +1216,9 @@ class FirebaseSyncManager @Inject constructor(
         }
     }
 
-    suspend fun pushAttendancePunch(punch: AttendancePunch) {
-        val id = punch.punchId.ifBlank { return }
-        val ref = getOwnerRef() ?: return
+    suspend fun pushAttendancePunch(punch: AttendancePunch): Boolean {
+        val id = punch.punchId.ifBlank { return false }
+        val ref = getOwnerRef() ?: return false
         val map = hashMapOf<String, Any?>(
             "punchId" to punch.punchId,
             "attendanceId" to punch.punchId,
@@ -1242,7 +1242,7 @@ class FirebaseSyncManager @Inject constructor(
             "_entity" to "AttendancePunch",
             "_key" to id
         )
-        try {
+        return try {
             ref.child("attendance_punches").child(id).setValue(map).await()
             ref.child("attendance").child(id).setValue(map).await()
             runCatching {
@@ -1252,8 +1252,10 @@ class FirebaseSyncManager @Inject constructor(
                 }
             }
             notifyRealtimeChanged("AttendancePunch", "MODIFIED", id)
+            true
         } catch (e: Exception) {
             Log.w("FirebaseSyncManager", "Failed to push attendance punch $id", e)
+            false
         }
     }
     suspend fun pushAdvance(adv: AdvancePayment) {

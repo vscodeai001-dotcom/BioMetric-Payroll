@@ -950,7 +950,33 @@
                 shiftEndDt = baseD.AddHours(16);
             }
 
-            var dayPunches = group.OrderBy(x => x.PunchTime).ToList();
+            // Deduplicate punches that share identical minute + direction + BiometricID (e.g. companion attendance session vs raw punch)
+            var dayPunches = group
+                .OrderBy(x => x.PunchTime)
+                .ThenBy(x => AttendancePunchProcessor.GetPunchTier(x))
+                .GroupBy(p =>
+                {
+                    bool isOut = AttendancePunchProcessor.IsExplicitOutPunch(p);
+                    string dir = isOut ? "OUT" : "IN";
+                    // If BiometricID starts with AUTO_ or GEOFENCE, group by employee + minute + dir
+                    if (!string.IsNullOrEmpty(p.BiometricID) &&
+                        (p.BiometricID.StartsWith("AUTO_", StringComparison.OrdinalIgnoreCase) ||
+                         p.BiometricID.Equals("GEOFENCE_AUTO", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return $"{p.EmployeeID}_{p.PunchTime:yyyyMMdd_HHmm}_{dir}_{p.BiometricID.ToUpperInvariant()}";
+                    }
+                    return $"{p.EmployeeID}_{p.PunchTime:yyyyMMdd_HHmm}_{dir}_{(p.LogID > 0 ? p.LogID.ToString() : p.BiometricID)}";
+                })
+                .Select(g =>
+                {
+                    // Prefer genuine GeofenceAuto / Physical over fallback ManualCorrection
+                    var preferred = g.FirstOrDefault(x =>
+                        string.Equals(x.DeviceID, "AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(x.DeviceID, "GeofenceAuto", StringComparison.OrdinalIgnoreCase));
+                    return preferred ?? g.First();
+                })
+                .OrderBy(x => x.PunchTime)
+                .ToList();
 
             // Run deterministic AttendancePunchProcessor
             var processResult = PunchProcessor.ProcessPunches(

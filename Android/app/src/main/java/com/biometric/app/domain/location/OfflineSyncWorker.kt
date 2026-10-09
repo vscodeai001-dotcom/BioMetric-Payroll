@@ -358,11 +358,15 @@ class OfflineSyncWorker @AssistedInject constructor(
                     source = local.source,
                     status = local.status
                 )
-                firebaseSync.pushAttendancePunch(punch)
-                withContext(Dispatchers.IO) {
-                    punchDao.upsert(local.copy(syncState = 1))
+                val pushed = firebaseSync.pushAttendancePunch(punch)
+                if (pushed) {
+                    withContext(Dispatchers.IO) {
+                        punchDao.upsert(local.copy(syncState = 1))
+                    }
+                    Log.i("OfflineSyncWorker", "Reconciled offline punch ${local.punchId} to Firebase")
+                } else {
+                    Log.w("OfflineSyncWorker", "Punch ${local.punchId} not yet synced; keeping syncState=0 for next retry")
                 }
-                Log.i("OfflineSyncWorker", "Reconciled offline punch ${local.punchId} to Firebase")
             }
 
             val unsyncedAttendance = withContext(Dispatchers.IO) {

@@ -26,6 +26,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,6 +49,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class GeofenceAutoPunchCoordinator @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val sessionStore: MobileSessionStore,
     private val attendancePolicy: AttendancePolicyRepository,
     private val localAttendancePunchDao: LocalAttendancePunchDao,
@@ -404,8 +407,14 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             }
 
             // 3. Publish directly to Firebase RTDB with a bounded timeout so offline does not block
-            withTimeoutOrNull(4000L) {
-                runCatching { firebaseSync.pushAttendancePunch(punch) }
+            val pushed = withTimeoutOrNull(4000L) {
+                runCatching { firebaseSync.pushAttendancePunch(punch) }.getOrDefault(false)
+            } ?: false
+
+            if (pushed) {
+                localAttendancePunchDao.upsert(local.copy(syncState = 1))
+            } else {
+                OfflineSyncWorker.schedule(context)
             }
 
             lastEvaluatedInside = isInside
