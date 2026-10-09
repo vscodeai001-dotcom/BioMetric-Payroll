@@ -39,6 +39,8 @@ import com.biometric.app.domain.location.GeofenceAutoPunchCoordinator
 import com.biometric.app.domain.location.OfflineSyncWorker
 import com.biometric.app.domain.location.OfflineTrackingMonitor
 import com.biometric.app.sync.SignalRManager
+import android.widget.LinearLayout
+import com.google.android.material.datepicker.MaterialDatePicker
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
@@ -79,8 +81,17 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     // Filter Controls
     private lateinit var spnFilterEmployee: Spinner
     private lateinit var chipGroupDateFilter: ChipGroup
+    private lateinit var btnSearchOffline: MaterialButton
     private lateinit var btnRefreshOffline: MaterialButton
     private lateinit var btnSyncNow: MaterialButton
+
+    // Search Prompt & Results Container
+    private lateinit var cvSearchPrompt: MaterialCardView
+    private lateinit var btnPromptSearch: MaterialButton
+    private lateinit var llResultsContainer: LinearLayout
+    private var hasSearched: Boolean = false
+    private var customStartDateEpoch: Long = 0L
+    private var customEndDateEpoch: Long = 0L
 
     // 4 KPI Summary Cards
     private lateinit var tvOfflineSessionsCount: TextView
@@ -120,10 +131,10 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     private var cloudLoadJob: Job? = null
     private val cloudHistoryCache = mutableMapOf<Int, Pair<Long, List<SignalRManager.LiveLocation>>>()
 
-    private suspend fun getCachedOrFetchHistory(empId: Int, limit: Int = 300): List<SignalRManager.LiveLocation> {
+    private suspend fun getCachedOrFetchHistory(empId: Int, limit: Int = 5000): List<SignalRManager.LiveLocation> {
         val now = System.currentTimeMillis()
         val cached = cloudHistoryCache[empId]
-        if (cached != null && (now - cached.first) < 60_000L) {
+        if (cached != null && (now - cached.first) < 300_000L) {
             return cached.second
         }
         val fetched = signalR.loadTrackingHistory(empId, limit)
@@ -152,8 +163,17 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         // Filter Controls
         spnFilterEmployee = findViewById(R.id.spnFilterEmployee)
         chipGroupDateFilter = findViewById(R.id.chipGroupDateFilter)
+        btnSearchOffline = findViewById(R.id.btnSearchOffline)
         btnRefreshOffline = findViewById(R.id.btnRefreshOffline)
         btnSyncNow = findViewById(R.id.btnSyncNow)
+
+        // Search Prompt & Results Container
+        cvSearchPrompt = findViewById(R.id.cvSearchPrompt)
+        btnPromptSearch = findViewById(R.id.btnPromptSearch)
+        llResultsContainer = findViewById(R.id.llResultsContainer)
+
+        cvSearchPrompt.visibility = View.VISIBLE
+        llResultsContainer.visibility = View.GONE
 
         // 4 KPI Summary Cards
         tvOfflineSessionsCount = findViewById(R.id.tvOfflineSessionsCount)
@@ -216,17 +236,53 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     }
 
     private fun setupListeners() {
+        // Search Buttons
+        val triggerSearch: () -> Unit = {
+            hasSearched = true
+            cvSearchPrompt.visibility = View.GONE
+            llResultsContainer.visibility = View.VISIBLE
+            refreshCloudAndLocal()
+        }
+
+        btnSearchOffline.setOnClickListener { triggerSearch() }
+        btnPromptSearch.setOnClickListener { triggerSearch() }
+
         // Date Filter Chips
         chipGroupDateFilter.setOnCheckedStateChangeListener { _, checkedIds ->
-            dateFilter = when (checkedIds.firstOrNull()) {
+            val checkedId = checkedIds.firstOrNull()
+            if (checkedId == R.id.chipDateCustom) {
+                val picker = MaterialDatePicker.Builder.dateRangePicker()
+                    .setTitleText("Select Date Range")
+                    .build()
+                picker.addOnPositiveButtonClickListener { selection ->
+                    val start = selection.first ?: System.currentTimeMillis()
+                    val end = (selection.second ?: start) + (24 * 3600 * 1000L - 1)
+                    customStartDateEpoch = start
+                    customEndDateEpoch = end
+                    dateFilter = "CUSTOM"
+                    selectedPeriod = null
+                    btnResetMapFilter.visibility = View.GONE
+                    if (hasSearched) {
+                        refreshCloudAndLocal()
+                    }
+                }
+                picker.show(supportFragmentManager, "OFFLINE_DATE_RANGE")
+                return@setOnCheckedStateChangeListener
+            }
+
+            dateFilter = when (checkedId) {
                 R.id.chipDateYesterday -> "YESTERDAY"
                 R.id.chipDate7Days -> "7DAYS"
-                R.id.chipDateMonth -> "MONTH"
+                R.id.chipDateMonth -> "30DAYS"
+                R.id.chipDate60Days -> "60DAYS"
+                R.id.chipDateYear -> "YEAR"
                 else -> "TODAY"
             }
             selectedPeriod = null
             btnResetMapFilter.visibility = View.GONE
-            refreshCloudAndLocal()
+            if (hasSearched) {
+                refreshCloudAndLocal()
+            }
         }
 
         // Employee Dropdown Spinner
@@ -241,7 +297,9 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     selectedEmployeeId = newId
                     selectedPeriod = null
                     btnResetMapFilter.visibility = View.GONE
-                    refreshCloudAndLocal()
+                    if (hasSearched) {
+                        refreshCloudAndLocal()
+                    }
                 }
             }
 
@@ -252,11 +310,16 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         btnResetMapFilter.setOnClickListener {
             selectedPeriod = null
             btnResetMapFilter.visibility = View.GONE
-            refreshCloudAndLocal()
+            if (hasSearched) {
+                refreshCloudAndLocal()
+            }
         }
 
         // Refresh Button
         btnRefreshOffline.setOnClickListener {
+            hasSearched = true
+            cvSearchPrompt.visibility = View.GONE
+            llResultsContainer.visibility = View.VISIBLE
             cloudHistoryCache.clear()
             signalR.reconcileLiveLocationsNow()
             refreshCloudAndLocal()
@@ -269,7 +332,9 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             Toast.makeText(this, "Offline GPS synchronization scheduled", Toast.LENGTH_SHORT).show()
             lifecycleScope.launch {
                 delay(1200L)
-                refreshCloudAndLocal()
+                if (hasSearched) {
+                    refreshCloudAndLocal()
+                }
             }
         }
     }
@@ -277,13 +342,10 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     override fun onStart() {
         super.onStart()
         refreshJob?.cancel()
-        refreshJob = lifecycleScope.launch {
-            while (isActive) {
-                delay(15000L)
-                refreshCloudAndLocal()
-            }
+        refreshJob = null
+        if (hasSearched) {
+            refreshCloudAndLocal()
         }
-        refreshCloudAndLocal()
     }
 
     override fun onStop() {
@@ -297,21 +359,18 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             repo.allEmployeesFlow.collect { list ->
                 activeEmployees = list.filter { it.isActive }
                 updateEmployeeSpinner()
-                refreshCloudAndLocal()
             }
         }
 
         lifecycleScope.launch {
             repo.allAttendanceFlow.collect { attList ->
                 allAttendanceList = attList
-                refreshCloudAndLocal()
             }
         }
 
         lifecycleScope.launch {
             punchDao.getAllFlow().collect { punches ->
                 allPunchesList = punches
-                refreshCloudAndLocal()
             }
         }
     }
@@ -349,11 +408,30 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 val now = System.currentTimeMillis()
                 weekStart to now
             }
-            "MONTH" -> {
-                cal.set(Calendar.DAY_OF_MONTH, 1)
-                val monthStart = cal.timeInMillis
+            "30DAYS", "MONTH" -> {
+                val monthStart = todayStart - 29 * 24 * 3600 * 1000L
                 val now = System.currentTimeMillis()
                 monthStart to now
+            }
+            "60DAYS" -> {
+                val days60Start = todayStart - 59 * 24 * 3600 * 1000L
+                val now = System.currentTimeMillis()
+                days60Start to now
+            }
+            "YEAR" -> {
+                val yearCal = Calendar.getInstance(TimeZone.getTimeZone("Asia/Kolkata"))
+                yearCal.add(Calendar.YEAR, -1)
+                val yearStart = yearCal.timeInMillis
+                val now = System.currentTimeMillis()
+                yearStart to now
+            }
+            "CUSTOM" -> {
+                if (customStartDateEpoch > 0L && customEndDateEpoch > 0L) {
+                    customStartDateEpoch to customEndDateEpoch
+                } else {
+                    val weekStart = todayStart - 6 * 24 * 3600 * 1000L
+                    weekStart to System.currentTimeMillis()
+                }
             }
             else -> { // TODAY
                 val now = System.currentTimeMillis()
@@ -363,20 +441,18 @@ class OfflineTrackingActivity : MotionBaseActivity() {
     }
 
     private fun refreshCloudAndLocal() {
+        if (!hasSearched) return
         cloudLoadJob?.cancel()
         cloudLoadJob = lifecycleScope.launch(Dispatchers.IO) {
             val (fromEpoch, toEpoch) = getDateRangeEpoch()
 
             // Office Coordinates from Room/Settings
-            val officeEmp = activeEmployees.firstOrNull()
             officeLat = 11.9308
             officeLng = 79.7849
             officeRadiusMeters = 800
 
-            val localRecent = locationDao.getRecent(500)
-                .filter { it.timestamp in fromEpoch..toEpoch }
-            val localEvents = eventDao.recent(150)
-                .filter { it.eventTime in fromEpoch..toEpoch }
+            val localRecent = locationDao.getBetween(fromEpoch, toEpoch)
+            val localEvents = eventDao.getBetween(fromEpoch, toEpoch)
 
             val empNameMap = activeEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
             val allLocalPunches = try {
@@ -390,7 +466,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             if (selectedEmployeeId > 0) {
                 val empId = selectedEmployeeId
                 val empName = empNameMap[empId] ?: "Employee #$empId"
-                val hist = getCachedOrFetchHistory(empId, 300)
+                val hist = getCachedOrFetchHistory(empId, 5000)
                     .filter {
                         val epoch = parseTrackingTimestamp(it.timestamp)
                         epoch in fromEpoch..toEpoch
@@ -420,10 +496,37 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                     )
                 }
 
+                val punchPoints = allLocalPunches.filter { p ->
+                    val pId = p.staffId.toIntOrNull() ?: 0
+                    (pId == empId || p.staffId == empId.toString()) &&
+                    p.latitude != 0.0 && p.longitude != 0.0
+                }.map { p ->
+                    LocalLocation(
+                        id = 0,
+                        sessionId = p.punchId,
+                        clientEventId = UUID.randomUUID().toString(),
+                        sequence = 0L,
+                        latitude = p.latitude,
+                        longitude = p.longitude,
+                        accuracy = 10f,
+                        speed = 0f,
+                        bearing = 0f,
+                        batteryLevel = 100,
+                        timestamp = p.timestamp,
+                        capturedElapsedRealtime = 0L,
+                        syncState = LocalLocation.SYNCED,
+                        attemptCount = 1,
+                        lastAttemptAt = p.timestamp,
+                        syncedAt = p.timestamp,
+                        lastError = null,
+                        isOfflineCapture = true
+                    )
+                }
+
                 val combinedPoints = if (empId == sessionStore.employeeId()) {
-                    (convertedHist + localRecent).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
+                    (convertedHist + localRecent + punchPoints).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
                 } else {
-                    convertedHist
+                    (convertedHist + punchPoints).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
                 }
 
                 val empProfile = activeEmployees.firstOrNull { it.employeeId == empId.toString() }
@@ -433,7 +536,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 // All Employees
                 for (emp in activeEmployees) {
                     val eid = emp.employeeId.toIntOrNull() ?: continue
-                    val hist = getCachedOrFetchHistory(eid, 200).filter {
+                    val hist = getCachedOrFetchHistory(eid, 5000).filter {
                         val epoch = parseTrackingTimestamp(it.timestamp)
                         epoch in fromEpoch..toEpoch
                     }
@@ -461,10 +564,37 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                         )
                     }
 
+                    val punchPoints = allLocalPunches.filter { p ->
+                        val pId = p.staffId.toIntOrNull() ?: 0
+                        (pId == eid || p.staffId == eid.toString()) &&
+                        p.latitude != 0.0 && p.longitude != 0.0
+                    }.map { p ->
+                        LocalLocation(
+                            id = 0,
+                            sessionId = p.punchId,
+                            clientEventId = UUID.randomUUID().toString(),
+                            sequence = 0L,
+                            latitude = p.latitude,
+                            longitude = p.longitude,
+                            accuracy = 10f,
+                            speed = 0f,
+                            bearing = 0f,
+                            batteryLevel = 100,
+                            timestamp = p.timestamp,
+                            capturedElapsedRealtime = 0L,
+                            syncState = LocalLocation.SYNCED,
+                            attemptCount = 1,
+                            lastAttemptAt = p.timestamp,
+                            syncedAt = p.timestamp,
+                            lastError = null,
+                            isOfflineCapture = true
+                        )
+                    }
+
                     val pointsForEmp = if (eid == sessionStore.employeeId()) {
-                        (converted + localRecent).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
+                        (converted + localRecent + punchPoints).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
                     } else {
-                        converted
+                        (converted + punchPoints).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }
                     }
 
                     if (pointsForEmp.isNotEmpty()) {
@@ -823,13 +953,13 @@ class OfflineTrackingActivity : MotionBaseActivity() {
         val result = mutableListOf<OfflinePeriodItem>()
         val rawClusters = mutableListOf<MutableList<LocalLocation>>()
 
-        // 1. Contiguous runs of explicit offline points (with gap <= 20 mins between consecutive points)
+        // 1. Contiguous runs of explicit offline points (with gap <= 5 mins between consecutive points)
         var currentOfflineRun = mutableListOf<LocalLocation>()
         for (i in sorted.indices) {
             val pt = sorted[i]
             if (pt.isOfflineCapture) {
                 if (currentOfflineRun.isEmpty()) {
-                    if (i > 0 && (pt.timestamp - sorted[i - 1].timestamp) <= 30 * 60 * 1000L) {
+                    if (i > 0 && (pt.timestamp - sorted[i - 1].timestamp) <= 15 * 60 * 1000L) {
                         currentOfflineRun.add(sorted[i - 1])
                     }
                     currentOfflineRun.add(pt)
@@ -842,7 +972,7 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                             rawClusters.add(currentOfflineRun)
                         }
                         currentOfflineRun = mutableListOf()
-                        if (i > 0 && (pt.timestamp - sorted[i - 1].timestamp) <= 30 * 60 * 1000L) {
+                        if (i > 0 && (pt.timestamp - sorted[i - 1].timestamp) <= 15 * 60 * 1000L) {
                             currentOfflineRun.add(sorted[i - 1])
                         }
                         currentOfflineRun.add(pt)
@@ -862,12 +992,12 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             rawClusters.add(currentOfflineRun)
         }
 
-        // 2. Detect gaps between consecutive points (>= 10 mins and <= 48 hours)
+        // 2. Detect gaps between consecutive points (>= 5 mins and <= 48 hours)
         for (i in 1 until sorted.size) {
             val prev = sorted[i - 1]
             val curr = sorted[i]
             val gap = curr.timestamp - prev.timestamp
-            if (gap in (10 * 60 * 1000L)..(48 * 3600 * 1000L)) {
+            if (gap in (5 * 60 * 1000L)..(48 * 3600 * 1000L)) {
                 val gapPoints = sorted.filter { it.timestamp in prev.timestamp..curr.timestamp }
                 if (gapPoints.size >= 2) {
                     rawClusters.add(gapPoints.toMutableList())
@@ -877,7 +1007,120 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             }
         }
 
-        // 3. Sort & Merge overlapping or adjacent clusters (within 5 minutes)
+        // 2b. Explicit Offline Auto Geofence Punch Sessions (anchored by mobile device punches)
+        val empOfflinePunches = localPunches.filter { p ->
+            val pId = p.staffId.toIntOrNull() ?: 0
+            (pId == employeeId || p.staffId == employeeId.toString() || employeeId == 0) &&
+            p.latitude != 0.0 && p.longitude != 0.0
+        }.sortedBy { it.timestamp }
+
+        if (empOfflinePunches.isNotEmpty()) {
+            val punchGroups = mutableListOf<MutableList<LocalAttendancePunch>>()
+            var currentGroup = mutableListOf<LocalAttendancePunch>()
+
+            for (p in empOfflinePunches) {
+                if (currentGroup.isEmpty()) {
+                    currentGroup.add(p)
+                } else {
+                    val prevP = currentGroup.last()
+                    if ((p.timestamp - prevP.timestamp) <= 35 * 60 * 1000L) {
+                        currentGroup.add(p)
+                    } else {
+                        punchGroups.add(currentGroup)
+                        currentGroup = mutableListOf(p)
+                    }
+                }
+            }
+            if (currentGroup.isNotEmpty()) {
+                punchGroups.add(currentGroup)
+            }
+
+            for (group in punchGroups) {
+                if (group.size >= 2) {
+                    val firstP = group.first()
+                    val lastP = group.last()
+                    val sessionPoints = sorted.filter {
+                        it.timestamp in (firstP.timestamp - 2 * 60 * 1000L)..(lastP.timestamp + 2 * 60 * 1000L)
+                    }.toMutableList()
+
+                    if (sessionPoints.size < 2) {
+                        val converted = group.map { gp ->
+                            LocalLocation(
+                                id = 0,
+                                sessionId = gp.punchId,
+                                clientEventId = UUID.randomUUID().toString(),
+                                sequence = 0L,
+                                latitude = gp.latitude,
+                                longitude = gp.longitude,
+                                accuracy = 10f,
+                                speed = 0f,
+                                bearing = 0f,
+                                batteryLevel = 100,
+                                timestamp = gp.timestamp,
+                                capturedElapsedRealtime = 0L,
+                                syncState = LocalLocation.SYNCED,
+                                attemptCount = 1,
+                                lastAttemptAt = gp.timestamp,
+                                syncedAt = gp.timestamp,
+                                lastError = null,
+                                isOfflineCapture = true
+                            )
+                        }.toMutableList()
+                        rawClusters.add(converted)
+                    } else {
+                        rawClusters.add(sessionPoints)
+                    }
+                } else {
+                    val p = group[0]
+                    val sTime = p.timestamp - 5 * 60 * 1000L
+                    val eTime = p.timestamp + 15 * 60 * 1000L
+
+                    val pStart = LocalLocation(
+                        id = 0,
+                        sessionId = p.punchId,
+                        clientEventId = UUID.randomUUID().toString(),
+                        sequence = 0L,
+                        latitude = p.latitude,
+                        longitude = p.longitude,
+                        accuracy = 10f,
+                        speed = 0f,
+                        bearing = 0f,
+                        batteryLevel = 100,
+                        timestamp = sTime,
+                        capturedElapsedRealtime = 0L,
+                        syncState = LocalLocation.SYNCED,
+                        attemptCount = 1,
+                        lastAttemptAt = sTime,
+                        syncedAt = sTime,
+                        lastError = null,
+                        isOfflineCapture = true
+                    )
+                    val pEnd = LocalLocation(
+                        id = 0,
+                        sessionId = p.punchId,
+                        clientEventId = UUID.randomUUID().toString(),
+                        sequence = 0L,
+                        latitude = p.latitude,
+                        longitude = p.longitude,
+                        accuracy = 10f,
+                        speed = 0f,
+                        bearing = 0f,
+                        batteryLevel = 100,
+                        timestamp = eTime,
+                        capturedElapsedRealtime = 0L,
+                        syncState = LocalLocation.SYNCED,
+                        attemptCount = 1,
+                        lastAttemptAt = eTime,
+                        syncedAt = eTime,
+                        lastError = null,
+                        isOfflineCapture = true
+                    )
+                    rawClusters.add(mutableListOf(pStart, pEnd))
+                }
+            }
+        }
+
+        // 3. Sort & Merge overlapping or contiguous clusters
         val sortedClusters = rawClusters
             .map { it.distinctBy { pt -> "${pt.latitude}_${pt.longitude}_${pt.timestamp}" }.sortedBy { pt -> pt.timestamp }.toMutableList() }
             .filter { it.size >= 2 }
@@ -891,7 +1134,14 @@ class OfflineTrackingActivity : MotionBaseActivity() {
                 val lastCluster = clusters.last()
                 val lastEnd = lastCluster.last().timestamp
                 val candStart = cand.first().timestamp
-                if (candStart <= lastEnd + 5 * 60 * 1000L) {
+
+                val hasOnlineBetween = sorted.any { pt ->
+                    pt.timestamp > lastEnd &&
+                    pt.timestamp < candStart &&
+                    !pt.isOfflineCapture
+                }
+
+                if (candStart <= lastEnd + 5 * 60 * 1000L && !hasOnlineBetween) {
                     val combined = (lastCluster + cand).distinctBy { "${it.latitude}_${it.longitude}_${it.timestamp}" }.sortedBy { it.timestamp }.toMutableList()
                     clusters[clusters.size - 1] = combined
                 } else {
@@ -960,8 +1210,8 @@ class OfflineTrackingActivity : MotionBaseActivity() {
             val punchesInGap = localPunches.filter { p ->
                 val pStaffId = p.staffId.toIntOrNull() ?: 0
                 (pStaffId == employeeId || employeeId == 0 || p.staffId == employeeId.toString()) &&
-                        p.timestamp >= (first.timestamp - 120_000L) &&
-                        p.timestamp <= (last.timestamp + 120_000L)
+                        p.timestamp >= (first.timestamp - 180_000L) &&
+                        p.timestamp <= (last.timestamp + 180_000L)
             }.sortedBy { it.timestamp }.map { p ->
                 val isOutside = if (officeLat != 0.0 && officeLng != 0.0 && p.latitude != 0.0) {
                     calculateDistance(p.latitude, p.longitude, officeLat, officeLng) > officeRadiusMeters
@@ -1278,16 +1528,18 @@ private class OfflinePeriodAdapter(
             val timeFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
             val punchFmt = SimpleDateFormat("hh:mm a", Locale.US).apply { timeZone = tz }
 
+            val isNight = (itemView.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
             tvTitle.text = if (item.employeeName.isNotBlank()) item.employeeName else "Employee #${item.employeeId}"
             tvWindow.text = "Disconnected: ${fmt.format(Date(item.startTime))} → Reconnected: ${timeFmt.format(Date(item.endTime))} IST"
 
             tvShiftTag.text = item.shiftTag
             if (item.isOffShift) {
-                tvShiftTag.setTextColor(Color.parseColor("#616161"))
-                tvShiftTag.setBackgroundColor(Color.parseColor("#EEEEEE"))
+                tvShiftTag.setTextColor(if (isNight) Color.parseColor("#94A3B8") else Color.parseColor("#616161"))
+                tvShiftTag.setBackgroundColor(if (isNight) Color.parseColor("#1E293B") else Color.parseColor("#EEEEEE"))
             } else {
-                tvShiftTag.setTextColor(Color.parseColor("#E65100"))
-                tvShiftTag.setBackgroundColor(Color.parseColor("#FFF3E0"))
+                tvShiftTag.setTextColor(if (isNight) Color.parseColor("#FBBF24") else Color.parseColor("#E65100"))
+                tvShiftTag.setBackgroundColor(if (isNight) Color.parseColor("#332A15") else Color.parseColor("#FFF3E0"))
             }
 
             val mins = item.durationMs / 60000
@@ -1302,10 +1554,10 @@ private class OfflinePeriodAdapter(
 
             if (item.isSynced) {
                 tvSyncStatus.text = "✓ Reconciled into Live Data"
-                tvSyncStatus.setTextColor(Color.parseColor("#2E7D32"))
+                tvSyncStatus.setTextColor(if (isNight) Color.parseColor("#34D399") else Color.parseColor("#2E7D32"))
             } else {
                 tvSyncStatus.text = "⏳ Local Queue (Pending Sync)"
-                tvSyncStatus.setTextColor(Color.parseColor("#F57C00"))
+                tvSyncStatus.setTextColor(if (isNight) Color.parseColor("#FBBF24") else Color.parseColor("#F57C00"))
             }
 
             // Live Attendance Impact Badge & Detailed Summary
@@ -1317,33 +1569,33 @@ private class OfflinePeriodAdapter(
             when {
                 hasAutoOut -> {
                     tvLiveImpactBadge.text = "⚡ Auto OUT Punch Triggered"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#C62828"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#FFEBEE"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#F87171") else Color.parseColor("#C62828"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#351B21") else Color.parseColor("#FFEBEE"))
                 }
                 hasPunches -> {
                     tvLiveImpactBadge.text = "🟢 Reconciled Attendance Punch"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#2E7D32"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#34D399") else Color.parseColor("#2E7D32"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#142C22") else Color.parseColor("#E8F5E9"))
                 }
                 item.isOffShift -> {
                     tvLiveImpactBadge.text = "🌙 Off-Duty Window (No Impact)"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#616161"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#EEEEEE"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#94A3B8") else Color.parseColor("#616161"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#1E293B") else Color.parseColor("#EEEEEE"))
                 }
                 item.priorState == "IN" && outOfRadiusCount == 0 -> {
                     tvLiveImpactBadge.text = "🛡️ No Live Attendance Impact"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#2E7D32"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E8F5E9"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#34D399") else Color.parseColor("#2E7D32"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#142C22") else Color.parseColor("#E8F5E9"))
                 }
                 item.priorState == "OUT" -> {
                     tvLiveImpactBadge.text = "🛡️ No Attendance State Change"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#455A64"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#ECEFF1"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#94A3B8") else Color.parseColor("#455A64"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#1E293B") else Color.parseColor("#ECEFF1"))
                 }
                 else -> {
                     tvLiveImpactBadge.text = "🛡️ No Live Attendance Impact"
-                    tvLiveImpactBadge.setTextColor(Color.parseColor("#1565C0"))
-                    tvLiveImpactBadge.setBackgroundColor(Color.parseColor("#E3F2FD"))
+                    tvLiveImpactBadge.setTextColor(if (isNight) Color.parseColor("#60A5FA") else Color.parseColor("#1565C0"))
+                    tvLiveImpactBadge.setBackgroundColor(if (isNight) Color.parseColor("#172554") else Color.parseColor("#E3F2FD"))
                 }
             }
 

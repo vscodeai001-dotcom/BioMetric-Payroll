@@ -14,6 +14,9 @@ interface OfflineTrackingEventDao {
     @Query("SELECT * FROM offline_tracking_events ORDER BY eventTime DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<OfflineTrackingEvent>
 
+    @Query("SELECT * FROM offline_tracking_events WHERE eventTime >= :fromEpoch AND eventTime <= :toEpoch ORDER BY eventTime ASC")
+    suspend fun getBetween(fromEpoch: Long, toEpoch: Long): List<OfflineTrackingEvent>
+
     @Query("SELECT * FROM offline_tracking_events WHERE syncState != 'SYNCED' ORDER BY eventTime ASC")
     suspend fun getPendingSync(): List<OfflineTrackingEvent>
 

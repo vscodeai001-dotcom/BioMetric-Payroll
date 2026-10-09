@@ -8824,17 +8824,47 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
         const element = document.getElementById(mapId);
         if (!element || !window.L) return;
 
-        const existing = window.offlineTrackingMaps[mapId];
-        if (existing?.map) {
-            try { existing.map.remove(); } catch { }
-            delete window.offlineTrackingMaps[mapId];
-        }
+        const isDarkMode = Boolean(
+            document.body.classList.contains('dark') ||
+            document.documentElement.getAttribute('data-bs-theme') === 'dark' ||
+            document.body.getAttribute('data-bs-theme') === 'dark' ||
+            document.documentElement.getAttribute('data-theme') === 'dark'
+        );
 
-        const map = L.map(element, { zoomControl: true, attributionControl: true });
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        let mapState = window.offlineTrackingMaps[mapId];
+        let map = mapState?.map;
+        let layerGroup = mapState?.layerGroup;
+        let tileLayer = mapState?.tileLayer;
+
+        const tileUrl = isDarkMode
+            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+            : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+        const tileAttribution = isDarkMode
+            ? '© OpenStreetMap, © CARTO'
+            : '© OpenStreetMap contributors';
+
+        if (!map || !element._leaflet_id) {
+            // First time initialization on this DOM element
+            if (element._leaflet_id) {
+                element._leaflet_id = null;
+            }
+            map = L.map(element, { zoomControl: true, attributionControl: true });
+            tileLayer = L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttribution }).addTo(map);
+            layerGroup = L.layerGroup().addTo(map);
+            mapState = { map, layerGroup, tileLayer, isDarkMode };
+            window.offlineTrackingMaps[mapId] = mapState;
+        } else {
+            // Reusing existing map instance - toggle tile layer if theme changed
+            if (mapState.isDarkMode !== isDarkMode) {
+                if (tileLayer) {
+                    try { map.removeLayer(tileLayer); } catch { }
+                }
+                tileLayer = L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttribution }).addTo(map);
+                mapState.tileLayer = tileLayer;
+                mapState.isDarkMode = isDarkMode;
+            }
+            layerGroup.clearLayers();
+        }
 
         const bounds = [];
         const routeBounds = [];
@@ -8851,21 +8881,21 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
 
             L.circle(officeLatLng, {
                 radius: officeRadius,
-                color: '#2563eb',
-                fillColor: '#3b82f6',
-                fillOpacity: 0.15,
+                color: isDarkMode ? '#60a5fa' : '#2563eb',
+                fillColor: isDarkMode ? '#3b82f6' : '#3b82f6',
+                fillOpacity: isDarkMode ? 0.2 : 0.15,
                 weight: 2
-            }).addTo(map);
+            }).addTo(layerGroup);
 
             const officeIcon = L.divIcon({
-                className: 'offline-map-office-icon',
-                html: '<div style="background:#1d4ed8;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:18px;">🏢</div>',
+                className: 'offline-custom-pin',
+                html: '<div style="background:#1d4ed8;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.35);font-size:18px;border:2px solid #fff;">🏢</div>',
                 iconSize: [34, 34],
                 iconAnchor: [17, 17]
             });
             L.marker(officeLatLng, { icon: officeIcon })
                 .bindPopup(`<b>🏢 Office Center</b><br>Geofence Radius: ${officeRadius}m`)
-                .addTo(map);
+                .addTo(layerGroup);
         }
 
         // 2. Route polylines & breadcrumbs
@@ -8881,31 +8911,33 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
             const latLngs = validPoints.map(p => [Number(p.lat ?? p.latitude), Number(p.lng ?? p.longitude)]);
             latLngs.forEach(ll => routeBounds.push(ll));
 
-            // Polyline
-            L.polyline(latLngs, {
-                color: '#ea580c',
-                weight: 6,
-                opacity: 0.95,
-                lineCap: 'round',
-                lineJoin: 'round'
-            }).addTo(map);
+            if (latLngs.length >= 2) {
+                // Bold Polyline
+                L.polyline(latLngs, {
+                    color: '#ea580c',
+                    weight: 6,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }).addTo(layerGroup);
 
-            // Intermediate breadcrumb dots along the route
-            if (validPoints.length > 2) {
-                for (let i = 1; i < validPoints.length - 1; i++) {
-                    const pt = validPoints[i];
-                    const lat = Number(pt.lat ?? pt.latitude);
-                    const lng = Number(pt.lng ?? pt.longitude);
-                    L.circleMarker([lat, lng], {
-                        radius: 5,
-                        fillColor: '#f97316',
-                        color: '#ffffff',
-                        weight: 2,
-                        fillOpacity: 1
-                    }).bindTooltip(`<b>📍 Breadcrumb #${pt.index || (i + 1)}</b><br>Time: <b>${pt.timestamp || ''}</b>`, {
-                        permanent: false,
-                        direction: 'top'
-                    }).addTo(map);
+                // Intermediate breadcrumb dots along the route
+                if (validPoints.length > 2) {
+                    for (let i = 1; i < validPoints.length - 1; i++) {
+                        const pt = validPoints[i];
+                        const lat = Number(pt.lat ?? pt.latitude);
+                        const lng = Number(pt.lng ?? pt.longitude);
+                        L.circleMarker([lat, lng], {
+                            radius: 5,
+                            fillColor: '#f97316',
+                            color: '#ffffff',
+                            weight: 2,
+                            fillOpacity: 1
+                        }).bindTooltip(`<b>📍 Breadcrumb #${pt.index || (i + 1)}</b><br>Time: <b>${pt.timestamp || ''}</b>`, {
+                            permanent: false,
+                            direction: 'top'
+                        }).addTo(layerGroup);
+                    }
                 }
             }
 
@@ -8914,43 +8946,45 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
             const startLat = Number(startPt.lat ?? startPt.latitude);
             const startLng = Number(startPt.lng ?? startPt.longitude);
             const startIcon = L.divIcon({
-                className: 'offline-start-pin',
-                html: `<div style="background:#dc2626;color:#fff;border-radius:20px;padding:4px 11px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;box-shadow:0 3px 8px rgba(0,0,0,0.35);border:2px solid #fff;white-space:nowrap;">
+                className: 'offline-custom-pin',
+                html: `<div style="background:#dc2626;color:#fff;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;box-shadow:0 3px 10px rgba(0,0,0,0.45);border:2px solid #ffffff;white-space:nowrap;width:max-content;pointer-events:auto;">
                     <span>📴</span>
                     <span>Disconnected ${payload.startTime || startPt.timestamp || ''}</span>
                 </div>`,
-                iconSize: [150, 28],
-                iconAnchor: [75, 28]
+                iconSize: null,
+                iconAnchor: [50, 16]
             });
             L.marker([startLat, startLng], { icon: startIcon, zIndexOffset: 1000 })
                 .bindPopup(`<b>📴 Offline Disconnection Start</b><br>
                     Employee: <b>${payload.employeeName || 'Staff'}</b><br>
                     Time: <b>${payload.startTime || startPt.timestamp || '—'}</b><br>
                     Coords: <code>${startLat.toFixed(5)}, ${startLng.toFixed(5)}</code>`)
-                .addTo(map);
+                .addTo(layerGroup);
 
             // Reconnected End Marker
-            const endPt = validPoints[validPoints.length - 1];
-            const endLat = Number(endPt.lat ?? endPt.latitude);
-            const endLng = Number(endPt.lng ?? endPt.longitude);
-            const endIcon = L.divIcon({
-                className: 'offline-end-pin',
-                html: `<div style="background:#16a34a;color:#fff;border-radius:20px;padding:4px 11px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;box-shadow:0 3px 8px rgba(0,0,0,0.35);border:2px solid #fff;white-space:nowrap;">
-                    <span>📶</span>
-                    <span>Reconnected ${payload.endTime || endPt.timestamp || ''}</span>
-                </div>`,
-                iconSize: [150, 28],
-                iconAnchor: [75, 28]
-            });
-            L.marker([endLat, endLng], { icon: endIcon, zIndexOffset: 1000 })
-                .bindPopup(`<b>📶 Reconnected to Central Cloud</b><br>
-                    Employee: <b>${payload.employeeName || 'Staff'}</b><br>
-                    Time: <b>${payload.endTime || endPt.timestamp || '—'}</b><br>
-                    Duration: <b>${payload.duration || '—'}</b><br>
-                    Distance: <b>${payload.distance || '—'}</b><br>
-                    Total Breadcrumbs: <b>${validPoints.length}</b><br>
-                    Coords: <code>${endLat.toFixed(5)}, ${endLng.toFixed(5)}</code>`)
-                .addTo(map);
+            if (validPoints.length >= 2) {
+                const endPt = validPoints[validPoints.length - 1];
+                const endLat = Number(endPt.lat ?? endPt.latitude);
+                const endLng = Number(endPt.lng ?? endPt.longitude);
+                const endIcon = L.divIcon({
+                    className: 'offline-custom-pin',
+                    html: `<div style="background:#16a34a;color:#fff;border-radius:20px;padding:5px 12px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:5px;box-shadow:0 3px 10px rgba(0,0,0,0.45);border:2px solid #ffffff;white-space:nowrap;width:max-content;pointer-events:auto;">
+                        <span>📶</span>
+                        <span>Reconnected ${payload.endTime || endPt.timestamp || ''}</span>
+                    </div>`,
+                    iconSize: null,
+                    iconAnchor: [50, 16]
+                });
+                L.marker([endLat, endLng], { icon: endIcon, zIndexOffset: 1000 })
+                    .bindPopup(`<b>📶 Reconnected to Central Cloud</b><br>
+                        Employee: <b>${payload.employeeName || 'Staff'}</b><br>
+                        Time: <b>${payload.endTime || endPt.timestamp || '—'}</b><br>
+                        Duration: <b>${payload.duration || '—'}</b><br>
+                        Distance: <b>${payload.distance || '—'}</b><br>
+                        Total Breadcrumbs: <b>${validPoints.length}</b><br>
+                        Coords: <code>${endLat.toFixed(5)}, ${endLng.toFixed(5)}</code>`)
+                    .addTo(layerGroup);
+            }
         } else if (validPoints.length > 0) {
             // OVERVIEW MAP: Split into normal and offline segments
             const normalSegments = [];
@@ -8984,13 +9018,13 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
 
             normalSegments.forEach(seg => {
                 if (seg.length > 1) {
-                    L.polyline(seg, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(map);
+                    L.polyline(seg, { color: '#2563eb', weight: 4, opacity: 0.8 }).addTo(layerGroup);
                 }
             });
 
             offlineSegments.forEach(seg => {
                 if (seg.length > 1) {
-                    L.polyline(seg, { color: '#ea580c', weight: 5, opacity: 0.9, dashArray: '6, 8' }).addTo(map);
+                    L.polyline(seg, { color: '#ea580c', weight: 5, opacity: 0.9, dashArray: '6, 8' }).addTo(layerGroup);
                 }
             });
         }
@@ -9000,28 +9034,28 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
             const pInLatLng = [payload.punchIn.lat, payload.punchIn.lng];
             bounds.push(pInLatLng);
             const pInIcon = L.divIcon({
-                className: 'offline-map-punch-in-icon',
-                html: '<div style="background:#15803d;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🟢</div>',
+                className: 'offline-custom-pin',
+                html: '<div style="background:#15803d;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;border:2px solid #fff;">🟢</div>',
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
             });
             L.marker(pInLatLng, { icon: pInIcon })
                 .bindPopup(`<b>🟢 Punch In</b><br>Time: ${payload.punchIn.time || '—'}<br>Source: ${payload.punchIn.source || 'Mobile'}`)
-                .addTo(map);
+                .addTo(layerGroup);
         }
 
         if (!isFocused && payload?.punchOut && Number.isFinite(payload.punchOut.lat) && Number.isFinite(payload.punchOut.lng) && payload.punchOut.lat !== 0) {
             const pOutLatLng = [payload.punchOut.lat, payload.punchOut.lng];
             bounds.push(pOutLatLng);
             const pOutIcon = L.divIcon({
-                className: 'offline-map-punch-out-icon',
-                html: '<div style="background:#b91c1c;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🔴</div>',
+                className: 'offline-custom-pin',
+                html: '<div style="background:#b91c1c;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;border:2px solid #fff;">🔴</div>',
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
             });
             L.marker(pOutLatLng, { icon: pOutIcon })
                 .bindPopup(`<b>🔴 Punch Out</b><br>Time: ${payload.punchOut.time || '—'}`)
-                .addTo(map);
+                .addTo(layerGroup);
         }
 
         // 4. Offline Stay / Dwell Markers
@@ -9036,13 +9070,13 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
             else bounds.push(latLng);
 
             const stayIcon = L.divIcon({
-                className: 'offline-map-stay-marker',
-                html: `<div style="background:#0284c7;color:#fff;border-radius:16px;padding:3px 9px;font-size:11px;font-weight:bold;display:flex;align-items:center;gap:3px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
+                className: 'offline-custom-pin',
+                html: `<div style="background:#0284c7;color:#fff;border-radius:18px;padding:4px 10px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.4);white-space:nowrap;border:2px solid #fff;width:max-content;pointer-events:auto;">
                     <span>📍</span>
                     <span>Stayed ${s.duration || ''}</span>
                 </div>`,
-                iconSize: [110, 28],
-                iconAnchor: [55, 14]
+                iconSize: null,
+                iconAnchor: [45, 14]
             });
 
             L.marker(latLng, { icon: stayIcon })
@@ -9050,7 +9084,7 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                     Duration: <b>${s.duration || '—'}</b><br>
                     Location: ${s.description || '—'}<br>
                     Coords: <code>${lat.toFixed(5)}, ${lng.toFixed(5)}</code>`)
-                .addTo(map);
+                .addTo(layerGroup);
         });
 
         // 5. Live Locations / Employee Markers (overview only)
@@ -9068,12 +9102,12 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                 const badgeBg = isLive ? '#15803d' : (s.status === 'Stale' ? '#b45309' : '#64748b');
 
                 const empIcon = L.divIcon({
-                    className: 'offline-map-emp-marker',
-                    html: `<div style="background:${badgeBg};color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
+                    className: 'offline-custom-pin',
+                    html: `<div style="background:${badgeBg};color:#fff;border-radius:20px;padding:4px 10px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;width:max-content;">
                         <span>📍</span>
                         <span>${s.name || 'Staff'}</span>
                     </div>`,
-                    iconSize: [100, 30],
+                    iconSize: [0, 0],
                     iconAnchor: [50, 15]
                 });
 
@@ -9083,26 +9117,30 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                         Speed: ${Number(s.speedKmh || 0).toFixed(1)} km/h<br>
                         Movement: ${s.movement || 'Stopped'}<br>
                         Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
-                    .addTo(map);
+                    .addTo(layerGroup);
             });
         }
 
-        // 6. Fit Bounds or fallback
-        if (isFocused && routeBounds.length > 0) {
-            if (routeBounds.length === 1) {
-                map.setView(routeBounds[0], 17);
-            } else {
-                map.fitBounds(L.latLngBounds(routeBounds), { padding: [50, 50], maxZoom: 17 });
-            }
-        } else if (bounds.length > 0) {
-            map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 16 });
-        } else if (Number.isFinite(officeLat) && officeLat !== 0) {
-            map.setView([officeLat, officeLng], 15);
-        } else {
-            map.setView([11.9428, 79.7972], 13);
-        }
-
-        window.offlineTrackingMaps[mapId] = { map };
+        // 6. Refresh container size and fit bounds smoothly
+        setTimeout(() => {
+            if (!map) return;
+            try {
+                map.invalidateSize();
+                if (isFocused && routeBounds.length > 0) {
+                    if (routeBounds.length === 1) {
+                        map.setView(routeBounds[0], 17);
+                    } else {
+                        map.fitBounds(L.latLngBounds(routeBounds), { padding: [50, 50], maxZoom: 17 });
+                    }
+                } else if (bounds.length > 0) {
+                    map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 16 });
+                } else if (Number.isFinite(officeLat) && officeLat !== 0) {
+                    map.setView([officeLat, officeLng], 15);
+                } else {
+                    map.setView([11.9428, 79.7972], 13);
+                }
+            } catch { }
+        }, 50);
     } catch (err) {
         console.error('Error initializing offline tracking map:', err);
     }

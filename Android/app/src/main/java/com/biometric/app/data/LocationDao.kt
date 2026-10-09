@@ -22,6 +22,9 @@ interface LocationDao {
     @Query("SELECT * FROM offline_locations ORDER BY timestamp DESC, id DESC LIMIT :limit")
     suspend fun getRecent(limit: Int): List<LocalLocation>
 
+    @Query("SELECT * FROM offline_locations WHERE timestamp >= :fromEpoch AND timestamp <= :toEpoch ORDER BY timestamp ASC, id ASC")
+    suspend fun getBetween(fromEpoch: Long, toEpoch: Long): List<LocalLocation>
+
     @Query("SELECT * FROM offline_locations WHERE syncState = 'SYNCED' ORDER BY syncedAt DESC, id DESC LIMIT 1")
     suspend fun getLastSynced(): LocalLocation?
 

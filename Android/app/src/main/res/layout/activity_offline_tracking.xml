@@ -113,18 +113,39 @@
                                     style="@style/Widget.Material3.Chip.Filter"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="Last 7 Days" />
+                                    android:text="7 Days" />
 
                                 <com.google.android.material.chip.Chip
                                     android:id="@+id/chipDateMonth"
                                     style="@style/Widget.Material3.Chip.Filter"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="This Month" />
+                                    android:text="30 Days" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDate60Days"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="60 Days" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDateYear"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="1 Year" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDateCustom"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Custom" />
                             </com.google.android.material.chip.ChipGroup>
                         </HorizontalScrollView>
 
-                        <!-- Action Buttons: Refresh & Sync Pending -->
+                        <!-- Action Buttons: Search, Refresh & Sync Pending -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -133,29 +154,107 @@
                             android:orientation="horizontal">
 
                             <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSearchOffline"
+                                style="@style/Widget.Material3.Button"
+                                android:layout_width="0dp"
+                                android:layout_height="40dp"
+                                android:layout_weight="1.2"
+                                android:text="🔍 Search"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <Space
+                                android:layout_width="6dp"
+                                android:layout_height="1dp" />
+
+                            <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnRefreshOffline"
                                 style="@style/Widget.Material3.Button.TonalButton"
                                 android:layout_width="0dp"
-                                android:layout_height="38dp"
+                                android:layout_height="40dp"
                                 android:layout_weight="1"
                                 android:text="🔄 Refresh"
                                 android:textSize="12sp" />
 
                             <Space
-                                android:layout_width="8dp"
+                                android:layout_width="6dp"
                                 android:layout_height="1dp" />
 
                             <com.google.android.material.button.MaterialButton
                                 android:id="@+id/btnSyncNow"
                                 style="@style/Widget.Material3.Button.OutlinedButton"
                                 android:layout_width="0dp"
-                                android:layout_height="38dp"
+                                android:layout_height="40dp"
                                 android:layout_weight="1"
                                 android:text="☁️ Sync Buffer"
                                 android:textSize="12sp" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
+
+                <!-- Search Prompt Placeholder (Visible when !hasSearched) -->
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/cvSearchPrompt"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:visibility="visible"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="2dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutline">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:padding="28dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="📴"
+                            android:textSize="48sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="12dp"
+                            android:text="Offline Tracking &amp; Reconnection"
+                            android:textColor="?attr/colorOnSurface"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:gravity="center"
+                            android:text="No offline tracking sessions are loaded yet. Select an employee and date range above, then tap Search to analyze offline sessions, routes, stays, and attendance impact."
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textSize="13sp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnPromptSearch"
+                            style="@style/Widget.Material3.Button"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="20dp"
+                            android:paddingHorizontal="24dp"
+                            android:text="🔍 Search Offline Sessions"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- Results Container (Visible when hasSearched) -->
+                <LinearLayout
+                    android:id="@+id/llResultsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
 
                 <!-- 2. Summary KPI Metric Cards (2x2 Grid) -->
                 <LinearLayout
@@ -564,6 +663,7 @@
                     android:textColor="?attr/colorOnSurfaceVariant"
                     android:textSize="12sp"
                     android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>
     </LinearLayout>

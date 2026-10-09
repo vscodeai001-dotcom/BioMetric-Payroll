@@ -152,6 +152,95 @@ class Program
                             Console.WriteLine("Deleted owners/tenant_10001 completely.");
                         }
                     }
+                    if (tKeys.Contains("history"))
+                    {
+                        var histKeys = await GetShallowKeysAsync(http1, token1, $"owners/{o}/tracking/history");
+                        Console.WriteLine($"    tracking/history employee keys: {string.Join(", ", histKeys)}");
+                        foreach (var hk in histKeys)
+                        {
+                            var allPtsJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/tracking/history/{hk}.json?access_token={token1}");
+                            var doc = JsonDocument.Parse(allPtsJson);
+                            int offlineCount = 0;
+                            var timestamps = new List<string>();
+                            foreach (var prop in doc.RootElement.EnumerateObject())
+                            {
+                                var pt = prop.Value;
+                                bool isOff = false;
+                                if (pt.TryGetProperty("IsOffline", out var pOff) && pOff.GetBoolean()) isOff = true;
+                                if (pt.TryGetProperty("CaptureSource", out var pSrc) && pSrc.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOff = true;
+                                if (pt.TryGetProperty("MovementState", out var pMov) && pMov.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOff = true;
+                                if (isOff) offlineCount++;
+                                if (pt.TryGetProperty("Timestamp", out var pTs)) timestamps.Add($"{pTs.GetString()} [off={isOff}]");
+                            }
+                            timestamps.Sort();
+                            Console.WriteLine($"\n=== Emp #{hk} Total: {timestamps.Count} ===");
+                            var dtList = new List<DateTime>();
+                            foreach (var prop in doc.RootElement.EnumerateObject())
+                            {
+                                var pt = prop.Value;
+                                if (pt.TryGetProperty("Timestamp", out var pTs) && DateTime.TryParse(pTs.GetString(), out var dt))
+                                {
+                                    dtList.Add(dt);
+                                }
+                            }
+                            dtList.Sort();
+                            var indiaTz = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                            Console.WriteLine($"Detailed points for Emp #{hk}:");
+                            var pointsList = new List<(DateTime Utc, bool IsOff, double Lat, double Lng, string Src)>();
+                            foreach (var prop in doc.RootElement.EnumerateObject())
+                            {
+                                var pt = prop.Value;
+                                if (pt.TryGetProperty("Timestamp", out var pTs) && DateTime.TryParse(pTs.GetString(), out var dt))
+                                {
+                                    bool isOff = false;
+                                    if (pt.TryGetProperty("IsOffline", out var pOff) && pOff.GetBoolean()) isOff = true;
+                                    if (pt.TryGetProperty("CaptureSource", out var pSrc) && pSrc.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOff = true;
+                                    if (pt.TryGetProperty("MovementState", out var pMov) && pMov.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOff = true;
+                                    double lat = 0, lng = 0;
+                                    if (pt.TryGetProperty("Latitude", out var pLat)) lat = pLat.GetDouble();
+                                    if (pt.TryGetProperty("Longitude", out var pLng)) lng = pLng.GetDouble();
+                                    string src = pt.TryGetProperty("CaptureSource", out var s) ? s.GetString() ?? "" : "";
+                                    pointsList.Add((dt, isOff, lat, lng, src));
+                                }
+                            }
+                            pointsList.Sort((a, b) => a.Utc.CompareTo(b.Utc));
+                            Console.WriteLine($"Emp #{hk} first and last points:");
+                            if (pointsList.Count > 0)
+                            {
+                                var f = pointsList.First();
+                                var l = pointsList.Last();
+                                var fLoc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(f.Utc, DateTimeKind.Utc), indiaTz);
+                                var lLoc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(l.Utc, DateTimeKind.Utc), indiaTz);
+                                Console.WriteLine($"  First: {fLoc:yyyy-MM-dd hh:mm:ss tt} | Last: {lLoc:yyyy-MM-dd hh:mm:ss tt}");
+                                var todayPts = pointsList.Where(p => {
+                                    var loc = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(p.Utc, DateTimeKind.Utc), indiaTz);
+                                    return loc.Date == DateTime.Today;
+                                }).ToList();
+                                Console.WriteLine($"  Today (Oct 9) points count: {todayPts.Count}");
+                                Console.WriteLine($"  Gaps >= 10 minutes on Oct 9 for Emp #{hk}:");
+                                for (int i = 1; i < todayPts.Count; i++)
+                                {
+                                    var gap = todayPts[i].Utc - todayPts[i - 1].Utc;
+                                    if (gap >= TimeSpan.FromMinutes(8))
+                                    {
+                                        var t1 = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(todayPts[i - 1].Utc, DateTimeKind.Utc), indiaTz);
+                                        var t2 = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(todayPts[i].Utc, DateTimeKind.Utc), indiaTz);
+                                        Console.WriteLine($"    GAP: {t1:hh:mm:ss tt} -> {t2:hh:mm:ss tt} ({gap.TotalMinutes:F1} min) | off1={todayPts[i - 1].IsOff}, off2={todayPts[i].IsOff}");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (tKeys.Contains("events"))
+                    {
+                        var evKeys = await GetShallowKeysAsync(http1, token1, $"owners/{o}/tracking/events");
+                        Console.WriteLine($"    tracking/events employee keys: {string.Join(", ", evKeys)}");
+                        foreach (var ek in evKeys)
+                        {
+                            var evJson = await http1.GetStringAsync($"{DatabaseUrl}/owners/{o}/tracking/events/{ek}.json?access_token={token1}");
+                            Console.WriteLine($"    Emp #{ek} tracking events: {evJson}");
+                        }
+                    }
                 }
             }
             var rootLive = await GetShallowKeysAsync(http1, token1, "tracking/live");

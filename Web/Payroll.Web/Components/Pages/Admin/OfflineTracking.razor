@@ -2,6 +2,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.EntityFrameworkCore
 @using System.Text.Json
+@using System.Globalization
 @using global::Payroll.Shared.Data
 @using global::Payroll.Shared.Firebase
 @using global::Payroll.Web.Services
@@ -9,11 +10,12 @@
 @inject IDbContextFactory<AppDbContext> DbFactory
 @inject IJSRuntime JSRuntime
 @inject ILogger<OfflineTracking> Logger
+@inject FirebaseRealtimeService FirebaseRealtime
 @attribute [Authorize(Roles = "Admin, SuperAdmin")]
 
 <PageTitle>Offline Tracking &amp; Reconnection Audit</PageTitle>
 
-<AttendanceRefreshListener OnAttendanceChanged="Refresh" OnLocationChanged="Refresh" />
+<AttendanceRefreshListener OnAttendanceChanged="Refresh" />
 
 <div class="container-fluid py-3 offline-tracking-page">
     <!-- Top Header & Filter Station -->
@@ -39,9 +41,9 @@
                 </div>
             </div>
 
-            <!-- Filter Controls: Employee Selector + Date Range Chips -->
+            <!-- Filter Controls: Employee Selector + Date Range Chips + Search Button -->
             <div class="row g-2 align-items-center pt-2 border-top">
-                <div class="col-12 col-md-5">
+                <div class="col-12 col-lg-4">
                     <div class="input-group input-group-sm">
                         <span class="input-group-text bg-light text-secondary border-end-0 fw-semibold">
                             <i class="bi bi-person me-1"></i>Employee:
@@ -55,18 +57,53 @@
                         </select>
                     </div>
                 </div>
-                <div class="col-12 col-md-7 d-flex justify-content-md-end align-items-center flex-wrap gap-1">
+                <div class="col-12 col-lg-8 d-flex justify-content-lg-end align-items-center flex-wrap gap-1">
                     <span class="small text-muted me-1 fw-semibold"><i class="bi bi-calendar3 me-1"></i>Date:</span>
                     <button class="filter-chip @(dateFilter == "TODAY" ? "active" : "")" @onclick='() => SetDateFilter("TODAY")'>Today</button>
                     <button class="filter-chip @(dateFilter == "YESTERDAY" ? "active" : "")" @onclick='() => SetDateFilter("YESTERDAY")'>Yesterday</button>
                     <button class="filter-chip @(dateFilter == "7DAYS" ? "active" : "")" @onclick='() => SetDateFilter("7DAYS")'>Last 7 Days</button>
-                    <button class="filter-chip @(dateFilter == "MONTH" ? "active" : "")" @onclick='() => SetDateFilter("MONTH")'>This Month</button>
-                    <span class="badge bg-light text-dark border ms-2 py-1 px-2">@dateRangeLabel</span>
+                    <button class="filter-chip @(dateFilter == "30DAYS" ? "active" : "")" @onclick='() => SetDateFilter("30DAYS")'>30 Days</button>
+                    <button class="filter-chip @(dateFilter == "60DAYS" ? "active" : "")" @onclick='() => SetDateFilter("60DAYS")'>60 Days</button>
+                    <button class="filter-chip @(dateFilter == "YEAR" ? "active" : "")" @onclick='() => SetDateFilter("YEAR")'>1 Year</button>
+                    <button class="filter-chip @(dateFilter == "CUSTOM" ? "active" : "")" @onclick='() => SetDateFilter("CUSTOM")'>Custom</button>
+                    <span class="badge bg-light text-dark border ms-1 py-1 px-2">@dateRangeLabel</span>
+                    <button class="btn btn-sm btn-primary px-3 fw-semibold ms-2 shadow-sm" @onclick="OnSearchClicked" disabled="@loading">
+                        <i class="bi bi-search me-1"></i>@(loading ? "Searching..." : "Search")
+                    </button>
                 </div>
+                @if (dateFilter == "CUSTOM")
+                {
+                    <div class="col-12 d-flex justify-content-end align-items-center gap-2 pt-1">
+                        <span class="small text-muted fw-semibold">From:</span>
+                        <input type="date" class="form-control form-control-sm" style="max-width: 150px;" @bind="customStartDate" />
+                        <span class="small text-muted fw-semibold">To:</span>
+                        <input type="date" class="form-control form-control-sm" style="max-width: 150px;" @bind="customEndDate" />
+                        <button class="btn btn-sm btn-outline-primary px-2" @onclick="OnSearchClicked" disabled="@loading">
+                            Apply Range
+                        </button>
+                    </div>
+                }
             </div>
         </div>
     </div>
 
+    @if (!hasSearched)
+    {
+        <div class="card border-0 shadow-sm p-5 text-center my-4 initial-prompt-card">
+            <div class="mb-3" style="font-size: 3.5rem;">📴</div>
+            <h4 class="fw-bold mb-2 text-dark">Offline Tracking &amp; Reconnection Audit</h4>
+            <p class="text-muted mx-auto mb-4" style="max-width: 620px;">
+                By default, no offline tracking sessions are loaded. Select an employee (or all fleet staff) and choose your date filter above, then click <strong>Search</strong> to analyze offline movements, dwell stays, geofence surveys, and live attendance impact upon reconnection.
+            </p>
+            <div>
+                <button class="btn btn-primary btn-lg px-4 shadow-sm" @onclick="OnSearchClicked" disabled="@loading">
+                    <i class="bi bi-search me-2"></i>@(loading ? "Searching..." : "Search Offline Sessions")
+                </button>
+            </div>
+        </div>
+    }
+    else
+    {
     <!-- 4 Summary KPI Cards (Offline-Only Metrics) -->
     <div class="row g-2 mb-3">
         <div class="col-6 col-lg-3">
@@ -143,9 +180,9 @@
                             <i class="bi bi-map me-2 text-primary"></i>Offline / Reconnect Route Survey
                         </h6>
                         <small class="text-muted">
-                            @if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
+                            @if (focusedPeriod != null)
                             {
-                                <span>Showing offline window for <strong>@selectedPeriodEmployeeName</strong></span>
+                                <span>🎯 Showing route: <strong>@focusedPeriod.EmployeeName</strong> • <strong>@ToLocal(focusedPeriod.StartTimeUtc).ToString("hh:mm tt")</strong> → <strong>@ToLocal(focusedPeriod.EndTimeUtc).ToString("hh:mm tt") IST</strong> (@focusedPeriod.PointsCount points • @FormatDistance(focusedPeriod.DistanceMeters))</span>
                             }
                             else if (selectedEmployeeId > 0)
                             {
@@ -158,10 +195,16 @@
                         </small>
                     </div>
                     <div class="d-flex align-items-center gap-1">
-                        @if (!string.IsNullOrEmpty(selectedOfflinePeriodId) || selectedEmployeeId > 0)
+                        @if (focusedPeriod != null)
                         {
-                            <button class="btn btn-sm btn-outline-secondary py-0 px-2" @onclick="ClearMapFilter">
-                                <i class="bi bi-x-circle me-1"></i>Reset Focus
+                            <button class="btn btn-sm btn-outline-primary py-0 px-2" @onclick="ClearPeriodFocus" title="Show all routes for this employee">
+                                <i class="bi bi-eye me-1"></i>Overview (@selectedEmployeeName)
+                            </button>
+                        }
+                        @if (selectedEmployeeId > 0)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary py-0 px-2" @onclick="ClearEmployeeFilter" title="Reset employee filter">
+                                <i class="bi bi-x-circle me-1"></i>All Staff
                             </button>
                         }
                     </div>
@@ -171,18 +214,18 @@
                     <div id="offline-tracking-map" style="height: 480px; width: 100%;"></div>
                 </div>
 
-                <div class="card-footer bg-white py-2">
+                <div class="card-footer py-2">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <!-- Map Legend -->
                         <div class="d-flex align-items-center flex-wrap gap-2 very-small">
                             <span><span class="legend-dot bg-primary"></span> 🏢 Geofence (@officeRadiusMeters m)</span>
-                            <span><span class="legend-dot bg-warning"></span> 📴 Disconnected</span>
+                            <span><span class="legend-dot bg-danger"></span> 📴 Disconnected</span>
                             <span><span class="legend-line" style="border-top: 3px dashed #ea580c;"></span> 🟠 Offline Route</span>
                             <span><span class="legend-dot bg-info"></span> 📍 Dwell Stay</span>
                             <span><span class="legend-dot bg-success"></span> 📶 Reconnected</span>
                         </div>
                         <small class="text-muted very-small">
-                            Cached OSM Tiles • SSOT Realtime Sync
+                            SSOT Realtime Sync • Dark &amp; Light Adaptive
                         </small>
                     </div>
                 </div>
@@ -233,7 +276,13 @@
                                     <div>
                                         <div class="fw-bold fs-6 text-dark d-flex align-items-center gap-2">
                                             <span>👤 @period.EmployeeName</span>
-                                            <span class="badge bg-light text-muted border very-small">#@period.EmployeeId</span>
+                                            <span class="badge bg-secondary-subtle text-secondary border very-small">#@period.EmployeeId</span>
+                                            @if (isFocused)
+                                            {
+                                                <span class="badge bg-primary text-white very-small">
+                                                    <i class="bi bi-crosshair me-1"></i>Active on Map
+                                                </span>
+                                            }
                                         </div>
                                         <div class="small text-muted mt-1">
                                             Disconnected: <strong>@ToLocal(period.StartTimeUtc).ToString("hh:mm tt")</strong>
@@ -253,13 +302,13 @@
                                         <span class="fs-4">@period.ImpactIcon</span>
                                         <div>
                                             <div class="fw-bold small">@period.ImpactTitle</div>
-                                            <div class="very-small text-dark">@period.LiveImpactSummary</div>
+                                            <div class="very-small text-body">@period.LiveImpactSummary</div>
                                         </div>
                                     </div>
                                 </div>
 
                                 <!-- Inside vs. Outside Geofence Breakdown -->
-                                <div class="geofence-breakdown-box p-2 px-3 mb-3 bg-light rounded border">
+                                <div class="geofence-breakdown-box p-2 px-3 mb-3 rounded border">
                                     <div class="d-flex justify-content-between align-items-center very-small fw-semibold mb-1">
                                         <span class="text-success">🟢 Inside Office: @FormatDuration(inDur) (@inPercent%)</span>
                                         <span class="text-danger">🔴 Outside Office: @FormatDuration(outDur) (@outPercent%)</span>
@@ -284,9 +333,9 @@
                                         <div class="stay-list">
                                             @foreach (var s in period.Stays)
                                             {
-                                                <div class="stay-pill p-2 mb-1 rounded bg-white border d-flex justify-content-between align-items-center very-small">
+                                                <div class="stay-pill p-2 mb-1 rounded border d-flex justify-content-between align-items-center very-small">
                                                     <div>
-                                                        <span class="fw-bold text-dark">📍 Stayed @FormatDuration(s.Duration)</span>
+                                                        <span class="fw-bold text-body">📍 Stayed @FormatDuration(s.Duration)</span>
                                                         <span class="text-muted ms-1">(@ToLocal(s.StartUtc).ToString("hh:mm tt") – @ToLocal(s.EndUtc).ToString("hh:mm tt"))</span>
                                                         <div class="text-secondary very-small">@s.LocationDescription</div>
                                                     </div>
@@ -299,13 +348,13 @@
                                     }
                                     else if (period.DistanceMeters < 30)
                                     {
-                                        <div class="stay-pill p-2 rounded bg-white border text-muted very-small">
+                                        <div class="stay-pill p-2 rounded border text-muted very-small">
                                             📍 Stationary at disconnect position throughout entire offline duration.
                                         </div>
                                     }
                                     else
                                     {
-                                        <div class="stay-pill p-2 rounded bg-white border text-muted very-small">
+                                        <div class="stay-pill p-2 rounded border text-muted very-small">
                                             🚶 Continuous transit (@FormatDistance(period.DistanceMeters) traversed with no stationary stops &gt; 2 mins).
                                         </div>
                                     }
@@ -317,9 +366,18 @@
                                         <span>Status: </span>
                                         <span class="text-success fw-semibold">✓ Synced to Cloud SSOT</span>
                                     </div>
-                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => InspectPeriodOnMap(period)">
-                                        <i class="bi bi-map me-1"></i>Focus Route on Map
-                                    </button>
+                                    @if (isFocused)
+                                    {
+                                        <button class="btn btn-sm btn-primary" @onclick="ClearPeriodFocus">
+                                            <i class="bi bi-check2-circle me-1"></i>Focused on Map (Reset)
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => InspectPeriodOnMap(period)">
+                                            <i class="bi bi-map me-1"></i>Focus Route on Map
+                                        </button>
+                                    }
                                 </div>
                             </div>
                         }
@@ -433,9 +491,24 @@
             </div>
         }
     </div>
+    }
 </div>
 
 <style>
+    .offline-custom-pin {
+        background: transparent !important;
+        border: none !important;
+        overflow: visible !important;
+        width: auto !important;
+        height: auto !important;
+    }
+
+    .initial-prompt-card {
+        background: #ffffff;
+        border: 1px dashed #cbd5e1 !important;
+        border-radius: 16px;
+    }
+
     .offline-tracking-page .card { border-radius: 12px; }
     .top-filter-card { background: #ffffff; border-bottom: 2px solid #e2e8f0 !important; }
     
@@ -477,7 +550,17 @@
     .offline-session-card.focused {
         border-color: #2563eb !important;
         background: #f8faff;
-        box-shadow: 0 4px 14px rgba(37,99,235,0.12);
+        box-shadow: 0 0 0 1px #2563eb, 0 4px 14px rgba(37,99,235,0.18);
+    }
+
+    .geofence-breakdown-box {
+        background: #f8fafc;
+        border-color: #e2e8f0;
+    }
+
+    .stay-pill {
+        background: #ffffff;
+        border-color: #e2e8f0;
     }
 
     .legend-dot {
@@ -505,10 +588,130 @@
     .very-small { font-size: 0.75rem; }
     .spin { animation: spinAnim 1s linear infinite; }
     @@keyframes spinAnim { 100% { transform: rotate(360deg); } }
+
+    /* =========================================================================
+       DARK THEME COMPLETE ADAPTABILITY
+       ========================================================================= */
+    body.dark .offline-tracking-page .card,
+    [data-bs-theme="dark"] .offline-tracking-page .card {
+        background-color: var(--app-surface, #1e293b) !important;
+        border-color: var(--app-border, #334155) !important;
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .top-filter-card,
+    [data-bs-theme="dark"] .top-filter-card {
+        background: var(--app-surface, #1e293b) !important;
+        border-bottom: 2px solid var(--app-border, #334155) !important;
+    }
+
+    body.dark .metric-card,
+    [data-bs-theme="dark"] .metric-card {
+        background: var(--app-surface, #1e293b) !important;
+        border-color: var(--app-border, #334155) !important;
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .filter-chip,
+    [data-bs-theme="dark"] .filter-chip {
+        background: var(--app-surface-muted, #334155) !important;
+        border-color: var(--app-border, #475569) !important;
+        color: var(--app-text-muted, #cbd5e1) !important;
+    }
+    body.dark .filter-chip:hover,
+    [data-bs-theme="dark"] .filter-chip:hover {
+        background: #475569 !important;
+        color: #ffffff !important;
+    }
+    body.dark .filter-chip.active,
+    [data-bs-theme="dark"] .filter-chip.active {
+        background: #6366f1 !important;
+        border-color: #6366f1 !important;
+        color: #ffffff !important;
+    }
+
+    body.dark .initial-prompt-card,
+    [data-bs-theme="dark"] .initial-prompt-card {
+        background: var(--app-surface, #1e293b) !important;
+        border-color: var(--app-border, #334155) !important;
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .offline-session-card,
+    [data-bs-theme="dark"] .offline-session-card {
+        background: var(--app-surface, #1e293b) !important;
+        border-color: var(--app-border, #334155) !important;
+        color: var(--app-text, #f8fafc) !important;
+    }
+    body.dark .offline-session-card:hover,
+    [data-bs-theme="dark"] .offline-session-card:hover {
+        border-color: #60a5fa !important;
+        box-shadow: 0 4px 14px rgba(96, 165, 250, 0.15);
+    }
+    body.dark .offline-session-card.focused,
+    [data-bs-theme="dark"] .offline-session-card.focused {
+        border-color: #3b82f6 !important;
+        background: rgba(59, 130, 246, 0.12) !important;
+        box-shadow: 0 0 0 1px #3b82f6, 0 4px 14px rgba(59, 130, 246, 0.25);
+    }
+
+    body.dark .geofence-breakdown-box,
+    [data-bs-theme="dark"] .geofence-breakdown-box {
+        background: #0f172a !important;
+        border-color: var(--app-border, #334155) !important;
+    }
+
+    body.dark .stay-pill,
+    [data-bs-theme="dark"] .stay-pill {
+        background: var(--app-surface-muted, #334155) !important;
+        border-color: var(--app-border, #475569) !important;
+        color: var(--app-text-muted, #cbd5e1) !important;
+    }
+
+    body.dark .offline-tracking-page .card-header,
+    body.dark .offline-tracking-page .card-footer,
+    [data-bs-theme="dark"] .offline-tracking-page .card-header,
+    [data-bs-theme="dark"] .offline-tracking-page .card-footer {
+        background-color: var(--app-surface-muted, #1e293b) !important;
+        border-color: var(--app-border, #334155) !important;
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .offline-tracking-page .text-dark,
+    [data-bs-theme="dark"] .offline-tracking-page .text-dark {
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .offline-tracking-page .text-muted,
+    [data-bs-theme="dark"] .offline-tracking-page .text-muted {
+        color: var(--app-text-muted, #94a3b8) !important;
+    }
+
+    body.dark .offline-tracking-page .table,
+    [data-bs-theme="dark"] .offline-tracking-page .table {
+        color: var(--app-text, #f8fafc) !important;
+    }
+
+    body.dark .offline-tracking-page .table thead th,
+    body.dark .offline-tracking-page .table-light,
+    [data-bs-theme="dark"] .offline-tracking-page .table thead th,
+    [data-bs-theme="dark"] .offline-tracking-page .table-light {
+        background-color: #0f172a !important;
+        color: var(--app-text, #f8fafc) !important;
+        border-color: var(--app-border, #334155) !important;
+    }
+
+    body.dark .offline-tracking-page .table td,
+    [data-bs-theme="dark"] .offline-tracking-page .table td {
+        border-color: var(--app-border, #334155) !important;
+    }
 </style>
 
 @code {
     private bool loading;
+    private bool hasSearched = false;
+    private DateOnly customStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-7));
+    private DateOnly customEndDate = DateOnly.FromDateTime(DateTime.Today);
     private int selectedEmployeeId = 0;
     private string? selectedOfflinePeriodId = null;
     private string dateFilter = "TODAY";
@@ -532,12 +735,15 @@
     private string selectedPeriodEmployeeName =>
         allOfflinePeriods.FirstOrDefault(p => p.Id == selectedOfflinePeriodId)?.EmployeeName ?? selectedEmployeeName;
 
-    private List<OfflinePeriodDisplayModel> displayedPeriods =>
+    private OfflinePeriodDisplayModel? focusedPeriod =>
         !string.IsNullOrEmpty(selectedOfflinePeriodId)
-            ? allOfflinePeriods.Where(p => p.Id == selectedOfflinePeriodId).ToList()
-            : (selectedEmployeeId > 0
-                ? allOfflinePeriods.Where(p => p.EmployeeId == selectedEmployeeId).ToList()
-                : allOfflinePeriods);
+            ? allOfflinePeriods.FirstOrDefault(p => p.Id == selectedOfflinePeriodId)
+            : null;
+
+    private List<OfflinePeriodDisplayModel> displayedPeriods =>
+        selectedEmployeeId > 0
+            ? allOfflinePeriods.Where(p => p.EmployeeId == selectedEmployeeId).ToList()
+            : allOfflinePeriods;
 
     private List<OfflineLedgerRowModel> displayedLedgerRows
     {
@@ -546,8 +752,6 @@
             var q = offlineLedgerRows.AsEnumerable();
             if (selectedEmployeeId > 0)
                 q = q.Where(r => r.EmployeeId == selectedEmployeeId);
-            if (!string.IsNullOrEmpty(selectedOfflinePeriodId))
-                q = q.Where(r => r.PeriodId == selectedOfflinePeriodId);
             return q.OrderByDescending(r => r.TimestampUtc).ToList();
         }
     }
@@ -616,7 +820,8 @@
             {
                 "TODAY" => startLocal.ToString("dd MMM yyyy"),
                 "YESTERDAY" => startLocal.ToString("dd MMM yyyy"),
-                _ => $"{startLocal:dd MMM} – {endLocal:dd MMM yyyy}"
+                "CUSTOM" => $"{customStartDate:dd MMM yyyy} – {customEndDate:dd MMM yyyy}",
+                _ => $"{startLocal:dd MMM yyyy} – {endLocal:dd MMM yyyy}"
             };
         }
     }
@@ -626,16 +831,40 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Refresh(force: true);
+        await LoadMetadataAsync();
         cts = new CancellationTokenSource();
         // Bandwidth Storm Control: 60s background cadence + in-memory LiveLocationStore (0 Firebase REST egress)
         timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         _ = PeriodicLoopAsync(cts.Token);
     }
 
+    private async Task LoadMetadataAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            allEmployees = await db.Employees.AsNoTracking()
+                .Where(e => !e.IsDeleted)
+                .OrderBy(e => e.Name)
+                .ToListAsync();
+
+            var setting = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync();
+            if (setting != null)
+            {
+                officeLat = setting.OfficeLatitude;
+                officeLng = setting.OfficeLongitude;
+                officeRadiusMeters = setting.GeoRadiusMeters;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading metadata for offline tracking");
+        }
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender || !mapRendered)
+        if (hasSearched && (firstRender || !mapRendered))
         {
             await RenderMapAsync();
         }
@@ -643,26 +872,28 @@
 
     private async Task PeriodicLoopAsync(CancellationToken token)
     {
-        if (timer == null) return;
-        try
-        {
-            while (await timer.WaitForNextTickAsync(token))
-            {
-                await InvokeAsync(async () =>
-                {
-                    await Refresh(force: false);
-                    StateHasChanged();
-                });
-            }
-        }
-        catch (OperationCanceledException) { }
+        // Periodic background egress storm disabled in Spark/Testing mode.
+        // Offline tracking is historical audit data and only refreshed on user Search/Refresh button
+        // or Attendance punch event.
+        await Task.CompletedTask;
+    }
+
+    private async Task OnSearchClicked()
+    {
+        hasSearched = true;
+        selectedOfflinePeriodId = null;
+        mapRendered = false;
+        await Refresh(force: true);
     }
 
     private void SetDateFilter(string filter)
     {
         if (dateFilter == filter) return;
         dateFilter = filter;
-        _ = Refresh(force: true);
+        if (hasSearched)
+        {
+            _ = Refresh(force: true);
+        }
     }
 
     private void ToggleLedgerExpanded()
@@ -676,23 +907,50 @@
         {
             selectedEmployeeId = empId;
             selectedOfflinePeriodId = null;
-            _ = RenderMapAsync();
+            if (hasSearched)
+            {
+                _ = Refresh(force: true);
+            }
         }
     }
 
-    private void InspectPeriodOnMap(OfflinePeriodDisplayModel period)
+    private async Task InspectPeriodOnMap(OfflinePeriodDisplayModel period)
     {
         selectedOfflinePeriodId = period.Id;
         selectedEmployeeId = period.EmployeeId;
-        _ = RenderMapAsync(period);
-        _ = ScrollToMap();
+        StateHasChanged();
+        await Task.Yield();
+        await RenderMapAsync(period);
+        await ScrollToMap();
     }
 
-    private void ClearMapFilter()
+    private async Task ClearPeriodFocus()
+    {
+        selectedOfflinePeriodId = null;
+        StateHasChanged();
+        await RenderMapAsync();
+    }
+
+    private async Task ClearEmployeeFilter()
     {
         selectedOfflinePeriodId = null;
         selectedEmployeeId = 0;
-        _ = RenderMapAsync();
+        StateHasChanged();
+        if (hasSearched)
+        {
+            await Refresh(force: true);
+        }
+    }
+
+    private async Task ClearMapFilter()
+    {
+        selectedOfflinePeriodId = null;
+        selectedEmployeeId = 0;
+        StateHasChanged();
+        if (hasSearched)
+        {
+            await Refresh(force: true);
+        }
     }
 
     private async Task ScrollToMap()
@@ -721,8 +979,21 @@
                 endLocal = today.AddHours(23).AddMinutes(59).AddSeconds(59);
                 break;
             case "MONTH":
-                startLocal = new DateTime(today.Year, today.Month, 1);
+            case "30DAYS":
+                startLocal = today.AddDays(-29);
                 endLocal = today.AddHours(23).AddMinutes(59).AddSeconds(59);
+                break;
+            case "60DAYS":
+                startLocal = today.AddDays(-59);
+                endLocal = today.AddHours(23).AddMinutes(59).AddSeconds(59);
+                break;
+            case "YEAR":
+                startLocal = today.AddYears(-1);
+                endLocal = today.AddHours(23).AddMinutes(59).AddSeconds(59);
+                break;
+            case "CUSTOM":
+                startLocal = customStartDate.ToDateTime(TimeOnly.MinValue);
+                endLocal = customEndDate.ToDateTime(new TimeOnly(23, 59, 59));
                 break;
             case "TODAY":
             default:
@@ -734,11 +1005,145 @@
         return (IndiaToUtc(startLocal), IndiaToUtc(endLocal));
     }
 
+    private (DateTime fromLocal, DateTime toLocal) GetDateRangeLocal()
+    {
+        var (fromUtc, toUtc) = GetDateRangeUtc();
+        return (ToLocal(fromUtc), ToLocal(toUtc));
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CachedAtUtc, List<EmployeeLocationHistory> Points)> TrackingCache = new();
+
+    private async Task<List<EmployeeLocationHistory>> FetchFirebaseTrackingHistoryAsync(
+        string ownerUid,
+        int empId,
+        DateTime fromUtc,
+        DateTime toUtc,
+        bool bypassCache = false,
+        CancellationToken ct = default)
+    {
+        var cacheKey = $"{ownerUid}_{empId}";
+        if (!bypassCache && TrackingCache.TryGetValue(cacheKey, out var entry))
+        {
+            if (DateTime.UtcNow - entry.CachedAtUtc < TimeSpan.FromMinutes(5))
+            {
+                return entry.Points.Where(p => p.CapturedAtUtc >= fromUtc && p.CapturedAtUtc <= toUtc).ToList();
+            }
+        }
+
+        var candidateOwners = new List<string>();
+        if (!string.IsNullOrWhiteSpace(ownerUid)) candidateOwners.Add(ownerUid.Trim());
+        if (!candidateOwners.Contains("tenant_201", StringComparer.OrdinalIgnoreCase)) candidateOwners.Add("tenant_201");
+        if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparer.OrdinalIgnoreCase))
+            candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
+
+        var result = new List<EmployeeLocationHistory>();
+
+        foreach (var owner in candidateOwners)
+        {
+            try
+            {
+                var json = await FirebaseRealtime.GetOwnerTrackingHistoryAsync(owner, empId, 5000, ct);
+                if (!json.HasValue) continue;
+
+                var root = json.Value;
+                IEnumerable<JsonElement> elements = root.ValueKind switch
+                {
+                    JsonValueKind.Object => root.EnumerateObject().Select(p => p.Value),
+                    JsonValueKind.Array => root.EnumerateArray(),
+                    _ => Enumerable.Empty<JsonElement>()
+                };
+
+                foreach (var elem in elements)
+                {
+                    if (elem.ValueKind != JsonValueKind.Object) continue;
+
+                    double lat = 0;
+                    if (elem.TryGetProperty("Latitude", out var pLat) || elem.TryGetProperty("latitude", out pLat) || elem.TryGetProperty("lat", out pLat))
+                    {
+                        if (pLat.ValueKind == JsonValueKind.Number) lat = pLat.GetDouble();
+                        else if (pLat.ValueKind == JsonValueKind.String && double.TryParse(pLat.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedLat)) lat = parsedLat;
+                    }
+
+                    double lng = 0;
+                    if (elem.TryGetProperty("Longitude", out var pLng) || elem.TryGetProperty("longitude", out pLng) || elem.TryGetProperty("lng", out pLng) || elem.TryGetProperty("lon", out pLng))
+                    {
+                        if (pLng.ValueKind == JsonValueKind.Number) lng = pLng.GetDouble();
+                        else if (pLng.ValueKind == JsonValueKind.String && double.TryParse(pLng.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedLng)) lng = parsedLng;
+                    }
+
+                    if (lat == 0 && lng == 0) continue;
+
+                    DateTime capturedUtc = DateTime.MinValue;
+                    if (elem.TryGetProperty("Timestamp", out var pTs) || elem.TryGetProperty("timestamp", out pTs))
+                    {
+                        if (pTs.ValueKind == JsonValueKind.String)
+                        {
+                            var str = pTs.GetString();
+                            if (DateTime.TryParse(str, null, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsedDt))
+                            {
+                                capturedUtc = parsedDt;
+                            }
+                        }
+                        else if (pTs.ValueKind == JsonValueKind.Number && pTs.TryGetInt64(out var epochMs))
+                        {
+                            capturedUtc = DateTimeOffset.FromUnixTimeMilliseconds(epochMs).UtcDateTime;
+                        }
+                    }
+
+                    if (capturedUtc == DateTime.MinValue) continue;
+
+                    bool isOffline = false;
+                    if (elem.TryGetProperty("IsOffline", out var pOff) && pOff.ValueKind == JsonValueKind.True) isOffline = true;
+                    if (elem.TryGetProperty("isOffline", out pOff) && pOff.ValueKind == JsonValueKind.True) isOffline = true;
+                    if (elem.TryGetProperty("CaptureSource", out var pSrc) && pSrc.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOffline = true;
+                    if (elem.TryGetProperty("Source", out pSrc) && pSrc.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOffline = true;
+                    if (elem.TryGetProperty("MovementState", out var pMov) && pMov.GetString()?.Contains("offline", StringComparison.OrdinalIgnoreCase) == true) isOffline = true;
+
+                    double accuracy = 0;
+                    if (elem.TryGetProperty("AccuracyMeters", out var pAcc) || elem.TryGetProperty("accuracy", out pAcc))
+                    {
+                        if (pAcc.ValueKind == JsonValueKind.Number) accuracy = pAcc.GetDouble();
+                    }
+
+                    double distOffice = (officeLat != 0 && officeLng != 0) ? CalculateDistance(lat, lng, officeLat, officeLng) : 0;
+                    bool isWithinRadius = (officeRadiusMeters > 0) ? distOffice <= officeRadiusMeters : true;
+
+                    result.Add(new EmployeeLocationHistory
+                    {
+                        EmployeeId = empId,
+                        Latitude = lat,
+                        Longitude = lng,
+                        CapturedAtUtc = capturedUtc,
+                        RecordedAtUtc = capturedUtc,
+                        AccuracyMeters = accuracy,
+                        DistanceFromOfficeMeters = distOffice,
+                        AllowedRadiusMeters = officeRadiusMeters,
+                        IsWithinAllowedRadius = isWithinRadius,
+                        CaptureSource = isOffline ? "Offline" : "Live"
+                    });
+                }
+
+                if (result.Count > 0)
+                {
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Error reading Firebase tracking history for employee {EmpId} from owner {Owner}", empId, owner);
+            }
+        }
+
+        TrackingCache[cacheKey] = (DateTime.UtcNow, result);
+        return result.Where(p => p.CapturedAtUtc >= fromUtc && p.CapturedAtUtc <= toUtc).ToList();
+    }
+
     private Task Refresh() => Refresh(force: false);
 
     private async Task Refresh(bool force)
     {
         if (loading) return;
+        if (!hasSearched) return;
         if (!force && (DateTime.UtcNow - lastRefreshInvokedUtc) < RefreshCooldown) return;
         loading = true;
         lastRefreshInvokedUtc = DateTime.UtcNow;
@@ -747,10 +1152,13 @@
         {
             await using var db = await DbFactory.CreateDbContextAsync();
 
-            allEmployees = await db.Employees.AsNoTracking()
-                .Where(e => !e.IsDeleted)
-                .OrderBy(e => e.Name)
-                .ToListAsync();
+            if (allEmployees.Count == 0)
+            {
+                allEmployees = await db.Employees.AsNoTracking()
+                    .Where(e => !e.IsDeleted)
+                    .OrderBy(e => e.Name)
+                    .ToListAsync();
+            }
 
             var setting = await db.CompanySettings.AsNoTracking().FirstOrDefaultAsync();
             if (setting != null)
@@ -761,30 +1169,79 @@
             }
 
             var (fromUtc, toUtc) = GetDateRangeUtc();
+            var (fromLocal, toLocal) = GetDateRangeLocal();
+            var ownerUid = FirebaseRealtime.ResolveOwnerUid();
 
-            // Attendance Logs in window
+            // Attendance Logs in local window (punches in database are stored in local time)
             var punches = await db.AttendanceLogs.AsNoTracking()
-                .Where(p => p.PunchTime >= fromUtc && p.PunchTime <= toUtc)
+                .Where(p => p.PunchTime >= fromLocal && p.PunchTime <= toLocal)
                 .OrderBy(p => p.PunchTime)
                 .ToListAsync();
 
-            // Location history in window
-            var dbPoints = await db.EmployeeLocationHistory.AsNoTracking()
-                .Where(p => p.CapturedAtUtc >= fromUtc && p.CapturedAtUtc <= toUtc)
-                .OrderBy(p => p.CapturedAtUtc)
-                .ToListAsync();
+            var targetEmpIds = selectedEmployeeId > 0
+                ? new List<int> { selectedEmployeeId }
+                : allEmployees.Select(e => e.EmployeeID).ToList();
 
-            // If empty today, fall back to recent points
-            if (!dbPoints.Any() && dateFilter == "TODAY")
+            var allCombinedPoints = new List<EmployeeLocationHistory>();
+
+            // 1. Fetch real GPS points from Firebase RTDB (SSOT)
+            foreach (var eid in targetEmpIds)
             {
-                dbPoints = await db.EmployeeLocationHistory.AsNoTracking()
-                    .OrderByDescending(p => p.CapturedAtUtc)
-                    .Take(1000)
-                    .ToListAsync();
+                var fbPoints = await FetchFirebaseTrackingHistoryAsync(ownerUid, eid, fromUtc, toUtc, bypassCache: force);
+                allCombinedPoints.AddRange(fbPoints);
             }
 
-            // Build all offline periods and ledger
-            (allOfflinePeriods, offlineLedgerRows) = BuildAllOfflineData(dbPoints, allEmployees, punches);
+            // 2. Query SQLite DB points in the same date range
+            var sqliteQuery = db.EmployeeLocationHistory.AsNoTracking()
+                .Where(p => p.CapturedAtUtc >= fromUtc && p.CapturedAtUtc <= toUtc);
+            if (selectedEmployeeId > 0)
+                sqliteQuery = sqliteQuery.Where(p => p.EmployeeId == selectedEmployeeId);
+            var dbPoints = await sqliteQuery.ToListAsync();
+
+            allCombinedPoints.AddRange(dbPoints);
+
+            // 3. Inject punches with GPS coordinates as offline tracking points (crucial for breadcrumbs during disconnection)
+            foreach (var punch in punches)
+            {
+                if (punch.Latitude.HasValue && punch.Longitude.HasValue &&
+                    punch.Latitude.Value != 0 && punch.Longitude.Value != 0 &&
+                    punch.EmployeeID.HasValue)
+                {
+                    if (selectedEmployeeId > 0 && punch.EmployeeID.Value != selectedEmployeeId)
+                        continue;
+
+                    var punchUtc = IndiaToUtc(punch.PunchTime);
+                    var distOffice = (officeLat != 0 && officeLng != 0)
+                        ? CalculateDistance(punch.Latitude.Value, punch.Longitude.Value, officeLat, officeLng)
+                        : 0;
+
+                    bool isWithinRadius = (officeRadiusMeters > 0) ? distOffice <= officeRadiusMeters : true;
+
+                    allCombinedPoints.Add(new EmployeeLocationHistory
+                    {
+                        EmployeeId = punch.EmployeeID.Value,
+                        Latitude = punch.Latitude.Value,
+                        Longitude = punch.Longitude.Value,
+                        CapturedAtUtc = punchUtc,
+                        RecordedAtUtc = punchUtc,
+                        AccuracyMeters = 10,
+                        DistanceFromOfficeMeters = distOffice,
+                        AllowedRadiusMeters = officeRadiusMeters,
+                        IsWithinAllowedRadius = isWithinRadius,
+                        CaptureSource = "OfflinePunch"
+                    });
+                }
+            }
+
+            // 4. Deduplicate points
+            var distinctPoints = allCombinedPoints
+                .GroupBy(p => $"{p.EmployeeId}_{p.Latitude:F5}_{p.Longitude:F5}_{p.CapturedAtUtc:yyyyMMddHHmmss}")
+                .Select(g => g.First())
+                .OrderBy(p => p.CapturedAtUtc)
+                .ToList();
+
+            // 5. Build all offline periods and ledger
+            (allOfflinePeriods, offlineLedgerRows) = BuildAllOfflineData(distinctPoints, allEmployees, punches);
         }
         catch (Exception ex)
         {
@@ -798,16 +1255,18 @@
         await RenderMapAsync();
     }
 
-    private async Task RenderMapAsync(OfflinePeriodDisplayModel? focusedPeriod = null)
+    private async Task RenderMapAsync(OfflinePeriodDisplayModel? targetPeriod = null)
     {
         try
         {
+            var focused = targetPeriod ?? focusedPeriod;
             var pointsForMap = new List<object>();
             var staysForMap = new List<object>();
 
-            if (focusedPeriod != null)
+            if (focused != null)
             {
-                pointsForMap = focusedPeriod.Points.Select((p, idx) => (object)new
+                var validPts = focused.Points.Where(p => p.Latitude != 0 && p.Longitude != 0).ToList();
+                pointsForMap = validPts.Select((p, idx) => (object)new
                 {
                     lat = p.Latitude,
                     lng = p.Longitude,
@@ -816,7 +1275,7 @@
                     isOffline = true
                 }).ToList();
 
-                staysForMap = focusedPeriod.Stays.Select(s => (object)new
+                staysForMap = focused.Stays.Where(s => s.Latitude != 0 && s.Longitude != 0).Select(s => (object)new
                 {
                     lat = s.Latitude,
                     lng = s.Longitude,
@@ -834,7 +1293,8 @@
 
                 foreach (var p in periodsToMap)
                 {
-                    pointsForMap.AddRange(p.Points.Select((pt, idx) => (object)new
+                    var validPts = p.Points.Where(pt => pt.Latitude != 0 && pt.Longitude != 0).ToList();
+                    pointsForMap.AddRange(validPts.Select((pt, idx) => (object)new
                     {
                         lat = pt.Latitude,
                         lng = pt.Longitude,
@@ -842,7 +1302,7 @@
                         index = idx + 1,
                         isOffline = true
                     }));
-                    staysForMap.AddRange(p.Stays.Select(s => (object)new
+                    staysForMap.AddRange(p.Stays.Where(s => s.Latitude != 0 && s.Longitude != 0).Select(s => (object)new
                     {
                         lat = s.Latitude,
                         lng = s.Longitude,
@@ -861,12 +1321,12 @@
                 officeRadiusMeters = officeRadiusMeters,
                 routePoints = pointsForMap,
                 stays = staysForMap,
-                isFocused = focusedPeriod != null,
-                employeeName = focusedPeriod?.EmployeeName ?? (selectedEmployeeId > 0 ? selectedEmployeeName : "All Employees"),
-                startTime = focusedPeriod != null ? ToLocal(focusedPeriod.StartTimeUtc).ToString("hh:mm tt") : null,
-                endTime = focusedPeriod != null ? ToLocal(focusedPeriod.EndTimeUtc).ToString("hh:mm tt") : null,
-                duration = focusedPeriod != null ? FormatDuration(focusedPeriod.Duration) : null,
-                distance = focusedPeriod != null ? FormatDistance(focusedPeriod.DistanceMeters) : null
+                isFocused = focused != null,
+                employeeName = focused?.EmployeeName ?? (selectedEmployeeId > 0 ? selectedEmployeeName : "All Employees"),
+                startTime = focused != null ? ToLocal(focused.StartTimeUtc).ToString("hh:mm tt") : null,
+                endTime = focused != null ? ToLocal(focused.EndTimeUtc).ToString("hh:mm tt") : null,
+                duration = focused != null ? FormatDuration(focused.Duration) : null,
+                distance = focused != null ? FormatDistance(focused.DistanceMeters) : null
             };
 
             await JSRuntime.InvokeVoidAsync("initializeOfflineTrackingMap", "offline-tracking-map", payload);
@@ -914,7 +1374,7 @@
                 {
                     if (currentOfflineRun.Count == 0)
                     {
-                        if (i > 0 && (pt.CapturedAtUtc - sorted[i - 1].CapturedAtUtc) <= TimeSpan.FromMinutes(30))
+                        if (i > 0 && (pt.CapturedAtUtc - sorted[i - 1].CapturedAtUtc) <= TimeSpan.FromMinutes(15))
                         {
                             currentOfflineRun.Add(sorted[i - 1]);
                         }
@@ -934,7 +1394,7 @@
                                 rawClusters.Add(currentOfflineRun);
                             }
                             currentOfflineRun = new List<EmployeeLocationHistory>();
-                            if (i > 0 && (pt.CapturedAtUtc - sorted[i - 1].CapturedAtUtc) <= TimeSpan.FromMinutes(30))
+                            if (i > 0 && (pt.CapturedAtUtc - sorted[i - 1].CapturedAtUtc) <= TimeSpan.FromMinutes(15))
                             {
                                 currentOfflineRun.Add(sorted[i - 1]);
                             }
@@ -960,14 +1420,14 @@
                 rawClusters.Add(currentOfflineRun);
             }
 
-            // 2. Detect Gaps between consecutive points (>= 10 mins and <= 2 days)
+            // 2. Detect Gaps between consecutive points (>= 5 mins and <= 2 days)
             for (int i = 1; i < sorted.Count; i++)
             {
                 var prev = sorted[i - 1];
                 var curr = sorted[i];
                 var gap = curr.CapturedAtUtc - prev.CapturedAtUtc;
 
-                if (gap >= TimeSpan.FromMinutes(10) && gap <= TimeSpan.FromDays(2))
+                if (gap >= TimeSpan.FromMinutes(5) && gap <= TimeSpan.FromDays(2))
                 {
                     var startUtc = prev.CapturedAtUtc;
                     var endUtc = curr.CapturedAtUtc;
@@ -984,7 +1444,126 @@
                 }
             }
 
-            // 3. Sort & Merge overlapping or adjacent clusters (within 5 minutes)
+            // 2b. Explicit Offline Auto Geofence Punch Sessions (anchored by mobile device punches)
+            var empOfflinePunches = punches
+                .Where(p => p.EmployeeID == empId &&
+                            p.Latitude.HasValue && p.Longitude.HasValue &&
+                            p.Latitude.Value != 0 && p.Longitude.Value != 0 &&
+                            (p.DeviceID?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ||
+                             p.BiometricID?.Contains("AUTO", StringComparison.OrdinalIgnoreCase) == true ||
+                             p.LogType?.Contains("Auto", StringComparison.OrdinalIgnoreCase) == true ||
+                             string.Equals(p.DeviceID, "AndroidGeofenceAuto", StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(p => p.PunchTime)
+                .ToList();
+
+            if (empOfflinePunches.Count > 0)
+            {
+                var punchGroups = new List<List<AttendanceLog>>();
+                var currentGroup = new List<AttendanceLog>();
+
+                foreach (var p in empOfflinePunches)
+                {
+                    if (currentGroup.Count == 0)
+                    {
+                        currentGroup.Add(p);
+                    }
+                    else
+                    {
+                        var prevPunch = currentGroup.Last();
+                        if ((p.PunchTime - prevPunch.PunchTime) <= TimeSpan.FromMinutes(35))
+                        {
+                            currentGroup.Add(p);
+                        }
+                        else
+                        {
+                            punchGroups.Add(currentGroup);
+                            currentGroup = new List<AttendanceLog> { p };
+                        }
+                    }
+                }
+                if (currentGroup.Count > 0)
+                {
+                    punchGroups.Add(currentGroup);
+                }
+
+                foreach (var group in punchGroups)
+                {
+                    var firstP = group.First();
+                    var lastP = group.Last();
+                    var firstUtc = IndiaToUtc(firstP.PunchTime);
+                    var lastUtc = IndiaToUtc(lastP.PunchTime);
+
+                    if (group.Count >= 2)
+                    {
+                        // Multi-punch offline session (e.g. Prakash 15:28 to 15:48)
+                        var sessionPoints = sorted
+                            .Where(pt => pt.CapturedAtUtc >= firstUtc.AddMinutes(-2) && pt.CapturedAtUtc <= lastUtc.AddMinutes(2))
+                            .OrderBy(pt => pt.CapturedAtUtc)
+                            .ToList();
+
+                        if (sessionPoints.Count < 2)
+                        {
+                            sessionPoints = group.Select(gp => {
+                                var utc = IndiaToUtc(gp.PunchTime);
+                                return new EmployeeLocationHistory
+                                {
+                                    EmployeeId = empId,
+                                    Latitude = gp.Latitude!.Value,
+                                    Longitude = gp.Longitude!.Value,
+                                    CapturedAtUtc = utc,
+                                    RecordedAtUtc = utc,
+                                    AccuracyMeters = 10,
+                                    DistanceFromOfficeMeters = (officeLat != 0) ? CalculateDistance(gp.Latitude.Value, gp.Longitude.Value, officeLat, officeLng) : 0,
+                                    AllowedRadiusMeters = officeRadiusMeters,
+                                    IsWithinAllowedRadius = (officeRadiusMeters > 0) && CalculateDistance(gp.Latitude.Value, gp.Longitude.Value, officeLat, officeLng) <= officeRadiusMeters,
+                                    CaptureSource = "OfflinePunch"
+                                };
+                            }).ToList();
+                        }
+                        rawClusters.Add(sessionPoints);
+                    }
+                    else
+                    {
+                        // Single isolated offline punch (e.g. Nevetha 16:25) -> session from punch - 5 mins to punch + 15 mins (16:20 to 16:40)
+                        var p = group[0];
+                        var punchUtc = IndiaToUtc(p.PunchTime);
+                        var sUtc = punchUtc.AddMinutes(-5);
+                        var eUtc = punchUtc.AddMinutes(15);
+
+                        var pStart = new EmployeeLocationHistory
+                        {
+                            EmployeeId = empId,
+                            Latitude = p.Latitude!.Value,
+                            Longitude = p.Longitude!.Value,
+                            CapturedAtUtc = sUtc,
+                            RecordedAtUtc = sUtc,
+                            AccuracyMeters = 10,
+                            DistanceFromOfficeMeters = (officeLat != 0) ? CalculateDistance(p.Latitude.Value, p.Longitude.Value, officeLat, officeLng) : 0,
+                            AllowedRadiusMeters = officeRadiusMeters,
+                            IsWithinAllowedRadius = (officeRadiusMeters > 0) && CalculateDistance(p.Latitude.Value, p.Longitude.Value, officeLat, officeLng) <= officeRadiusMeters,
+                            CaptureSource = "OfflinePunch"
+                        };
+
+                        var pEnd = new EmployeeLocationHistory
+                        {
+                            EmployeeId = empId,
+                            Latitude = p.Latitude!.Value,
+                            Longitude = p.Longitude!.Value,
+                            CapturedAtUtc = eUtc,
+                            RecordedAtUtc = eUtc,
+                            AccuracyMeters = 10,
+                            DistanceFromOfficeMeters = pStart.DistanceFromOfficeMeters,
+                            AllowedRadiusMeters = officeRadiusMeters,
+                            IsWithinAllowedRadius = pStart.IsWithinAllowedRadius,
+                            CaptureSource = "OfflinePunch"
+                        };
+
+                        rawClusters.Add(new List<EmployeeLocationHistory> { pStart, pEnd });
+                    }
+                }
+            }
+
+            // 3. Sort & Merge overlapping or contiguous clusters
             var sortedClusters = rawClusters
                 .Select(c => c.DistinctBy(p => $"{p.Latitude}_{p.Longitude}_{p.CapturedAtUtc:O}").OrderBy(p => p.CapturedAtUtc).ToList())
                 .Where(c => c.Count >= 2)
@@ -1003,7 +1582,13 @@
                     var lastCluster = clusters.Last();
                     var lastEnd = lastCluster.Last().CapturedAtUtc;
                     var candStart = cand.First().CapturedAtUtc;
-                    if (candStart <= lastEnd.AddMinutes(5))
+
+                    bool hasOnlineBetween = sorted.Any(pt =>
+                        pt.CapturedAtUtc > lastEnd &&
+                        pt.CapturedAtUtc < candStart &&
+                        pt.CaptureSource?.Contains("Offline", StringComparison.OrdinalIgnoreCase) != true);
+
+                    if (candStart <= lastEnd.AddMinutes(5) && !hasOnlineBetween)
                     {
                         var merged = lastCluster.Concat(cand)
                             .DistinctBy(p => $"{p.Latitude}_{p.Longitude}_{p.CapturedAtUtc:O}")
@@ -1042,10 +1627,10 @@
 
                     var stays = DetectPeriodStays(gapPoints);
 
-                    // Punches during gap
+                    // Punches during gap (converted to UTC for accurate timestamp comparison)
                     var punchesInGap = punches.Where(p => p.EmployeeID == empId &&
-                                                          p.PunchTime >= startUtc.AddMinutes(-2) &&
-                                                          p.PunchTime <= endUtc.AddMinutes(2)).ToList();
+                                                          IndiaToUtc(p.PunchTime) >= startUtc.AddMinutes(-3) &&
+                                                          IndiaToUtc(p.PunchTime) <= endUtc.AddMinutes(3)).ToList();
 
                     var hasAutoOut = punchesInGap.Any(p => IsOutType(p.LogType));
                     var hasPunches = punchesInGap.Any();
