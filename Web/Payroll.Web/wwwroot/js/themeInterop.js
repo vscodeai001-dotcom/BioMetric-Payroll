@@ -1730,15 +1730,21 @@ window.payrollSmoothMoveMarker =
             return;
         }
 
-        // LARGE-JUMP SNAP: If the marker needs to move > 300 meters (e.g. employee traveled in
-        // vehicle, or session reconnected after gap), snap directly to the destination.
-        // Never slowly crawl across 5 km of town through lakes and buildings.
+        // LARGE-JUMP SNAP: If the marker needs to move > 1500 meters (e.g. app freshly opened,
+        // cross-city jump, or session reconnected after long gap), snap directly to the destination.
+        // Normal vehicle travel (300m - 1200m) glides smoothly along the road.
         const jumpDistanceMeters = window.payrollHaversineMeters(start, end);
-        if (jumpDistanceMeters > 300) {
+        if (jumpDistanceMeters > 1500) {
             marker.setLatLng(end);
             if (typeof onFrame === 'function') {
                 onFrame(end);
             }
+            return;
+        }
+
+        // DEADBAND FILTER: Ignore micro-jitter (< 3.5 meters) when stationary.
+        // Prevents marker twitching when employee is sitting at a desk or standing still.
+        if (jumpDistanceMeters < 3.5 && (!marker._speedMps || marker._speedMps < 0.3)) {
             return;
         }
 
@@ -1757,10 +1763,10 @@ window.payrollSmoothMoveMarker =
         }
 
         const duration = Math.max(
-            250,
+            1500,
             Math.min(
                 62000,
-                Number(durationMs) || 4000
+                Number(durationMs) || 15000
             )
         );
 
@@ -4352,7 +4358,7 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
             const elapsed =
                 previousAt > 0
                     ? now - previousAt
-                    : 2500;
+                    : 20000;
 
             state.realtimeLastAt =
                 state.realtimeLastAt || {};
@@ -4364,18 +4370,16 @@ window.registerAdminLiveLocationRealtime = function (mapId) {
                 state.markers[employeeId]._speedMps = Number(data.SpeedMps);
             }
 
-            // Match the real GPS cadence while preventing either a jump or
-            // an excessively slow animation when the browser/network pauses.
-            // Max is 62 000 ms to cover full 60-second GPS update intervals —
-            // the marker will glide continuously from fix to fix with no jumps.
+            // Match real GPS cadence (~15-30s) so the marker glides continuously at actual
+            // travel speed rather than rapidly jumping in 1-2 seconds and freezing.
             const duration =
                 Math.max(
-                    1200,
+                    1500,
                     Math.min(
                         62000,
-                        elapsed > 250
-                            ? elapsed * 0.92
-                            : 2500
+                        elapsed > 500
+                            ? elapsed * 0.95
+                            : 20000
                     )
                 );
 
@@ -5297,17 +5301,17 @@ window.updateAdminLiveStaffMap =
                             Number(state.lastLocationAt[employeeId]) || 0;
                         const elapsed = previousAt > 0
                             ? now - previousAt
-                            : 4500;
+                            : 20000;
 
                         state.lastLocationAt[employeeId] = now;
 
                         const moveDuration = Math.max(
-                            900,
+                            1500,
                             Math.min(
                                 62000,
-                                elapsed > 250
-                                    ? elapsed * 0.9
-                                    : 2200
+                                elapsed > 500
+                                    ? elapsed * 0.95
+                                    : 20000
                             )
                         );
 
@@ -8836,12 +8840,15 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
         let layerGroup = mapState?.layerGroup;
         let tileLayer = mapState?.tileLayer;
 
-        const tileUrl = isDarkMode
-            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-            : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-        const tileAttribution = isDarkMode
-            ? '© OpenStreetMap, © CARTO'
-            : '© OpenStreetMap contributors';
+        window.ensurePayrollDarkOsmTiles();
+
+        const tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+        const tileAttribution = '© OpenStreetMap contributors';
+        const tileOptions = {
+            maxZoom: 19,
+            attribution: tileAttribution,
+            className: isDarkMode ? 'payroll-dark-osm-tiles' : ''
+        };
 
         if (!map || !element._leaflet_id) {
             // First time initialization on this DOM element
@@ -8849,7 +8856,7 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                 element._leaflet_id = null;
             }
             map = L.map(element, { zoomControl: true, attributionControl: true });
-            tileLayer = L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttribution }).addTo(map);
+            tileLayer = L.tileLayer(tileUrl, tileOptions).addTo(map);
             layerGroup = L.layerGroup().addTo(map);
             mapState = { map, layerGroup, tileLayer, isDarkMode };
             window.offlineTrackingMaps[mapId] = mapState;
@@ -8859,7 +8866,7 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                 if (tileLayer) {
                     try { map.removeLayer(tileLayer); } catch { }
                 }
-                tileLayer = L.tileLayer(tileUrl, { maxZoom: 19, attribution: tileAttribution }).addTo(map);
+                tileLayer = L.tileLayer(tileUrl, tileOptions).addTo(map);
                 mapState.tileLayer = tileLayer;
                 mapState.isDarkMode = isDarkMode;
             }

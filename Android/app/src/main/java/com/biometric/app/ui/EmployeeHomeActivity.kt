@@ -920,9 +920,9 @@ class EmployeeHomeActivity : MotionBaseActivity() {
         // duration that matches the actual inter-fix cadence of the device's GPS.
         val nowMs = System.currentTimeMillis()
         val gpsElapsedMs = if (lastGpsSampleAtMs > 0L) {
-            ((nowMs - lastGpsSampleAtMs) * 0.92).toLong().coerceIn(1_500L, 35_000L)
+            ((nowMs - lastGpsSampleAtMs) * 0.95).toLong().coerceIn(2_000L, 60_000L)
         } else {
-            2_500L // first-fix default — safe and fast
+            15_000L // smooth cruise matching standard GPS cadence
         }
         lastGpsSampleAtMs = nowMs
 

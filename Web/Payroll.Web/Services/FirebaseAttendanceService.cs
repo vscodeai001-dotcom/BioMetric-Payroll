@@ -380,6 +380,8 @@ public sealed class FirebaseAttendanceService
 
         foreach (var owner in candidateOwners)
         {
+            var initialCount = result.Count;
+
             // 1. Try attendance_punches by range
             var json = await _firebase.GetOwnerTableByChildRangeAsync(
                 owner,
@@ -389,14 +391,6 @@ public sealed class FirebaseAttendanceService
                 endUtcMs,
                 limitToLast: 10000,
                 cancellationToken: ct);
-
-            // If range query returns null or empty, read full table as fallback
-            if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array) ||
-                (json.Value.ValueKind == JsonValueKind.Object && !json.Value.EnumerateObject().Any()) ||
-                (json.Value.ValueKind == JsonValueKind.Array && json.Value.GetArrayLength() == 0))
-            {
-                json = await _firebase.GetOwnerTableAsync(owner, "attendance_punches", ct);
-            }
 
             ParseAndCollectPunches(json, from, to, employeeId, result, biometricMap);
 
@@ -410,14 +404,13 @@ public sealed class FirebaseAttendanceService
                 limitToLast: 10000,
                 cancellationToken: ct);
 
-            if (attJson is null || (attJson.Value.ValueKind != JsonValueKind.Object && attJson.Value.ValueKind != JsonValueKind.Array) ||
-                (attJson.Value.ValueKind == JsonValueKind.Object && !attJson.Value.EnumerateObject().Any()) ||
-                (attJson.Value.ValueKind == JsonValueKind.Array && attJson.Value.GetArrayLength() == 0))
-            {
-                attJson = await _firebase.GetOwnerTableAsync(owner, "attendance", ct);
-            }
-
             ParseAndCollectPunches(attJson, from, to, employeeId, result, biometricMap);
+
+            // If we found punches under this owner, no need to query duplicate fallback tenant keys
+            if (result.Count > initialCount)
+            {
+                break;
+            }
         }
 
         if (localPunches.Count > 0)

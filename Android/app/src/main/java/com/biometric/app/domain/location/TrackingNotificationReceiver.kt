@@ -38,7 +38,7 @@ class TrackingNotificationReceiver : BroadcastReceiver() {
                 Log.w("TrackingNotifReceiver", "Ignoring tracking restore: invalid employeeId=$employeeId")
                 return
             }
-if (sessionStore.isLoggedIn() && geoEnabled) {
+            if (sessionStore.isLoggedIn() && geoEnabled) {
                 Log.i("TrackingNotifReceiver", "Aggressively restoring tracking service...")
                 val serviceIntent = Intent(context, TrackingService::class.java).apply {
                     action = if (intent.action == TrackingService.ACTION_REFRESH_WINDOW) TrackingService.ACTION_REFRESH_WINDOW else TrackingService.ACTION_START
@@ -47,6 +47,20 @@ if (sessionStore.isLoggedIn() && geoEnabled) {
                     ContextCompat.startForegroundService(context, serviceIntent)
                 } catch (e: Exception) {
                     Log.e("TrackingNotifReceiver", "Restoration failed: ${e.message}")
+                }
+            }
+
+            // Re-arm next alarm tick for 24/7 persistence across deep Doze mode
+            if (intent.action == "ACTION_SERVICE_RESTART_TICK" && sessionStore.isLoggedIn()) {
+                val nextIntent = Intent(context, TrackingNotificationReceiver::class.java).apply {
+                    action = "ACTION_SERVICE_RESTART_TICK"
+                }
+                val nextPending = android.app.PendingIntent.getBroadcast(
+                    context, 0, nextIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+                )
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    alarmManager.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 180_000L, nextPending)
                 }
             }
         }

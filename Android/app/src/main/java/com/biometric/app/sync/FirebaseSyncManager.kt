@@ -971,6 +971,41 @@ class FirebaseSyncManager @Inject constructor(
         })
     }
 
+    /**
+     * Heartbeat presence touch: updates LastUpdatedUtc and State="ACTIVE" on
+     * the authoritative live node without writing any route history breadcrumbs.
+     * Keeps the employee showing as Live on Admin Dashboards even when stationary.
+     */
+    suspend fun touchLivePresence(employeeId: Int, sessionId: String): Boolean {
+        if (sessionStore.isOfflineMode() || sessionStore.deploymentMode().equals("Offline", ignoreCase = true)) return false
+        if (employeeId <= 0 || sessionId.isBlank() || !isAuthenticated()) return false
+        val ownerUid = getOwnerUid()?.takeIf { it.isNotBlank() } ?: return false
+        val nowIso = Date().toInstant().toString()
+        val liveRef = getGlobalRef().child("owners/$ownerUid/tracking/live/$employeeId")
+        return try {
+            val updates = mapOf<String, Any>(
+                "LastUpdatedUtc" to nowIso,
+                "State" to "ACTIVE"
+            )
+            liveRef.updateChildren(updates).await()
+            val isSpark = sessionStore.firebasePlanMode().equals("Spark", ignoreCase = true)
+            if (!isSpark) {
+                if (ownerUid.equals(FirebaseSsotSchema.DEFAULT_OWNER_UID, ignoreCase = true)) {
+                    getGlobalRef().child("tracking/live/$employeeId").updateChildren(updates).await()
+                }
+                getAlternateOwnerUid()?.let { altUid ->
+                    runCatching {
+                        getGlobalRef().child("owners/$altUid/tracking/live/$employeeId").updateChildren(updates).await()
+                    }
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.d("FirebaseSyncManager", "Live presence touch skipped: ${e.message}")
+            false
+        }
+    }
+
     suspend fun pushLiveLocation(
         employeeId: Int,
         sessionId: String,

@@ -44,12 +44,7 @@ val prefs = context.getSharedPreferences("tracking_prefs", Context.MODE_PRIVATE)
         }
 
         val window = trackingWindowResolver.resolve()
-        if (!window.allowed) {
-            prefs.edit().putBoolean("tracking_waiting_for_shift", true).apply()
-            scheduleFollowUp(context)
-            return Result.success()
-        }
-        prefs.edit().putBoolean("tracking_waiting_for_shift", false).apply()
+        prefs.edit().putBoolean("tracking_waiting_for_shift", !window.allowed).apply()
 
         if (!isServiceRunning(TrackingService::class.java)) {
             Log.i("TrackingRecovery", "Service not running, restarting aggressively...")

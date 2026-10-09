@@ -1138,12 +1138,11 @@ class MainActivity : MotionBaseActivity(), PaymentResultListener {
                 m1.title = employeeName
 
                 // Compute elapsed time since the last GPS fix for this employee so
-                // the animation duration spans the full inter-fix gap (smooth, not jumpy).
+                // the animation duration spans the full inter-fix gap (smooth, continuous motion).
                 val nowMs = System.currentTimeMillis()
-                val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: nowMs
-                // Use 92% of the elapsed gap so the next update always finds the marker
-                // already at its destination — this guarantees continuous smooth motion.
-                val gpsElapsedMs = ((nowMs - lastMs) * 0.92).toLong().coerceIn(1_500L, 65_000L)
+                val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: (nowMs - 20_000L)
+                // Use 95% of the elapsed gap so the marker glides continuously at true speed.
+                val gpsElapsedMs = ((nowMs - lastMs) * 0.95).toLong().coerceIn(2_000L, 65_000L)
                 lastMarkerUpdateAtMs[loc.employeeId] = nowMs
 
                 MarkerAnimationHelper.animateMarker(

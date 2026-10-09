@@ -1089,10 +1089,10 @@ class TrackingMapActivity : MotionBaseActivity() {
             marker.alpha = 1f
             
             // Compute elapsed time since the last GPS fix so the animation duration
-            // spans the full inter-fix interval (smooth, delivery-app-style motion).
+            // spans the full inter-fix interval (smooth, continuous motion).
             val nowMs = System.currentTimeMillis()
-            val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: nowMs
-            val gpsElapsedMs = ((nowMs - lastMs) * 0.92).toLong().coerceIn(1_500L, 65_000L)
+            val lastMs = lastMarkerUpdateAtMs[loc.employeeId] ?: (nowMs - 20_000L)
+            val gpsElapsedMs = ((nowMs - lastMs) * 0.95).toLong().coerceIn(2_000L, 65_000L)
             lastMarkerUpdateAtMs[loc.employeeId] = nowMs
 
             MarkerAnimationHelper.animateMarker(

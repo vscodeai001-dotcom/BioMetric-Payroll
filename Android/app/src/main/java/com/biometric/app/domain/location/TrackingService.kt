@@ -207,12 +207,13 @@ class TrackingService : Service() {
                             putBoolean("tracking_waiting_for_shift", true)
                         }
 
-                        withContext(Dispatchers.Main) {
-                            stopTracking(
-                                "OUTSIDE_TRACKING_WINDOW",
-                                keepRecovery = true
-                            )
+                        // Maintain persistent 24/7 foreground presence:
+                        // Keep heartbeat and wake lock alive in standby mode without tearing down notification.
+                        if (heartbeatJob?.isActive != true) {
+                            startHeartbeatLoop()
                         }
+                        scheduleShiftBoundary(window.start)
+                        scheduleRestartTick()
                         return@launch
                     }
 
@@ -360,15 +361,17 @@ class TrackingService : Service() {
                 // online GPS event is ready to become live.
                 withContext(Dispatchers.Main) { startLocationUpdates() }
             }
-        }
-else if (locationUpdatesStarted) {
-            scheduleShiftBoundary(window.start)
-            withContext(Dispatchers.Main) { stopTracking("OUTSIDE_TRACKING_WINDOW", keepRecovery = true) }
         } else {
             scheduleShiftBoundary(window.start)
             getSharedPreferences(PREFS, MODE_PRIVATE).edit {
                 putBoolean("is_service_active_intended", true)
                 putBoolean("tracking_waiting_for_shift", true)
+            }
+            if (locationUpdatesStarted) {
+                withContext(Dispatchers.Main) {
+                    fusedLocationClient.removeLocationUpdates(locationCallback)
+                    locationUpdatesStarted = false
+                }
             }
         }
     }
@@ -417,7 +420,7 @@ else if (locationUpdatesStarted) {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "Persistent Sync Status", NotificationManager.IMPORTANCE_DEFAULT)
+            val channel = NotificationChannel(CHANNEL_ID, "Persistent Sync Status", NotificationManager.IMPORTANCE_HIGH)
             channel.apply {
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
                 setShowBadge(false)
@@ -827,9 +830,18 @@ else if (locationUpdatesStarted) {
         heartbeatJob?.cancel()
         heartbeatJob = serviceScope.launch {
             while (isActive) {
-                // Heartbeat ensures the authoritative employee_sessions node 
-                // remains current even if the device is stationary.
-                firebaseEmployeeSessionManager.touch()
+                // Heartbeat ensures the authoritative employee_sessions and live
+                // presence nodes remain current even if the device is stationary.
+                try {
+                    val employeeId = sessionStore.employeeId()
+                    val sessionId = sessionStore.currentGpsSessionId().orEmpty()
+                    firebaseEmployeeSessionManager.touch()
+                    if (employeeId > 0 && sessionId.isNotBlank() && offlineMonitor.isOnline()) {
+                        firebaseSync.touchLivePresence(employeeId, sessionId)
+                    }
+                } catch (e: Exception) {
+                    Log.d("TrackingService", "Heartbeat touch error: ${e.message}")
+                }
                 delay(60_000L)
             }
         }
@@ -1007,15 +1019,39 @@ else if (locationUpdatesStarted) {
         super.onTaskRemoved(rootIntent)
         if (isManualStopping) return
         
-        // Aggressively restart the service if swiped away
-        Log.i("TrackingService", "Task removed, triggering immediate recovery...")
-        val restartIntent = Intent(applicationContext, this.javaClass).apply {
-            action = ACTION_START
+        // Aggressively restart the service if swiped away (Android 12+ compliant via Broadcast and WorkManager)
+        Log.i("TrackingService", "Task removed, triggering immediate 24/7 recovery...")
+        
+        // 1. BroadcastReceiver alarm bounce (exempt from Android 12+ FGS background launch restrictions)
+        val restartIntent = Intent(applicationContext, TrackingNotificationReceiver::class.java).apply {
+            action = "ACTION_SERVICE_RESTART_TICK"
         }
-        restartIntent.setPackage(packageName)
-        val pendingIntent = PendingIntent.getService(applicationContext, 1, restartIntent, PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE)
+        val pendingIntent = PendingIntent.getBroadcast(
+            applicationContext,
+            101,
+            restartIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val alarmManager = getSystemService(ALARM_SERVICE) as AlarmManager
-        alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, pendingIntent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000L, pendingIntent)
+        } else {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000L, pendingIntent)
+        }
+
+        // 2. Immediate WorkManager expedited task backup
+        try {
+            val recoveryWork = androidx.work.OneTimeWorkRequestBuilder<TrackingRecoveryWorker>()
+                .addTag("tracking_recovery_task_removed")
+                .build()
+            androidx.work.WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                "tracking_recovery_task_removed",
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                recoveryWork
+            )
+        } catch (e: Exception) {
+            Log.e("TrackingService", "WorkManager task removal backup failed", e)
+        }
     }
 
     override fun onDestroy() {

@@ -39,29 +39,32 @@ object MarkerAnimationHelper {
         }
 
         // 2. Large Jump / Transit Check: If the distance between current and new position
-        // is > 300 meters (e.g. app freshly opened, or employee traveled in vehicle), snap
-        // directly to the real position. Google Maps / Uber never slowly drag a marker across 5 km.
+        // is > 1500 meters (e.g. app freshly opened, cross-city transit), snap directly to position.
+        // Normal vehicle travel (300m - 1200m) glides smoothly along the road.
         val distMeters = startPos.distanceToAsDouble(toPosition)
-        if (distMeters > 300.0) {
+        if (distMeters > 1500.0) {
             marker.position = toPosition
             marker.rotation = toBearing
             onUpdate(toPosition)
             return
         }
 
-        val startRotation = marker.rotation
-
         // Normalize rotation for shortest path
+        val startRotation = marker.rotation
         var targetRotation = toBearing
         if (abs(targetRotation - startRotation) > 180) {
             if (targetRotation > startRotation) targetRotation -= 360 else targetRotation += 360
         }
 
-        // Animate over 92% of the real GPS-fix interval so the marker appears
+        // 3. Stationary Deadband Check: If distance is < 3.5m and bearing change is negligible,
+        // suppress micro-drift to keep the marker rock-solid when employee is standing still.
+        if (distMeters < 3.5 && (abs(targetRotation - startRotation) < 10f || toBearing == 0f)) {
+            return
+        }
+
+        // Animate over 95% of the real GPS-fix interval so the marker appears
         // to travel continuously between fixes (Zomato/Swiggy-style liveness).
-        // Clamped: minimum 1.2 s so short-burst updates still look smooth;
-        // maximum 35 s for slower sessions.
-        val animDuration = elapsedMs.coerceIn(1_200L, 35_000L)
+        val animDuration = elapsedMs.coerceIn(2_000L, 60_000L)
 
         val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = animDuration
