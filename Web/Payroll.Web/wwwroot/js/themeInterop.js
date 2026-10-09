@@ -8837,6 +8837,8 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
         }).addTo(map);
 
         const bounds = [];
+        const routeBounds = [];
+        const isFocused = Boolean(payload?.isFocused);
 
         // 1. Office Location & Geofence Circle
         const officeLat = Number(payload?.officeLat);
@@ -8845,7 +8847,7 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
 
         if (Number.isFinite(officeLat) && Number.isFinite(officeLng) && officeLat !== 0 && officeLng !== 0) {
             const officeLatLng = [officeLat, officeLng];
-            bounds.push(officeLatLng);
+            if (!isFocused) bounds.push(officeLatLng);
 
             L.circle(officeLatLng, {
                 radius: officeRadius,
@@ -8866,49 +8868,99 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
                 .addTo(map);
         }
 
-        // 2. Punch In Marker
-        if (payload?.punchIn && Number.isFinite(payload.punchIn.lat) && Number.isFinite(payload.punchIn.lng) && payload.punchIn.lat !== 0) {
-            const pInLatLng = [payload.punchIn.lat, payload.punchIn.lng];
-            bounds.push(pInLatLng);
-            const pInIcon = L.divIcon({
-                className: 'offline-map-punch-in-icon',
-                html: '<div style="background:#15803d;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🟢</div>',
-                iconSize: [30, 30],
-                iconAnchor: [15, 15]
-            });
-            L.marker(pInLatLng, { icon: pInIcon })
-                .bindPopup(`<b>🟢 Punch In</b><br>Time: ${payload.punchIn.time || '—'}<br>Source: ${payload.punchIn.source || 'Mobile'}`)
-                .addTo(map);
-        }
+        // 2. Route polylines & breadcrumbs
+        const rawPoints = Array.isArray(payload?.routePoints) ? payload.routePoints : [];
+        const validPoints = rawPoints.filter(pt => {
+            const lat = Number(pt.lat ?? pt.latitude);
+            const lng = Number(pt.lng ?? pt.longitude);
+            return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+        });
 
-        // 3. Punch Out Marker
-        if (payload?.punchOut && Number.isFinite(payload.punchOut.lat) && Number.isFinite(payload.punchOut.lng) && payload.punchOut.lat !== 0) {
-            const pOutLatLng = [payload.punchOut.lat, payload.punchOut.lng];
-            bounds.push(pOutLatLng);
-            const pOutIcon = L.divIcon({
-                className: 'offline-map-punch-out-icon',
-                html: '<div style="background:#b91c1c;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🔴</div>',
-                iconSize: [30, 30],
-                iconAnchor: [15, 15]
-            });
-            L.marker(pOutLatLng, { icon: pOutIcon })
-                .bindPopup(`<b>🔴 Punch Out</b><br>Time: ${payload.punchOut.time || '—'}`)
-                .addTo(map);
-        }
+        if (isFocused && validPoints.length > 0) {
+            // FOCUSED PERIOD INSPECTION: Draw clear, bold trajectory route of where the employee went!
+            const latLngs = validPoints.map(p => [Number(p.lat ?? p.latitude), Number(p.lng ?? p.longitude)]);
+            latLngs.forEach(ll => routeBounds.push(ll));
 
-        // 4. Route polylines
-        const points = Array.isArray(payload?.routePoints) ? payload.routePoints : [];
-        if (points.length > 0) {
+            // Polyline
+            L.polyline(latLngs, {
+                color: '#ea580c',
+                weight: 6,
+                opacity: 0.95,
+                lineCap: 'round',
+                lineJoin: 'round'
+            }).addTo(map);
+
+            // Intermediate breadcrumb dots along the route
+            if (validPoints.length > 2) {
+                for (let i = 1; i < validPoints.length - 1; i++) {
+                    const pt = validPoints[i];
+                    const lat = Number(pt.lat ?? pt.latitude);
+                    const lng = Number(pt.lng ?? pt.longitude);
+                    L.circleMarker([lat, lng], {
+                        radius: 5,
+                        fillColor: '#f97316',
+                        color: '#ffffff',
+                        weight: 2,
+                        fillOpacity: 1
+                    }).bindTooltip(`<b>📍 Breadcrumb #${pt.index || (i + 1)}</b><br>Time: <b>${pt.timestamp || ''}</b>`, {
+                        permanent: false,
+                        direction: 'top'
+                    }).addTo(map);
+                }
+            }
+
+            // Start Disconnected Marker
+            const startPt = validPoints[0];
+            const startLat = Number(startPt.lat ?? startPt.latitude);
+            const startLng = Number(startPt.lng ?? startPt.longitude);
+            const startIcon = L.divIcon({
+                className: 'offline-start-pin',
+                html: `<div style="background:#dc2626;color:#fff;border-radius:20px;padding:4px 11px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;box-shadow:0 3px 8px rgba(0,0,0,0.35);border:2px solid #fff;white-space:nowrap;">
+                    <span>📴</span>
+                    <span>Disconnected ${payload.startTime || startPt.timestamp || ''}</span>
+                </div>`,
+                iconSize: [150, 28],
+                iconAnchor: [75, 28]
+            });
+            L.marker([startLat, startLng], { icon: startIcon, zIndexOffset: 1000 })
+                .bindPopup(`<b>📴 Offline Disconnection Start</b><br>
+                    Employee: <b>${payload.employeeName || 'Staff'}</b><br>
+                    Time: <b>${payload.startTime || startPt.timestamp || '—'}</b><br>
+                    Coords: <code>${startLat.toFixed(5)}, ${startLng.toFixed(5)}</code>`)
+                .addTo(map);
+
+            // Reconnected End Marker
+            const endPt = validPoints[validPoints.length - 1];
+            const endLat = Number(endPt.lat ?? endPt.latitude);
+            const endLng = Number(endPt.lng ?? endPt.longitude);
+            const endIcon = L.divIcon({
+                className: 'offline-end-pin',
+                html: `<div style="background:#16a34a;color:#fff;border-radius:20px;padding:4px 11px;font-size:11px;font-weight:700;display:flex;align-items:center;gap:4px;box-shadow:0 3px 8px rgba(0,0,0,0.35);border:2px solid #fff;white-space:nowrap;">
+                    <span>📶</span>
+                    <span>Reconnected ${payload.endTime || endPt.timestamp || ''}</span>
+                </div>`,
+                iconSize: [150, 28],
+                iconAnchor: [75, 28]
+            });
+            L.marker([endLat, endLng], { icon: endIcon, zIndexOffset: 1000 })
+                .bindPopup(`<b>📶 Reconnected to Central Cloud</b><br>
+                    Employee: <b>${payload.employeeName || 'Staff'}</b><br>
+                    Time: <b>${payload.endTime || endPt.timestamp || '—'}</b><br>
+                    Duration: <b>${payload.duration || '—'}</b><br>
+                    Distance: <b>${payload.distance || '—'}</b><br>
+                    Total Breadcrumbs: <b>${validPoints.length}</b><br>
+                    Coords: <code>${endLat.toFixed(5)}, ${endLng.toFixed(5)}</code>`)
+                .addTo(map);
+        } else if (validPoints.length > 0) {
+            // OVERVIEW MAP: Split into normal and offline segments
             const normalSegments = [];
             const offlineSegments = [];
             let curNormal = [];
             let curOffline = [];
 
-            points.forEach(pt => {
+            validPoints.forEach(pt => {
                 const lat = Number(pt.lat ?? pt.latitude);
                 const lng = Number(pt.lng ?? pt.longitude);
-                if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
-
                 const latLng = [lat, lng];
                 bounds.push(latLng);
 
@@ -8943,40 +8995,106 @@ window.initializeOfflineTrackingMap = async function (mapId, payload) {
             });
         }
 
-        // 5. Live Locations / Employee Markers
-        const staff = Array.isArray(payload?.liveLocations) ? payload.liveLocations : [];
-        staff.forEach(s => {
+        // 3. Punch In / Out Markers (overview only)
+        if (!isFocused && payload?.punchIn && Number.isFinite(payload.punchIn.lat) && Number.isFinite(payload.punchIn.lng) && payload.punchIn.lat !== 0) {
+            const pInLatLng = [payload.punchIn.lat, payload.punchIn.lng];
+            bounds.push(pInLatLng);
+            const pInIcon = L.divIcon({
+                className: 'offline-map-punch-in-icon',
+                html: '<div style="background:#15803d;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🟢</div>',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            L.marker(pInLatLng, { icon: pInIcon })
+                .bindPopup(`<b>🟢 Punch In</b><br>Time: ${payload.punchIn.time || '—'}<br>Source: ${payload.punchIn.source || 'Mobile'}`)
+                .addTo(map);
+        }
+
+        if (!isFocused && payload?.punchOut && Number.isFinite(payload.punchOut.lat) && Number.isFinite(payload.punchOut.lng) && payload.punchOut.lat !== 0) {
+            const pOutLatLng = [payload.punchOut.lat, payload.punchOut.lng];
+            bounds.push(pOutLatLng);
+            const pOutIcon = L.divIcon({
+                className: 'offline-map-punch-out-icon',
+                html: '<div style="background:#b91c1c;color:#fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:16px;">🔴</div>',
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+            L.marker(pOutLatLng, { icon: pOutIcon })
+                .bindPopup(`<b>🔴 Punch Out</b><br>Time: ${payload.punchOut.time || '—'}`)
+                .addTo(map);
+        }
+
+        // 4. Offline Stay / Dwell Markers
+        const stays = Array.isArray(payload?.stays) ? payload.stays : [];
+        stays.forEach(s => {
             const lat = Number(s.lat ?? s.latitude);
             const lng = Number(s.lng ?? s.longitude);
             if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
 
             const latLng = [lat, lng];
-            bounds.push(latLng);
+            if (isFocused) routeBounds.push(latLng);
+            else bounds.push(latLng);
 
-            const isLive = s.status === 'Live';
-            const badgeBg = isLive ? '#15803d' : (s.status === 'Stale' ? '#b45309' : '#64748b');
-
-            const empIcon = L.divIcon({
-                className: 'offline-map-emp-marker',
-                html: `<div style="background:${badgeBg};color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
+            const stayIcon = L.divIcon({
+                className: 'offline-map-stay-marker',
+                html: `<div style="background:#0284c7;color:#fff;border-radius:16px;padding:3px 9px;font-size:11px;font-weight:bold;display:flex;align-items:center;gap:3px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
                     <span>📍</span>
-                    <span>${s.name || 'Staff'}</span>
+                    <span>Stayed ${s.duration || ''}</span>
                 </div>`,
-                iconSize: [100, 30],
-                iconAnchor: [50, 15]
+                iconSize: [110, 28],
+                iconAnchor: [55, 14]
             });
 
-            L.marker(latLng, { icon: empIcon })
-                .bindPopup(`<b>${s.name || 'Employee'} (#${s.employeeId || '—'})</b><br>
-                    Status: <b>${s.status || 'Offline'}</b><br>
-                    Speed: ${Number(s.speedKmh || 0).toFixed(1)} km/h<br>
-                    Movement: ${s.movement || 'Stopped'}<br>
-                    Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
+            L.marker(latLng, { icon: stayIcon })
+                .bindPopup(`<b>📍 Offline Stay / Stop</b><br>
+                    Duration: <b>${s.duration || '—'}</b><br>
+                    Location: ${s.description || '—'}<br>
+                    Coords: <code>${lat.toFixed(5)}, ${lng.toFixed(5)}</code>`)
                 .addTo(map);
         });
 
+        // 5. Live Locations / Employee Markers (overview only)
+        if (!isFocused) {
+            const staff = Array.isArray(payload?.liveLocations) ? payload.liveLocations : [];
+            staff.forEach(s => {
+                const lat = Number(s.lat ?? s.latitude);
+                const lng = Number(s.lng ?? s.longitude);
+                if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+
+                const latLng = [lat, lng];
+                bounds.push(latLng);
+
+                const isLive = s.status === 'Live';
+                const badgeBg = isLive ? '#15803d' : (s.status === 'Stale' ? '#b45309' : '#64748b');
+
+                const empIcon = L.divIcon({
+                    className: 'offline-map-emp-marker',
+                    html: `<div style="background:${badgeBg};color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:bold;display:flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;border:2px solid #fff;">
+                        <span>📍</span>
+                        <span>${s.name || 'Staff'}</span>
+                    </div>`,
+                    iconSize: [100, 30],
+                    iconAnchor: [50, 15]
+                });
+
+                L.marker(latLng, { icon: empIcon })
+                    .bindPopup(`<b>${s.name || 'Employee'} (#${s.employeeId || '—'})</b><br>
+                        Status: <b>${s.status || 'Offline'}</b><br>
+                        Speed: ${Number(s.speedKmh || 0).toFixed(1)} km/h<br>
+                        Movement: ${s.movement || 'Stopped'}<br>
+                        Coords: ${lat.toFixed(5)}, ${lng.toFixed(5)}`)
+                    .addTo(map);
+            });
+        }
+
         // 6. Fit Bounds or fallback
-        if (bounds.length > 0) {
+        if (isFocused && routeBounds.length > 0) {
+            if (routeBounds.length === 1) {
+                map.setView(routeBounds[0], 17);
+            } else {
+                map.fitBounds(L.latLngBounds(routeBounds), { padding: [50, 50], maxZoom: 17 });
+            }
+        } else if (bounds.length > 0) {
             map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 16 });
         } else if (Number.isFinite(officeLat) && officeLat !== 0) {
             map.setView([officeLat, officeLng], 15);

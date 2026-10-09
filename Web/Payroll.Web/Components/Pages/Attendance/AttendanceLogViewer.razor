@@ -992,7 +992,9 @@
                                     {
                                         if (dto.Status == "Absent" || dto.Status == "Missing Punch" || dto.FinalWorkedHours == 0 || displayLogs.Count % 2 == 0)
                                         {
-                                            dto.Status = (displayLogs.Count % 2 != 0) ? "Missing Punch" : "Present";
+                                            bool isToday = ds.ShiftDate == DateOnly.FromDateTime(DateTime.Today);
+                                            bool isClockedInToday = isToday && displayLogs.Count > 0 && string.Equals(displayLogs.Last().LogType, "IN", StringComparison.OrdinalIgnoreCase);
+                                            dto.Status = (displayLogs.Count % 2 != 0 && !isClockedInToday) ? "Missing Punch" : "Present";
                                             dto.ShiftWorkedDuration = TimeSpan.FromMinutes(punchWorkedMinutes);
                                             dto.FinalWorkedHours = workedHours;
                                         }

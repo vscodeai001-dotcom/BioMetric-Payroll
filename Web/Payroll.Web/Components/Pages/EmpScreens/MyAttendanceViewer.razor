@@ -335,9 +335,50 @@ else
             {
                 var isWeeklyOff = ds.Status.Contains("Weekly Off", StringComparison.OrdinalIgnoreCase);
                 var isWeeklyOffWorked = ds.Status == "Weekly Off (Worked)" || (isWeeklyOff && ds.TotalOvertimeDuration > TimeSpan.Zero);
+
+                var dayLogs = relevantLogs
+                    .Where(l => l.PunchTime.Date == ds.ShiftDate.ToDateTime(TimeOnly.MinValue).Date)
+                    .OrderBy(l => l.PunchTime)
+                    .ToList();
+
+                var punchesForDay = dayLogs
+                    .Select(l => $"{l.PunchTime:HH:mm} {(string.IsNullOrWhiteSpace(l.LogType) ? "" : l.LogType.Trim())}".Trim())
+                    .ToList();
+
+                bool hasIn = dayLogs.Any(l => string.Equals(l.LogType, "IN", StringComparison.OrdinalIgnoreCase));
+                bool hasOut = dayLogs.Any(l => string.Equals(l.LogType, "OUT", StringComparison.OrdinalIgnoreCase));
+                bool isEvenCount = dayLogs.Count > 0 && dayLogs.Count % 2 == 0;
+                bool endsWithOut = dayLogs.Count > 0 && string.Equals(dayLogs.Last().LogType, "OUT", StringComparison.OrdinalIgnoreCase);
+                bool hasCompletePairs = hasIn && hasOut && isEvenCount && endsWithOut;
+
+                decimal punchWorkedHours = 0m;
+                for (int i = 0; i + 1 < dayLogs.Count; i += 2)
+                {
+                    if (dayLogs[i + 1].PunchTime > dayLogs[i].PunchTime)
+                    {
+                        punchWorkedHours += (decimal)(dayLogs[i + 1].PunchTime - dayLogs[i].PunchTime).TotalHours;
+                    }
+                }
+
                 decimal workedHours = isWeeklyOffWorked
                     ? (decimal)ds.TotalOvertimeDuration.TotalHours
                     : ds.EarnedStandardHours + (decimal)ds.TotalOvertimeDuration.TotalHours;
+
+                if (hasCompletePairs && punchWorkedHours > workedHours)
+                {
+                    workedHours = punchWorkedHours;
+                }
+
+                string displayStatus = ds.Status;
+                if (string.Equals(ds.Status, "Missing Punch", StringComparison.OrdinalIgnoreCase) && hasCompletePairs)
+                {
+                    displayStatus = isWeeklyOff ? "Weekly Off (Worked)" : "Present";
+                }
+                else if (isWeeklyOffWorked)
+                {
+                    displayStatus = "Weekly Off (Worked)";
+                }
+
                 cumulative.TotalScheduledHours += isWeeklyOff
                     ? TimeSpan.Zero
                     : ds.ScheduledShiftDuration;
@@ -345,16 +386,10 @@ else
                 cumulative.TotalOverallPenalty += ds.TotalPenaltyDuration;
                 cumulative.TotalOvertime += ds.TotalOvertimeDuration;
 
-                var punchesForDay = relevantLogs
-                    .Where(l => l.PunchTime.Date == ds.ShiftDate.ToDateTime(TimeOnly.MinValue).Date)
-                    .OrderBy(l => l.PunchTime)
-                    .Select(l => $"{l.PunchTime:HH:mm} {(string.IsNullOrWhiteSpace(l.LogType) ? "" : l.LogType.Trim())}".Trim())
-                    .ToList();
-
                 dailySummaries.Add(new DailyAttendanceRecord
                 {
                     Date = ds.ShiftDate,
-                    Status = isWeeklyOffWorked ? "Weekly Off (Worked)" : ds.Status,
+                    Status = displayStatus,
                     ScheduledShiftDuration = isWeeklyOff
                         ? TimeSpan.Zero
                         : ds.ScheduledShiftDuration,

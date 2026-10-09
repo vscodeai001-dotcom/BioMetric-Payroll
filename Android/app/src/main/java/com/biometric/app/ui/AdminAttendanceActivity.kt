@@ -506,8 +506,13 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     "No punches recorded"
                 }
 
+                val isToday = dateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
                 val status = if (effectivePunches.isNotEmpty()) {
-                    if (effectivePunches.size % 2 == 1) "Missing Punch" else "Present"
+                    if (effectivePunches.size % 2 == 1) {
+                        if (isToday && effectivePunches.last().type.equals("IN", true)) "Present" else "Missing Punch"
+                    } else {
+                        "Present"
+                    }
                 } else {
                     val dayOfWeek = runCatching {
                         val c = Calendar.getInstance().apply { time = isoDateFormat.parse(dateStr)!! }

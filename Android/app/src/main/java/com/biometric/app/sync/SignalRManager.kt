@@ -922,6 +922,10 @@ class SignalRManager @Inject constructor(
                 val lon = (map["Longitude"] as? Number)?.toDouble() ?: return@forEach
                 val timestamp = map["Timestamp"]?.toString()
                 val dedupeKey = "${id}|${timestamp.orEmpty()}|${lat}|${lon}"
+                val isOffline = (map["IsOffline"] as? Boolean) == true ||
+                        (map["Source"]?.toString()?.contains("offline", ignoreCase = true) == true) ||
+                        (map["CaptureSource"]?.toString()?.contains("offline", ignoreCase = true) == true) ||
+                        (map["MovementState"]?.toString()?.contains("offline", ignoreCase = true) == true)
                 byKey[dedupeKey] = LiveLocation(
                     employeeId = eid,
                     sessionId = map["SessionId"]?.toString().orEmpty(),
@@ -934,7 +938,8 @@ class SignalRManager @Inject constructor(
                     timestamp = timestamp,
                     speedMps = (map["SpeedMps"] as? Number)?.toDouble() ?: 0.0,
                     bearing = (map["Bearing"] as? Number)?.toDouble() ?: 0.0,
-                    movementState = map["MovementState"]?.toString() ?: "Stopped"
+                    movementState = map["MovementState"]?.toString() ?: "Stopped",
+                    isOffline = isOffline
                 )
             }
             byKey.values.toList().sortedBy { parseTrackingTimestamp(it.timestamp) }
@@ -1165,7 +1170,8 @@ class SignalRManager @Inject constructor(
         @SerializedName("timestamp") val timestamp: String? = null,
         @SerializedName("speedMps") val speedMps: Double = 0.0,
         @SerializedName("bearing") val bearing: Double = 0.0,
-        @SerializedName("movementState") val movementState: String = "Stopped"
+        @SerializedName("movementState") val movementState: String = "Stopped",
+        @SerializedName("isOffline") val isOffline: Boolean = false
     )
 
     private data class FirebaseLiveLocation(

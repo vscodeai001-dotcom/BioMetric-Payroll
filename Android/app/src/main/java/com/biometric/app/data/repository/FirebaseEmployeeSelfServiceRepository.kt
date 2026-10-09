@@ -758,22 +758,45 @@ class FirebaseEmployeeSelfServiceRepository @Inject constructor(
                 } ?: 0.0
             }
 
-            val worked = summaryWorked ?: punchWorked.takeIf { it > 0 } ?: attWorked
-            val status = summary?.string("status")?.takeIf { it.isNotBlank() } ?: run {
-                    // Check if this day is the employee's weekly off day.
-                    // compOffDayOfWeek: 1=Monday, 7=Sunday (ISO-8601 DayOfWeek.value)
-                    val isWeeklyOff = emp.compOffDayOfWeek?.let { offDay ->
-                        day.dayOfWeek.value == offDay
-                    } ?: false
+            val hasIn = dayPunches.any { it.type.equals("IN", true) }
+            val hasOut = dayPunches.any { it.type.equals("OUT", true) }
+            val isEvenCount = dayPunches.isNotEmpty() && (dayPunches.size % 2 == 0)
+            val endsWithOut = dayPunches.lastOrNull()?.type?.equals("OUT", true) == true
+            val hasCompletePairs = hasIn && hasOut && isEvenCount && endsWithOut
+            val isToday = day == LocalDate.now()
+            val isClockedInToday = isToday && dayPunches.lastOrNull()?.type?.equals("IN", true) == true
+
+            val rawStatus = summary?.string("status")?.takeIf { it.isNotBlank() }
+            val isStaleMissingPunch = rawStatus?.equals("Missing Punch", ignoreCase = true) == true && (hasCompletePairs || isClockedInToday)
+
+            // If summary was calculated when closing OUT was missing or before mobile punches synced,
+            // prefer actual punch calculation over the stale partial summary.
+            val worked = if ((isStaleMissingPunch || hasCompletePairs) && punchWorked > (summaryWorked ?: 0.0)) {
+                punchWorked
+            } else {
+                summaryWorked ?: punchWorked.takeIf { it > 0 } ?: attWorked
+            }
+
+            val isWeeklyOff = emp.compOffDayOfWeek?.let { offDay ->
+                day.dayOfWeek.value == offDay
+            } ?: false
+
+            val status = when {
+                isStaleMissingPunch -> {
+                    if (isWeeklyOff) "Weekly Off (Worked)" else "Present"
+                }
+                rawStatus != null -> rawStatus
+                else -> {
                     when {
+                        isWeeklyOff && (dayPunches.isNotEmpty() || dayAttendance.isNotEmpty()) -> "Weekly Off (Worked)"
                         isWeeklyOff -> "Weekly Off"
                         dayPunches.isEmpty() && dayAttendance.isEmpty() -> "Absent"
-                        dayPunches.any { it.type.equals("IN", true) } &&
-                            dayPunches.any { it.type.equals("OUT", true) } -> "Present"
+                        hasCompletePairs || isClockedInToday -> "Present"
                         dayPunches.isNotEmpty() -> "Missing Punch"
                         else -> "Present"
                     }
                 }
+            }
             AttendanceDayDto(
                 date = date,
                 status = status,

@@ -25,7 +25,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
                 app:navigationIcon="@drawable/ic_back"
-                app:title="GPS Connection &amp; Offline Tracking" />
+                app:title="Offline Tracking &amp; Reconnection"
+                app:subtitle="Survey, Dwell Stays &amp; Attendance Impact" />
         </com.google.android.material.appbar.AppBarLayout>
 
         <androidx.core.widget.NestedScrollView
@@ -40,7 +41,7 @@
                 android:orientation="vertical"
                 android:padding="12dp">
 
-                <!-- Header Connectivity Status Card -->
+                <!-- 1. Filter Station: Employee Selector & Date Range Chips -->
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -48,381 +49,339 @@
                     app:cardElevation="2dp"
                     app:strokeWidth="1dp"
                     app:strokeColor="?attr/colorOutline">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="14dp">
-                        <TextView
-                            android:id="@+id/tvConnectivity"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Checking connectivity…"
-                            android:textStyle="bold"
-                            android:textSize="15sp"
-                            android:textColor="?attr/colorOnSurface" />
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="3dp"
-                            android:text="Realtime connection health, background sync ledger and offline disconnection intervals."
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Metric Cards: Live, Stale, Offline, Last Refresh -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:orientation="horizontal">
-
-                    <!-- Live Card -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="1dp"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="#A5D6A7">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Live (&lt;5m)"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#2E7D32" />
-                            <TextView
-                                android:id="@+id/tvLiveCount"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="0"
-                                android:textSize="22sp"
-                                android:textStyle="bold"
-                                android:textColor="#2E7D32" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <Space android:layout_width="6dp" android:layout_height="1dp" />
-
-                    <!-- Stale Card -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="1dp"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="#FFE082">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Stale (5-15m)"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#F57F17" />
-                            <TextView
-                                android:id="@+id/tvStaleCount"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="0"
-                                android:textSize="22sp"
-                                android:textStyle="bold"
-                                android:textColor="#F57F17" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <Space android:layout_width="6dp" android:layout_height="1dp" />
-
-                    <!-- Offline Card -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="1dp"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="#FFCDD2">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Offline"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:textColor="#C62828" />
-                            <TextView
-                                android:id="@+id/tvOfflineCount"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="0"
-                                android:textSize="22sp"
-                                android:textStyle="bold"
-                                android:textColor="#C62828" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <Space android:layout_width="6dp" android:layout_height="1dp" />
-
-                    <!-- Last Refresh Card -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="1dp"
-                        app:strokeWidth="1dp"
-                        app:strokeColor="?attr/colorOutline">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Refreshed"
-                                android:textSize="10sp"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                            <TextView
-                                android:id="@+id/tvLastRefreshTime"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="—"
-                                android:textSize="14sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                </LinearLayout>
-
-                <!-- Active Offline State Notice (if device is offline) -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/cardActiveOfflineNotice"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:visibility="gone"
-                    app:cardCornerRadius="16dp"
-                    app:cardBackgroundColor="#FFF3E0"
-                    app:strokeColor="#FFB74D"
-                    app:strokeWidth="1dp">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="14dp">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical">
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="🔴 Offline Mode Active on this device"
-                                android:textStyle="bold"
-                                android:textSize="14sp"
-                                android:textColor="#E65100" />
-                            <TextView
-                                android:id="@+id/tvActiveOfflineElapsed"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="00:00"
-                                android:textStyle="bold"
-                                android:textSize="13sp"
-                                android:textColor="#E65100" />
-                        </LinearLayout>
-                        <TextView
-                            android:id="@+id/tvActiveOfflineDetails"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Offline capture running • Points and punches recorded locally and will sync when internet returns."
-                            android:textSize="12sp"
-                            android:textColor="#BF360C" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Section: All Employees Connection Health -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="All Employees Connection Health"
-                            android:textStyle="bold"
-                            android:textSize="16sp"
-                            android:textColor="?attr/colorOnSurface" />
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Tap an employee to inspect their offline periods and route"
-                            android:textSize="11sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-                    </LinearLayout>
-                    <TextView
-                        android:id="@+id/tvEmployeesCountBadge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="0 employees"
-                        android:textSize="11sp"
-                        android:textStyle="bold"
-                        android:textColor="?attr/colorPrimary" />
-                </LinearLayout>
-
-                <!-- Search Input for Employee Name / ID -->
-                <com.google.android.material.textfield.TextInputLayout
-                    android:id="@+id/tilSearchEmployee"
-                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:hint="Search employee by name or ID…"
-                    app:boxCornerRadiusBottomEnd="12dp"
-                    app:boxCornerRadiusBottomStart="12dp"
-                    app:boxCornerRadiusTopEnd="12dp"
-                    app:boxCornerRadiusTopStart="12dp"
-                    app:endIconMode="clear_text"
-                    app:startIconDrawable="@drawable/ic_search">
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etSearchEmployee"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:imeOptions="actionSearch"
-                        android:inputType="text"
-                        android:maxLines="1"
-                        android:textSize="13sp" />
-                </com.google.android.material.textfield.TextInputLayout>
-
-                <!-- Status Filter Chips -->
-                <HorizontalScrollView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:scrollbars="none">
-
-                    <com.google.android.material.chip.ChipGroup
-                        android:id="@+id/chipGroupStatusFilter"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        app:singleLine="true"
-                        app:singleSelection="true">
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterAll"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checked="true"
-                            android:text="All" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterLive"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="🟢 Live" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterStale"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="🟡 Stale" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterOffline"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="🔴 Offline" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterPendingSync"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="⏳ Pending Sync" />
-
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipFilterSynced"
-                            style="@style/Widget.Material3.Chip.Filter"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="✓ Synced" />
-                    </com.google.android.material.chip.ChipGroup>
-                </HorizontalScrollView>
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/rvEmployeeConnectionStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:nestedScrollingEnabled="false" />
-
-                <TextView
-                    android:id="@+id/tvNoEmployeesRegistered"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:padding="16dp"
-                    android:gravity="center"
-                    android:visibility="gone"
-                    android:text="No matching employees found."
-                    android:textSize="13sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <!-- Detailed Selected Employee Inspection Panel -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/cardSelectedEmployeeDetail"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:visibility="gone"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="2dp"
-                    app:strokeColor="?attr/colorPrimary"
-                    app:strokeWidth="1.5dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:padding="14dp">
+                        android:padding="12dp">
 
-                        <!-- Header Row -->
+                        <!-- Employee Spinner Row -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="👤 Employee:"
+                                android:textColor="?attr/colorOnSurface"
+                                android:textSize="13sp"
+                                android:textStyle="bold" />
+
+                            <Spinner
+                                android:id="@+id/spnFilterEmployee"
+                                android:layout_width="0dp"
+                                android:layout_height="42dp"
+                                android:layout_marginStart="8dp"
+                                android:layout_weight="1" />
+                        </LinearLayout>
+
+                        <!-- Date Filter Chips Row -->
+                        <HorizontalScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:scrollbars="none">
+
+                            <com.google.android.material.chip.ChipGroup
+                                android:id="@+id/chipGroupDateFilter"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                app:singleLine="true"
+                                app:singleSelection="true">
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDateToday"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:checked="true"
+                                    android:text="Today" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDateYesterday"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Yesterday" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDate7Days"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Last 7 Days" />
+
+                                <com.google.android.material.chip.Chip
+                                    android:id="@+id/chipDateMonth"
+                                    style="@style/Widget.Material3.Chip.Filter"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="This Month" />
+                            </com.google.android.material.chip.ChipGroup>
+                        </HorizontalScrollView>
+
+                        <!-- Action Buttons: Refresh & Sync Pending -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnRefreshOffline"
+                                style="@style/Widget.Material3.Button.TonalButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1"
+                                android:text="🔄 Refresh"
+                                android:textSize="12sp" />
+
+                            <Space
+                                android:layout_width="8dp"
+                                android:layout_height="1dp" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnSyncNow"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="38dp"
+                                android:layout_weight="1"
+                                android:text="☁️ Sync Buffer"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- 2. Summary KPI Metric Cards (2x2 Grid) -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical">
+
+                    <!-- Row 1: Sessions & Duration -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <!-- Sessions Card -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            app:cardCornerRadius="14dp"
+                            app:cardElevation="1dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="#FFE082">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Offline Sessions"
+                                    android:textColor="#E65100"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvOfflineSessionsCount"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0"
+                                    android:textColor="?attr/colorOnSurface"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvOfflineSessionsSub"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Disconnected windows"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <Space
+                            android:layout_width="8dp"
+                            android:layout_height="1dp" />
+
+                        <!-- Duration Card -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            app:cardCornerRadius="14dp"
+                            app:cardElevation="1dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="#90CAF9">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Total Offline Time"
+                                    android:textColor="#1565C0"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvTotalOfflineDuration"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0m"
+                                    android:textColor="?attr/colorOnSurface"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvOfflineDurationSub"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Cumulative offline"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                    </LinearLayout>
+
+                    <!-- Row 2: Geofence Survey & Attendance Impact -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <!-- Geofence Survey Card -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            app:cardCornerRadius="14dp"
+                            app:cardElevation="1dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="#A5D6A7">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Geofence Survey"
+                                    android:textColor="#2E7D32"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvGeofenceSurvey"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0m / 0m"
+                                    android:textColor="?attr/colorOnSurface"
+                                    android:textSize="16sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvGeofenceSurveySub"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="🟢 In: 100% • 🔴 Out: 0%"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+
+                        <Space
+                            android:layout_width="8dp"
+                            android:layout_height="1dp" />
+
+                        <!-- Attendance Impact Card -->
+                        <com.google.android.material.card.MaterialCardView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            app:cardCornerRadius="14dp"
+                            app:cardElevation="1dp"
+                            app:strokeWidth="1dp"
+                            app:strokeColor="#FFCDD2">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:padding="10dp">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Live Data Impact"
+                                    android:textColor="#C62828"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvLiveImpactCount"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="0"
+                                    android:textColor="?attr/colorOnSurface"
+                                    android:textSize="20sp"
+                                    android:textStyle="bold" />
+
+                                <TextView
+                                    android:id="@+id/tvLiveImpactSub"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Reconciled on reconnect"
+                                    android:textColor="?attr/colorOnSurfaceVariant"
+                                    android:textSize="10sp" />
+                            </LinearLayout>
+                        </com.google.android.material.card.MaterialCardView>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 3. Offline Route Survey Map Card -->
+                <com.google.android.material.card.MaterialCardView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    app:cardCornerRadius="16dp"
+                    app:cardElevation="2dp"
+                    app:strokeWidth="1dp"
+                    app:strokeColor="?attr/colorOutline">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <!-- Map Header -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:padding="12dp">
 
                             <LinearLayout
                                 android:layout_width="0dp"
@@ -431,333 +390,161 @@
                                 android:orientation="vertical">
 
                                 <TextView
-                                    android:id="@+id/tvSelectedEmpName"
-                                    android:layout_width="wrap_content"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Selected Employee"
+                                    android:text="Offline / Reconnect Route Survey"
                                     android:textColor="?attr/colorOnSurface"
-                                    android:textSize="16sp"
+                                    android:textSize="15sp"
                                     android:textStyle="bold" />
 
                                 <TextView
-                                    android:id="@+id/tvSelectedEmpId"
-                                    android:layout_width="wrap_content"
+                                    android:id="@+id/tvMapRouteBanner"
+                                    android:layout_width="match_parent"
                                     android:layout_height="wrap_content"
-                                    android:text="Employee ID #101"
+                                    android:text="Tap an offline period below to inspect journey route"
                                     android:textColor="?attr/colorOnSurfaceVariant"
                                     android:textSize="11sp" />
                             </LinearLayout>
 
-                            <TextView
-                                android:id="@+id/tvSelectedEmpSyncBadge"
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btnResetMapFilter"
+                                style="@style/Widget.Material3.Button.TextButton"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginEnd="6dp"
-                                android:background="@drawable/bg_chip_rounded"
-                                android:paddingHorizontal="8dp"
-                                android:paddingVertical="3dp"
-                                android:textSize="10sp"
-                                android:textStyle="bold"
-                                android:text="✓ Synced" />
-
-                            <TextView
-                                android:id="@+id/tvSelectedEmpStatusBadge"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:background="@drawable/bg_rounded_card_outline"
-                                android:paddingHorizontal="9dp"
-                                android:paddingVertical="3dp"
-                                android:text="LIVE"
-                                android:textColor="#2E7D32"
+                                android:text="Reset View"
                                 android:textSize="11sp"
-                                android:textStyle="bold" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnCloseSelectedEmployee"
-                                style="@style/Widget.Material3.Button.IconButton"
-                                android:layout_width="36dp"
-                                android:layout_height="36dp"
-                                android:layout_marginStart="4dp"
-                                app:icon="@drawable/ic_cancel"
-                                app:iconSize="18dp" />
+                                android:visibility="gone" />
                         </LinearLayout>
 
-                        <!-- Section A: Attendance Punch Status -->
-                        <com.google.android.material.card.MaterialCardView
+                        <!-- OSM Map View -->
+                        <FrameLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="300dp">
+
+                            <org.osmdroid.views.MapView
+                                android:id="@+id/offlineMapView"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent" />
+
+                            <TextView
+                                android:id="@+id/tvMapEmptyNotice"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_gravity="center"
+                                android:background="@drawable/bg_chip_rounded"
+                                android:paddingHorizontal="14dp"
+                                android:paddingVertical="8dp"
+                                android:text="Select an employee or offline interval to draw journey"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:visibility="gone" />
+                        </FrameLayout>
+
+                        <!-- Map Legend Bar -->
+                        <HorizontalScrollView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp"
-                            app:strokeColor="?attr/colorOutlineVariant"
-                            app:strokeWidth="1dp">
+                            android:background="?attr/colorSurfaceVariant"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="6dp"
+                            android:scrollbars="none">
 
                             <LinearLayout
-                                android:layout_width="match_parent"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:padding="10dp">
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
 
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="TODAY'S ATTENDANCE"
-                                    android:textColor="?attr/colorPrimary"
+                                    android:text="🏢 Geofence"
+                                    android:textColor="#1565C0"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedPunchIn"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4dp"
-                                    android:text="🟢 Punch In: Not recorded today"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textSize="12sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedPunchLocation"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="Punch In Location: —"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedPunchOut"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4dp"
-                                    android:text="🔴 Punch Out: Currently Active / Working"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textSize="12sp" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedWorkHours"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="Duration: —"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <!-- Section B: Live GPS Telemetry -->
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp"
-                            app:strokeColor="?attr/colorOutlineVariant"
-                            app:strokeWidth="1dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:padding="10dp">
 
                                 <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:text="REALTIME GPS &amp; PRESENCE"
-                                    android:textColor="?attr/colorPrimary"
+                                    android:layout_marginStart="8dp"
+                                    android:text="📴 Disconnected"
+                                    android:textColor="#F57F17"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
 
                                 <TextView
-                                    android:id="@+id/tvSelectedLiveCoord"
-                                    android:layout_width="match_parent"
+                                    android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginTop="4dp"
-                                    android:fontFamily="monospace"
-                                    android:text="📍 GPS: Waiting for signal…"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textSize="11sp" />
+                                    android:layout_marginStart="8dp"
+                                    android:text="🟠 Offline Route"
+                                    android:textColor="#E65100"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
 
                                 <TextView
-                                    android:id="@+id/tvSelectedLiveMovement"
-                                    android:layout_width="match_parent"
+                                    android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="Movement: Stationary • Speed: 0.0 km/h"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
+                                    android:layout_marginStart="8dp"
+                                    android:text="📍 Dwell Stay"
+                                    android:textColor="#0288D1"
+                                    android:textSize="10sp"
+                                    android:textStyle="bold" />
 
                                 <TextView
-                                    android:id="@+id/tvSelectedLiveGeofence"
-                                    android:layout_width="match_parent"
+                                    android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="🏢 Geofence: Inside allowed office radius (100m)"
+                                    android:layout_marginStart="8dp"
+                                    android:text="📶 Reconnected"
                                     android:textColor="#2E7D32"
-                                    android:textSize="11sp" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedLiveLastSeen"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="Last Updated: —"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="10sp" />
-                            </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <!-- Section C: Cloud History & Sync Ledger -->
-                        <com.google.android.material.card.MaterialCardView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="8dp"
-                            app:cardCornerRadius="12dp"
-                            app:cardElevation="0dp"
-                            app:strokeColor="?attr/colorOutlineVariant"
-                            app:strokeWidth="1dp">
-
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:orientation="vertical"
-                                android:padding="10dp">
-
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="CLOUD SYNC &amp; OFFLINE HISTORY"
-                                    android:textColor="?attr/colorPrimary"
                                     android:textSize="10sp"
                                     android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedCloudPoints"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4dp"
-                                    android:text="☁️ Cloud Points Synced: 0 points today"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textSize="11sp" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedPendingPoints"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="⏳ Local Queue: 0 points pending"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
-
-                                <TextView
-                                    android:id="@+id/tvSelectedOfflineIntervalsSummary"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="2dp"
-                                    android:text="📴 Offline Disconnections: 0 intervals"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
                             </LinearLayout>
-                        </com.google.android.material.card.MaterialCardView>
-
-                        <!-- Quick action buttons -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:orientation="horizontal">
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnFocusSelectedOnMap"
-                                style="@style/Widget.Material3.Button.TonalButton"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="📍 View Route on Map"
-                                android:textSize="12sp" />
-
-                            <Space
-                                android:layout_width="8dp"
-                                android:layout_height="1dp" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btnReloadCloudForSelected"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="🔄 Reload Cloud"
-                                android:textSize="12sp" />
-                        </LinearLayout>
+                        </HorizontalScrollView>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Filter Card for Offline Intervals / Route -->
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    app:cardCornerRadius="14dp"
-                    app:cardElevation="1dp"
-                    app:strokeWidth="1dp"
-                    app:strokeColor="?attr/colorOutline">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:padding="10dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Inspect Employee:"
-                            android:textSize="12sp"
-                            android:textStyle="bold"
-                            android:textColor="?attr/colorOnSurface" />
-                        <Spinner
-                            android:id="@+id/spnFilterEmployee"
-                            android:layout_width="0dp"
-                            android:layout_height="40dp"
-                            android:layout_weight="1"
-                            android:layout_marginStart="8dp" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Section: Offline Disconnection Intervals -->
+                <!-- 4. Offline Disconnection Sessions List -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
                     <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:orientation="vertical">
+
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Offline Disconnection Intervals"
-                            android:textStyle="bold"
+                            android:text="Offline Disconnection Sessions"
+                            android:textColor="?attr/colorOnSurface"
                             android:textSize="16sp"
-                            android:textColor="?attr/colorOnSurface" />
+                            android:textStyle="bold" />
+
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Missing windows (airplane mode, network off) synced to cloud"
-                            android:textSize="11sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
+                            android:text="Reconciled intervals after mobile device regained internet"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textSize="11sp" />
                     </LinearLayout>
+
                     <TextView
                         android:id="@+id/tvPeriodCountBadge"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:background="@drawable/bg_rounded_card_outline"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="3dp"
                         android:text="0 periods"
+                        android:textColor="#E65100"
                         android:textSize="11sp"
-                        android:textStyle="bold"
-                        android:textColor="#E65100" />
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <androidx.recyclerview.widget.RecyclerView
@@ -771,380 +558,12 @@
                     android:id="@+id/tvNoOfflinePeriods"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:padding="16dp"
                     android:gravity="center"
-                    android:text="No offline periods recorded today. Mobile tracking streaming live."
+                    android:padding="24dp"
+                    android:text="No offline periods recorded for the selected filter."
+                    android:textColor="?attr/colorOnSurfaceVariant"
                     android:textSize="12sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <!-- Section: Route Map -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Offline / Reconnect Route"
-                            android:textStyle="bold"
-                            android:textSize="16sp"
-                            android:textColor="?attr/colorOnSurface" />
-                        <TextView
-                            android:id="@+id/tvMapRouteBanner"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Tap an offline period or employee above to draw route"
-                            android:textSize="11sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-                    </LinearLayout>
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnResetMapFilter"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:visibility="gone"
-                        android:text="Show All" />
-                </LinearLayout>
-
-                <!-- Map Legend -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="🟢 Punch In"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:textColor="#2E7D32" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="🔵 GPS Route"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:textColor="#1565C0" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="🟠 Offline Gap"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:textColor="#E65100" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="🔴 Punch Out"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:textColor="#C62828" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="8dp"
-                        android:text="🎯 Live Now"
-                        android:textSize="10sp"
-                        android:textStyle="bold"
-                        android:textColor="#00838F" />
-                </LinearLayout>
-
-                <com.google.android.material.card.MaterialCardView
-                    android:layout_width="match_parent"
-                    android:layout_height="320dp"
-                    android:layout_marginTop="8dp"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="3dp">
-
-                    <FrameLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent">
-
-                        <org.osmdroid.views.MapView
-                            android:id="@+id/offlineMapView"
-                            android:layout_width="match_parent"
-                            android:layout_height="match_parent" />
-
-                        <TextView
-                            android:id="@+id/tvMapEmptyNotice"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_gravity="center"
-                            android:background="@drawable/bg_chip_rounded"
-                            android:paddingHorizontal="14dp"
-                            android:paddingVertical="8dp"
-                            android:text="Select an employee or offline interval to draw journey"
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            android:textSize="11sp"
-                            android:textStyle="bold"
-                            android:visibility="gone" />
-                    </FrameLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Action Buttons: Sync, Cloud History, Refresh -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:orientation="horizontal">
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSyncNow"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Sync Pending GPS" />
-                    <Space android:layout_width="8dp" android:layout_height="1dp" />
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnLoadCloudHistory"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Cloud History" />
-                    <Space android:layout_width="8dp" android:layout_height="1dp" />
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnRefreshOffline"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="Refresh" />
-                </LinearLayout>
-
-                <!-- Today's Journey & Sync Timeline Card -->
-                <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/cardJourneyTimeline"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    app:cardCornerRadius="16dp"
-                    app:cardElevation="1dp"
-                    app:strokeColor="?attr/colorOutline"
-                    app:strokeWidth="1dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="14dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="Today's Journey &amp; Sync Timeline"
-                                    android:textColor="?attr/colorOnSurface"
-                                    android:textSize="15sp"
-                                    android:textStyle="bold" />
-
-                                <TextView
-                                    android:id="@+id/tvTimelineSubtitle"
-                                    android:layout_width="match_parent"
-                                    android:layout_height="wrap_content"
-                                    android:text="Chronological punches, live tracking &amp; offline sync"
-                                    android:textColor="?attr/colorOnSurfaceVariant"
-                                    android:textSize="11sp" />
-                            </LinearLayout>
-
-                            <TextView
-                                android:id="@+id/tvJourneyTimelineCount"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="0 events"
-                                android:textColor="?attr/colorPrimary"
-                                android:textSize="11sp"
-                                android:textStyle="bold" />
-                        </LinearLayout>
-
-                        <androidx.recyclerview.widget.RecyclerView
-                            android:id="@+id/rvJourneyTimeline"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="10dp"
-                            android:nestedScrollingEnabled="false" />
-
-                        <TextView
-                            android:id="@+id/tvNoTimelineEvents"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:gravity="center"
-                            android:padding="14dp"
-                            android:text="Select an employee above to inspect their today's journey timeline."
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-                </com.google.android.material.card.MaterialCardView>
-
-                <!-- Local Device Diagnostics (Queued / Ledger / Session) -->
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="This Device's Local Ledger"
-                    android:textStyle="bold"
-                    android:textSize="14sp"
-                    android:textColor="?attr/colorOnSurface" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:orientation="horizontal">
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="12dp">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Pending sync"
-                                android:textSize="10sp"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                            <TextView
-                                android:id="@+id/tvQueue"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="0"
-                                android:textSize="20sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorPrimary" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                    <Space android:layout_width="8dp" android:layout_height="1dp" />
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="12dp">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Local ledger"
-                                android:textSize="10sp"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                            <TextView
-                                android:id="@+id/tvTotal"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="0"
-                                android:textSize="20sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                    <Space android:layout_width="8dp" android:layout_height="1dp" />
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        app:cardCornerRadius="12dp">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical"
-                            android:padding="10dp">
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Session"
-                                android:textSize="10sp"
-                                android:textColor="?attr/colorOnSurfaceVariant" />
-                            <TextView
-                                android:id="@+id/tvSession"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="—"
-                                android:textSize="14sp"
-                                android:textStyle="bold"
-                                android:textColor="?attr/colorOnSurface" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/tvLastCapture"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="Last local capture: —"
-                    android:textSize="11sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-                <TextView
-                    android:id="@+id/tvLastSync"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Last sync: —"
-                    android:textSize="11sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-                <TextView
-                    android:id="@+id/tvRemoteHistory"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Cloud history: not loaded"
-                    android:textSize="11sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <!-- Event Log Section -->
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Enterprise Event Log"
-                    android:textStyle="bold"
-                    android:textSize="16sp"
-                    android:textColor="?attr/colorOnSurface" />
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Local capture, retries, and network connectivity switches"
-                    android:textSize="11sp"
-                    android:textColor="?attr/colorOnSurfaceVariant" />
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/rvOfflineEvents"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:nestedScrollingEnabled="false" />
+                    android:visibility="gone" />
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>
     </LinearLayout>
