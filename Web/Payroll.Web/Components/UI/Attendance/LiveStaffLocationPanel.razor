@@ -3241,9 +3241,9 @@
         .admin-selected-rail-item .rail-label { font-size:.52rem; }
         .admin-selected-rail-item strong { font-size:.67rem; }
         .admin-selected-rail-item small { font-size:.54rem; }
-    }
-    .payroll-map-fullscreen .payroll-map-commandbar { top:auto; bottom:18px; left:18px; right:auto; transform:none; }
-    .payroll-map-fullscreen .payroll-map-statusbar { bottom:18px; left:18px; }
+    .payroll-map-fullscreen .payroll-map-commandbar { top:auto; bottom:18px; left:18px; right:auto; transform:none; z-index:10000 !important; }
+    .payroll-map-fullscreen .payroll-map-statusbar { bottom:18px; left:18px; z-index:10000 !important; }
+    .payroll-map-fullscreen .payroll-map-floating-nav { position:fixed !important; top:18px !important; right:18px !important; z-index:10001 !important; }
     @@keyframes payrollMapLivePulse { 50% { transform:scale(1.25); opacity:.65; } }
     @@media (max-width: 900px) {
         .payroll-map-commandbar { width:44px; max-width:44px; left:8px; right:auto; top:auto; bottom:8px; transform:none; flex-direction:column; overflow:visible; }

@@ -17,6 +17,7 @@ import com.biometric.app.R
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.databinding.ActivityAdminAttendanceBinding
 import com.biometric.app.databinding.ItemAdminAttendanceBinding
+import com.biometric.app.domain.attendance.AttendanceEngine
 import com.biometric.app.domain.attendance.AttendancePunchProcessor
 import com.biometric.app.domain.attendance.ProcessedPunchItem
 import com.biometric.app.domain.attendance.PunchSourceTier
@@ -369,23 +370,72 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 "No punches recorded"
             }
 
-            val scheduledDuration = formatDurationMs(s.scheduledShiftDurationMs)
-            val scheduledShiftText = if (s.scheduledShiftDurationMs > 0) {
+            val shiftStart = emp?.shiftStart?.takeIf { it.isNotBlank() } ?: "09:00"
+            val shiftEnd = emp?.shiftEnd?.takeIf { it.isNotBlank() } ?: "18:00"
+
+            val engineCalc = if (effectivePunches.isNotEmpty()) {
+                val attPunches = effectivePunches.map { p ->
+                    com.biometric.app.data.entity.AttendancePunch(
+                        punchId = p.id,
+                        staffId = s.employeeId.toString(),
+                        date = s.shiftDate,
+                        type = p.type,
+                        timestamp = p.timestamp,
+                        source = p.source,
+                        status = "APPROVED"
+                    )
+                }
+                AttendanceEngine.processAttendance(s.shiftDate, attPunches, shiftStart, shiftEnd)
+            } else null
+
+            val scheduledMs = if (s.scheduledShiftDurationMs > 0) s.scheduledShiftDurationMs else {
+                runCatching {
+                    val st = punchTimeFormat.parse(shiftStart)?.time ?: 0L
+                    val et = punchTimeFormat.parse(shiftEnd)?.time ?: 0L
+                    var diff = et - st
+                    if (diff <= 0) diff += 24 * 3600 * 1000
+                    diff
+                }.getOrDefault(0L)
+            }
+            val scheduledDuration = formatDurationMs(scheduledMs)
+            val scheduledShiftText = if (scheduledMs > 0) {
                 "⏰ Scheduled Shift: $scheduledDuration"
             } else {
                 "⏰ Shift: Flexible / Unscheduled"
             }
 
-            // FIX: If daily_summaries still shows "Present" but actual punches are gone (post-wipe
-            // stale data scenario), override the status so UI matches reality.
+            // Standalone calculation vs pre-calculated Web summary:
+            val finalWorked = if (s.earnedStandardHours > 0.0) s.earnedStandardHours
+                              else engineCalc?.let { it.totalWorkDurationMinutes / 60.0 } ?: 0.0
+            val finalOtMin = if (s.totalOvertimeMs > 0) s.totalOvertimeMs / 60000.0
+                             else engineCalc?.overtimeMinutes?.toDouble() ?: 0.0
+            val finalLateMin = if (s.totalLatenessMs > 0) s.totalLatenessMs / 60000.0
+                               else engineCalc?.lateArrivalMinutes?.toDouble() ?: 0.0
+            val finalBreakPenaltyMin = if (s.totalBreakPenaltyMs > 0) s.totalBreakPenaltyMs / 60000.0
+                                       else engineCalc?.breakPenaltyMinutes?.toDouble() ?: 0.0
+            val finalPenaltyMin = if (s.totalPenaltyMs > 0) s.totalPenaltyMs / 60000.0
+                                  else (finalBreakPenaltyMin + (engineCalc?.let { if (it.earlyLeaveMinutes > 30) it.earlyLeaveMinutes.toDouble() else 0.0 } ?: 0.0))
+
             val effectiveStatus = when {
-                effectivePunches.isNotEmpty() -> s.status.ifBlank { "Present" }
+                effectivePunches.isNotEmpty() -> {
+                    if (s.earnedStandardHours > 0.0 && s.status.isNotBlank() && !s.status.equals("Absent", ignoreCase = true)) {
+                        s.status
+                    } else if (engineCalc != null) {
+                        when (engineCalc.status.uppercase()) {
+                            "PRESENT" -> "Present"
+                            "HALF_DAY" -> "Half Day"
+                            "LATE_OR_EARLY" -> "Late"
+                            "MISSING_PUNCH" -> "Missing Punch"
+                            else -> if (finalWorked > 0.0) "Present" else "Absent"
+                        }
+                    } else "Present"
+                }
                 s.status.equals("Weekly Off", ignoreCase = true) ||
                 s.status.equals("WeeklyOff", ignoreCase = true) ||
                 s.status.equals("Week Off", ignoreCase = true) -> s.status
                 s.status.equals("Holiday", ignoreCase = true) -> s.status
                 s.status.equals("Leave", ignoreCase = true) -> s.status
-                else -> "Absent" // no punches → absent (overrides stale "Present")
+                else -> "Absent"
             }
 
             AdminAttendanceRow(
@@ -394,12 +444,12 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                 date = s.shiftDate,
                 formattedDate = formattedDate,
                 status = effectiveStatus,
-                workedHours = if (effectivePunches.isEmpty()) 0.0 else s.earnedStandardHours,
-                overtimeMinutes = s.totalOvertimeMs / 60000.0,
-                penaltyMinutes = s.totalPenaltyMs / 60000.0,
-                latenessMinutes = s.totalLatenessMs / 60000.0,
-                breakPenaltyMinutes = s.totalBreakPenaltyMs / 60000.0,
-                scheduledMinutes = s.scheduledShiftDurationMs / 60000.0,
+                workedHours = if (effectivePunches.isEmpty()) 0.0 else finalWorked,
+                overtimeMinutes = finalOtMin,
+                penaltyMinutes = finalPenaltyMin,
+                latenessMinutes = finalLateMin,
+                breakPenaltyMinutes = finalBreakPenaltyMin,
+                scheduledMinutes = scheduledMs / 60000.0,
                 scheduledShiftText = scheduledShiftText,
                 punches = rawPunchesText
             )
@@ -506,23 +556,6 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     "No punches recorded"
                 }
 
-                val isToday = dateStr == SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                val status = if (effectivePunches.isNotEmpty()) {
-                    if (effectivePunches.size % 2 == 1) {
-                        if (isToday && effectivePunches.last().type.equals("IN", true)) "Present" else "Missing Punch"
-                    } else {
-                        "Present"
-                    }
-                } else {
-                    val dayOfWeek = runCatching {
-                        val c = Calendar.getInstance().apply { time = isoDateFormat.parse(dateStr)!! }
-                        c.get(Calendar.DAY_OF_WEEK)
-                    }.getOrDefault(Calendar.MONDAY)
-                    val isSunday = dayOfWeek == Calendar.SUNDAY
-                    val isCompOff = (emp.compOffDayOfWeek != null && emp.compOffDayOfWeek == (dayOfWeek - 1))
-                    if (isSunday || isCompOff) "Weekly Off" else "Absent"
-                }
-
                 val schedMs = if (!emp.shiftStart.isNullOrBlank() && !emp.shiftEnd.isNullOrBlank()) {
                     runCatching {
                         val s = punchTimeFormat.parse(emp.shiftStart)
@@ -542,17 +575,52 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                     "⏰ Shift: Flexible / Unscheduled"
                 }
 
-                var calculatedWorkedMs = 0L
-                var inTime: Long? = null
-                for (p in effectivePunches) {
-                    if (p.type.equals("IN", ignoreCase = true)) {
-                        inTime = p.timestamp
-                    } else if (p.type.equals("OUT", ignoreCase = true) && inTime != null) {
-                        calculatedWorkedMs += (p.timestamp - inTime).coerceAtLeast(0L)
-                        inTime = null
+                val shiftStart = emp.shiftStart?.takeIf { it.isNotBlank() } ?: "09:00"
+                val shiftEnd = emp.shiftEnd?.takeIf { it.isNotBlank() } ?: "18:00"
+
+                val synEngineCalc = if (effectivePunches.isNotEmpty()) {
+                    val attPunches = effectivePunches.map { p ->
+                        com.biometric.app.data.entity.AttendancePunch(
+                            punchId = p.id,
+                            staffId = emp.employeeId,
+                            date = dateStr,
+                            type = p.type,
+                            timestamp = p.timestamp,
+                            source = p.source,
+                            status = "APPROVED"
+                        )
+                    }
+                    AttendanceEngine.processAttendance(dateStr, attPunches, shiftStart, shiftEnd)
+                } else null
+
+                val calculatedWorkedHours = synEngineCalc?.let { it.totalWorkDurationMinutes / 60.0 } ?: 0.0
+                val synOtMinutes = synEngineCalc?.overtimeMinutes?.toDouble() ?: 0.0
+                val synLateMinutes = synEngineCalc?.lateArrivalMinutes?.toDouble() ?: 0.0
+                val synBreakPenaltyMin = synEngineCalc?.breakPenaltyMinutes?.toDouble() ?: 0.0
+                val synPenaltyMinutes = (synBreakPenaltyMin + (synEngineCalc?.let { if (it.earlyLeaveMinutes > 30) it.earlyLeaveMinutes.toDouble() else 0.0 } ?: 0.0))
+
+                val synStatus = when {
+                    effectivePunches.isNotEmpty() -> {
+                        if (synEngineCalc != null) {
+                            when (synEngineCalc.status.uppercase()) {
+                                "PRESENT" -> "Present"
+                                "HALF_DAY" -> "Half Day"
+                                "LATE_OR_EARLY" -> "Late"
+                                "MISSING_PUNCH" -> "Missing Punch"
+                                else -> if (calculatedWorkedHours > 0.0) "Present" else "Absent"
+                            }
+                        } else "Present"
+                    }
+                    else -> {
+                        val dayOfWeek = runCatching {
+                            val c = Calendar.getInstance().apply { time = isoDateFormat.parse(dateStr)!! }
+                            c.get(Calendar.DAY_OF_WEEK)
+                        }.getOrDefault(Calendar.MONDAY)
+                        val isSunday = dayOfWeek == Calendar.SUNDAY
+                        val isCompOff = (emp.compOffDayOfWeek != null && emp.compOffDayOfWeek == (dayOfWeek - 1))
+                        if (isSunday || isCompOff) "Weekly Off" else "Absent"
                     }
                 }
-                val calculatedWorkedHours = calculatedWorkedMs / 3600000.0
 
                 synthesizedRows.add(
                     AdminAttendanceRow(
@@ -560,12 +628,12 @@ class AdminAttendanceActivity : MotionBaseActivity() {
                         employeeName = emp.name,
                         date = dateStr,
                         formattedDate = formattedDate,
-                        status = status,
+                        status = synStatus,
                         workedHours = calculatedWorkedHours,
-                        overtimeMinutes = 0.0,
-                        penaltyMinutes = 0.0,
-                        latenessMinutes = 0.0,
-                        breakPenaltyMinutes = 0.0,
+                        overtimeMinutes = synOtMinutes,
+                        penaltyMinutes = synPenaltyMinutes,
+                        latenessMinutes = synLateMinutes,
+                        breakPenaltyMinutes = synBreakPenaltyMin,
                         scheduledMinutes = schedMs / 60000.0,
                         scheduledShiftText = scheduledShiftText,
                         punches = rawPunchesText
@@ -576,14 +644,14 @@ class AdminAttendanceActivity : MotionBaseActivity() {
 
         val combinedRows = (allRows + synthesizedRows).distinctBy { Pair(it.employeeID, it.date) }
 
-        // Compute KPI Cumulative Metrics across all filtered summaries and synthesized rows
+        // Compute KPI Cumulative Metrics across all rows (guarantees standalone parity with Web)
         val employeesProcessed = combinedRows.map { it.employeeID }.distinct().count()
-        val scheduledMs = summariesInRange.sumOf { it.scheduledShiftDurationMs } + synthesizedRows.sumOf { (it.scheduledMinutes * 60000).toLong() }
-        val workedHours = summariesInRange.sumOf { it.earnedStandardHours } + synthesizedRows.sumOf { it.workedHours }
-        val otMs = summariesInRange.sumOf { it.totalOvertimeMs }
-        val penaltyMs = summariesInRange.sumOf { it.totalPenaltyMs }
-        val latenessMs = summariesInRange.sumOf { it.totalLatenessMs }
-        val breakPenaltyMs = summariesInRange.sumOf { it.totalBreakPenaltyMs }
+        val scheduledMs = combinedRows.sumOf { (it.scheduledMinutes * 60000).toLong() }
+        val workedHours = combinedRows.sumOf { it.workedHours }
+        val otMs = combinedRows.sumOf { (it.overtimeMinutes * 60000).toLong() }
+        val penaltyMs = combinedRows.sumOf { (it.penaltyMinutes * 60000).toLong() }
+        val latenessMs = combinedRows.sumOf { (it.latenessMinutes * 60000).toLong() }
+        val breakPenaltyMs = combinedRows.sumOf { (it.breakPenaltyMinutes * 60000).toLong() }
 
         val summaryText = if (combinedRows.isEmpty()) {
             "No attendance logs recorded for selected period"

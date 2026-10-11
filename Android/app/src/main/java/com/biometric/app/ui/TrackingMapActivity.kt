@@ -596,16 +596,24 @@ class TrackingMapActivity : MotionBaseActivity() {
             }
         }
 
-        // Controls are explicitly expanded/minimized by the persistent Tools
-        // button. They never appear because of hover or disappear by timeout.
-        setMapControlsVisible(false)
+        // Legend toggle (compact collapsible view)
+        binding.cardLegend.setOnClickListener {
+            resetTrackingMapIdleTimer()
+            val content = binding.llLegendContent
+            val isExpanded = content.visibility == View.VISIBLE
+            content.visibility = if (isExpanded) View.GONE else View.VISIBLE
+            binding.tvLegendToggle.text = if (isExpanded) "▸" else "▾"
+        }
+
+        // Controls are expanded by default and can be toggled by the Tools button
+        setMapControlsVisible(true)
     }
 
     private fun setMapControlsVisible(visible: Boolean) {
         mapControlsVisible = visible
         binding.mapCommandRailScroll.visibility =
             if (visible) View.VISIBLE else View.GONE
-        binding.btnMapToolsToggle.text = if (visible) "− Hide" else "⚙ Tools"
+        binding.btnMapToolsToggle.text = if (visible) "− Tools" else "⚙ Tools"
         binding.btnMapToolsToggle.isSelected = visible
 
         hideMapControlsRunnable?.let {
