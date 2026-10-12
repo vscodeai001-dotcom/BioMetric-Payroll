@@ -23,10 +23,12 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import android.content.Context
+import com.biometric.app.data.dao.LocalEmployeeDao
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -54,6 +56,7 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
     private val attendancePolicy: AttendancePolicyRepository,
     private val localAttendancePunchDao: LocalAttendancePunchDao,
     private val localAttendanceDao: LocalAttendanceDao,
+    private val localEmployeeDao: LocalEmployeeDao,
     private val closedDayDao: LocalShopClosedDayDao,
     private val firebaseSync: FirebaseSyncManager,
     private val trackingWindowResolver: TrackingWindowResolver
@@ -261,6 +264,76 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                 else -> false
             }
 
+            // Check employee shift mode to distinguish SINGLE_DAY vs CONTINUOUS
+            val emp = runCatching { localEmployeeDao.getById(staffIdStr) }.getOrNull()
+            val isContinuous = emp?.shiftMode.equals("CONTINUOUS", ignoreCase = true)
+
+            // Midnight rollover handling for SINGLE_DAY shift:
+            // If employee remains inside across midnight (today has zero punches) and previous day was open,
+            // automatically close the previous day with an OUT punch at 23:59:59 before starting today's session.
+            if (isInside && pastPunches.isEmpty() && !isContinuous) {
+                val cal = Calendar.getInstance(istTimeZone).apply { timeInMillis = nowMs; add(Calendar.DATE, -1) }
+                val yesterdayStr = sdf.format(cal.time)
+                val yesterdayPunches = allPunches.filter { p ->
+                    (p.staffId == staffIdStr || p.staffId.toIntOrNull() == employeeId) &&
+                    (p.date == yesterdayStr || (p.timestamp > 0 && sdf.format(Date(p.timestamp)) == yesterdayStr))
+                }.sortedBy { it.timestamp }
+
+                val lastYesterdayPunch = yesterdayPunches.lastOrNull()
+                if (lastYesterdayPunch != null && isCheckInType(lastYesterdayPunch.type)) {
+                    cal.set(Calendar.HOUR_OF_DAY, 23)
+                    cal.set(Calendar.MINUTE, 59)
+                    cal.set(Calendar.SECOND, 59)
+                    cal.set(Calendar.MILLISECOND, 0)
+                    val endOfDayMs = cal.timeInMillis
+
+                    val closePunchId = "AUTO_${employeeId}_${endOfDayMs}_OUT"
+                    val closePunch = AttendancePunch(
+                        punchId = closePunchId,
+                        staffId = staffIdStr,
+                        date = yesterdayStr,
+                        type = "OUT",
+                        timestamp = endOfDayMs,
+                        latitude = location.latitude,
+                        longitude = location.longitude,
+                        accuracy = location.accuracy,
+                        distanceFromGeofence = distanceMeters.toDouble(),
+                        deviceId = "AndroidGeofenceAuto",
+                        source = "GEOFENCE_AUTO",
+                        status = "APPROVED"
+                    )
+                    localAttendancePunchDao.upsert(
+                        LocalAttendancePunch(
+                            punchId = closePunchId,
+                            staffId = staffIdStr,
+                            date = yesterdayStr,
+                            type = "OUT",
+                            timestamp = endOfDayMs,
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            accuracy = location.accuracy,
+                            source = "GEOFENCE_AUTO",
+                            status = "APPROVED",
+                            syncState = 0,
+                            lastModified = endOfDayMs
+                        )
+                    )
+                    val yesterdayAttId = "ATT_${employeeId}_${yesterdayStr}"
+                    val yestAtt = localAttendanceDao.getById(yesterdayAttId)
+                    if (yestAtt != null && (yestAtt.checkOutTime == null || yestAtt.checkOutTime == 0L)) {
+                        localAttendanceDao.upsert(yestAtt.copy(
+                            checkOutTime = endOfDayMs,
+                            syncState = 0,
+                            lastModified = endOfDayMs
+                        ))
+                    }
+                    withTimeoutOrNull(3000L) {
+                        runCatching { firebaseSync.pushAttendancePunch(closePunch) }
+                    }
+                    Log.i(TAG, "Single-day shift crossed midnight: automatically closed previous day ($yesterdayStr) at 23:59:59 for employee $staffIdStr")
+                }
+            }
+
             // Parity check: geofence state must not match current attendance state
             // (e.g. inside and already IN -> no-op; outside and already OUT -> no-op)
             if (isInside == attendanceCurrentlyOpen) {
@@ -271,12 +344,12 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             // Strict Guard: An automatic OUT punch requires:
             // 1. Employee must have an active IN punch today (cannot punch OUT without punching IN).
             // 2. The most recent punch must be an IN punch (cannot punch OUT if already OUT).
-            // 3. Employee must have actually transitioned from INSIDE to OUTSIDE (lastEvaluatedInside == true).
-            // If the employee is outside the radius (at home, service restarted, etc.), no OUT punch is created.
+            // 3. Employee must be outside the geofence perimeter. If wasPreviouslyInside was null or true,
+            //    or attendance is currently open while the employee is now outside, allow the OUT punch.
             if (!isInside) {
                 val hasInPunchToday = pastPunches.any { isCheckInType(it.type) }
                 val isLastPunchIn = lastPunch != null && isCheckInType(lastPunch.type)
-                val wasPreviouslyInside = (lastEvaluatedInside == true)
+                val wasPreviouslyInside = (lastEvaluatedInside == true) || (lastEvaluatedInside == null && attendanceCurrentlyOpen)
 
                 if (!hasInPunchToday || !isLastPunchIn || !wasPreviouslyInside) {
                     Log.d(TAG, "Skipping auto OUT punch: employee is outside radius without active inside-to-outside transition or IN punch today (hasInToday=$hasInPunchToday, isLastIn=$isLastPunchIn, wasInside=$wasPreviouslyInside)")

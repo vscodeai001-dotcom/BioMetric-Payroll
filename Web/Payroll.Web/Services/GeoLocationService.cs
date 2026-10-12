@@ -976,6 +976,42 @@ public class GeoLocationService
                 }
             }
 
+            // Midnight rollover handling for SINGLE_DAY shift:
+            // If employee remains inside across midnight (today has zero punches) and previous day was open,
+            // automatically close the previous day with an OUT punch at 23:59:59 before starting today's session.
+            if (currentLocationState && todaysPunches.Count == 0 && !isContinuous)
+            {
+                var yesterdayStart = businessDayStart.AddDays(-1);
+                var yesterdayEnd = businessDayStart;
+                var yesterdayPunches = await db.AttendanceLogs
+                    .Where(x => x.EmployeeID == employeeId && x.PunchTime >= yesterdayStart && x.PunchTime < yesterdayEnd)
+                    .OrderBy(x => x.PunchTime)
+                    .ThenBy(x => x.LogID)
+                    .ToListAsync();
+
+                var yesterdayValid = yesterdayPunches.Where(p => IsInType(p.LogType) || IsOutType(p.LogType)).ToList();
+                if (yesterdayValid.Count > 0 && IsInType(yesterdayValid.Last().LogType))
+                {
+                    var endOfYesterday = businessDayStart.AddSeconds(-1);
+                    var closePunchId = $"AUTO_{employeeId}_{new DateTimeOffset(endOfYesterday).ToUnixTimeMilliseconds()}_OUT";
+                    var closeLog = new AttendanceLog
+                    {
+                        EmployeeID = employeeId,
+                        BiometricID = closePunchId,
+                        PunchTime = endOfYesterday,
+                        DeviceID = "GeofenceAuto",
+                        LogType = "OUT",
+                        Latitude = latitude,
+                        Longitude = longitude,
+                        IsApproved = true
+                    };
+                    db.AttendanceLogs.Add(closeLog);
+                    await SaveChangesWithSqliteRetryAsync(db);
+                    _ = _firebaseAttendanceMutations.UpsertPunchAsync(closeLog, "CREATED");
+                    _logger.LogInformation("Single-day shift crossed midnight: automatically closed previous day with OUT at 23:59:59. EmployeeId={EmployeeId}", employeeId);
+                }
+            }
+
             var punchType = currentLocationState ? "IN" : "OUT";
 
             // Initial OUT is only a state initialization, never an OUT punch.
