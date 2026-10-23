@@ -1212,6 +1212,41 @@ public sealed class FirebaseSqliteSyncService : BackgroundService
         if (entityName == "EmployeeLocationHistory")
             return await SyncTrackingHistoryAsync(ownerUid, ct);
 
+        // If SQLite already contains records for this entity, skip full table download.
+        // The SSE realtime stream connected immediately after will deliver any live updates.
+        if (entityName != "CompanySetting" && entityName != "FeatureSettings")
+        {
+            try
+            {
+                await using var checkScope = _scopeFactory.CreateAsyncScope();
+                var dbFactory = checkScope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+                await using var db = await dbFactory.CreateDbContextAsync(ct);
+                var hasLocalRecords = entityName switch
+                {
+                    "Employee" => await db.Employees.AnyAsync(ct),
+                    "SalaryAdvance" => await db.SalaryAdvances.AnyAsync(ct),
+                    "LeaveRequest" => await db.LeaveRequests.AnyAsync(ct),
+                    "AttendanceRegularization" => await db.AttendanceRegularizations.AnyAsync(ct),
+                    "BonusRecord" => await db.BonusRecords.AnyAsync(ct),
+                    "ShiftSchedule" => await db.ShiftSchedules.AnyAsync(ct),
+                    "Holiday" => await db.CompanyHolidays.AnyAsync(ct),
+                    _ => false
+                };
+
+                if (hasLocalRecords)
+                {
+                    _logger.LogInformation(
+                        "Skipping full table download for {Entity} ({FirebaseTable}): SQLite already populated, realtime SSE will maintain deltas.",
+                        entityName, firebaseTable);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Could not check SQLite count for {Entity}; proceeding with sync.", entityName);
+            }
+        }
+
         var json = await _firebase.GetOwnerTableAsync(ownerUid, firebaseTable, ct);
         if (json is null)
             return false;

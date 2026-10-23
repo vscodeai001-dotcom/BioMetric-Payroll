@@ -168,18 +168,18 @@ class LeaveManagementActivity : MotionBaseActivity() {
 
     private fun setupListeners() {
         binding.swipeRefresh.setOnRefreshListener {
-            fetchLeavesFromServer()
+            fetchLeavesFromServer(force = true)
         }
 
         binding.btnSearchLeaves.setOnClickListener {
-            fetchLeavesFromServer()
+            filterAndRender()
+            fetchLeavesFromServer(force = false)
         }
 
         binding.btnAllDatesToggle.setOnClickListener {
             isAllDates = !isAllDates
             updateAllDatesButtonUi()
             filterAndRender()
-            fetchLeavesFromServer()
         }
 
         binding.fabAddLeave.setOnClickListener {
@@ -193,14 +193,6 @@ class LeaveManagementActivity : MotionBaseActivity() {
                 allRequests.clear()
                 allRequests.addAll(list)
                 filterAndRender()
-            }
-        }
-
-        lifecycleScope.launch {
-            firebaseSync.getDataFlow<LeaveRequest>("leave_requests").collectLatest { fbList ->
-                if (fbList.isNotEmpty()) {
-                    repository.upsertLeaveRequests(fbList)
-                }
             }
         }
 
@@ -227,12 +219,15 @@ class LeaveManagementActivity : MotionBaseActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 filterEmployeeId = allEmployees.getOrNull(position - 1)?.employeeId?.toIntOrNull()
                 filterAndRender()
-                fetchLeavesFromServer()
             }
         }
     }
 
-    private fun fetchLeavesFromServer() {
+    private fun fetchLeavesFromServer(force: Boolean = false) {
+        if (!force && allRequests.isNotEmpty()) {
+            binding.swipeRefresh.isRefreshing = false
+            return
+        }
         lifecycleScope.launch {
             binding.swipeRefresh.isRefreshing = true
 

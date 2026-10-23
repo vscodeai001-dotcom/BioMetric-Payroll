@@ -269,9 +269,9 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             val isContinuous = emp?.shiftMode.equals("CONTINUOUS", ignoreCase = true)
 
             // Midnight rollover handling for SINGLE_DAY shift:
-            // If employee remains inside across midnight (today has zero punches) and previous day was open,
-            // automatically close the previous day with an OUT punch at 23:59:59 before starting today's session.
-            if (isInside && pastPunches.isEmpty() && !isContinuous) {
+            // If previous day (yesterday) was left open without an OUT punch,
+            // automatically close the previous day with an OUT punch at 23:59:59.
+            if (!isContinuous) {
                 val cal = Calendar.getInstance(istTimeZone).apply { timeInMillis = nowMs; add(Calendar.DATE, -1) }
                 val yesterdayStr = sdf.format(cal.time)
                 val yesterdayPunches = allPunches.filter { p ->
@@ -279,8 +279,20 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                     (p.date == yesterdayStr || (p.timestamp > 0 && sdf.format(Date(p.timestamp)) == yesterdayStr))
                 }.sortedBy { it.timestamp }
 
+                val yesterdaySessions = allSessions.filter { s ->
+                    (s.employeeId == staffIdStr || s.employeeId.toIntOrNull() == employeeId) &&
+                    s.checkInTime > 0 && sdf.format(Date(s.checkInTime)) == yesterdayStr
+                }
+
                 val lastYesterdayPunch = yesterdayPunches.lastOrNull()
-                if (lastYesterdayPunch != null && isCheckInType(lastYesterdayPunch.type)) {
+                val yesterdayOpenSession = yesterdaySessions.lastOrNull { it.checkOutTime == null || it.checkOutTime == 0L }
+
+                val yesterdayWasOpen = (lastYesterdayPunch != null && isCheckInType(lastYesterdayPunch.type)) ||
+                    (yesterdayOpenSession != null)
+                val yesterdayAlreadyClosed = yesterdayPunches.any { isCheckOutType(it.type) } ||
+                    (yesterdaySessions.isNotEmpty() && yesterdaySessions.all { it.checkOutTime != null && it.checkOutTime > 0L })
+
+                if (yesterdayWasOpen && !yesterdayAlreadyClosed) {
                     cal.set(Calendar.HOUR_OF_DAY, 23)
                     cal.set(Calendar.MINUTE, 59)
                     cal.set(Calendar.SECOND, 59)
@@ -318,6 +330,13 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                             lastModified = endOfDayMs
                         )
                     )
+                    yesterdaySessions.filter { it.checkOutTime == null || it.checkOutTime == 0L }.forEach { openAtt ->
+                        localAttendanceDao.upsert(openAtt.copy(
+                            checkOutTime = endOfDayMs,
+                            syncState = 0,
+                            lastModified = endOfDayMs
+                        ))
+                    }
                     val yesterdayAttId = "ATT_${employeeId}_${yesterdayStr}"
                     val yestAtt = localAttendanceDao.getById(yesterdayAttId)
                     if (yestAtt != null && (yestAtt.checkOutTime == null || yestAtt.checkOutTime == 0L)) {
@@ -327,7 +346,7 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
                             lastModified = endOfDayMs
                         ))
                     }
-                    withTimeoutOrNull(3000L) {
+                    withTimeoutOrNull(4000L) {
                         runCatching { firebaseSync.pushAttendancePunch(closePunch) }
                     }
                     Log.i(TAG, "Single-day shift crossed midnight: automatically closed previous day ($yesterdayStr) at 23:59:59 for employee $staffIdStr")
@@ -342,17 +361,15 @@ class GeofenceAutoPunchCoordinator @Inject constructor(
             }
 
             // Strict Guard: An automatic OUT punch requires:
-            // 1. Employee must have an active IN punch today (cannot punch OUT without punching IN).
-            // 2. The most recent punch must be an IN punch (cannot punch OUT if already OUT).
-            // 3. Employee must be outside the geofence perimeter. If wasPreviouslyInside was null or true,
-            //    or attendance is currently open while the employee is now outside, allow the OUT punch.
+            // 1. Employee must have an active IN punch or open session today.
+            // 2. Attendance must be currently open.
             if (!isInside) {
-                val hasInPunchToday = pastPunches.any { isCheckInType(it.type) }
-                val isLastPunchIn = lastPunch != null && isCheckInType(lastPunch.type)
-                val wasPreviouslyInside = (lastEvaluatedInside == true) || (lastEvaluatedInside == null && attendanceCurrentlyOpen)
+                val hasInPunchToday = pastPunches.any { isCheckInType(it.type) } ||
+                    todaySessions.any { it.checkInTime > 0 }
+                val isLastPunchIn = attendanceCurrentlyOpen || (lastPunch != null && isCheckInType(lastPunch.type))
 
-                if (!hasInPunchToday || !isLastPunchIn || !wasPreviouslyInside) {
-                    Log.d(TAG, "Skipping auto OUT punch: employee is outside radius without active inside-to-outside transition or IN punch today (hasInToday=$hasInPunchToday, isLastIn=$isLastPunchIn, wasInside=$wasPreviouslyInside)")
+                if (!hasInPunchToday || !isLastPunchIn) {
+                    Log.d(TAG, "Skipping auto OUT punch: employee is outside radius without active IN punch today (hasInToday=$hasInPunchToday, isLastIn=$isLastPunchIn)")
                     lastEvaluatedInside = false
                     return
                 }

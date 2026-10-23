@@ -34,6 +34,25 @@ public sealed class FirebaseRealtimeService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Lazy<Task<FirebaseContext?>> _context;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime CachedAt, JsonElement Element)> _responseCache = new(StringComparer.Ordinal);
+
+    public void InvalidateCache(string? pathPrefix = null)
+    {
+        if (string.IsNullOrWhiteSpace(pathPrefix))
+        {
+            _responseCache.Clear();
+            return;
+        }
+
+        var cleanPrefix = pathPrefix.Trim().TrimStart('/');
+        foreach (var key in _responseCache.Keys)
+        {
+            if (key.StartsWith(cleanPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                _responseCache.TryRemove(key, out _);
+            }
+        }
+    }
 
     public FirebaseRealtimeService(
         IConfiguration configuration,
@@ -2119,7 +2138,15 @@ public sealed class FirebaseRealtimeService
 
             using var response = await client.SendAsync(request, cancellationToken);
             if (response.IsSuccessStatusCode)
+            {
+                InvalidateCache(cleanPath);
+                var segments = cleanPath.Split('/');
+                if (segments.Length >= 3)
+                {
+                    InvalidateCache($"{segments[0]}/{segments[1]}/{segments[2]}");
+                }
                 return true;
+            }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
@@ -2579,6 +2606,16 @@ public sealed class FirebaseRealtimeService
         if (context == null)
             return null;
 
+        var cacheKey = $"{path.TrimStart('/')}{queryString}";
+        if (_responseCache.TryGetValue(cacheKey, out var cachedEntry))
+        {
+            if (DateTime.UtcNow - cachedEntry.CachedAt < TimeSpan.FromSeconds(60))
+            {
+                return cachedEntry.Element.Clone();
+            }
+            _responseCache.TryRemove(cacheKey, out _);
+        }
+
         try
         {
             var client = _httpClientFactory.CreateClient("FirebaseRealtime");
@@ -2630,7 +2667,9 @@ public sealed class FirebaseRealtimeService
                 return null;
 
             using var document = JsonDocument.Parse(json);
-            return document.RootElement.Clone();
+            var cloned = document.RootElement.Clone();
+            _responseCache[cacheKey] = (DateTime.UtcNow, cloned.Clone());
+            return cloned;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -2664,7 +2703,18 @@ public sealed class FirebaseRealtimeService
 
             using var response = await client.SendAsync(request, cancellationToken);
             if (response.IsSuccessStatusCode)
+            {
+                foreach (var updateKey in updates.Keys)
+                {
+                    InvalidateCache(updateKey);
+                    var segments = updateKey.TrimStart('/').Split('/');
+                    if (segments.Length >= 3)
+                    {
+                        InvalidateCache($"{segments[0]}/{segments[1]}/{segments[2]}");
+                    }
+                }
                 return true;
+            }
 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             _logger.LogWarning(

@@ -89,8 +89,8 @@ class ExitManagementActivity : MotionBaseActivity() {
 
     private fun observeRealtimeRequests() {
         lifecycleScope.launch {
-            val requestFlow = firebaseSync.getDataFlow<ResignationRequest>("resignation_requests")
-            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            val requestFlow = repository.allResignationRequestsFlow
+            val employeeFlow = repository.allEmployeesFlow
 
             combine(requestFlow, employeeFlow) { requests, employees ->
                 requests to employees

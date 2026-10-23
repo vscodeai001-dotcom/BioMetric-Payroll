@@ -667,15 +667,17 @@ class AdminPayrollActivity : MotionBaseActivity() {
 
     private fun observePayrollHistoryRealtime() {
         lifecycleScope.launch {
-            val payrollFlow = firebaseSync.getDataFlow<RealtimePayrollRow>("payroll_history")
-            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            val payrollFlow = localPayrollHistoryDao.getAllFlow()
+            val employeeFlow = mainRepository.allEmployeesFlow
 
-            combine(payrollFlow, employeeFlow) { payroll, employees ->
+            combine(payrollFlow, employeeFlow) { payroll: List<LocalPayrollHistory>, employees: List<Employee> ->
                 val (y, m) = period()
                 val names = employees.associateBy { it.employeeId.toIntOrNull() ?: -1 }.mapValues { it.value.name }
 
-                payroll.filter { it.payYear == y && it.payMonth == m } to names
-            }.collectLatest { (rows, names) ->
+                Pair(payroll.filter { it.payYear == y && it.payMonth == m }, names)
+            }.collectLatest { pair ->
+                val rows = pair.first
+                val names = pair.second
                 historyList = rows.sortedBy { it.employeeId }.map { row ->
                     AdminPayrollHistoryRowDto(
                         payrollID = row.payrollId,

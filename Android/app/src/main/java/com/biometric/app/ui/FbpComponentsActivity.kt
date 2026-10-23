@@ -11,6 +11,7 @@ import com.biometric.app.R
 import com.biometric.app.api.FbpComponentDto
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalFbpComponentDao
 import com.biometric.app.data.entity.LocalFbpComponent
 import com.biometric.app.databinding.ActivityFbpComponentsBinding
 import com.biometric.app.databinding.DialogFbpComponentEditBinding
@@ -34,6 +35,7 @@ class FbpComponentsActivity : MotionBaseActivity() {
     @Inject lateinit var sync: FirebaseSyncManager
     @Inject lateinit var api: MobileApiService
     @Inject lateinit var session: MobileSessionStore
+    @Inject lateinit var fbpComponentDao: LocalFbpComponentDao
 
     private var allComponents = listOf<LocalFbpComponent>()
     private val currency = NumberFormat.getCurrencyInstance(Locale.forLanguageTag("en-IN")).apply {
@@ -74,7 +76,7 @@ class FbpComponentsActivity : MotionBaseActivity() {
 
     private fun observeRealtimeComponents() {
         lifecycleScope.launch {
-            sync.getDataFlow<LocalFbpComponent>("fbp_components").collectLatest { rows ->
+            fbpComponentDao.getAllFlow().collectLatest { rows ->
                 allComponents = rows.sortedBy { it.name }
                 updateKpiDashboard()
                 renderComponents()

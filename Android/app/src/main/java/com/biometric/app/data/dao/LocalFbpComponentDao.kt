@@ -12,6 +12,9 @@ interface LocalFbpComponentDao {
     @Query("SELECT * FROM local_fbp_components WHERE isActive = 1")
     fun getActiveFlow(): Flow<List<LocalFbpComponent>>
 
+    @Query("SELECT * FROM local_fbp_components ORDER BY name ASC")
+    fun getAllFlow(): Flow<List<LocalFbpComponent>>
+
     @Query("SELECT * FROM local_fbp_components WHERE syncState = 0")
     fun getUnsynced(): List<LocalFbpComponent>
 

@@ -11,6 +11,8 @@ import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
+import com.biometric.app.data.MainRepository
+import com.biometric.app.data.dao.LocalBonusRecordDao
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.LocalBonusRecord
 import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
@@ -36,6 +38,8 @@ class AdminBonusActivity : MotionBaseActivity() {
 
     @Inject lateinit var firebaseFinance: FirebaseAdminFinanceRepository
     @Inject lateinit var firebaseSync: FirebaseSyncManager
+    @Inject lateinit var bonusRecordDao: LocalBonusRecordDao
+    @Inject lateinit var mainRepository: MainRepository
 
     private var allBonuses = listOf<LocalBonusRecord>()
     private var allEmployees = listOf<Employee>()
@@ -92,8 +96,8 @@ class AdminBonusActivity : MotionBaseActivity() {
 
     private fun observeRealtimeBonuses() {
         lifecycleScope.launch {
-            val bonusFlow = firebaseSync.getDataFlow<LocalBonusRecord>("bonus_records")
-            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            val bonusFlow = bonusRecordDao.getAllFlow()
+            val employeeFlow = mainRepository.allEmployeesFlow
 
             combine(bonusFlow, employeeFlow) { bonuses, employees ->
                 bonuses to employees

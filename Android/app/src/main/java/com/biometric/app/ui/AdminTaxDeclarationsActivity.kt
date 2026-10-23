@@ -11,6 +11,8 @@ import android.widget.Toast
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import com.biometric.app.R
+import com.biometric.app.data.MainRepository
+import com.biometric.app.data.dao.LocalTaxDeclarationDao
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.LocalTaxDeclaration
 import com.biometric.app.data.repository.FirebaseAdminFinanceRepository
@@ -35,6 +37,8 @@ class AdminTaxDeclarationsActivity : MotionBaseActivity() {
 
     @Inject lateinit var firebaseFinance: FirebaseAdminFinanceRepository
     @Inject lateinit var firebaseSync: FirebaseSyncManager
+    @Inject lateinit var taxDeclarationDao: LocalTaxDeclarationDao
+    @Inject lateinit var mainRepository: MainRepository
 
     private var allDeclarations = listOf<LocalTaxDeclaration>()
     private var allEmployees = listOf<Employee>()
@@ -120,8 +124,8 @@ class AdminTaxDeclarationsActivity : MotionBaseActivity() {
 
     private fun observeRealtimeDeclarations() {
         lifecycleScope.launch {
-            val taxFlow = firebaseSync.getDataFlow<LocalTaxDeclaration>("tax_declarations")
-            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            val taxFlow = taxDeclarationDao.getAllFlow()
+            val employeeFlow = mainRepository.allEmployeesFlow
 
             combine(taxFlow, employeeFlow) { taxes, employees ->
                 taxes to employees

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json;
 using Payroll.Shared.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Payroll.Web.Services;
 
@@ -17,11 +19,16 @@ public sealed class FirebaseRegularizationService
 
     private readonly FirebaseRealtimeService _firebase;
     private readonly IConfiguration _configuration;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
-    public FirebaseRegularizationService(FirebaseRealtimeService firebase, IConfiguration configuration)
+    public FirebaseRegularizationService(
+        FirebaseRealtimeService firebase,
+        IConfiguration configuration,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _firebase = firebase;
         _configuration = configuration;
+        _scopeFactory = scopeFactory;
     }
 
     private string OwnerUid => _firebase.ResolveOwnerUid("regularization-service", "Admin");
@@ -52,6 +59,21 @@ public sealed class FirebaseRegularizationService
 
     public async Task<List<Employee>> GetActiveEmployeesAsync(CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localEmps = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                if (localEmps.Count > 0)
+                {
+                    return localEmps;
+                }
+            }
+        }
+
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, ct);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array)) return new();
         var result = new List<Employee>();
@@ -96,6 +118,23 @@ public sealed class FirebaseRegularizationService
 
     public async Task<List<AttendanceRegularization>> GetAsync(int employeeId = 0, CancellationToken ct = default)
     {
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var query = db.AttendanceRegularizations.AsNoTracking().AsQueryable();
+                if (employeeId > 0) query = query.Where(r => r.EmployeeId == employeeId);
+                var localList = await query.OrderByDescending(r => r.DateOfPunch).ToListAsync(ct);
+                if (localList.Count > 0)
+                {
+                    return localList;
+                }
+            }
+        }
+
         var json = employeeId > 0
             ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "staffId", employeeId.ToString(CultureInfo.InvariantCulture), ct)
             : await _firebase.GetOwnerTableAsync(OwnerUid, Table, ct);

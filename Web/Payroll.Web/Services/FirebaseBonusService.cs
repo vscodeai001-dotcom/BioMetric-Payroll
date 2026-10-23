@@ -82,14 +82,14 @@ public sealed class FirebaseBonusService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localEmps = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                if (localEmps.Count > 0)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                    return localEmps;
                 }
             }
         }
@@ -178,18 +178,18 @@ public sealed class FirebaseBonusService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var query = db.BonusRecords.AsNoTracking().AsQueryable();
+                if (employeeId > 0) query = query.Where(b => b.EmployeeID == employeeId);
+                if (from.HasValue) query = query.Where(b => b.BonusDate >= from.Value);
+                if (to.HasValue) query = query.Where(b => b.BonusDate <= to.Value);
+                var localList = await query.OrderByDescending(b => b.BonusDate).ThenBy(b => b.EmployeeID).ToListAsync(ct);
+                if (localList.Count > 0)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    var query = db.BonusRecords.AsNoTracking().AsQueryable();
-                    if (employeeId > 0) query = query.Where(b => b.EmployeeID == employeeId);
-                    if (from.HasValue) query = query.Where(b => b.BonusDate >= from.Value);
-                    if (to.HasValue) query = query.Where(b => b.BonusDate <= to.Value);
-                    return await query.OrderByDescending(b => b.BonusDate).ThenBy(b => b.EmployeeID).ToListAsync(ct);
+                    return localList;
                 }
             }
         }

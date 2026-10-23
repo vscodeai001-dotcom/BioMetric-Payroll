@@ -1,16 +1,23 @@
 package com.biometric.app.sync
 
+import android.content.Context
 import android.util.Log
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalEmployeeDao
 import com.google.firebase.database.*
 import com.google.firebase.auth.FirebaseAuth
+import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import com.google.gson.reflect.TypeToken
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.tasks.await
+import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 import com.biometric.app.sync.ssot.FirebaseSsotSchema
@@ -24,9 +31,11 @@ import com.biometric.app.sync.ssot.FirebaseSsotSchema
  */
 @Singleton
 class SignalRManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val sessionStore: MobileSessionStore,
     private val firebaseSync: FirebaseSyncManager,
-    private val firebaseAuthTokenManager: FirebaseAuthTokenManager
+    private val firebaseAuthTokenManager: FirebaseAuthTokenManager,
+    private val localEmployeeDao: LocalEmployeeDao
 ) {
     private val managerScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var applicationJob: Job? = null
@@ -462,6 +471,24 @@ class SignalRManager @Inject constructor(
             }
 
             // Authoritative employee binding for the current tenant (Admin map markers only).
+            // Driven from local Room cache mirrored by FirebaseRoomHydrator to prevent redundant bandwidth.
+            applicationJob?.cancel()
+            applicationJob = managerScope.launch {
+                localEmployeeDao.getAllFlow().collectLatest { localList ->
+                    if (localList.isNotEmpty()) {
+                        val map = localList.mapNotNull { emp ->
+                            val id = emp.employeeId.toIntOrNull() ?: return@mapNotNull null
+                            id to OwnerEmployee(id, emp.name, emp.email.orEmpty())
+                        }.toMap()
+                        synchronized(primaryOwnerEmployees) {
+                            primaryOwnerEmployees.clear()
+                            primaryOwnerEmployees.putAll(map)
+                        }
+                        mergeAndPublishEmployees()
+                    }
+                }
+            }
+
             val employeesRef = firebaseSync.getGlobalRef()
                 .child("owners")
                 .child(ownerUid)
@@ -484,30 +511,7 @@ class SignalRManager @Inject constructor(
                 }
             }
             employeeListener = employeesListener
-            employeesRef.addValueEventListener(employeesListener)
-
-            if (altOwnerUid != null) {
-                val altEmployeesRef = firebaseSync.getGlobalRef()
-                    .child("owners")
-                    .child(altOwnerUid)
-                    .child("employees")
-                val altEmpListener = object : ValueEventListener {
-                    override fun onDataChange(snapshot: DataSnapshot) {
-                        val parsed = parseSnapshotEmployees(snapshot)
-                        synchronized(altOwnerEmployees) {
-                            altOwnerEmployees.clear()
-                            altOwnerEmployees.putAll(parsed)
-                        }
-                        mergeAndPublishEmployees()
-                    }
-
-                    override fun onCancelled(error: DatabaseError) {
-                        Log.d("SignalRManager", "Alternate owner employee listener cancelled: ${error.message}")
-                    }
-                }
-                altEmployeeListener = altEmpListener
-                altEmployeesRef.addValueEventListener(altEmpListener)
-            }
+            employeesRef.addListenerForSingleValueEvent(employeesListener)
         }
 
         if (role.equals("ADMIN", true) ||
@@ -908,11 +912,45 @@ class SignalRManager @Inject constructor(
         if (employeeId <= 0 || !firebaseSync.isAuthenticated()) return emptyList()
         val ownerUid = firebaseSync.getOwnerUid()?.takeIf { it.isNotBlank() } ?: return emptyList()
         return runCatching {
-            val snapshot = firebaseSync.getGlobalRef()
-                .child("owners").child(ownerUid).child("tracking")
-                .child("history").child(employeeId.toString())
-                .orderByChild("Timestamp").limitToLast(limit).get().await()
+            val cacheDir = File(context.filesDir, "tracking_cache").apply { if (!exists()) mkdirs() }
+            val cacheFile = File(cacheDir, "hist_${ownerUid}_${employeeId}.json")
+            val gson = Gson()
+            val listType = object : TypeToken<List<LiveLocation>>() {}.type
+
+            val cachedList: MutableList<LiveLocation> = if (cacheFile.exists()) {
+                runCatching {
+                    val text = cacheFile.readText()
+                    gson.fromJson<List<LiveLocation>>(text, listType)?.toMutableList() ?: mutableListOf()
+                }.getOrDefault(mutableListOf())
+            } else {
+                mutableListOf()
+            }
+
+            val latestTs = cachedList.maxOfOrNull { it.timestamp.orEmpty() }?.takeIf { it.isNotBlank() }
+
+            val query = if (!latestTs.isNullOrBlank()) {
+                // Fetch ONLY new GPS deltas created after the latest cached point
+                firebaseSync.getGlobalRef()
+                    .child("owners").child(ownerUid).child("tracking")
+                    .child("history").child(employeeId.toString())
+                    .orderByChild("Timestamp").startAt(latestTs).limitToLast(100)
+            } else {
+                // First time fetch: bounded by limit
+                firebaseSync.getGlobalRef()
+                    .child("owners").child(ownerUid).child("tracking")
+                    .child("history").child(employeeId.toString())
+                    .orderByChild("Timestamp").limitToLast(limit)
+            }
+
+            val snapshot = query.get().await()
             val byKey = linkedMapOf<String, LiveLocation>()
+
+            // Seed with cached points
+            cachedList.forEach { pt ->
+                val dedupeKey = "${pt.employeeId}|${pt.timestamp.orEmpty()}|${pt.latitude}|${pt.longitude}"
+                byKey[dedupeKey] = pt
+            }
+
             snapshot.children.forEach { child ->
                 val map = child.value as? Map<*, *> ?: return@forEach
                 val id = child.key ?: return@forEach
@@ -921,7 +959,7 @@ class SignalRManager @Inject constructor(
                 val lat = (map["Latitude"] as? Number)?.toDouble() ?: return@forEach
                 val lon = (map["Longitude"] as? Number)?.toDouble() ?: return@forEach
                 val timestamp = map["Timestamp"]?.toString()
-                val dedupeKey = "${id}|${timestamp.orEmpty()}|${lat}|${lon}"
+                val dedupeKey = "${eid}|${timestamp.orEmpty()}|${lat}|${lon}"
                 val isOffline = (map["IsOffline"] as? Boolean) == true ||
                         (map["Source"]?.toString()?.contains("offline", ignoreCase = true) == true) ||
                         (map["CaptureSource"]?.toString()?.contains("offline", ignoreCase = true) == true) ||
@@ -942,7 +980,12 @@ class SignalRManager @Inject constructor(
                     isOffline = isOffline
                 )
             }
-            byKey.values.toList().sortedBy { parseTrackingTimestamp(it.timestamp) }
+
+            val merged = byKey.values.toList().sortedBy { parseTrackingTimestamp(it.timestamp) }
+            runCatching {
+                cacheFile.writeText(gson.toJson(merged))
+            }
+            merged
         }.getOrElse {
             Log.w("SignalRManager", "Historical tracking read failed", it)
             emptyList()

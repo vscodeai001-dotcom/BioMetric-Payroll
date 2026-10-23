@@ -61,14 +61,14 @@ public sealed class FirebaseAdvanceService
         if (_scopeFactory != null)
         {
             using var scope = _scopeFactory.CreateScope();
-            var appMode = scope.ServiceProvider.GetService<IAppModeService>();
-            if (appMode != null && await appMode.IsOfflineModeAsync())
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
             {
-                var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
-                if (dbFactory != null)
+                using var db = await dbFactory.CreateDbContextAsync(ct);
+                var localEmps = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                if (localEmps.Count > 0)
                 {
-                    using var db = await dbFactory.CreateDbContextAsync(ct);
-                    return await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(ct);
+                    return localEmps;
                 }
             }
         }
@@ -140,7 +140,7 @@ public sealed class FirebaseAdvanceService
                 if (to.HasValue) query = query.Where(a => a.AdvanceDate <= to.Value);
                 if (unpaidOnly) query = query.Where(a => a.PayrollID_Paid == null);
                 localList = await query.OrderByDescending(a => a.AdvanceDate).ThenBy(a => a.EmployeeID).ToListAsync(ct);
-                if (isOffline)
+                if (localList.Count > 0)
                 {
                     return localList;
                 }
@@ -151,10 +151,6 @@ public sealed class FirebaseAdvanceService
         if (!string.IsNullOrWhiteSpace(OwnerUid)) candidateOwners.Add(OwnerUid);
         if (!candidateOwners.Contains(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid, StringComparer.OrdinalIgnoreCase))
             candidateOwners.Add(Payroll.Shared.Firebase.FirebaseSsotSchema.DefaultOwnerUid);
-        if (!candidateOwners.Contains("tenant_201", StringComparer.OrdinalIgnoreCase))
-            candidateOwners.Add("tenant_201");
-        if (!candidateOwners.Contains("201", StringComparer.OrdinalIgnoreCase))
-            candidateOwners.Add("201");
 
         var result = new List<SalaryAdvance>();
         foreach (var owner in candidateOwners)

@@ -73,9 +73,16 @@ class ReportRepository @Inject constructor(
             return local
         }
 
-        // Fallback: Fetch directly from Firebase Realtime Database
+        // Fallback: Fetch directly from Firebase Realtime Database bounded by shiftDate
         val ownerRef = firebaseSync.getOwnerRef() ?: return local
-        val snapshot = runCatching { ownerRef.child("daily_summaries").get().await() }.getOrNull()
+        val snapshot = runCatching {
+            ownerRef.child("daily_summaries")
+                .orderByChild("shiftDate")
+                .startAt(startDate)
+                .endAt(endDate)
+                .get()
+                .await()
+        }.getOrNull()
         if (snapshot == null || !snapshot.exists()) {
             return local
         }

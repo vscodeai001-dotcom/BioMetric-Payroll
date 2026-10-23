@@ -186,7 +186,7 @@ class ShiftManagerActivity : MotionBaseActivity() {
     private fun observeShifts() {
         shiftsJob?.cancel()
         shiftsJob = lifecycleScope.launch {
-            firebaseSync.observeShiftSchedules().collectLatest { remoteRows ->
+            repository.allShiftSchedulesFlow.collectLatest { remoteRows ->
                 val names = allEmployees.associate { (it.employeeId.toIntOrNull() ?: 0) to it.name }
 
                 val mapped = remoteRows.map {

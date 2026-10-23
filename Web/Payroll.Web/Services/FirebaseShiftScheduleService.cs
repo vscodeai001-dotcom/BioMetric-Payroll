@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text.Json;
 using Payroll.Shared;
 using Payroll.Shared.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Payroll.Web.Services;
 
@@ -41,6 +43,34 @@ public sealed class FirebaseShiftScheduleService
         DateOnly? to = null,
         CancellationToken cancellationToken = default)
     {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+                var query = db.ShiftSchedules.AsNoTracking().AsQueryable();
+                if (employeeId > 0) query = query.Where(s => s.EmployeeID == employeeId);
+                var localList = await query.ToListAsync(cancellationToken);
+                if (localList.Count > 0)
+                {
+                    return localList
+                        .Where(schedule => {
+                            if (!schedule.IsRecurringPattern)
+                            {
+                                if (from.HasValue && schedule.ShiftDate < from.Value) return false;
+                                if (to.HasValue && schedule.ShiftDate > to.Value) return false;
+                            }
+                            return true;
+                        })
+                        .OrderBy(x => x.ShiftDate)
+                        .ThenBy(x => x.EmployeeID)
+                        .ThenBy(x => x.StartTime)
+                        .ToList();
+                }
+            }
+        }
+
         var json = employeeId > 0
             ? await _firebase.GetOwnerTableByChildValueAsync(OwnerUid, Table, "employeeId", employeeId, cancellationToken)
             : await _firebase.GetOwnerTableAsync(OwnerUid, Table, cancellationToken);
@@ -131,6 +161,20 @@ public sealed class FirebaseShiftScheduleService
     public async Task<List<Employee>> GetActiveEmployeesAsync(
         CancellationToken cancellationToken = default)
     {
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var dbFactory = scope.ServiceProvider.GetService<IDbContextFactory<AppDbContext>>();
+            if (dbFactory != null)
+            {
+                using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+                var localEmps = await db.Employees.AsNoTracking().Where(e => !e.IsDeleted).OrderBy(e => e.Name).ToListAsync(cancellationToken);
+                if (localEmps.Count > 0)
+                {
+                    return localEmps;
+                }
+            }
+        }
+
         var json = await _firebase.GetOwnerTableAsync(OwnerUid, EmployeeTable, cancellationToken);
         if (json is null || (json.Value.ValueKind != JsonValueKind.Object && json.Value.ValueKind != JsonValueKind.Array))
             return new List<Employee>();

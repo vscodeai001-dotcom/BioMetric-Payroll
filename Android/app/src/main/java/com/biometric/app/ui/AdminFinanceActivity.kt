@@ -87,8 +87,8 @@ class AdminFinanceActivity : MotionBaseActivity() {
 
     private fun observeAdvancesRealtime() {
         lifecycleScope.launch {
-            val advanceFlow = firebaseSync.getDataFlow<AdvancePayment>("advance_payments")
-            val employeeFlow = firebaseSync.getDataFlow<Employee>("employees")
+            val advanceFlow = repository.allAdvancesFlow
+            val employeeFlow = repository.allEmployeesFlow
 
             combine(advanceFlow, employeeFlow) { advances, employees ->
                 advances to employees

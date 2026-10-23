@@ -13,6 +13,7 @@ import com.biometric.app.api.AdminRemarkRequest
 import com.biometric.app.api.MobileApiService
 import com.biometric.app.data.MainRepository
 import com.biometric.app.data.MobileSessionStore
+import com.biometric.app.data.dao.LocalFbpDeclarationDao
 import com.biometric.app.data.entity.Employee
 import com.biometric.app.data.entity.LocalFbpDeclaration
 import com.biometric.app.databinding.ActivityFbpDeclarationApprovalBinding
@@ -38,6 +39,7 @@ class FbpDeclarationApprovalActivity : MotionBaseActivity() {
     @Inject lateinit var api: MobileApiService
     @Inject lateinit var session: MobileSessionStore
     @Inject lateinit var repo: MainRepository
+    @Inject lateinit var fbpDeclarationDao: LocalFbpDeclarationDao
 
     private var allEmployees = listOf<Employee>()
     private var pendingDeclarationsMap = mapOf<Int, List<LocalFbpDeclaration>>()
@@ -64,8 +66,8 @@ class FbpDeclarationApprovalActivity : MotionBaseActivity() {
 
     private fun observeDeclarations() {
         lifecycleScope.launch {
-            val employeeFlow = sync.getDataFlow<Employee>("employees")
-            val fbpFlow = sync.getDataFlow<LocalFbpDeclaration>("fbp_declarations")
+            val employeeFlow = repo.allEmployeesFlow
+            val fbpFlow = fbpDeclarationDao.getAllFlow()
 
             combine(employeeFlow, fbpFlow) { employees, declarations ->
                 employees to declarations
